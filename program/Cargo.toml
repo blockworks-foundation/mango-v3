@@ -13,6 +13,8 @@ arrayref = "^0.3.6"
 serde = "^1.0.118"
 bytemuck = "^1.4.1"
 bincode = "^1.3.1"
+fixed = { version = "^1.8.0", features=["serde"] }
+fixed-macro = "^1.1.1"
 
 [profile.release]
 lto = true
