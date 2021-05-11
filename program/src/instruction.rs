@@ -7,7 +7,9 @@ use solana_program::pubkey::Pubkey;
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MerpsInstruction {
-    InitMerpsGroup,
+    InitMerpsGroup {
+        valid_interval: u8
+    },
     TestMultiTx {
         index: u8,
     }
@@ -19,7 +21,11 @@ impl MerpsInstruction {
         let discrim = u32::from_le_bytes(discrim);
         match discrim {
             0 => {
-                Some(MerpsInstruction::InitMerpsGroup)
+                let valid_interval = array_ref![data, 0, 1];
+
+                Some(MerpsInstruction::InitMerpsGroup {
+                    valid_interval: u8::from_le_bytes(*valid_interval)
+                })
             }
             1 => {
                 let index = array_ref![data, 0, 1];

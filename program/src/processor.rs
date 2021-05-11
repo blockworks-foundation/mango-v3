@@ -28,6 +28,7 @@ macro_rules! check_eq {
 fn init_merps_group(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
+    valid_interval: u8
 ) -> ProgramResult {
     const NUM_FIXED: usize = 1;
     let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -35,8 +36,9 @@ fn init_merps_group(
         merps_group_ai,
     ] = accounts;
 
-    let merps_group = MerpsGroup::load(merps_group_ai)?;
+    let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
 
+    merps_group.valid_interval = valid_interval;
     // check size
     // check rent
     Ok(())
@@ -61,10 +63,12 @@ fn test_multi_tx(
 
     msg!("{} {}", index, clock.unix_timestamp);
     // last mut
+    let valid_interval = merps_group.valid_interval as u64;
     for i in 0..MAX_TOKENS {
         // if all are within certain bounds and last_mut (last time some function that changed state was called)
         // is before all updating
-        if merps_group.last_updated[i] < curr_time - 2 {
+
+        if merps_group.last_updated[i] < curr_time - valid_interval {
             msg!("Failed");
             return Ok(())
         }
@@ -146,7 +150,6 @@ fn update_prices(
     }
 
     Ok(())
-
 }
 
 /// Withdraw a token from the bank if collateral ratio permits
@@ -187,8 +190,6 @@ fn withdraw(
         if !merps_account.in_basket[i] {
             continue
         }
-
-
 
     }
 
@@ -264,8 +265,10 @@ pub fn process(
 ) -> MerpsResult<()> {
     let instruction = MerpsInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
     match instruction {
-        MerpsInstruction::InitMerpsGroup => {
-            init_merps_group(program_id, accounts)?;
+        MerpsInstruction::InitMerpsGroup {
+            valid_interval
+        } => {
+            init_merps_group(program_id, accounts, valid_interval)?;
         }
         MerpsInstruction::TestMultiTx {
             index

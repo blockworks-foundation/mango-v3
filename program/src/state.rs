@@ -90,7 +90,8 @@ pub struct MerpsGroup {
     // TODO consider storing oracle prices here
     //      it makes this more single threaded if cranks are writing to merps group constantly with oracle prices
 
-    pub last_updated: [u64; MAX_TOKENS]  // this only exists for the test_multi_tx thing
+    pub last_updated: [u64; MAX_TOKENS],  // this only exists for the test_multi_tx thing
+    pub valid_interval: u8
 }
 impl_loadable!(MerpsGroup);
 impl MerpsGroup {
