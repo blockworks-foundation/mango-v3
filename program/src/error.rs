@@ -1,6 +1,7 @@
 use bytemuck::Contiguous;
-use num_enum::IntoPrimitive;
 use solana_program::program_error::ProgramError;
+
+use num_enum::IntoPrimitive;
 use thiserror::Error;
 
 pub type MerpsResult<T = ()> = Result<T, MerpsError>;
@@ -27,12 +28,14 @@ pub enum MerpsError {
     #[error(transparent)]
     ProgramError(#[from] ProgramError),
     #[error("{merps_error_code}; {source_file_id}:{line}")]
-    MerpsErrorCode { merps_error_code: MerpsErrorCode, line: u32, source_file_id: SourceFileId},
+    MerpsErrorCode { merps_error_code: MerpsErrorCode, line: u32, source_file_id: SourceFileId },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, IntoPrimitive)]
 #[repr(u32)]
 pub enum MerpsErrorCode {
+    #[error("MerpsErrorCode::InvalidOwner")]
+    InvalidOwner,
 
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
@@ -61,8 +64,7 @@ impl From<serum_dex::error::DexError> for MerpsError {
 #[inline]
 pub fn check_assert(
     cond: bool,
-    merps_error_code:
-    MerpsErrorCode,
+    merps_error_code: MerpsErrorCode,
     line: u32,
     source_file_id: SourceFileId
 ) -> MerpsResult<()> {

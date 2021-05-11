@@ -5,7 +5,7 @@ use solana_program::program_error::ProgramError;
 use bytemuck::{cast_slice, cast_slice_mut, from_bytes, from_bytes_mut, Pod, try_from_bytes, try_from_bytes_mut, Zeroable};
 use solana_program::pubkey::Pubkey;
 use fixed::types::{U64F64, I64F64};
-use crate::error::MangoResult;
+use crate::error::{MangoResult, MerpsResult, check_assert, MerpsErrorCode};
 use solana_program::entrypoint::ProgramResult;
 
 // TODO: all unit numbers are just place holders. make decisions on each unit number
@@ -48,6 +48,16 @@ macro_rules! impl_loadable {
 pub const MAX_TOKENS: usize = 8;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
+
+
+#[derive(Copy, Clone, BitFlags, Debug, Eq, PartialEq)]
+#[repr(u64)]
+pub enum AccountFlag {
+    Initialized = 1u64 << 0,
+    MerpsGroup = 1u64 << 1,
+    MerpsAccount = 1u64 << 2,
+}
+
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -121,7 +131,9 @@ pub struct MerpsAccount {
     pub base_positions: [i128; MAX_PAIRS],
     pub quote_positions: [i128; MAX_PAIRS],
 
+    pub funding_earned: [u128; MAX_PAIRS],
     pub funding_settled: [u128; MAX_PAIRS],
+
 
     // TODO hold open orders in here as well
 }
@@ -129,8 +141,24 @@ impl_loadable!(MerpsAccount);
 
 
 impl MerpsAccount {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group_pk: &Pubkey
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        // load_mut checks for size already
+        // merps account must be rent exempt to even be initialized
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        let merps_account = Self::load_mut(account)?;
 
-    pub fn get_account_value(
+        let valid_flags: u64 = (AccountFlag::Initialized | AccountFlag::MerpsAccount).bits();
+        check_eq!(merps_account.account_flags, valid_flags, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
+
+        Ok(merps_account)
+    }
+
+    pub fn get_equity(
 
     ) {
 

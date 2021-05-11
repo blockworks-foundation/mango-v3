@@ -1,5 +1,5 @@
 use arrayref::array_ref;
-use solana_program::account_info::{AccountInfo, Account};
+use solana_program::account_info::{Account, AccountInfo};
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::msg;
@@ -7,10 +7,9 @@ use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::Sysvar;
 
+use crate::error::{MerpsResult, check_assert, MerpsErrorCode};
 use crate::instruction::MerpsInstruction;
-use crate::state::{Loadable, MAX_TOKENS, MerpsGroup, MerpsAccount, NodeBank, RootBank};
-use crate::error::MerpsResult;
-
+use crate::state::{Loadable, MAX_TOKENS, MerpsAccount, MerpsGroup, NodeBank, RootBank};
 
 macro_rules! check {
     ($cond:expr, $err:expr) => {
@@ -76,6 +75,14 @@ fn test_multi_tx(
     Ok(())
 }
 
+/// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
+fn init_merps_account(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> MerpsResult<()> {
+    Ok(())
+}
+
 /// Deposit instruction
 fn deposit(
     program_id: &Pubkey,
@@ -90,7 +97,7 @@ fn deposit(
         owner_ai,  // read
         root_bank_ai,  // read
         node_bank_ai,  // write
-        vault_ai,
+        vault_ai,  //
         token_prog_acc,
         clock_acc,
     ] = accounts;
@@ -114,6 +121,7 @@ fn deposit(
     Ok(())
 }
 
+/// Withdraw a token from the bank if collateral ratio permits
 fn withdraw(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -135,7 +143,10 @@ fn withdraw(
     ] = accounts;
 
     let merps_group = MerpsGroup::load(merps_group_ai)?;
-    let merps_account = MerpsAccount::load_mut(merps_account_ai)?;
+
+    let merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+
 
     let root_bank = RootBank::load(root_bank_ai)?;
     // find the index of the root bank pubkey in merps_group
@@ -143,14 +154,14 @@ fn withdraw(
 
     let node_bank = NodeBank::load_mut(node_bank_ai)?;
 
-
+    // iterate through all the oracle prices and see if it was updated recently
 
     /*
-
         Find value of all the tokens that have a borrow or withdraw balance
             To get the value, need to convert each deposit and withdraw into native terms
             need to pass in the root bank for each of the tokens
             need to pass in the oracle for each token
+            also do the calculation?
 
             TODO: consider putting root banks inside the MerpsGroup
                 pro: fewer tokens to pass in
