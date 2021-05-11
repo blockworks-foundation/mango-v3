@@ -50,7 +50,7 @@ macro_rules! impl_loadable {
     }
 }
 
-pub const MAX_TOKENS: usize = 65;
+pub const MAX_TOKENS: usize = 64;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const ZERO_U64F64: U64F64 = U64F64!(0);
