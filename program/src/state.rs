@@ -1,14 +1,20 @@
 use std::cell::{Ref, RefMut};
 
-use solana_program::account_info::AccountInfo;
-use solana_program::program_error::ProgramError;
 use bytemuck::{cast_slice, cast_slice_mut, from_bytes, from_bytes_mut, Pod, try_from_bytes, try_from_bytes_mut, Zeroable};
-use solana_program::pubkey::Pubkey;
-use fixed::types::{U64F64, I64F64};
-use crate::error::{MangoResult, MerpsResult, check_assert, MerpsErrorCode};
+use enumflags2::BitFlags;
+use fixed::types::{I64F64, U64F64};
+use solana_program::account_info::AccountInfo;
 use solana_program::entrypoint::ProgramResult;
+use solana_program::program_error::ProgramError;
+use solana_program::pubkey::Pubkey;
+use fixed_macro::types::U64F64;
+
+use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 
 // TODO: all unit numbers are just place holders. make decisions on each unit number
+// TODO: add prop tests for nums
+// TODO add GUI hoster fee discount
+
 macro_rules! check {
     ($cond:expr, $err:expr) => {
         check_assert($cond, $err, line!(), SourceFileId::State)
@@ -44,10 +50,10 @@ macro_rules! impl_loadable {
     }
 }
 
-
-pub const MAX_TOKENS: usize = 8;
+pub const MAX_TOKENS: usize = 65;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
+pub const ZERO_U64F64: U64F64 = U64F64!(0);
 
 
 #[derive(Copy, Clone, BitFlags, Debug, Eq, PartialEq)]
@@ -64,12 +70,11 @@ pub enum AccountFlag {
 pub struct MerpsGroup {
     pub account_flags: u64,  // TODO think about adding versioning here
     pub num_tokens: usize,
-    pub num_spot_markets: usize,
-    pub num_perp_markets: usize,
+    pub num_markets: usize,  // Note: does not increase if there is a spot and perp market for same base token
 
     pub tokens: [Pubkey; MAX_TOKENS],
-    pub spot_oracles: [Pubkey; MAX_PAIRS],
-    pub mark_oracles: [Pubkey; MAX_PAIRS],  // oracles for the perp mark price, might be same as spot oracle
+    pub oracles: [Pubkey; MAX_PAIRS],
+    // Note: oracle used for perps mark price is same as the one for spot. This is not ideal so it may change
 
     pub contract_sizes: [u128; MAX_PAIRS],  // [10, ... 1]
 
@@ -84,12 +89,30 @@ pub struct MerpsGroup {
     // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
     // TODO consider storing oracle prices here
     //      it makes this more single threaded if cranks are writing to merps group constantly with oracle prices
-    //
 
-
-    pub last_updated: [u64; MAX_TOKENS]
+    pub last_updated: [u64; MAX_TOKENS]  // this only exists for the test_multi_tx thing
 }
 impl_loadable!(MerpsGroup);
+impl MerpsGroup {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        // TODO
+        Ok(Self::load_mut(account)?)
+    }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        // TODO
+        Ok(Self::load(account)?)
+    }
+
+    pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
+        self.oracles.iter().position(|pk| pk == oracle_pk)
+    }
+}
 
 
 /// This is the root bank for one token's lending and borrowing info
@@ -105,6 +128,23 @@ pub struct RootBank {
 }
 impl_loadable!(RootBank);
 
+impl RootBank {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        // TODO
+        Ok(Self::load_mut(account)?)
+    }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        // TODO
+        Ok(Self::load(account)?)
+    }
+}
+
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -115,7 +155,31 @@ pub struct NodeBank {
     pub vault: Pubkey,
 }
 impl_loadable!(NodeBank);
+impl NodeBank {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        // TODO
+        Ok(Self::load_mut(account)?)
+    }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        // TODO
+        Ok(Self::load(account)?)
+    }
+}
 
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct PriceInfo {
+    pub price: U64F64,
+    pub last_update: u64,
+}
+unsafe impl Zeroable for PriceInfo {}
+unsafe impl Pod for PriceInfo {}
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -124,10 +188,15 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
+    pub in_basket: [bool; MAX_PAIRS],  // this can be done with u64 and bit shifting to save space
+    pub prices: [PriceInfo; MAX_PAIRS],
+
+    // Spot and Margin related data
     pub deposits: [U64F64; MAX_TOKENS],
     pub borrows: [U64F64; MAX_TOKENS],
+    pub open_orders: [Pubkey; MAX_PAIRS],
 
-    // perp positions in base qty and quote qty
+    // Perps related data
     pub base_positions: [i128; MAX_PAIRS],
     pub quote_positions: [i128; MAX_PAIRS],
 
@@ -135,7 +204,7 @@ pub struct MerpsAccount {
     pub funding_settled: [u128; MAX_PAIRS],
 
 
-    // TODO hold open orders in here as well
+    // TODO hold perps open orders in here
 }
 impl_loadable!(MerpsAccount);
 
@@ -156,12 +225,6 @@ impl MerpsAccount {
         check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
 
         Ok(merps_account)
-    }
-
-    pub fn get_equity(
-
-    ) {
-
     }
 
 }

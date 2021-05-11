@@ -1,4 +1,4 @@
-use arrayref::array_ref;
+use arrayref::{array_ref, array_refs};
 use solana_program::account_info::{Account, AccountInfo};
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
@@ -7,9 +7,10 @@ use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::Sysvar;
 
-use crate::error::{MerpsResult, check_assert, MerpsErrorCode};
+use crate::error::{MerpsResult, check_assert, MerpsErrorCode, MerpsError, SourceFileId};
 use crate::instruction::MerpsInstruction;
-use crate::state::{Loadable, MAX_TOKENS, MerpsAccount, MerpsGroup, NodeBank, RootBank};
+use crate::state::{Loadable, MAX_TOKENS, MerpsAccount, MerpsGroup, NodeBank, RootBank, ZERO_U64F64, PriceInfo};
+use fixed::types::U64F64;
 
 macro_rules! check {
     ($cond:expr, $err:expr) => {
@@ -52,13 +53,11 @@ fn test_multi_tx(
         merps_group_ai,
         clock_ai
     ] = accounts;
-    let mut merps_group = MerpsGroup::load_mut(merps_group_ai)?;
+    let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
     let clock = Clock::from_account_info(clock_ai)?;
     let curr_time = clock.unix_timestamp as u64;
     merps_group.last_updated[index as usize] = curr_time;
 
-    // 10 open orders accounts
-    // 10
 
     msg!("{} {}", index, clock.unix_timestamp);
     // last mut
@@ -98,8 +97,7 @@ fn deposit(
         root_bank_ai,  // read
         node_bank_ai,  // write
         vault_ai,  //
-        token_prog_acc,
-        clock_acc,
+        token_prog_ai,
     ] = accounts;
 
     // TODO perform account checks
@@ -121,6 +119,36 @@ fn deposit(
     Ok(())
 }
 
+
+/// To be called to write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)
+fn update_prices(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> MerpsResult<()> {
+    const NUM_FIXED: usize = 3;
+    let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
+    let [
+        merps_group_ai,     // read
+        merps_account_ai,   // write
+        clock_ai,           // read
+    ] = fixed_ais;
+
+    let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+    let mut merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let clock = Clock::from_account_info(clock_ai)?;
+    let now_ts = clock.unix_timestamp as u64;
+    for oracle_ai in oracle_ais.iter() {
+        let index = merps_group.find_oracle_index(oracle_ai.key).unwrap();
+        merps_account.prices[index] = PriceInfo {
+            price: read_oracle(oracle_ai)?,
+            last_update: now_ts
+        };
+    }
+
+    Ok(())
+
+}
+
 /// Withdraw a token from the bank if collateral ratio permits
 fn withdraw(
     program_id: &Pubkey,
@@ -129,30 +157,40 @@ fn withdraw(
     quantity: u64
 ) -> MerpsResult<()> {
 
-    const NUM_FIXED: usize = 7;
+    const NUM_FIXED: usize = 8;
     let accounts = array_ref![accounts, 0, NUM_FIXED];
     let [
-        merps_group_ai,  // read
-        merps_account_ai,  // write
-        owner_ai,  // read
-        root_bank_ai,  // read
-        node_bank_ai,  // write
-        vault_ai,
-        token_prog_acc,
-        clock_acc,
+        merps_group_ai,     // read
+        merps_account_ai,   // write
+        owner_ai,           // read
+        root_bank_ai,       // read
+        node_bank_ai,       // write
+        vault_ai,           // write
+        token_prog_acc,     // read
+        clock_acc,          // read
     ] = accounts;
 
-    let merps_group = MerpsGroup::load(merps_group_ai)?;
+    // need a list of root banks for tokens in basket
+    // need a list of open orders for tokens in basket
+    // need a list of
+
+    let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
     let merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
     check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
+    let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+    let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-    let root_bank = RootBank::load(root_bank_ai)?;
-    // find the index of the root bank pubkey in merps_group
-    // if not found, error
+    for i in 0..merps_group.num_markets {
+        // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
+        if !merps_account.in_basket[i] {
+            continue
+        }
 
-    let node_bank = NodeBank::load_mut(node_bank_ai)?;
+
+
+    }
 
     // iterate through all the oracle prices and see if it was updated recently
 
@@ -213,6 +251,11 @@ fn update_indexes(
     Ok(())
 }
 
+fn read_oracle(
+    oracle_ai: &AccountInfo
+) -> MerpsResult<U64F64> {
+    Ok(ZERO_U64F64)  // TODO
+}
 
 pub fn process(
     program_id: &Pubkey,
