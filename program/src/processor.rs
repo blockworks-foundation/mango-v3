@@ -94,22 +94,12 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> Prog
     // Find the node_bank pubkey in root_bank, if not found error
     let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
     check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
+    check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::InvalidVault);
 
     // deposit into node bank token vault using invoke_transfer
     check_eq!(token_prog_ai.key, &spl_token::id(), MerpsErrorCode::Default)?;
-    let deposit_instruction = spl_token::instruction::transfer(
-        &spl_token::id(),
-        owner_token_account_ai.key,
-        vault_ai.key,
-        owner_ai.key,
-        &[],
-        quantity,
-    )?;
 
-    let deposit_accs =
-        [owner_token_account_ai.clone(), vault_ai.clone(), owner_ai.clone(), token_prog_ai.clone()];
-
-    solana_program::program::invoke_signed(&deposit_instruction, &deposit_accs, &[])?;
+    invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
 
     // increment merps account
     let deposit: U64F64 = U64F64::from_num(quantity) / root_bank.deposit_index;
