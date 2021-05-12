@@ -111,7 +111,10 @@ impl MerpsGroup {
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
-        self.oracles.iter().position(|pk| pk == oracle_pk)
+        self.oracles.iter().position(|pk| pk == oracle_pk)  // TODO profile and optimize
+    }
+    pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
+        self.root_banks.iter().position(|pk| pk == root_bank_pk)  // TODO profile and optimize
     }
 }
 
@@ -175,12 +178,42 @@ impl NodeBank {
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct PriceInfo {
+pub struct PriceCache {
     pub price: U64F64,
     pub last_update: u64,
 }
-unsafe impl Zeroable for PriceInfo {}
-unsafe impl Pod for PriceInfo {}
+unsafe impl Zeroable for PriceCache {}
+unsafe impl Pod for PriceCache {}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct RootBankCache {
+    pub deposit_index: U64F64,
+    pub borrow_index: U64F64,
+    pub last_update: u64,
+}
+unsafe impl Zeroable for RootBankCache {}
+unsafe impl Pod for RootBankCache {}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct OpenOrdersCache {
+    pub base_total: u64,
+    pub quote_total: u64,
+    pub last_update: u64,
+}
+unsafe impl Zeroable for OpenOrdersCache {}
+unsafe impl Pod for OpenOrdersCache {}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct PerpMarketCache {
+    pub funding_paid: u128,
+    pub last_update: u64,
+}
+unsafe impl Zeroable for PerpMarketCache {}
+unsafe impl Pod for PerpMarketCache {}
+
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -190,7 +223,10 @@ pub struct MerpsAccount {
     pub owner: Pubkey,
 
     pub in_basket: [bool; MAX_PAIRS],  // this can be done with u64 and bit shifting to save space
-    pub prices: [PriceInfo; MAX_PAIRS],
+    pub price_cache: [PriceCache; MAX_PAIRS],  // TODO consider only having enough space for those in basket
+    pub root_bank_cache: [RootBankCache; MAX_TOKENS],
+    pub open_orders_cache: [OpenOrdersCache; MAX_PAIRS],
+    pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
 
     // Spot and Margin related data
     pub deposits: [U64F64; MAX_TOKENS],

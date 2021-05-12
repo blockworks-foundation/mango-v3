@@ -9,7 +9,7 @@ use solana_program::sysvar::Sysvar;
 
 use crate::error::{MerpsResult, check_assert, MerpsErrorCode, MerpsError, SourceFileId};
 use crate::instruction::MerpsInstruction;
-use crate::state::{Loadable, MAX_TOKENS, MerpsAccount, MerpsGroup, NodeBank, RootBank, ZERO_U64F64, PriceInfo};
+use crate::state::{Loadable, MAX_TOKENS, MerpsAccount, MerpsGroup, NodeBank, RootBank, ZERO_U64F64, PriceCache, RootBankCache};
 use fixed::types::U64F64;
 
 macro_rules! check {
@@ -124,8 +124,8 @@ fn deposit(
 }
 
 
-/// To be called to write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)
-fn update_prices(
+/// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)
+fn cache_prices(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
 ) -> MerpsResult<()> {
@@ -143,12 +143,55 @@ fn update_prices(
     let now_ts = clock.unix_timestamp as u64;
     for oracle_ai in oracle_ais.iter() {
         let index = merps_group.find_oracle_index(oracle_ai.key).unwrap();
-        merps_account.prices[index] = PriceInfo {
+        merps_account.price_cache[index] = PriceCache {
             price: read_oracle(oracle_ai)?,
             last_update: now_ts
         };
     }
+    Ok(())
+}
 
+fn cache_root_banks(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo]
+) -> MerpsResult<()> {
+    const NUM_FIXED: usize = 3;
+    let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
+    let [
+        merps_group_ai,     // read
+        merps_account_ai,   // write
+        clock_ai,           // read
+    ] = fixed_ais;
+
+    let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+    let mut merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let clock = Clock::from_account_info(clock_ai)?;
+    let now_ts = clock.unix_timestamp as u64;
+    for root_bank_ai in root_bank_ais.iter() {
+        let index = merps_group.find_root_bank_index(root_bank_ai.key).unwrap();
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        merps_account.root_bank_cache[index] = RootBankCache {
+            deposit_index: root_bank.deposit_index,
+            borrow_index: root_bank.borrow_index,
+            last_update: now_ts
+        };
+    }
+    Ok(())
+}
+
+fn cache_open_orders(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo]
+) -> MerpsResult<()> {
+    // TODO
+    Ok(())
+}
+
+fn cache_perp_market(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo]
+) -> MerpsResult<()> {
+    // TODO
     Ok(())
 }
 
@@ -156,7 +199,7 @@ fn update_prices(
 fn withdraw(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
-    token_index: usize,  // maybe make this u8 to reduce transaction size
+    token_index: usize,  // TODO: maybe make this u8 to reduce transaction size
     quantity: u64
 ) -> MerpsResult<()> {
 
@@ -169,49 +212,47 @@ fn withdraw(
         root_bank_ai,       // read
         node_bank_ai,       // write
         vault_ai,           // write
-        token_prog_acc,     // read
-        clock_acc,          // read
+        token_prog_ai,     // read
+        clock_ai,          // read
     ] = accounts;
-
-    // need a list of root banks for tokens in basket
-    // need a list of open orders for tokens in basket
-    // need a list of
-
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
     let merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
-    check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+    check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
     let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
     let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+    let clock = Clock::from_account_info(clock_ai)?;
+    let now_ts = clock.unix_timestamp as u64;
+    let valid_interval = merps_group.valid_interval as u64;
 
+    // Verify there is root_bank_cache for the quote currency
+    if now_ts > merps_account.root_bank_cache[MAX_TOKENS - 1].last_update + valid_interval {
+        return Ok(())
+    }
     for i in 0..merps_group.num_markets {
         // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
         if !merps_account.in_basket[i] {
             continue
         }
 
+        if now_ts > merps_account.price_cache[i].last_update + valid_interval {
+            // TODO log or write to buffer that this transaction did not complete due to stale cache
+            return Ok(())
+        }
+        if now_ts > merps_account.root_bank_cache[i].last_update + valid_interval {
+            return Ok(())
+        }
+        if merps_account.open_orders[i] != Pubkey::default() && now_ts > merps_account.open_orders_cache[i].last_update + valid_interval {
+            return Ok(())
+        }
+        if merps_group.perp_markets[i] != Pubkey::default() && now_ts > merps_account.perp_market_cache[i].last_update + valid_interval {
+            return Ok(())
+        }
     }
 
-    // iterate through all the oracle prices and see if it was updated recently
-
-    /*
-        Find value of all the tokens that have a borrow or withdraw balance
-            To get the value, need to convert each deposit and withdraw into native terms
-            need to pass in the root bank for each of the tokens
-            need to pass in the oracle for each token
-            also do the calculation?
-
-            TODO: consider putting root banks inside the MerpsGroup
-                pro: fewer tokens to pass in
-                con: Perhaps we might decide to update index on withdraw, liquidate etc., but then that'll become single threaded
-                maybe it makes the lending pools more dependent on Mango (?)
-
-        Find value of all perp positions
-            multiply
-
-    1.
-     */
+    // Now calculate the collateral ratio of the account using the various caches
+    // Allow withdrawal if sufficient funds in deposits and collateral ratio above initial
 
     Ok(())
 }
