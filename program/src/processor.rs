@@ -10,7 +10,8 @@ use solana_program::sysvar::Sysvar;
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::state::{
-    Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS, ZERO_U64F64,
+    Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS,
+    ZERO_U64F64,
 };
 use fixed::types::U64F64;
 
@@ -26,7 +27,27 @@ macro_rules! check_eq {
     };
 }
 
-fn init_merps_group(program_id: &Pubkey, accounts: &[AccountInfo], valid_interval: u8) -> ProgramResult {
+macro_rules! check_eq_default {
+    ($x:expr, $y:expr) => {
+        check_assert($x == $y, MerpsErrorCode::Default, line!(), SourceFileId::Processor)
+    };
+}
+
+macro_rules! throw {
+    () => {
+        MerpsError::MerpsErrorCode {
+            merps_error_code: MerpsErrorCode::Default,
+            line: line!(),
+            source_file_id: SourceFileId::State,
+        }
+    };
+}
+
+fn init_merps_group(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    valid_interval: u8,
+) -> ProgramResult {
     const NUM_FIXED: usize = 1;
     let accounts = array_ref![accounts, 0, NUM_FIXED];
     let [merps_group_ai] = accounts;
@@ -72,7 +93,7 @@ fn init_merps_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsRes
 
 /// Deposit instruction
 fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> ProgramResult {
-    const NUM_FIXED: usize = 7;
+    const NUM_FIXED: usize = 8;
     let accounts = array_ref![accounts, 0, NUM_FIXED];
     let [
         merps_group_ai,  // read
@@ -82,23 +103,43 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> Prog
         node_bank_ai,  // write
         vault_ai,  //
         token_prog_ai,
+        owner_token_account_ai,
     ] = accounts;
-
     // TODO perform account checks
 
-    let merps_group = MerpsGroup::load(merps_group_ai)?;
-    let merps_account = MerpsAccount::load_mut(merps_account_ai)?;
+    let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+    let mut merps_account =
+        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
-    let root_bank = RootBank::load(root_bank_ai)?;
     // find the index of the root bank pubkey in merps_group
     // if not found, error
-
-    let node_bank = NodeBank::load_mut(node_bank_ai)?;
+    let token_index = merps_group.find_root_bank_index(root_bank_ai.key).ok_or(throw!())?;
+    let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
     // Find the node_bank pubkey in root_bank, if not found error
+    let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+    check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
 
     // deposit into node bank token vault using invoke_transfer
+    check_eq_default!(token_prog_ai.key, &spl_token::id())?;
+    let deposit_instruction = spl_token::instruction::transfer(
+        &spl_token::id(),
+        owner_token_account_ai.key,
+        vault_ai.key,
+        owner_ai.key,
+        &[],
+        quantity,
+    )?;
+
+    let deposit_accs =
+        [owner_token_account_ai.clone(), vault_ai.clone(), owner_ai.clone(), token_prog_ai.clone()];
+
+    solana_program::program::invoke_signed(&deposit_instruction, &deposit_accs, &[])?;
+
     // increment merps account
+    let deposit: U64F64 = U64F64::from_num(quantity) / root_bank.deposit_index;
+    checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
 
     Ok(())
 }
@@ -114,16 +155,15 @@ fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()
     ] = fixed_ais;
 
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-    let mut merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let mut merps_account =
+        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
     let clock = Clock::from_account_info(clock_ai)?;
     let now_ts = clock.unix_timestamp as u64;
     for oracle_ai in oracle_ais.iter() {
         let index = merps_group.find_oracle_index(oracle_ai.key).unwrap();
-        merps_account.price_cache[index] = PriceCache {
-            price: read_oracle(oracle_ai)?,
-            last_update: now_ts,
-        };
+        merps_account.price_cache[index] =
+            PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
     }
     Ok(())
 }
@@ -138,7 +178,8 @@ fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResul
     ] = fixed_ais;
 
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-    let mut merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let mut merps_account =
+        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
     let clock = Clock::from_account_info(clock_ai)?;
     let now_ts = clock.unix_timestamp as u64;
     for root_bank_ai in root_bank_ais.iter() {
@@ -184,7 +225,8 @@ fn withdraw(
     ] = accounts;
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
-    let merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let merps_account =
+        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
     check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
     let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -272,9 +314,23 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Me
         MerpsInstruction::TestMultiTx { index } => {
             test_multi_tx(program_id, accounts, index)?;
         }
+        MerpsInstruction::Deposit { quantity } => {
+            msg!("Merps: Deposit");
+            deposit(program_id, accounts, quantity)?;
+        }
     }
 
     Ok(())
+}
+
+fn checked_add_deposit(
+    node_bank: &mut NodeBank,
+    merps_account: &mut MerpsAccount,
+    token_index: usize,
+    quantity: U64F64,
+) -> MerpsResult<()> {
+    merps_account.checked_add_deposit(token_index, quantity)?;
+    node_bank.checked_add_deposit(quantity)
 }
 
 /*

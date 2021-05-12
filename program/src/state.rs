@@ -12,7 +12,7 @@ use solana_program::entrypoint::ProgramResult;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
-use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 
 // TODO: all unit numbers are just place holders. make decisions on each unit number
 // TODO: add prop tests for nums
@@ -27,6 +27,22 @@ macro_rules! check {
 macro_rules! check_eq {
     ($x:expr, $y:expr, $err:expr) => {
         check_assert($x == $y, $err, line!(), SourceFileId::State)
+    };
+}
+
+macro_rules! check_eq_default {
+    ($x:expr, $y:expr) => {
+        check_assert($x == $y, MerpsErrorCode::Default, line!(), SourceFileId::Processor)
+    };
+}
+
+macro_rules! throw {
+    () => {
+        MerpsError::MerpsErrorCode {
+            merps_error_code: MerpsErrorCode::Default,
+            line: line!(),
+            source_file_id: SourceFileId::State,
+        }
     };
 }
 
@@ -104,8 +120,15 @@ impl MerpsGroup {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MerpsResult<Ref<'a, Self>> {
-        // TODO
-        Ok(Self::load(account)?)
+        check_eq_default!(account.owner, program_id)?;
+
+        let merps_group = Self::load(account)?;
+        check_eq_default!(
+            merps_group.account_flags,
+            (AccountFlag::Initialized | AccountFlag::MerpsGroup).bits()
+        )?;
+
+        Ok(merps_group)
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
@@ -144,6 +167,9 @@ impl RootBank {
         // TODO
         Ok(Self::load(account)?)
     }
+    pub fn find_node_bank_index(&self, node_bank_pk: &Pubkey) -> Option<usize> {
+        self.node_banks.iter().position(|pk| pk == node_bank_pk)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -169,6 +195,18 @@ impl NodeBank {
     ) -> MerpsResult<Ref<'a, Self>> {
         // TODO
         Ok(Self::load(account)?)
+    }
+    pub fn checked_add_borrow(&mut self, v: U64F64) -> MerpsResult<()> {
+        Ok(self.borrows = self.borrows.checked_add(v).ok_or(throw!())?)
+    }
+    pub fn checked_sub_borrow(&mut self, v: U64F64) -> MerpsResult<()> {
+        Ok(self.borrows = self.borrows.checked_sub(v).ok_or(throw!())?)
+    }
+    pub fn checked_add_deposit(&mut self, v: U64F64) -> MerpsResult<()> {
+        Ok(self.deposits = self.deposits.checked_add(v).ok_or(throw!())?)
+    }
+    pub fn checked_sub_deposit(&mut self, v: U64F64) -> MerpsResult<()> {
+        Ok(self.deposits = self.deposits.checked_sub(v).ok_or(throw!())?)
     }
 }
 
@@ -254,6 +292,18 @@ impl MerpsAccount {
         check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
 
         Ok(merps_account)
+    }
+    pub fn checked_add_borrow(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+        Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
+    }
+    pub fn checked_sub_borrow(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+        Ok(self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(throw!())?)
+    }
+    pub fn checked_add_deposit(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+        Ok(self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(throw!())?)
+    }
+    pub fn checked_sub_deposit(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+        Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
     }
 }
 

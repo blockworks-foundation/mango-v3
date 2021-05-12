@@ -27,11 +27,7 @@ pub enum MerpsError {
     #[error(transparent)]
     ProgramError(#[from] ProgramError),
     #[error("{merps_error_code}; {source_file_id}:{line}")]
-    MerpsErrorCode {
-        merps_error_code: MerpsErrorCode,
-        line: u32,
-        source_file_id: SourceFileId,
-    },
+    MerpsErrorCode { merps_error_code: MerpsErrorCode, line: u32, source_file_id: SourceFileId },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, IntoPrimitive)]
@@ -48,11 +44,9 @@ impl From<MerpsError> for ProgramError {
     fn from(e: MerpsError) -> ProgramError {
         match e {
             MerpsError::ProgramError(pe) => pe,
-            MerpsError::MerpsErrorCode {
-                merps_error_code,
-                line: _,
-                source_file_id: _,
-            } => ProgramError::Custom(merps_error_code.into()),
+            MerpsError::MerpsErrorCode { merps_error_code, line: _, source_file_id: _ } => {
+                ProgramError::Custom(merps_error_code.into())
+            }
         }
     }
 }
@@ -74,10 +68,6 @@ pub fn check_assert(
     if cond {
         Ok(())
     } else {
-        Err(MerpsError::MerpsErrorCode {
-            merps_error_code,
-            line,
-            source_file_id,
-        })
+        Err(MerpsError::MerpsErrorCode { merps_error_code, line, source_file_id })
     }
 }
