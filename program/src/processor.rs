@@ -97,7 +97,7 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> Prog
     check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::InvalidVault);
 
     // deposit into node bank token vault using invoke_transfer
-    check_eq!(token_prog_ai.key, &spl_token::id(), MerpsErrorCode::Default)?;
+    check_eq!(token_prog_ai.key, &spl_token::ID, MerpsErrorCode::Default)?;
 
     invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
 
