@@ -71,3 +71,40 @@ pub fn check_assert(
         Err(MerpsError::MerpsErrorCode { merps_error_code, line, source_file_id })
     }
 }
+
+#[macro_export]
+macro_rules! declare_check_assert_macros {
+    ($source_file_id:expr) => {
+        macro_rules! check {
+            ($cond:expr, $err:expr) => {
+                check_assert($cond, $err, line!(), SourceFileId::Processor)
+            };
+        }
+
+        macro_rules! check_eq {
+            ($x:expr, $y:expr, $err:expr) => {
+                check_assert($x == $y, $err, line!(), SourceFileId::Processor)
+            };
+        }
+
+        macro_rules! throw {
+            () => {
+                MerpsError::MerpsErrorCode {
+                    merps_error_code: MerpsErrorCode::Default,
+                    line: line!(),
+                    source_file_id: SourceFileId::State,
+                }
+            };
+        }
+
+        macro_rules! throw_err {
+            ($err:expr) => {
+                Err(MangoError::MangoErrorCode {
+                    mango_error_code: $err,
+                    line: line!(),
+                    source_file_id: SourceFileId::Processor,
+                })
+            };
+        }
+    };
+}

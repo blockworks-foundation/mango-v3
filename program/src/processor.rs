@@ -15,33 +15,7 @@ use crate::state::{
 };
 use fixed::types::U64F64;
 
-macro_rules! check {
-    ($cond:expr, $err:expr) => {
-        check_assert($cond, $err, line!(), SourceFileId::Processor)
-    };
-}
-
-macro_rules! check_eq {
-    ($x:expr, $y:expr, $err:expr) => {
-        check_assert($x == $y, $err, line!(), SourceFileId::Processor)
-    };
-}
-
-macro_rules! check_eq_default {
-    ($x:expr, $y:expr) => {
-        check_assert($x == $y, MerpsErrorCode::Default, line!(), SourceFileId::Processor)
-    };
-}
-
-macro_rules! throw {
-    () => {
-        MerpsError::MerpsErrorCode {
-            merps_error_code: MerpsErrorCode::Default,
-            line: line!(),
-            source_file_id: SourceFileId::State,
-        }
-    };
-}
+declare_check_assert_macros!(SourceFileId::State);
 
 fn init_merps_group(
     program_id: &Pubkey,
@@ -122,7 +96,7 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> Prog
     check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
 
     // deposit into node bank token vault using invoke_transfer
-    check_eq_default!(token_prog_ai.key, &spl_token::id())?;
+    check_eq!(token_prog_ai.key, &spl_token::id(), MerpsErrorCode::Default)?;
     let deposit_instruction = spl_token::instruction::transfer(
         &spl_token::id(),
         owner_token_account_ai.key,

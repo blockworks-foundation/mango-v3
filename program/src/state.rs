@@ -14,37 +14,11 @@ use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 
+declare_check_assert_macros!(SourceFileId::State);
+
 // TODO: all unit numbers are just place holders. make decisions on each unit number
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
-
-macro_rules! check {
-    ($cond:expr, $err:expr) => {
-        check_assert($cond, $err, line!(), SourceFileId::State)
-    };
-}
-
-macro_rules! check_eq {
-    ($x:expr, $y:expr, $err:expr) => {
-        check_assert($x == $y, $err, line!(), SourceFileId::State)
-    };
-}
-
-macro_rules! check_eq_default {
-    ($x:expr, $y:expr) => {
-        check_assert($x == $y, MerpsErrorCode::Default, line!(), SourceFileId::Processor)
-    };
-}
-
-macro_rules! throw {
-    () => {
-        MerpsError::MerpsErrorCode {
-            merps_error_code: MerpsErrorCode::Default,
-            line: line!(),
-            source_file_id: SourceFileId::State,
-        }
-    };
-}
 
 pub trait Loadable: Pod {
     fn load_mut<'a>(account: &'a AccountInfo) -> Result<RefMut<'a, Self>, ProgramError> {
@@ -120,12 +94,13 @@ impl MerpsGroup {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MerpsResult<Ref<'a, Self>> {
-        check_eq_default!(account.owner, program_id)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
         let merps_group = Self::load(account)?;
-        check_eq_default!(
+        check_eq!(
             merps_group.account_flags,
-            (AccountFlag::Initialized | AccountFlag::MerpsGroup).bits()
+            (AccountFlag::Initialized | AccountFlag::MerpsGroup).bits(),
+            MerpsErrorCode::Default
         )?;
 
         Ok(merps_group)
