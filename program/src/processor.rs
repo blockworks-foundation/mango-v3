@@ -47,14 +47,14 @@ impl Processor {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-        merps_group_ai,  // read
-        merps_account_ai,  // write
-        owner_ai,  // read
-        root_bank_ai,  // read
-        node_bank_ai,  // write
-        vault_ai,  //
-        token_prog_ai,
-        owner_token_account_ai,
+            merps_group_ai,  // read
+            merps_account_ai,  // write
+            owner_ai,  // read
+            root_bank_ai,  // read
+            node_bank_ai,  // write
+            vault_ai,  //
+            token_prog_ai,
+            owner_token_account_ai,
         ] = accounts;
         // TODO perform account checks
 
@@ -90,9 +90,9 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
-        merps_group_ai,     // read
-        merps_account_ai,   // write
-        clock_ai,           // read
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            clock_ai,           // read
         ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -116,9 +116,9 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
-        merps_group_ai,     // read
-        merps_account_ai,   // write
-        clock_ai,           // read
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            clock_ai,           // read
         ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -158,14 +158,14 @@ impl Processor {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-        merps_group_ai,     // read
-        merps_account_ai,   // write
-        owner_ai,           // read
-        root_bank_ai,       // read
-        node_bank_ai,       // write
-        vault_ai,           // write
-        token_prog_ai,      // read
-        clock_ai,           // read
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            owner_ai,           // read
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+            vault_ai,           // write
+            token_prog_ai,      // read
+            clock_ai,           // read
         ] = accounts;
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
