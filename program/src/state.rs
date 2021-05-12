@@ -1,13 +1,16 @@
 use std::cell::{Ref, RefMut};
 
-use bytemuck::{cast_slice, cast_slice_mut, from_bytes, from_bytes_mut, Pod, try_from_bytes, try_from_bytes_mut, Zeroable};
+use bytemuck::{
+    cast_slice, cast_slice_mut, from_bytes, from_bytes_mut, try_from_bytes, try_from_bytes_mut,
+    Pod, Zeroable,
+};
 use enumflags2::BitFlags;
 use fixed::types::{I64F64, U64F64};
+use fixed_macro::types::U64F64;
 use solana_program::account_info::AccountInfo;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
-use fixed_macro::types::U64F64;
 
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 
@@ -18,23 +21,26 @@ use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 macro_rules! check {
     ($cond:expr, $err:expr) => {
         check_assert($cond, $err, line!(), SourceFileId::State)
-    }
+    };
 }
 
 macro_rules! check_eq {
     ($x:expr, $y:expr, $err:expr) => {
         check_assert($x == $y, $err, line!(), SourceFileId::State)
-    }
+    };
 }
-
 
 pub trait Loadable: Pod {
     fn load_mut<'a>(account: &'a AccountInfo) -> Result<RefMut<'a, Self>, ProgramError> {
         // TODO verify if this checks for size
-        Ok(RefMut::map(account.try_borrow_mut_data()?, |data| from_bytes_mut(data)))
+        Ok(RefMut::map(account.try_borrow_mut_data()?, |data| {
+            from_bytes_mut(data)
+        }))
     }
     fn load<'a>(account: &'a AccountInfo) -> Result<Ref<'a, Self>, ProgramError> {
-        Ok(Ref::map(account.try_borrow_data()?, |data| from_bytes(data)))
+        Ok(Ref::map(account.try_borrow_data()?, |data| {
+            from_bytes(data)
+        }))
     }
 
     fn load_from_bytes(data: &[u8]) -> Result<&Self, ProgramError> {
@@ -47,14 +53,13 @@ macro_rules! impl_loadable {
         unsafe impl Zeroable for $type_name {}
         unsafe impl Pod for $type_name {}
         impl Loadable for $type_name {}
-    }
+    };
 }
 
 pub const MAX_TOKENS: usize = 64;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const ZERO_U64F64: U64F64 = U64F64!(0);
-
 
 #[derive(Copy, Clone, BitFlags, Debug, Eq, PartialEq)]
 #[repr(u64)]
@@ -64,19 +69,17 @@ pub enum AccountFlag {
     MerpsAccount = 1u64 << 2,
 }
 
-
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct MerpsGroup {
-    pub account_flags: u64,  // TODO think about adding versioning here
+    pub account_flags: u64, // TODO think about adding versioning here
     pub num_tokens: usize,
-    pub num_markets: usize,  // Note: does not increase if there is a spot and perp market for same base token
+    pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
 
     pub tokens: [Pubkey; MAX_TOKENS],
     pub oracles: [Pubkey; MAX_PAIRS],
     // Note: oracle used for perps mark price is same as the one for spot. This is not ideal so it may change
-
-    pub contract_sizes: [u128; MAX_PAIRS],  // [10, ... 1]
+    pub contract_sizes: [u128; MAX_PAIRS], // [10, ... 1]
 
     // Right now Serum dex spot markets. TODO make this general to an interface
     pub spot_markets: [Pubkey; MAX_PAIRS],
@@ -89,9 +92,8 @@ pub struct MerpsGroup {
     // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
     // TODO consider storing oracle prices here
     //      it makes this more single threaded if cranks are writing to merps group constantly with oracle prices
-
-    pub last_updated: [u64; MAX_TOKENS],  // this only exists for the test_multi_tx thing
-    pub valid_interval: u8
+    pub last_updated: [u64; MAX_TOKENS], // this only exists for the test_multi_tx thing
+    pub valid_interval: u8,
 }
 impl_loadable!(MerpsGroup);
 impl MerpsGroup {
@@ -111,13 +113,12 @@ impl MerpsGroup {
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
-        self.oracles.iter().position(|pk| pk == oracle_pk)  // TODO profile and optimize
+        self.oracles.iter().position(|pk| pk == oracle_pk) // TODO profile and optimize
     }
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
-        self.root_banks.iter().position(|pk| pk == root_bank_pk)  // TODO profile and optimize
+        self.root_banks.iter().position(|pk| pk == root_bank_pk) // TODO profile and optimize
     }
 }
-
 
 /// This is the root bank for one token's lending and borrowing info
 #[derive(Copy, Clone)]
@@ -148,7 +149,6 @@ impl RootBank {
         Ok(Self::load(account)?)
     }
 }
-
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -214,7 +214,6 @@ pub struct PerpMarketCache {
 unsafe impl Zeroable for PerpMarketCache {}
 unsafe impl Pod for PerpMarketCache {}
 
-
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct MerpsAccount {
@@ -222,8 +221,8 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_PAIRS],  // this can be done with u64 and bit shifting to save space
-    pub price_cache: [PriceCache; MAX_PAIRS],  // TODO consider only having enough space for those in basket
+    pub in_basket: [bool; MAX_PAIRS], // this can be done with u64 and bit shifting to save space
+    pub price_cache: [PriceCache; MAX_PAIRS], // TODO consider only having enough space for those in basket
     pub root_bank_cache: [RootBankCache; MAX_TOKENS],
     pub open_orders_cache: [OpenOrdersCache; MAX_PAIRS],
     pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
@@ -239,18 +238,15 @@ pub struct MerpsAccount {
 
     pub funding_earned: [u128; MAX_PAIRS],
     pub funding_settled: [u128; MAX_PAIRS],
-
-
     // TODO hold perps open orders in here
 }
 impl_loadable!(MerpsAccount);
-
 
 impl MerpsAccount {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group_pk: &Pubkey
+        merps_group_pk: &Pubkey,
     ) -> MerpsResult<RefMut<'a, Self>> {
         // load_mut checks for size already
         // merps account must be rent exempt to even be initialized
@@ -258,14 +254,20 @@ impl MerpsAccount {
         let merps_account = Self::load_mut(account)?;
 
         let valid_flags: u64 = (AccountFlag::Initialized | AccountFlag::MerpsAccount).bits();
-        check_eq!(merps_account.account_flags, valid_flags, MerpsErrorCode::Default)?;
-        check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
+        check_eq!(
+            merps_account.account_flags,
+            valid_flags,
+            MerpsErrorCode::Default
+        )?;
+        check_eq!(
+            &merps_account.merps_group,
+            merps_group_pk,
+            MerpsErrorCode::Default
+        )?;
 
         Ok(merps_account)
     }
-
 }
-
 
 /// This will hold top level info about the perps market
 /// Likely all perps transactions on a market will be locked on this one because this will be passed in as writable
@@ -283,8 +285,7 @@ pub struct PerpMarket {
 
     pub mark_price: u128,
     pub mark_oracle: u128,
-    pub last_updated: u64
-    // admin key
-    // insurance fund?
+    pub last_updated: u64, // admin key
+                           // insurance fund?
 }
 impl_loadable!(PerpMarket);
