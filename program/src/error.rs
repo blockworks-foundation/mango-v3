@@ -35,6 +35,8 @@ pub enum MerpsError {
 pub enum MerpsErrorCode {
     #[error("MerpsErrorCode::InvalidOwner")]
     InvalidOwner,
+    #[error("MerpsErrorCode::InvalidVault")]
+    InvalidVault,
 
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
@@ -75,34 +77,38 @@ pub fn check_assert(
 #[macro_export]
 macro_rules! declare_check_assert_macros {
     ($source_file_id:expr) => {
+        #[allow(unused_macros)]
         macro_rules! check {
             ($cond:expr, $err:expr) => {
-                check_assert($cond, $err, line!(), SourceFileId::Processor)
+                check_assert($cond, $err, line!(), $source_file_id)
             };
         }
 
+        #[allow(unused_macros)]
         macro_rules! check_eq {
             ($x:expr, $y:expr, $err:expr) => {
-                check_assert($x == $y, $err, line!(), SourceFileId::Processor)
+                check_assert($x == $y, $err, line!(), $source_file_id)
             };
         }
 
+        #[allow(unused_macros)]
         macro_rules! throw {
             () => {
                 MerpsError::MerpsErrorCode {
                     merps_error_code: MerpsErrorCode::Default,
                     line: line!(),
-                    source_file_id: SourceFileId::State,
+                    source_file_id: $source_file_id,
                 }
             };
         }
 
+        #[allow(unused_macros)]
         macro_rules! throw_err {
             ($err:expr) => {
                 Err(MangoError::MangoErrorCode {
                     mango_error_code: $err,
                     line: line!(),
-                    source_file_id: SourceFileId::Processor,
+                    source_file_id: $source_file_id,
                 })
             };
         }

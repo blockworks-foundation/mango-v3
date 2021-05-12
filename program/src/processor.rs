@@ -15,7 +15,7 @@ use crate::state::{
 };
 use fixed::types::U64F64;
 
-declare_check_assert_macros!(SourceFileId::State);
+declare_check_assert_macros!(SourceFileId::Processor);
 
 fn init_merps_group(
     program_id: &Pubkey,
