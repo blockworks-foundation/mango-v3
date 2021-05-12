@@ -33,14 +33,10 @@ macro_rules! check_eq {
 pub trait Loadable: Pod {
     fn load_mut<'a>(account: &'a AccountInfo) -> Result<RefMut<'a, Self>, ProgramError> {
         // TODO verify if this checks for size
-        Ok(RefMut::map(account.try_borrow_mut_data()?, |data| {
-            from_bytes_mut(data)
-        }))
+        Ok(RefMut::map(account.try_borrow_mut_data()?, |data| from_bytes_mut(data)))
     }
     fn load<'a>(account: &'a AccountInfo) -> Result<Ref<'a, Self>, ProgramError> {
-        Ok(Ref::map(account.try_borrow_data()?, |data| {
-            from_bytes(data)
-        }))
+        Ok(Ref::map(account.try_borrow_data()?, |data| from_bytes(data)))
     }
 
     fn load_from_bytes(data: &[u8]) -> Result<&Self, ProgramError> {
@@ -254,16 +250,8 @@ impl MerpsAccount {
         let merps_account = Self::load_mut(account)?;
 
         let valid_flags: u64 = (AccountFlag::Initialized | AccountFlag::MerpsAccount).bits();
-        check_eq!(
-            merps_account.account_flags,
-            valid_flags,
-            MerpsErrorCode::Default
-        )?;
-        check_eq!(
-            &merps_account.merps_group,
-            merps_group_pk,
-            MerpsErrorCode::Default
-        )?;
+        check_eq!(merps_account.account_flags, valid_flags, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
 
         Ok(merps_account)
     }

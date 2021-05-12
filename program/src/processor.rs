@@ -10,8 +10,7 @@ use solana_program::sysvar::Sysvar;
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::state::{
-    Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS,
-    ZERO_U64F64,
+    Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS, ZERO_U64F64,
 };
 use fixed::types::U64F64;
 
@@ -27,11 +26,7 @@ macro_rules! check_eq {
     };
 }
 
-fn init_merps_group(
-    program_id: &Pubkey,
-    accounts: &[AccountInfo],
-    valid_interval: u8,
-) -> ProgramResult {
+fn init_merps_group(program_id: &Pubkey, accounts: &[AccountInfo], valid_interval: u8) -> ProgramResult {
     const NUM_FIXED: usize = 1;
     let accounts = array_ref![accounts, 0, NUM_FIXED];
     let [merps_group_ai] = accounts;
@@ -108,7 +103,7 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> Prog
     Ok(())
 }
 
-/// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)
+/// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)    
 fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
     const NUM_FIXED: usize = 3;
     let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -119,8 +114,8 @@ fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()
     ] = fixed_ais;
 
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-    let mut merps_account =
-        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let mut merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
     let clock = Clock::from_account_info(clock_ai)?;
     let now_ts = clock.unix_timestamp as u64;
     for oracle_ai in oracle_ais.iter() {
@@ -143,8 +138,7 @@ fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResul
     ] = fixed_ais;
 
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-    let mut merps_account =
-        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    let mut merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
     let clock = Clock::from_account_info(clock_ai)?;
     let now_ts = clock.unix_timestamp as u64;
     for root_bank_ai in root_bank_ais.iter() {
@@ -185,17 +179,13 @@ fn withdraw(
         root_bank_ai,       // read
         node_bank_ai,       // write
         vault_ai,           // write
-        token_prog_ai,     // read
-        clock_ai,          // read
+        token_prog_ai,      // read
+        clock_ai,           // read
     ] = accounts;
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
-    let merps_account =
-        MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
-    check!(
-        &merps_account.owner == owner_ai.key,
-        MerpsErrorCode::InvalidOwner
-    )?;
+    let merps_account = MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+    check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
     let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
     let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;

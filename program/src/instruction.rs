@@ -7,12 +7,8 @@ use solana_program::pubkey::Pubkey;
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MerpsInstruction {
-    InitMerpsGroup {
-        valid_interval: u8
-    },
-    TestMultiTx {
-        index: u8,
-    }
+    InitMerpsGroup { valid_interval: u8 },
+    TestMultiTx { index: u8 },
 }
 
 impl MerpsInstruction {
@@ -24,20 +20,19 @@ impl MerpsInstruction {
                 let valid_interval = array_ref![data, 0, 1];
 
                 Some(MerpsInstruction::InitMerpsGroup {
-                    valid_interval: u8::from_le_bytes(*valid_interval)
+                    valid_interval: u8::from_le_bytes(*valid_interval),
                 })
             }
             1 => {
                 let index = array_ref![data, 0, 1];
                 Some(MerpsInstruction::TestMultiTx {
-                    index: u8::from_le_bytes(*index)
+                    index: u8::from_le_bytes(*index),
                 })
             }
-            _ => None
+            _ => None,
         }
     }
     pub fn pack(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
-
 }
