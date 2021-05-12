@@ -5,8 +5,8 @@ use bytemuck::{
     Pod, Zeroable,
 };
 use enumflags2::BitFlags;
-use fixed::types::{I64F64, U64F64};
-use fixed_macro::types::U64F64;
+use fixed::types::{I64F64, I80F48, U64F64};
+use fixed_macro::types::{I80F48, U64F64};
 use solana_program::account_info::AccountInfo;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::program_error::ProgramError;
@@ -46,6 +46,7 @@ pub const MAX_TOKENS: usize = 64;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const ZERO_U64F64: U64F64 = U64F64!(0);
+pub const ZERO_I80F48: I80F48 = I80F48!(0);
 
 #[derive(Copy, Clone, BitFlags, Debug, Eq, PartialEq)]
 #[repr(u64)]
@@ -118,11 +119,16 @@ impl MerpsGroup {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct RootBank {
+    pub version: u8,
+    pub is_initialized: u8,
+    pub account_type: u8, // some enum mapping MerpsAccount, MerpsGroup etc..
+    pub padding: [u8; 5],
+
     pub account_flags: u64,
     pub num_node_banks: usize,
     pub node_banks: [Pubkey; MAX_NODE_BANKS],
-    pub deposit_index: U64F64,
-    pub borrow_index: U64F64,
+    pub deposit_index: I80F48,
+    pub borrow_index: I80F48,
     pub last_updated: u64,
 }
 impl_loadable!(RootBank);
@@ -151,8 +157,8 @@ impl RootBank {
 #[repr(C)]
 pub struct NodeBank {
     pub account_flags: u64,
-    pub deposits: U64F64,
-    pub borrows: U64F64,
+    pub deposits: I80F48,
+    pub borrows: I80F48,
     pub vault: Pubkey,
 }
 impl_loadable!(NodeBank);
@@ -171,16 +177,16 @@ impl NodeBank {
         // TODO
         Ok(Self::load(account)?)
     }
-    pub fn checked_add_borrow(&mut self, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_add_borrow(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows = self.borrows.checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_borrow(&mut self, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_sub_borrow(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows = self.borrows.checked_sub(v).ok_or(throw!())?)
     }
-    pub fn checked_add_deposit(&mut self, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_add_deposit(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits = self.deposits.checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_deposit(&mut self, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_sub_deposit(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits = self.deposits.checked_sub(v).ok_or(throw!())?)
     }
 }
@@ -188,7 +194,7 @@ impl NodeBank {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PriceCache {
-    pub price: U64F64,
+    pub price: I80F48,
     pub last_update: u64,
 }
 unsafe impl Zeroable for PriceCache {}
@@ -197,8 +203,8 @@ unsafe impl Pod for PriceCache {}
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct RootBankCache {
-    pub deposit_index: U64F64,
-    pub borrow_index: U64F64,
+    pub deposit_index: I80F48,
+    pub borrow_index: I80F48,
     pub last_update: u64,
 }
 unsafe impl Zeroable for RootBankCache {}
@@ -237,16 +243,16 @@ pub struct MerpsAccount {
     pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
 
     // Spot and Margin related data
-    pub deposits: [U64F64; MAX_TOKENS],
-    pub borrows: [U64F64; MAX_TOKENS],
+    pub deposits: [I80F48; MAX_TOKENS],
+    pub borrows: [I80F48; MAX_TOKENS],
     pub open_orders: [Pubkey; MAX_PAIRS],
 
     // Perps related data
-    pub base_positions: [i128; MAX_PAIRS],
-    pub quote_positions: [i128; MAX_PAIRS],
+    pub base_positions: [I80F48; MAX_PAIRS],
+    pub quote_positions: [I80F48; MAX_PAIRS],
 
-    pub funding_earned: [u128; MAX_PAIRS],
-    pub funding_settled: [u128; MAX_PAIRS],
+    pub funding_earned: [I80F48; MAX_PAIRS],
+    pub funding_settled: [I80F48; MAX_PAIRS],
     // TODO hold perps open orders in here
 }
 impl_loadable!(MerpsAccount);
@@ -268,16 +274,16 @@ impl MerpsAccount {
 
         Ok(merps_account)
     }
-    pub fn checked_add_borrow(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_borrow(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(throw!())?)
     }
-    pub fn checked_add_deposit(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_deposit(&mut self, token_i: usize, v: U64F64) -> MerpsResult<()> {
+    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
     }
 }

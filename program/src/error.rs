@@ -37,7 +37,8 @@ pub enum MerpsErrorCode {
     InvalidOwner,
     #[error("MerpsErrorCode::InvalidVault")]
     InvalidVault,
-
+    #[error("MerpsErrorCode::MathError")]
+    MathError,
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }
@@ -105,8 +106,8 @@ macro_rules! declare_check_assert_macros {
         #[allow(unused_macros)]
         macro_rules! throw_err {
             ($err:expr) => {
-                Err(MangoError::MangoErrorCode {
-                    mango_error_code: $err,
+                Err(MerpsError::MerpsErrorCode {
+                    merps_error_code: $err,
                     line: line!(),
                     source_file_id: $source_file_id,
                 })

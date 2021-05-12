@@ -11,9 +11,9 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::state::{
     Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS,
-    ZERO_U64F64,
+    ZERO_I80F48, ZERO_U64F64,
 };
-use fixed::types::U64F64;
+use fixed::types::{I80F48, U64F64};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -102,7 +102,7 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> Prog
     invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
 
     // increment merps account
-    let deposit: U64F64 = U64F64::from_num(quantity) / root_bank.deposit_index;
+    let deposit: I80F48 = I80F48::from_num(quantity) / root_bank.deposit_index;
     checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
 
     Ok(())
@@ -125,8 +125,11 @@ fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()
     let clock = Clock::from_account_info(clock_ai)?;
     let now_ts = clock.unix_timestamp as u64;
     for oracle_ai in oracle_ais.iter() {
-        let index = merps_group.find_oracle_index(oracle_ai.key).unwrap();
-        merps_account.price_cache[index] =
+        let i = merps_group
+            .find_oracle_index(oracle_ai.key)
+            .ok_or(throw_err!(MerpsErrorCode::Default))?;
+
+        merps_account.price_cache[i] =
             PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
     }
     Ok(())
@@ -189,7 +192,7 @@ fn withdraw(
     ] = accounts;
     let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
-    let merps_account =
+    let mut merps_account =
         MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
     check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
@@ -199,33 +202,88 @@ fn withdraw(
     let now_ts = clock.unix_timestamp as u64;
     let valid_interval = merps_group.valid_interval as u64;
 
+    // Value of all assets and liabs in quote currency
+    let mut assets_val = ZERO_I80F48;
+    let mut liabs_val = ZERO_I80F48;
+
     // Verify there is root_bank_cache for the quote currency
-    if now_ts > merps_account.root_bank_cache[MAX_TOKENS - 1].last_update + valid_interval {
+    let quote_i = MAX_TOKENS - 1;
+    if now_ts > merps_account.root_bank_cache[quote_i].last_update + valid_interval {
         return Ok(());
+    } else {
+        assets_val = merps_account.root_bank_cache[quote_i]
+            .deposit_index
+            .checked_mul(merps_account.deposits[quote_i])
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?
+            .checked_add(assets_val)
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+        liabs_val = merps_account.root_bank_cache[quote_i]
+            .borrow_index
+            .checked_mul(merps_account.borrows[quote_i])
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?
+            .checked_add(liabs_val)
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?;
     }
+
     for i in 0..merps_group.num_markets {
         // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
         if !merps_account.in_basket[i] {
             continue;
         }
 
-        if now_ts > merps_account.price_cache[i].last_update + valid_interval {
+        let mut base_assets = ZERO_I80F48;
+        let mut base_liabs = ZERO_I80F48;
+        let price_cache = &merps_account.price_cache[i];
+        let root_bank_cache = &merps_account.root_bank_cache[i];
+        let open_orders_cache = &merps_account.open_orders_cache[i];
+
+        if now_ts > price_cache.last_update + valid_interval {
             // TODO log or write to buffer that this transaction did not complete due to stale cache
             return Ok(());
         }
-        if now_ts > merps_account.root_bank_cache[i].last_update + valid_interval {
+
+        if now_ts > root_bank_cache.last_update + valid_interval {
             return Ok(());
+        } else {
+            base_assets = root_bank_cache
+                .deposit_index
+                .checked_mul(merps_account.deposits[i])
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_add(base_assets)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+            base_liabs = root_bank_cache
+                .borrow_index
+                .checked_mul(merps_account.borrows[i])
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_add(base_liabs)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
         }
-        if merps_account.open_orders[i] != Pubkey::default()
-            && now_ts > merps_account.open_orders_cache[i].last_update + valid_interval
-        {
-            return Ok(());
+
+        if merps_account.open_orders[i] != Pubkey::default() {
+            if now_ts > open_orders_cache.last_update + valid_interval {
+                return Ok(());
+            } else {
+                assets_val = I80F48::from_num(open_orders_cache.quote_total)
+                    .checked_add(assets_val)
+                    .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+                base_assets = I80F48::from_num(open_orders_cache.base_total)
+                    .checked_add(base_assets)
+                    .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+            }
         }
-        if merps_group.perp_markets[i] != Pubkey::default()
-            && now_ts > merps_account.perp_market_cache[i].last_update + valid_interval
-        {
-            return Ok(());
+
+        if merps_group.perp_markets[i] != Pubkey::default() {
+            if now_ts > merps_account.perp_market_cache[i].last_update + valid_interval {
+                return Ok(());
+            } else {
+                // TODO fill this in once perp logic is a little bit more clear
+            }
         }
+
+        // TODO weight the base_assets and multiply by price to increment assets_val
     }
 
     // Now calculate the collateral ratio of the account using the various caches
@@ -251,7 +309,7 @@ fn invoke_transfer<'a>(
         quantity,
     )?;
     let accs = [
-        token_prog_acc.clone(), // TODO check if this is necessary
+        token_prog_acc.clone(), // TODO check if passing in program_id is necessary
         source_acc.clone(),
         dest_acc.clone(),
         authority_acc.clone(),
@@ -265,8 +323,8 @@ fn update_indexes(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) 
     Ok(())
 }
 
-fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<U64F64> {
-    Ok(ZERO_U64F64) // TODO
+fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
+    Ok(ZERO_I80F48) // TODO
 }
 
 pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MerpsResult<()> {
@@ -291,7 +349,7 @@ fn checked_add_deposit(
     node_bank: &mut NodeBank,
     merps_account: &mut MerpsAccount,
     token_index: usize,
-    quantity: U64F64,
+    quantity: I80F48,
 ) -> MerpsResult<()> {
     merps_account.checked_add_deposit(token_index, quantity)?;
     node_bank.checked_add_deposit(quantity)
