@@ -11,7 +11,7 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::state::{
     Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS,
-    ZERO_I80F48, ZERO_U64F64,
+    ONE_I80F48, ZERO_I80F48, ZERO_U64F64,
 };
 use fixed::types::{I80F48, U64F64};
 
@@ -38,6 +38,7 @@ impl Processor {
     }
 
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
+    /// TODO make the merps account a derived address
     fn init_merps_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         Ok(())
     }
@@ -71,7 +72,7 @@ impl Processor {
         // Find the node_bank pubkey in root_bank, if not found error
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
-        check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::InvalidVault);
+        check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::InvalidVault)?;
 
         // deposit into node bank token vault using invoke_transfer
         check_eq!(token_prog_ai.key, &spl_token::ID, MerpsErrorCode::Default)?;
@@ -102,9 +103,7 @@ impl Processor {
         let clock = Clock::from_account_info(clock_ai)?;
         let now_ts = clock.unix_timestamp as u64;
         for oracle_ai in oracle_ais.iter() {
-            let i = merps_group
-                .find_oracle_index(oracle_ai.key)
-                .ok_or(throw_err!(MerpsErrorCode::Default))?;
+            let i = merps_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
             merps_account.price_cache[i] =
                 PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
@@ -242,11 +241,13 @@ impl Processor {
                 if now_ts > open_orders_cache.last_update + valid_interval {
                     return Ok(());
                 } else {
-                    assets_val = I80F48::from_num(open_orders_cache.quote_total)
+                    assets_val = open_orders_cache
+                        .quote_total
                         .checked_add(assets_val)
                         .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-                    base_assets = I80F48::from_num(open_orders_cache.base_total)
+                    base_assets = open_orders_cache
+                        .base_total
                         .checked_add(base_assets)
                         .ok_or(throw_err!(MerpsErrorCode::MathError))?;
                 }
@@ -260,11 +261,28 @@ impl Processor {
                 }
             }
 
-            // TODO weight the base_assets and multiply by price to increment assets_val
+            let asset_weight = merps_group.asset_weights[i];
+            let liab_weight = ONE_I80F48 / asset_weight;
+            assets_val = base_assets
+                .checked_mul(price_cache.price)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_mul(asset_weight)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_add(assets_val)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+            liabs_val = base_liabs
+                .checked_mul(price_cache.price)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_mul(liab_weight)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_add(liabs_val)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
         }
 
-        // Now calculate the collateral ratio of the account using the various caches
-        // Allow withdrawal if sufficient funds in deposits and collateral ratio above initial
+        // TODO need a new name for this as it's not exactly collateral ratio
+        let coll_ratio = assets_val.checked_div(liabs_val).ok_or(throw!())?;
+        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
     }

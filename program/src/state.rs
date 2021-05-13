@@ -14,6 +14,13 @@ use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 
+pub const MAX_TOKENS: usize = 64;
+pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
+pub const MAX_NODE_BANKS: usize = 8;
+pub const ZERO_U64F64: U64F64 = U64F64!(0);
+pub const ZERO_I80F48: I80F48 = I80F48!(0);
+pub const ONE_I80F48: I80F48 = I80F48!(1);
+
 declare_check_assert_macros!(SourceFileId::State);
 
 // TODO: all unit numbers are just place holders. make decisions on each unit number
@@ -42,24 +49,23 @@ macro_rules! impl_loadable {
     };
 }
 
-pub const MAX_TOKENS: usize = 64;
-pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
-pub const MAX_NODE_BANKS: usize = 8;
-pub const ZERO_U64F64: U64F64 = U64F64!(0);
-pub const ZERO_I80F48: I80F48 = I80F48!(0);
-
-#[derive(Copy, Clone, BitFlags, Debug, Eq, PartialEq)]
-#[repr(u64)]
-pub enum AccountFlag {
-    Initialized = 1u64 << 0,
-    MerpsGroup = 1u64 << 1,
-    MerpsAccount = 1u64 << 2,
+#[repr(u8)]
+pub enum DataType {
+    MerpsGroup = 0,
+    MerpsAccount,
+    RootBank,
+    NodeBank,
+    PerpMarket,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct MerpsGroup {
-    pub account_flags: u64, // TODO think about adding versioning here
+    pub data_type: u8,
+    pub version: u8,
+    pub is_initialized: bool,
+    pub padding: [u8; 5],
+
     pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
 
@@ -75,6 +81,11 @@ pub struct MerpsGroup {
     pub perp_markets: [Pubkey; MAX_PAIRS],
 
     pub root_banks: [Pubkey; MAX_TOKENS],
+
+    pub asset_weights: [I80F48; MAX_TOKENS],
+
+    // TODO determine liquidation incentives for each token
+    // TODO determine maint weight and init weight
 
     // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
     // TODO consider storing oracle prices here
@@ -98,11 +109,8 @@ impl MerpsGroup {
         check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
         let merps_group = Self::load(account)?;
-        check_eq!(
-            merps_group.account_flags,
-            (AccountFlag::Initialized | AccountFlag::MerpsGroup).bits(),
-            MerpsErrorCode::Default
-        )?;
+        check!(merps_group.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(merps_group.data_type, DataType::MerpsGroup as u8, MerpsErrorCode::Default)?;
 
         Ok(merps_group)
     }
@@ -119,9 +127,9 @@ impl MerpsGroup {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct RootBank {
+    pub data_type: u8,
     pub version: u8,
-    pub is_initialized: u8,
-    pub account_type: u8, // some enum mapping MerpsAccount, MerpsGroup etc..
+    pub is_initialized: bool,
     pub padding: [u8; 5],
 
     pub account_flags: u64,
@@ -156,7 +164,10 @@ impl RootBank {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct NodeBank {
-    pub account_flags: u64,
+    pub data_type: u8,
+    pub version: u8,
+    pub is_initialized: bool,
+    pub padding: [u8; 5],
     pub deposits: I80F48,
     pub borrows: I80F48,
     pub vault: Pubkey,
@@ -213,8 +224,8 @@ unsafe impl Pod for RootBankCache {}
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct OpenOrdersCache {
-    pub base_total: u64,
-    pub quote_total: u64,
+    pub base_total: I80F48,
+    pub quote_total: I80F48,
     pub last_update: u64,
 }
 unsafe impl Zeroable for OpenOrdersCache {}
@@ -232,7 +243,11 @@ unsafe impl Pod for PerpMarketCache {}
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct MerpsAccount {
-    pub account_flags: u64,
+    pub data_type: u8,
+    pub version: u8,
+    pub is_initialized: bool,
+    pub padding: [u8; 5],
+
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
@@ -268,8 +283,8 @@ impl MerpsAccount {
         check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
         let merps_account = Self::load_mut(account)?;
 
-        let valid_flags: u64 = (AccountFlag::Initialized | AccountFlag::MerpsAccount).bits();
-        check_eq!(merps_account.account_flags, valid_flags, MerpsErrorCode::Default)?;
+        check_eq!(merps_account.data_type, DataType::MerpsAccount as u8, MerpsErrorCode::Default)?;
+        check!(merps_account.is_initialized, MerpsErrorCode::Default)?;
         check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
 
         Ok(merps_account)
@@ -293,18 +308,24 @@ impl MerpsAccount {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PerpMarket {
-    pub account_flags: u64,
+    pub data_type: u8,
+    pub version: u8,
+    pub is_initialized: bool,
+    pub padding: [u8; 5],
 
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
     pub matching_queue: Pubkey,
-    pub funding_paid: u128,
-    pub open_interest: u128,
+    pub funding_paid: I80F48,
+    pub open_interest: I80F48,
 
-    pub mark_price: u128,
-    pub mark_oracle: u128,
-    pub last_updated: u64, // admin key
-                           // insurance fund?
+    pub mark_price: I80F48,
+    pub index_oracle: Pubkey,
+    pub last_updated: u64,
+    // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+    // index_price = some function of centralized exchange spot prices
+    // book_price = average of impact bid and impact ask; used to calculate basis
+    // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 impl_loadable!(PerpMarket);
