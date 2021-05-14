@@ -8,6 +8,7 @@ use solana_program::pubkey::Pubkey;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MerpsInstruction {
     InitMerpsGroup { valid_interval: u8 },
+    InitMerpsAccount,
     Deposit { quantity: u64 },
 }
 

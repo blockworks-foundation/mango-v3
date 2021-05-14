@@ -1,19 +1,22 @@
+use std::mem::size_of;
+
 use arrayref::{array_ref, array_refs};
-use solana_program::account_info::{Account, AccountInfo};
+use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
+use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::state::{
-    Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache, MAX_TOKENS,
-    ONE_I80F48, ZERO_I80F48, ZERO_U64F64,
+    DataType, Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache,
+    MAX_TOKENS, ONE_I80F48, ZERO_I80F48, ZERO_U64F64,
 };
-use fixed::types::{I80F48, U64F64};
+use fixed::types::I80F48;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -40,6 +43,25 @@ impl Processor {
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
     /// TODO make the merps account a derived address
     fn init_merps_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [merps_group_ai, merps_account_ai, owner_ai, rent_ai] = accounts;
+
+        let _merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+        let rent = Rent::from_account_info(rent_ai)?;
+
+        check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::Default)?;
+        check!(
+            rent.is_exempt(merps_account_ai.lamports(), size_of::<MerpsAccount>()),
+            MerpsErrorCode::Default
+        )?;
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        merps_account.merps_group = *merps_group_ai.key;
+        merps_account.owner = *owner_ai.key;
+
         Ok(())
     }
 
@@ -302,6 +324,9 @@ impl Processor {
         match instruction {
             MerpsInstruction::InitMerpsGroup { valid_interval } => {
                 Self::init_merps_group(program_id, accounts, valid_interval)?;
+            }
+            MerpsInstruction::InitMerpsAccount => {
+                Self::init_merps_account(program_id, accounts)?;
             }
             MerpsInstruction::Deposit { quantity } => {
                 msg!("Merps: Deposit");
