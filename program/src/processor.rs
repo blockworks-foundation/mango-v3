@@ -80,7 +80,7 @@ impl Processor {
             node_bank_ai,  // write
             vault_ai,  //
             token_prog_ai,
-            owner_token_account_ai,
+            owner_token_account_ai, // write
         ] = accounts;
         // TODO perform account checks
 
