@@ -41,6 +41,8 @@ pub enum MerpsErrorCode {
     MathError,
     #[error("MerpsErrorCode::InsufficientFunds")]
     InsufficientFunds,
+    #[error("MerpsErrorCode::InvalidToken")]
+    InvalidToken,
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

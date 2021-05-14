@@ -84,6 +84,7 @@ pub struct MerpsGroup {
 
     pub asset_weights: [I80F48; MAX_TOKENS],
 
+    pub signer_nonce: u64,
     // TODO determine liquidation incentives for each token
     // TODO determine maint weight and init weight
 
@@ -300,6 +301,113 @@ impl MerpsAccount {
     }
     pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
+    }
+
+    pub fn check_caches_valid(&self, merps_group: &MerpsGroup, now_ts: u64) -> bool {
+        let valid_interval = merps_group.valid_interval as u64;
+        if now_ts > self.root_bank_cache[MAX_TOKENS - 1].last_update + valid_interval {
+            return false;
+        }
+
+        for i in 0..merps_group.num_markets {
+            // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
+            if !self.in_basket[i] {
+                continue;
+            }
+            if now_ts > self.price_cache[i].last_update + valid_interval {
+                return false;
+            }
+            if now_ts > self.root_bank_cache[i].last_update + valid_interval {
+                return false;
+            }
+            if self.open_orders[i] != Pubkey::default() {
+                if now_ts > self.open_orders_cache[i].last_update + valid_interval {
+                    return false;
+                }
+            }
+            if merps_group.perp_markets[i] != Pubkey::default() {
+                if now_ts > self.perp_market_cache[i].last_update + valid_interval {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    // TODO need a new name for this as it's not exactly collateral ratio
+    pub fn get_coll_ratio(&self, merps_group: &MerpsGroup) -> MerpsResult<I80F48> {
+        // Value of all assets and liabs in quote currency
+        let quote_i = MAX_TOKENS - 1;
+        let mut assets_val = self.root_bank_cache[quote_i]
+            .deposit_index
+            .checked_mul(self.deposits[quote_i])
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+        let mut liabs_val = self.root_bank_cache[quote_i]
+            .borrow_index
+            .checked_mul(self.borrows[quote_i])
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+        for i in 0..merps_group.num_markets {
+            // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
+            if !self.in_basket[i] {
+                continue;
+            }
+            let price_cache = &self.price_cache[i];
+            let root_bank_cache = &self.root_bank_cache[i];
+            let open_orders_cache = &self.open_orders_cache[i];
+
+            let mut base_assets = root_bank_cache
+                .deposit_index
+                .checked_mul(self.deposits[i])
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+            let mut base_liabs = root_bank_cache
+                .borrow_index
+                .checked_mul(self.borrows[i])
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+            if self.open_orders[i] != Pubkey::default() {
+                assets_val = open_orders_cache
+                    .quote_total
+                    .checked_add(assets_val)
+                    .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+                base_assets = open_orders_cache
+                    .base_total
+                    .checked_add(base_assets)
+                    .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+            }
+
+            if merps_group.perp_markets[i] != Pubkey::default() {
+                // TODO fill this in once perp logic is a little bit more clear
+            }
+
+            let asset_weight = merps_group.asset_weights[i];
+            let liab_weight = ONE_I80F48 / asset_weight;
+            assets_val = base_assets
+                .checked_mul(price_cache.price)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_mul(asset_weight)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_add(assets_val)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+            liabs_val = base_liabs
+                .checked_mul(price_cache.price)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_mul(liab_weight)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?
+                .checked_add(liabs_val)
+                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+        }
+
+        if liabs_val == ZERO_I80F48 {
+            Ok(I80F48::MAX)
+        } else {
+            assets_val.checked_div(liabs_val).ok_or(throw!())
+        }
     }
 }
 
