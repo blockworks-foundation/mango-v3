@@ -204,12 +204,7 @@ impl Processor {
     }
 
     /// Withdraw a token from the bank if collateral ratio permits
-    fn withdraw(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        token_index: usize, // TODO: maybe make this u8 to reduce transaction size
-        quantity: u64,
-    ) -> MerpsResult<()> {
+    fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -251,6 +246,7 @@ impl Processor {
         }
 
         // Subtract the amount from merps account
+        // TODO borrow first if possible
         checked_sub_deposit(
             &mut node_bank,
             &mut merps_account,

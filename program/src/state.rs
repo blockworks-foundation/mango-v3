@@ -354,27 +354,24 @@ impl MerpsAccount {
             if !self.in_basket[i] {
                 continue;
             }
-            let price_cache = &self.price_cache[i];
-            let root_bank_cache = &self.root_bank_cache[i];
-            let open_orders_cache = &self.open_orders_cache[i];
 
-            let mut base_assets = root_bank_cache
+            let mut base_assets = self.root_bank_cache[i]
                 .deposit_index
                 .checked_mul(self.deposits[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-            let mut base_liabs = root_bank_cache
+            let mut base_liabs = self.root_bank_cache[i]
                 .borrow_index
                 .checked_mul(self.borrows[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
             if self.open_orders[i] != Pubkey::default() {
-                assets_val = open_orders_cache
+                assets_val = self.open_orders_cache[i]
                     .quote_total
                     .checked_add(assets_val)
                     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-                base_assets = open_orders_cache
+                base_assets = self.open_orders_cache[i]
                     .base_total
                     .checked_add(base_assets)
                     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
@@ -387,7 +384,7 @@ impl MerpsAccount {
             let asset_weight = merps_group.asset_weights[i];
             let liab_weight = ONE_I80F48 / asset_weight;
             assets_val = base_assets
-                .checked_mul(price_cache.price)
+                .checked_mul(self.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
                 .checked_mul(asset_weight)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
@@ -395,7 +392,7 @@ impl MerpsAccount {
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
             liabs_val = base_liabs
-                .checked_mul(price_cache.price)
+                .checked_mul(self.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
                 .checked_mul(liab_weight)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
