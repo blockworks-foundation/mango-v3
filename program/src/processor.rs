@@ -99,6 +99,27 @@ impl Processor {
         Ok(())
     }
 
+    /// Initialize a root bank and add it to the merps group
+    /// add_asset only adds the borrowing and lending functionality for an asset
+    /// Requires a price oracle for this asset priced in quote currency
+    /// Only allow admin to add to MerpsGroup
+    fn add_asset() -> MerpsResult<()> {
+        // TODO
+        Ok(())
+    }
+
+    /// Add spot market to merps group. Make sure the base asset for this market has already been added
+    fn add_spot_market() -> MerpsResult<()> {
+        // TODO
+        Ok(())
+    }
+
+    /// Initialize perp market including orderbooks and queues
+    fn add_perp_market() -> MerpsResult<()> {
+        // TODO
+        Ok(())
+    }
+
     /// Deposit instruction
     fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> ProgramResult {
         const NUM_FIXED: usize = 8;
@@ -238,6 +259,7 @@ impl Processor {
 
         // Safety checks
         check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::InvalidVault)?;
+        check_eq!(&spl_token::ID, token_prog_ai.key, MerpsErrorCode::InvalidProgramId)?;
 
         // First check all caches to make sure valid
         if !merps_account.check_caches_valid(&merps_group, now_ts) {
@@ -272,13 +294,40 @@ impl Processor {
         Ok(())
     }
 
-    /// Cranks should update all indexes in root banks TODO maybe update oracle prices as well?
-    fn update_indexes(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        quantity: u64,
-    ) -> MerpsResult<()> {
-        Ok(())
+    fn place_spot_order() -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
+    }
+
+    fn cancel_spot_order() -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
+    }
+
+    fn place_perp_order() -> MerpsResult<()> {
+        // TODO
+        /*
+        1. First match against the book
+        2. Determine if account still above coll ratio
+         */
+        unimplemented!()
+    }
+
+    fn cancel_perp_order() -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
+    }
+
+    /// Liquidate an account similar to
+    fn liquidate() -> MerpsResult<()> {
+        // TODO - still need to figure out how liquidations will work
+        unimplemented!()
+    }
+
+    /// Cranks should update all indexes in root banks
+    fn update_indexes(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MerpsResult<()> {
