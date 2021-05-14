@@ -61,6 +61,9 @@ impl Processor {
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
+        merps_account.data_type = DataType::MerpsAccount as u8;
+        merps_account.is_initialized = true;
+        // merps_account.version = 0;
 
         Ok(())
     }
