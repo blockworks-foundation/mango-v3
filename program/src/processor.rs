@@ -49,30 +49,14 @@ impl Processor {
 
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
 
-        let quote_vault = Account::unpack(&quote_vault_ai.try_borrow_data()?)?;
-        check!(quote_vault.is_initialized(), MerpsErrorCode::Default)?;
-        check_eq!(&quote_vault.owner, signer_ai.key, MerpsErrorCode::Default)?;
-        check_eq!(&quote_vault.mint, quote_mint_ai.key, MerpsErrorCode::Default)?;
-        check_eq!(quote_vault_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
-
-        let mut quote_node_bank = NodeBank::load_mut(&quote_node_bank_ai)?;
-        check!(quote_node_bank.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MerpsErrorCode::Default)?;
-        check_eq!(quote_node_bank_ai.owner, program_id, MerpsErrorCode::Default)?;
-        quote_node_bank.data_type = DataType::NodeBank as u8;
-        quote_node_bank.version = 0;
-        quote_node_bank.deposits = ZERO_I80F48;
-        quote_node_bank.borrows = ZERO_I80F48;
-
-        let mut quote_root_bank = RootBank::load_mut(&quote_root_bank_ai)?;
-        check!(quote_root_bank.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(quote_root_bank_ai.owner, program_id, MerpsErrorCode::Default)?;
-
-        quote_root_bank.data_type = DataType::RootBank as u8;
-        quote_root_bank.node_banks[QUOTE_INDEX] = *quote_node_bank_ai.key;
-        quote_root_bank.num_node_banks = 1;
-        quote_root_bank.deposit_index = ONE_I80F48;
-        quote_root_bank.borrow_index = ONE_I80F48;
+        let _root_bank = init_root_bank(
+            program_id,
+            &merps_group,
+            quote_mint_ai,
+            quote_vault_ai,
+            quote_root_bank_ai,
+            quote_node_bank_ai,
+        )?;
 
         merps_group.tokens[QUOTE_INDEX] = *quote_mint_ai.key;
         merps_group.root_banks[QUOTE_INDEX] = *quote_root_bank_ai.key;
@@ -134,10 +118,10 @@ impl Processor {
     /// Requires a price oracle for this asset priced in quote currency
     /// Only allow admin to add to MerpsGroup
     fn add_asset(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 6;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, token_mint_ai, token_node_bank_ai, token_root_bank_ai, oracle_ai, admin_ai] =
+        let [merps_group_ai, mint_ai, node_bank_ai, vault_ai, root_bank_ai, oracle_ai, admin_ai] =
             accounts;
 
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
@@ -146,18 +130,20 @@ impl Processor {
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
 
         let next_token_index = merps_group.num_tokens;
+        merps_group.num_tokens += 1;
 
-        let token_mint = Mint::unpack(&token_mint_ai.try_borrow_data()?)?;
-        let token_node_bank = NodeBank::load_mut(&token_node_bank_ai)?;
+        let _root_bank = init_root_bank(
+            program_id,
+            &merps_group,
+            mint_ai,
+            vault_ai,
+            root_bank_ai,
+            node_bank_ai,
+        )?;
 
-        check!(token_node_bank.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(token_node_bank_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
-
-        merps_group.tokens[next_token_index] = *token_node_bank_ai.key;
-        merps_group.root_banks[next_token_index] = *token_root_bank_ai.key;
-
-        // TODO add check for admin acc
-        // let next_market_index = merps_group.num_markets;
+        merps_group.tokens[next_token_index] = *node_bank_ai.key;
+        merps_group.root_banks[next_token_index] = *root_bank_ai.key;
+        merps_group.oracles[next_token_index] = *oracle_ai.key;
 
         Ok(())
     }
@@ -167,6 +153,7 @@ impl Processor {
     /// Add spot market to merps group. Make sure the base asset for this market has already been added
     fn add_spot_market() -> MerpsResult<()> {
         // TODO
+        // let next_market_index = merps_group.num_markets;
         Ok(())
     }
 
@@ -411,6 +398,39 @@ impl Processor {
 
         Ok(())
     }
+}
+
+fn init_root_bank(
+    program_id: &Pubkey,
+    merps_group: &MerpsGroup,
+    mint_ai: &AccountInfo,
+    vault_ai: &AccountInfo,
+    root_bank_ai: &AccountInfo,
+    node_bank_ai: &AccountInfo,
+) -> MerpsResult<RootBank> {
+    let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
+    check!(vault.is_initialized(), MerpsErrorCode::Default)?;
+    check_eq!(vault.owner, merps_group.signer_key, MerpsErrorCode::Default)?;
+    check_eq!(&vault.mint, mint_ai.key, MerpsErrorCode::Default)?;
+    check_eq!(vault_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
+
+    let mut node_bank = NodeBank::load_mut_checked(&node_bank_ai, program_id)?;
+    check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::Default)?;
+
+    node_bank.data_type = DataType::NodeBank as u8;
+    node_bank.version = 0;
+    node_bank.deposits = ZERO_I80F48;
+    node_bank.borrows = ZERO_I80F48;
+
+    let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+
+    root_bank.data_type = DataType::RootBank as u8;
+    root_bank.node_banks[0] = *node_bank_ai.key;
+    root_bank.num_node_banks = 1;
+    root_bank.deposit_index = ONE_I80F48;
+    root_bank.borrow_index = ONE_I80F48;
+
+    Ok(*root_bank)
 }
 
 fn invoke_transfer<'a>(

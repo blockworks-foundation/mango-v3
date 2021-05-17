@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefMut};
+use std::mem::size_of;
 
 use bytemuck::{
     cast_slice, cast_slice_mut, from_bytes, from_bytes_mut, try_from_bytes, try_from_bytes_mut,
@@ -87,6 +88,7 @@ pub struct MerpsGroup {
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
     pub admin: Pubkey,
+    pub dex_program_id: Pubkey,
     // TODO determine liquidation incentives for each token
     // TODO determine maint weight and init weight
 
@@ -102,8 +104,13 @@ impl MerpsGroup {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        // TODO
-        Ok(Self::load_mut(account)?)
+        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+
+        let merps_group = Self::load_mut(account)?;
+        check_eq!(merps_group.data_type, DataType::MerpsGroup as u8, MerpsErrorCode::Default)?;
+
+        Ok(merps_group)
     }
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
@@ -148,15 +155,29 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        // TODO
-        Ok(Self::load_mut(account)?)
+        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::Default)?;
+
+        let root_bank = Self::load_mut(account)?;
+
+        check!(root_bank.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(root_bank.data_type, DataType::RootBank as u8, MerpsErrorCode::Default)?;
+
+        Ok(root_bank)
     }
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MerpsResult<Ref<'a, Self>> {
-        // TODO
-        Ok(Self::load(account)?)
+        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+
+        let root_bank = Self::load(account)?;
+
+        check!(root_bank.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(root_bank.data_type, DataType::RootBank as u8, MerpsErrorCode::Default)?;
+
+        Ok(root_bank)
     }
     pub fn find_node_bank_index(&self, node_bank_pk: &Pubkey) -> Option<usize> {
         self.node_banks.iter().position(|pk| pk == node_bank_pk)
@@ -180,8 +201,15 @@ impl NodeBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        // TODO
-        Ok(Self::load_mut(account)?)
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
+
+        let node_bank = Self::load_mut(account)?;
+
+        check!(node_bank.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(node_bank.data_type, DataType::NodeBank as u8, MerpsErrorCode::Default)?;
+
+        Ok(node_bank)
     }
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
