@@ -53,6 +53,7 @@ impl MerpsInstruction {
                     valid_interval: u8::from_le_bytes(*valid_interval),
                 })
             }
+
             _ => None,
         }
     }

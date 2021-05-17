@@ -365,9 +365,9 @@ impl Processor {
     fn place_perp_order() -> MerpsResult<()> {
         // TODO
         /*
-        1. First match against the book
-        2. Determine if account still above coll ratio
-         */
+           1. First match against the book
+           2. Determine if account still above coll ratio
+        */
         unimplemented!()
     }
 

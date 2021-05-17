@@ -487,6 +487,7 @@ dependencies = [
  "serum_dex",
  "solana-program",
  "spl-token",
+ "static_assertions",
  "thiserror",
 ]
 

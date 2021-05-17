@@ -11,6 +11,8 @@ pub type MerpsResult<T = ()> = Result<T, MerpsError>;
 pub enum SourceFileId {
     Processor = 0,
     State = 1,
+    Book = 2,
+    Queue = 3,
 }
 
 impl std::fmt::Display for SourceFileId {
@@ -18,6 +20,8 @@ impl std::fmt::Display for SourceFileId {
         match self {
             SourceFileId::Processor => write!(f, "src/processor.rs"),
             SourceFileId::State => write!(f, "src/state.rs"),
+            SourceFileId::Book => write!(f, "src/book.rs"),
+            SourceFileId::Queue => write!(f, "src/queue.rs"),
         }
     }
 }

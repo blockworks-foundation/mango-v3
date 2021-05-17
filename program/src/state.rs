@@ -65,7 +65,7 @@ pub struct MerpsGroup {
     pub data_type: u8,
     pub version: u8,
     pub is_initialized: bool,
-    pub padding: [u8; 5],
+    pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
 
     pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
@@ -96,6 +96,7 @@ pub struct MerpsGroup {
     pub valid_interval: u8,
 }
 impl_loadable!(MerpsGroup);
+
 impl MerpsGroup {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -264,9 +265,21 @@ pub struct MerpsAccount {
     pub open_orders: [Pubkey; MAX_PAIRS],
 
     // Perps related data
-    pub base_positions: [I80F48; MAX_PAIRS],
-    pub quote_positions: [I80F48; MAX_PAIRS],
+    pub base_positions: [I80F48; MAX_PAIRS],  // -1
+    pub quote_positions: [I80F48; MAX_PAIRS], // +44k
 
+    // trade again at 44k
+    // -1 | +44k
+    // +1 | -44k
+
+    // trade again at 50k
+    // 0 | -6k
+    // 0 | +6k
+
+    // three scenarios when a trade occurs
+    // OI goes up
+    // OI stays same
+    // OI goes down
     pub funding_earned: [I80F48; MAX_PAIRS],
     pub funding_settled: [I80F48; MAX_PAIRS],
     // TODO hold perps open orders in here
@@ -379,6 +392,7 @@ impl MerpsAccount {
 
             if merps_group.perp_markets[i] != Pubkey::default() {
                 // TODO fill this in once perp logic is a little bit more clear
+                //
             }
 
             let asset_weight = merps_group.asset_weights[i];
