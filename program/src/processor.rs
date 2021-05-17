@@ -16,7 +16,7 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::state::{
     DataType, Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache,
-    MAX_PAIRS, MAX_TOKENS, ONE_I80F48, ZERO_I80F48,
+    MAX_PAIRS, MAX_TOKENS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::gen_signer_key;
 use bytemuck::bytes_of;
@@ -69,7 +69,6 @@ impl Processor {
         let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, quote_oracle_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
-        // Q; the admin_acc was removed in mango, is it necessary here?
 
         check_eq!(merps_group_ai.owner, program_id, MerpsErrorCode::InvalidGroupOwner)?;
         let rent = Rent::from_account_info(rent_ai)?;
@@ -80,28 +79,42 @@ impl Processor {
 
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
 
-        let quote_mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
         let quote_vault = Account::unpack(&quote_vault_ai.try_borrow_data()?)?;
         check!(quote_vault.is_initialized(), MerpsErrorCode::Default)?;
         check_eq!(&quote_vault.owner, signer_ai.key, MerpsErrorCode::Default)?;
         check_eq!(&quote_vault.mint, quote_mint_ai.key, MerpsErrorCode::Default)?;
         check_eq!(quote_vault_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
 
-        let quote_node_bank = NodeBank::load_mut(&quote_node_bank_ai)?;
+        let mut quote_node_bank = NodeBank::load_mut(&quote_node_bank_ai)?;
         check!(quote_node_bank.is_initialized, MerpsErrorCode::Default)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MerpsErrorCode::Default)?;
         check_eq!(quote_node_bank_ai.owner, program_id, MerpsErrorCode::Default)?;
+        quote_node_bank.data_type = DataType::NodeBank as u8;
+        quote_node_bank.version = 0;
+        quote_node_bank.deposits = ZERO_I80F48;
+        quote_node_bank.borrows = ZERO_I80F48;
 
-        merps_group.tokens[0] = *quote_mint_ai.key;
-        merps_group.root_banks[0] = *quote_root_bank_ai.key;
-        merps_group.oracles[0] = *quote_oracle_ai.key;
+        let mut quote_root_bank = RootBank::load_mut(&quote_root_bank_ai)?;
+        check!(quote_root_bank.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(quote_root_bank_ai.owner, program_id, MerpsErrorCode::Default)?;
+
+        quote_root_bank.data_type = DataType::RootBank as u8;
+        quote_root_bank.node_banks[QUOTE_INDEX] = *quote_node_bank_ai.key;
+        quote_root_bank.num_node_banks = 1;
+        quote_root_bank.deposit_index = ONE_I80F48;
+        quote_root_bank.borrow_index = ONE_I80F48;
+
+        merps_group.tokens[QUOTE_INDEX] = *quote_mint_ai.key;
+        merps_group.root_banks[QUOTE_INDEX] = *quote_root_bank_ai.key;
+        merps_group.oracles[QUOTE_INDEX] = *quote_oracle_ai.key;
+
         merps_group.num_tokens = 1;
         merps_group.num_markets = 0;
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
 
-        // TODO: is there a security concern if we remove the merps_group_ai.key?
+        // TODO is there a security concern if we remove the merps_group_ai.key?
         check!(
             gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
             MerpsErrorCode::InvalidSignerKey

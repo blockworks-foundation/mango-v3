@@ -17,6 +17,7 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 pub const MAX_TOKENS: usize = 64;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
+pub const QUOTE_INDEX: usize = 0;
 pub const ZERO_U64F64: U64F64 = U64F64!(0);
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
@@ -133,7 +134,6 @@ pub struct RootBank {
     pub is_initialized: bool,
     pub padding: [u8; 5],
 
-    pub account_flags: u64, // is this still needed?
     pub num_node_banks: usize,
     pub node_banks: [Pubkey; MAX_NODE_BANKS],
     pub deposit_index: I80F48,
@@ -305,7 +305,7 @@ impl MerpsAccount {
 
     pub fn check_caches_valid(&self, merps_group: &MerpsGroup, now_ts: u64) -> bool {
         let valid_interval = merps_group.valid_interval as u64;
-        if now_ts > self.root_bank_cache[MAX_TOKENS - 1].last_update + valid_interval {
+        if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
             return false;
         }
 
@@ -338,7 +338,7 @@ impl MerpsAccount {
     // TODO need a new name for this as it's not exactly collateral ratio
     pub fn get_coll_ratio(&self, merps_group: &MerpsGroup) -> MerpsResult<I80F48> {
         // Value of all assets and liabs in quote currency
-        let quote_i = MAX_TOKENS - 1;
+        let quote_i = QUOTE_INDEX;
         let mut assets_val = self.root_bank_cache[quote_i]
             .deposit_index
             .checked_mul(self.deposits[quote_i])
