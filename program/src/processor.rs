@@ -187,7 +187,13 @@ impl Processor {
 
         // find the index of the root bank pubkey in merps_group
         // if not found, error
-        let token_index = merps_group.find_root_bank_index(root_bank_ai.key).ok_or(throw!())?;
+        let token_index = merps_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
+
+        // TODO enable check that token in is basket
+        // check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
+
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
         // Find the node_bank pubkey in root_bank, if not found error
@@ -393,6 +399,13 @@ impl Processor {
             MerpsInstruction::Deposit { quantity } => {
                 msg!("Merps: Deposit");
                 Self::deposit(program_id, accounts, quantity)?;
+            }
+            MerpsInstruction::Withdraw { quantity } => {
+                msg!("Merps: Withdraw");
+                Self::deposit(program_id, accounts, quantity)?;
+            }
+            MerpsInstruction::AddAsset => {
+                Self::add_asset(program_id, accounts)?;
             }
         }
 
