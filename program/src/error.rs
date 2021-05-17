@@ -35,6 +35,10 @@ pub enum MerpsError {
 pub enum MerpsErrorCode {
     #[error("MerpsErrorCode::InvalidOwner")]
     InvalidOwner,
+    #[error("MerpsErrorCode::InvalidGroupOwner")]
+    InvalidGroupOwner,
+    #[error("MerpsErrorCode::InvalidSignerKey")]
+    InvalidSignerKey,
     #[error("MerpsErrorCode::InvalidVault")]
     InvalidVault,
     #[error("MerpsErrorCode::MathError")]
@@ -45,6 +49,8 @@ pub enum MerpsErrorCode {
     InvalidToken,
     #[error("MerpsErrorCode::InvalidProgramId")]
     InvalidProgramId,
+    #[error("MerpsErrorCode::NotRentExempt")]
+    GroupNotRentExempt,
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

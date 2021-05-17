@@ -71,6 +71,7 @@ pub struct MerpsGroup {
 
     pub tokens: [Pubkey; MAX_TOKENS],
     pub oracles: [Pubkey; MAX_PAIRS],
+    pub mint_decimals: [u8; MAX_TOKENS],
     // Note: oracle used for perps mark price is same as the one for spot. This is not ideal so it may change
     pub contract_sizes: [u128; MAX_PAIRS], // [10, ... 1]
 
@@ -85,13 +86,14 @@ pub struct MerpsGroup {
     pub asset_weights: [I80F48; MAX_TOKENS],
 
     pub signer_nonce: u64,
+    pub signer_key: Pubkey,
+    pub admin: Pubkey,
     // TODO determine liquidation incentives for each token
     // TODO determine maint weight and init weight
 
     // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
     // TODO consider storing oracle prices here
     //      it makes this more single threaded if cranks are writing to merps group constantly with oracle prices
-    pub last_updated: [u64; MAX_TOKENS], // this only exists for the test_multi_tx thing
     pub valid_interval: u8,
 }
 impl_loadable!(MerpsGroup);
@@ -133,7 +135,7 @@ pub struct RootBank {
     pub is_initialized: bool,
     pub padding: [u8; 5],
 
-    pub account_flags: u64,
+    pub account_flags: u64, // is this still needed?
     pub num_node_banks: usize,
     pub node_banks: [Pubkey; MAX_NODE_BANKS],
     pub deposit_index: I80F48,

@@ -8,6 +8,7 @@ use solana_program::pubkey::Pubkey;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MerpsInstruction {
     InitMerpsGroup {
+        signer_nonce: u64,
         valid_interval: u8,
     },
 
@@ -44,9 +45,11 @@ impl MerpsInstruction {
         let discrim = u32::from_le_bytes(discrim);
         match discrim {
             0 => {
-                let valid_interval = array_ref![data, 0, 1];
+                let data = array_ref![data, 0, 9];
+                let (signer_nonce, valid_interval) = array_refs![data, 8, 1];
 
                 Some(MerpsInstruction::InitMerpsGroup {
+                    signer_nonce: u64::from_le_bytes(*signer_nonce),
                     valid_interval: u8::from_le_bytes(*valid_interval),
                 })
             }
