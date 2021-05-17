@@ -63,10 +63,10 @@ impl Processor {
         signer_nonce: u64,
         valid_interval: u8,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 8;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai] =
+        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, quote_oracle_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
         // Q: is a contract_size required to init a merpsgroup? or just when adding an asset?
@@ -83,16 +83,23 @@ impl Processor {
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
 
         let quote_mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
-        let quote_node_bank = NodeBank::load_mut(&quote_node_bank_ai)?;
         let quote_vault = Account::unpack(&quote_vault_ai.try_borrow_data()?)?;
+        check!(quote_vault.is_initialized(), MerpsErrorCode::Default)?;
+        check_eq!(&quote_vault.owner, signer_ai.key, MerpsErrorCode::Default)?;
+        check_eq!(&quote_vault.mint, quote_mint_ai.key, MerpsErrorCode::Default)?;
+        check_eq!(quote_vault_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
 
+        let quote_node_bank = NodeBank::load_mut(&quote_node_bank_ai)?;
         check!(quote_node_bank.is_initialized, MerpsErrorCode::Default)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MerpsErrorCode::Default)?;
-        check_eq!(quote_node_bank_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
+        check_eq!(quote_node_bank_ai.owner, program_id, MerpsErrorCode::Default)?;
 
-        merps_group.tokens[0] = *quote_node_bank_ai.key;
+        merps_group.tokens[0] = *quote_mint_ai.key;
         merps_group.root_banks[0] = *quote_root_bank_ai.key;
         merps_group.mint_decimals[0] = quote_mint.decimals;
+        merps_group.oracles[0] = *quote_oracle_ai.key;
+        merps_group.num_tokens = 1;
+        merps_group.num_markets = 0;
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
@@ -108,9 +115,6 @@ impl Processor {
         merps_group.data_type = DataType::MerpsGroup as u8;
         merps_group.is_initialized = true;
         merps_group.version = 0;
-
-        merps_group.num_tokens = 1;
-        merps_group.num_markets = 0;
 
         // check size
         Ok(())
