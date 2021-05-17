@@ -22,37 +22,7 @@ use crate::utils::gen_signer_key;
 use bytemuck::bytes_of;
 use fixed::types::I80F48;
 
-macro_rules! check {
-    ($cond:expr, $err:expr) => {
-        check_assert($cond, $err, line!(), SourceFileId::Processor)
-    };
-}
-
-macro_rules! check_eq {
-    ($x:expr, $y:expr, $err:expr) => {
-        check_assert($x == $y, $err, line!(), SourceFileId::Processor)
-    };
-}
-
-macro_rules! throw {
-    () => {
-        MerpsError::MerpsErrorCode {
-            merps_error_code: MerpsErrorCode::Default,
-            line: line!(),
-            source_file_id: SourceFileId::Processor,
-        }
-    };
-}
-
-macro_rules! throw_err {
-    ($err:expr) => {
-        MerpsError::MerpsErrorCode {
-            merps_error_code: $err,
-            line: line!(),
-            source_file_id: SourceFileId::Processor,
-        }
-    };
-}
+declare_check_assert_macros!(SourceFileId::Processor);
 
 pub struct Processor {}
 
@@ -191,6 +161,8 @@ impl Processor {
 
         Ok(())
     }
+
+    // TODO think about how to remove an asset. Maybe this just can't be done?
 
     /// Add spot market to merps group. Make sure the base asset for this market has already been added
     fn add_spot_market() -> MerpsResult<()> {
@@ -379,6 +351,7 @@ impl Processor {
         Ok(())
     }
 
+    /// Same idea as Mango margin
     fn place_spot_order() -> MerpsResult<()> {
         // TODO
         unimplemented!()
@@ -403,7 +376,7 @@ impl Processor {
         unimplemented!()
     }
 
-    /// Liquidate an account similar to
+    /// Liquidate an account similar to Mango
     fn liquidate() -> MerpsResult<()> {
         // TODO - still need to figure out how liquidations will work
         unimplemented!()
@@ -415,6 +388,11 @@ impl Processor {
         unimplemented!()
     }
 
+    ///
+    fn consume_event_queue(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
+    }
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MerpsResult<()> {
         let instruction =
             MerpsInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
