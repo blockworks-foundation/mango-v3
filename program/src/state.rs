@@ -71,9 +71,7 @@ pub struct MerpsGroup {
 
     pub tokens: [Pubkey; MAX_TOKENS],
     pub oracles: [Pubkey; MAX_PAIRS],
-    pub mint_decimals: [u8; MAX_TOKENS],
     // Note: oracle used for perps mark price is same as the one for spot. This is not ideal so it may change
-    pub contract_sizes: [u128; MAX_PAIRS], // [10, ... 1]
 
     // Right now Serum dex spot markets. TODO make this general to an interface
     pub spot_markets: [Pubkey; MAX_PAIRS],

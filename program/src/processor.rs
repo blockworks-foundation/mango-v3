@@ -69,9 +69,7 @@ impl Processor {
         let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, quote_oracle_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
-        // Q: is a contract_size required to init a merpsgroup? or just when adding an asset?
         // Q; the admin_acc was removed in mango, is it necessary here?
-        // Q: Do we need a mint_decimals array for tokens?
 
         check_eq!(merps_group_ai.owner, program_id, MerpsErrorCode::InvalidGroupOwner)?;
         let rent = Rent::from_account_info(rent_ai)?;
@@ -96,7 +94,6 @@ impl Processor {
 
         merps_group.tokens[0] = *quote_mint_ai.key;
         merps_group.root_banks[0] = *quote_root_bank_ai.key;
-        merps_group.mint_decimals[0] = quote_mint.decimals;
         merps_group.oracles[0] = *quote_oracle_ai.key;
         merps_group.num_tokens = 1;
         merps_group.num_markets = 0;
@@ -104,6 +101,7 @@ impl Processor {
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
 
+        // TODO: is there a security concern if we remove the merps_group_ai.key?
         check!(
             gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
             MerpsErrorCode::InvalidSignerKey
@@ -151,7 +149,6 @@ impl Processor {
     /// Initialize a root bank and add it to the merps group
     /// add_asset only adds the borrowing and lending functionality for an asset
     /// Requires a price oracle for this asset priced in quote currency
-    //  Requires a contract_size for the asset
     /// Only allow admin to add to MerpsGroup
     fn add_asset(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 6;
@@ -175,7 +172,6 @@ impl Processor {
 
         merps_group.tokens[next_token_index] = *token_node_bank_ai.key;
         merps_group.root_banks[next_token_index] = *token_root_bank_ai.key;
-        merps_group.mint_decimals[next_token_index] = token_mint.decimals;
 
         // TODO add check for admin acc
         // let next_market_index = merps_group.num_markets;
@@ -190,6 +186,7 @@ impl Processor {
     }
 
     /// Initialize perp market including orderbooks and queues
+    //  Requires a contract_size for the asset
     fn add_perp_market() -> MerpsResult<()> {
         // TODO
         Ok(())
