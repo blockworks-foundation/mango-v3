@@ -1,7 +1,7 @@
 #[macro_use]
 pub mod error;
 
-pub mod book;
+pub mod critbit;
 pub mod instruction;
 pub mod processor;
 pub mod queue;
