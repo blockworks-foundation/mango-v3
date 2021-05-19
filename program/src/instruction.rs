@@ -11,7 +11,15 @@ pub enum MerpsInstruction {
     ///
     /// Accounts expected by this instruction (9):
     ///
-    /// TODO
+    /// 0. `[writable]` merps_group_ai - TODO
+    /// 1. `[]` rent_ai - TODO
+    /// 2. `[]` signer_ai - TODO
+    /// 3. `[]` admin_ai - TODO
+    /// 4. `[]` quote_mint_ai - TODO
+    /// 5. `[]` quote_vault_ai - TODO
+    /// 6. `[writable]` quote_node_bank_ai - TODO
+    /// 7. `[writable]` quote_root_bank_ai - TODO
+    /// 8. `[]` dex_prog_ai - TODO
     InitMerpsGroup { signer_nonce: u64, valid_interval: u8 },
 
     /// Initialize a merps account for a user
@@ -57,6 +65,16 @@ pub enum MerpsInstruction {
     /// 5. `[]` oracle_ai - TODO
     /// 6. `[signer]` admin_ai - TODO
     AddAsset,
+
+    /// Add a spot market to a merps group
+    ///
+    /// Accounts expected by this instruction (4)
+    ///
+    /// 0. `[writable]` merps_group_ai - TODO
+    /// 1. `[writable]` spot_market_ai - TODO
+    /// 2. `[]` dex_program_ai - TODO
+    /// 3. `[]` admin_ai - TODO
+    AddSpotMarket,
 }
 
 impl MerpsInstruction {
@@ -83,6 +101,7 @@ impl MerpsInstruction {
                 MerpsInstruction::Withdraw { quantity: u64::from_le_bytes(*data) }
             }
             4 => MerpsInstruction::AddAsset,
+            5 => MerpsInstruction::AddSpotMarket,
             _ => {
                 return None;
             }
@@ -102,6 +121,7 @@ pub fn init_merps_group(
     quote_vault_pk: &Pubkey,
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
+    dex_program_pk: &Pubkey,
 
     signer_nonce: u64,
     valid_interval: u8,
@@ -115,6 +135,7 @@ pub fn init_merps_group(
         AccountMeta::new_readonly(*quote_vault_pk, false),
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
+        AccountMeta::new(*dex_program_pk, false),
     ];
 
     let instr = MerpsInstruction::InitMerpsGroup { signer_nonce, valid_interval };

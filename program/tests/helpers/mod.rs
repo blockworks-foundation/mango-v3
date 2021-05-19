@@ -231,6 +231,7 @@ pub struct TestMerpsGroup {
     pub signer_pk: Pubkey,
     pub signer_nonce: u64,
     pub admin_pk: Pubkey,
+    pub dex_program_pk: Pubkey,
 
     pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
@@ -257,6 +258,7 @@ impl TestMerpsGroup {
             &self.root_banks[0].node_banks[0].vault,
             &self.root_banks[0].node_banks[0].pubkey,
             &self.root_banks[0].pubkey,
+            &self.dex_program_pk,
 
             self.signer_nonce,
             5,
@@ -272,7 +274,9 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         merps_group_pk,
         Account::new(u32::MAX as u64, size_of::<MerpsGroup>(), &program_id),
     );
+
     let admin_pk = Pubkey::new_unique();
+    let dex_program_pk = Pubkey::new_unique();
 
     let quote_mint = add_mint(test, 6);
     let quote_vault = add_token_account(test, signer_pk, quote_mint.pubkey, 0);
@@ -288,6 +292,7 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         signer_pk,
         signer_nonce,
         admin_pk,
+        dex_program_pk,
         tokens,
         root_banks,
         num_tokens: 1,

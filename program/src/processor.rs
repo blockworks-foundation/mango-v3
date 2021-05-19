@@ -1,6 +1,9 @@
 use std::mem::size_of;
 
 use arrayref::{array_ref, array_refs};
+use flux_aggregator::borsh_state::InitBorshState;
+
+use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
@@ -15,8 +18,8 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::state::{
-    DataType, Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank, RootBankCache,
-    MAX_PAIRS, MAX_TOKENS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache,
+    RootBank, RootBankCache, MAX_PAIRS, MAX_TOKENS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::gen_signer_key;
 use bytemuck::bytes_of;
@@ -33,10 +36,10 @@ impl Processor {
         signer_nonce: u64,
         valid_interval: u8,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 8;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai] =
+        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, dex_prog_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
 
@@ -56,6 +59,7 @@ impl Processor {
         merps_group.signer_nonce = signer_nonce;
         merps_group.signer_key = *signer_ai.key;
         merps_group.valid_interval = valid_interval;
+        merps_group.dex_program_id = *dex_prog_ai.key;
 
         let _root_bank = init_root_bank(
             program_id,
@@ -100,7 +104,7 @@ impl Processor {
         let _merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
         let mut merps_account = MerpsAccount::load_mut(merps_account_ai)?;
-        check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::InvalidOwner)?;
 
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
@@ -122,12 +126,11 @@ impl Processor {
         let [merps_group_ai, mint_ai, node_bank_ai, vault_ai, root_bank_ai, oracle_ai, admin_ai] =
             accounts;
 
-        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
-
-        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
-        let next_token_index = merps_group.num_tokens;
+        let token_index = merps_group.num_tokens;
         merps_group.num_tokens += 1;
 
         let _root_bank = init_root_bank(
@@ -139,19 +142,52 @@ impl Processor {
             node_bank_ai,
         )?;
 
-        merps_group.tokens[next_token_index] = *node_bank_ai.key;
-        merps_group.root_banks[next_token_index] = *root_bank_ai.key;
-        merps_group.oracles[next_token_index] = *oracle_ai.key;
+        merps_group.tokens[token_index] = *mint_ai.key;
+        merps_group.root_banks[token_index] = *root_bank_ai.key;
+
+        let oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
+        merps_group.oracles[token_index] = *oracle_ai.key;
 
         Ok(())
     }
 
     // TODO think about how to remove an asset. Maybe this just can't be done?
+    /// Add spot market to merps group
+    fn add_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-    /// Add spot market to merps group. Make sure the base asset for this market has already been added
-    fn add_spot_market() -> MerpsResult<()> {
-        // TODO
-        // let next_market_index = merps_group.num_markets;
+        let [merps_group_ai, spot_market_ai, dex_program_ai, admin_ai] = accounts;
+
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+
+        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
+
+        // TODO check the base asset for this market has already been added
+        // TODO check the oracle for this market has already been added
+
+        let market_index = merps_group.num_markets;
+        let token_index = merps_group.num_markets + 1;
+
+        let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
+        let sm_base_mint = spot_market.coin_mint;
+        let sm_quote_mint = spot_market.pc_mint;
+        check_eq!(
+            sm_base_mint,
+            merps_group.tokens[token_index].to_aligned_bytes(),
+            MerpsErrorCode::Default
+        )?;
+        check_eq!(
+            sm_quote_mint,
+            merps_group.tokens[QUOTE_INDEX].to_aligned_bytes(),
+            MerpsErrorCode::Default
+        )?;
+        // check!(merps_group.oracles[market_index], MerpsErrorCode::Default)?;
+
+        merps_group.spot_markets[market_index] = *spot_market_ai.key;
+        merps_group.num_markets += 1;
+
         Ok(())
     }
 
@@ -384,6 +420,7 @@ impl Processor {
         // TODO
         unimplemented!()
     }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MerpsResult<()> {
         let instruction =
             MerpsInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -400,10 +437,13 @@ impl Processor {
             }
             MerpsInstruction::Withdraw { quantity } => {
                 msg!("Merps: Withdraw");
-                Self::deposit(program_id, accounts, quantity)?;
+                Self::withdraw(program_id, accounts, quantity)?;
             }
             MerpsInstruction::AddAsset => {
                 Self::add_asset(program_id, accounts)?;
+            }
+            MerpsInstruction::AddSpotMarket => {
+                Self::add_spot_market(program_id, accounts)?;
             }
         }
 

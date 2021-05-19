@@ -476,3 +476,21 @@ pub struct PerpMarket {
     // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 impl_loadable!(PerpMarket);
+
+pub fn load_market_state<'a>(
+    market_account: &'a AccountInfo,
+    program_id: &Pubkey,
+) -> MerpsResult<RefMut<'a, serum_dex::state::MarketState>> {
+    check_eq!(market_account.owner, program_id, MerpsErrorCode::Default)?;
+
+    let state: RefMut<'a, serum_dex::state::MarketState>;
+    state = RefMut::map(market_account.try_borrow_mut_data()?, |data| {
+        let data_len = data.len() - 12;
+        let (_, rest) = data.split_at_mut(5);
+        let (mid, _) = rest.split_at_mut(data_len);
+        from_bytes_mut(mid)
+    });
+
+    state.check_flags()?;
+    Ok(state)
+}
