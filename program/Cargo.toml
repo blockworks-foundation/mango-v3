@@ -24,8 +24,10 @@ serum_dex = { version = "^0.2", git = "https://github.com/blockworks-foundation/
 static_assertions = "^1.1.0"
 
 [dev-dependencies]
+safe-transmute = "^0.11.0"
 solana-sdk = "^1.6.4"
 solana-program-test = "^1.6.4"
+flux-aggregator = { version = "^0.1", git = "https://github.com/blockworks-foundation/solana-flux-aggregator.git", features = ["program", "no-entrypoint"] }
 
 
 [profile.release]
@@ -34,7 +36,6 @@ lto = true
 #[profile.test]
 #lto = true
 #opt-level = 2
-
 
 [lib]
 name = "merps"

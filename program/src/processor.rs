@@ -33,10 +33,10 @@ impl Processor {
         signer_nonce: u64,
         valid_interval: u8,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, quote_oracle_ai] =
+        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
 
@@ -48,6 +48,14 @@ impl Processor {
         )?;
 
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        // TODO is there a security concern if we remove the merps_group_ai.key?
+        check!(
+            gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
+            MerpsErrorCode::InvalidSignerKey
+        )?;
+        merps_group.signer_nonce = signer_nonce;
+        merps_group.signer_key = *signer_ai.key;
+        merps_group.valid_interval = valid_interval;
 
         let _root_bank = init_root_bank(
             program_id,
@@ -60,22 +68,11 @@ impl Processor {
 
         merps_group.tokens[QUOTE_INDEX] = *quote_mint_ai.key;
         merps_group.root_banks[QUOTE_INDEX] = *quote_root_bank_ai.key;
-        merps_group.oracles[QUOTE_INDEX] = *quote_oracle_ai.key;
-
         merps_group.num_tokens = 1;
         merps_group.num_markets = 0;
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
-
-        // TODO is there a security concern if we remove the merps_group_ai.key?
-        check!(
-            gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
-            MerpsErrorCode::InvalidSignerKey
-        )?;
-        merps_group.signer_nonce = signer_nonce;
-        merps_group.signer_key = *signer_ai.key;
-        merps_group.valid_interval = valid_interval;
 
         merps_group.data_type = DataType::MerpsGroup as u8;
         merps_group.is_initialized = true;
@@ -93,17 +90,18 @@ impl Processor {
 
         let [merps_group_ai, merps_account_ai, owner_ai, rent_ai] = accounts;
 
-        let _merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-        let mut merps_account =
-            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
         let rent = Rent::from_account_info(rent_ai)?;
-
-        check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::Default)?;
         check!(
             rent.is_exempt(merps_account_ai.lamports(), size_of::<MerpsAccount>()),
             MerpsErrorCode::Default
         )?;
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+
+        let _merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let mut merps_account = MerpsAccount::load_mut(merps_account_ai)?;
+        check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::Default)?;
+
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
         merps_account.data_type = DataType::MerpsAccount as u8;
@@ -427,17 +425,21 @@ fn init_root_bank(
     check_eq!(&vault.mint, mint_ai.key, MerpsErrorCode::Default)?;
     check_eq!(vault_ai.owner, &spl_token::id(), MerpsErrorCode::Default)?;
 
-    let mut node_bank = NodeBank::load_mut_checked(&node_bank_ai, program_id)?;
-    check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::Default)?;
+    let mut node_bank = NodeBank::load_mut(&node_bank_ai)?;
+    check_eq!(node_bank_ai.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
     node_bank.data_type = DataType::NodeBank as u8;
+    node_bank.is_initialized = true;
     node_bank.version = 0;
     node_bank.deposits = ZERO_I80F48;
     node_bank.borrows = ZERO_I80F48;
+    node_bank.vault = *vault_ai.key;
 
-    let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+    let mut root_bank = RootBank::load_mut(&root_bank_ai)?;
+    check_eq!(root_bank_ai.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
     root_bank.data_type = DataType::RootBank as u8;
+    root_bank.is_initialized = true;
     root_bank.node_banks[0] = *node_bank_ai.key;
     root_bank.num_node_banks = 1;
     root_bank.deposit_index = ONE_I80F48;

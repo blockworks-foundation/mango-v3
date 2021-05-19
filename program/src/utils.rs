@@ -1,4 +1,4 @@
-use bytemuck::bytes_of;
+use bytemuck::{bytes_of, Contiguous};
 
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
@@ -14,4 +14,13 @@ pub fn gen_signer_key(
 ) -> Result<Pubkey, ProgramError> {
     let seeds = gen_signer_seeds(&nonce, acc_pk);
     Ok(Pubkey::create_program_address(&seeds, program_id)?)
+}
+
+pub fn create_signer_key_and_nonce(program_id: &Pubkey, acc_pk: &Pubkey) -> (Pubkey, u64) {
+    for i in 0..=u64::MAX_VALUE {
+        if let Ok(pk) = gen_signer_key(i, acc_pk, program_id) {
+            return (pk, i);
+        }
+    }
+    panic!("Could not generate signer key");
 }

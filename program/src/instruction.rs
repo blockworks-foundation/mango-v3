@@ -92,3 +92,79 @@ impl MerpsInstruction {
         bincode::serialize(self).unwrap()
     }
 }
+
+pub fn init_merps_group(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    quote_mint_pk: &Pubkey,
+    quote_vault_pk: &Pubkey,
+    quote_node_bank_pk: &Pubkey,
+    quote_root_bank_pk: &Pubkey,
+
+    signer_nonce: u64,
+    valid_interval: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+        AccountMeta::new_readonly(*quote_mint_pk, false),
+        AccountMeta::new_readonly(*quote_vault_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_root_bank_pk, false),
+    ];
+
+    let instr = MerpsInstruction::InitMerpsGroup { signer_nonce, valid_interval };
+
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn init_merps_account(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*merps_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
+    ];
+
+    let instr = MerpsInstruction::InitMerpsAccount;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn deposit(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+    vault_pk: &Pubkey,
+    owner_token_account_pk: &Pubkey,
+
+    quantity: u64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new(*merps_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+        AccountMeta::new(*vault_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new(*owner_token_account_pk, false),
+    ];
+
+    let instr = MerpsInstruction::Deposit { quantity };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
