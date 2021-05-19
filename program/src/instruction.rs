@@ -73,8 +73,20 @@ pub enum MerpsInstruction {
     /// 0. `[writable]` merps_group_ai - TODO
     /// 1. `[writable]` spot_market_ai - TODO
     /// 2. `[]` dex_program_ai - TODO
-    /// 3. `[]` admin_ai - TODO
+    /// 3. `[signer]` admin_ai - TODO
     AddSpotMarket,
+
+    /// Borrow by incrementing MerpsAccount.borrows given collateral ratio is below init_coll_rat
+    ///
+    /// Accounts expected by this instruction (4 + 2 * NUM_MARKETS):
+    ///
+    /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
+    /// 1. `[writable]` merps_account_ai - the merps account for this user
+    /// 2. `[signer]` owner_ai - Solana account of owner of the MerpsAccount
+    /// 3. `[writable]` root_bank_ai - Root bank owned by MerpsGroup
+    /// 4. `[writable]` node_bank_ai - Node bank owned by RootBank
+    /// 5. `[]` clock_ai - Clock sysvar account
+    Borrow { quantity: u64 },
 }
 
 impl MerpsInstruction {
@@ -102,6 +114,10 @@ impl MerpsInstruction {
             }
             4 => MerpsInstruction::AddAsset,
             5 => MerpsInstruction::AddSpotMarket,
+            6 => {
+                let quantity = array_ref![data, 0, 8];
+                MerpsInstruction::Borrow { quantity: u64::from_le_bytes(*quantity) }
+            }
             _ => {
                 return None;
             }
@@ -186,6 +202,30 @@ pub fn deposit(
     ];
 
     let instr = MerpsInstruction::Deposit { quantity };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn borrow(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+
+    quantity: u64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new(*merps_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
+    ];
+
+    let instr = MerpsInstruction::Borrow { quantity };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

@@ -1,6 +1,8 @@
 use std::mem::size_of;
 
 use arrayref::{array_ref, array_refs};
+use bytemuck::bytes_of;
+use fixed::types::I80F48;
 use flux_aggregator::borsh_state::InitBorshState;
 
 use serum_dex::state::ToAlignedBytes;
@@ -13,17 +15,15 @@ use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
-use spl_token::state::{Account, Mint};
+use spl_token::state::Account;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::state::{
     load_market_state, DataType, Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache,
-    RootBank, RootBankCache, MAX_PAIRS, MAX_TOKENS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    RootBank, RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::gen_signer_key;
-use bytemuck::bytes_of;
-use fixed::types::I80F48;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -308,6 +308,51 @@ impl Processor {
         Ok(())
     }
 
+    fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [merps_group_ai, merps_account_ai, owner_ai, root_bank_ai, node_bank_ai, clock_ai] =
+            accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+        check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+
+        // Make sure the asset is in basket
+        let token_index = merps_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
+        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
+
+        // First check all caches to make sure valid
+        let clock = Clock::from_account_info(clock_ai)?;
+        let now_ts = clock.unix_timestamp as u64;
+        if !merps_account.check_caches_valid(&merps_group, now_ts) {
+            // TODO log or write to buffer that this transaction did not complete due to stale cache
+            return Ok(());
+        }
+
+        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank.deposit_index;
+        let borrow: I80F48 = I80F48::from_num(quantity) / root_bank.borrow_index;
+
+        checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
+        checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
+
+        let coll_ratio = merps_account.get_coll_ratio(&merps_group)?;
+
+        // TODO is >= ONE_I80F48 correct?
+        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
+
+        Ok(())
+    }
+
     /// Withdraw a token from the bank if collateral ratio permits
     fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
         const NUM_FIXED: usize = 10;
@@ -445,6 +490,9 @@ impl Processor {
             MerpsInstruction::AddSpotMarket => {
                 Self::add_spot_market(program_id, accounts)?;
             }
+            MerpsInstruction::Borrow { quantity } => {
+                Self::borrow(program_id, accounts, quantity)?;
+            }
         }
 
         Ok(())
@@ -536,6 +584,16 @@ fn checked_sub_deposit(
 ) -> MerpsResult<()> {
     merps_account.checked_sub_deposit(token_index, quantity)?;
     node_bank.checked_sub_deposit(quantity)
+}
+
+fn checked_add_borrow(
+    node_bank: &mut NodeBank,
+    margin_account: &mut MerpsAccount,
+    token_index: usize,
+    quantity: I80F48,
+) -> MerpsResult<()> {
+    margin_account.checked_add_borrow(token_index, quantity)?;
+    node_bank.checked_add_borrow(quantity)
 }
 
 /*

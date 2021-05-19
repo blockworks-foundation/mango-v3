@@ -230,6 +230,17 @@ impl NodeBank {
     pub fn checked_sub_deposit(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits = self.deposits.checked_sub(v).ok_or(throw!())?)
     }
+    pub fn has_valid_deposits_borrows(&self, root_bank: &RootBank) -> bool {
+        self.get_total_native_deposit(root_bank) >= self.get_total_native_borrow(root_bank)
+    }
+    pub fn get_total_native_borrow(&self, root_bank: &RootBank) -> u64 {
+        let native: I80F48 = self.borrows * root_bank.borrow_index;
+        native.checked_ceil().unwrap().to_num() // rounds toward +inf
+    }
+    pub fn get_total_native_deposit(&self, root_bank: &RootBank) -> u64 {
+        let native: I80F48 = self.deposits * root_bank.deposit_index;
+        native.checked_floor().unwrap().to_num() // rounds toward -inf
+    }
 }
 
 #[derive(Copy, Clone)]
