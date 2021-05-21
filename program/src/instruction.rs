@@ -71,10 +71,20 @@ pub enum MerpsInstruction {
     /// Accounts expected by this instruction (4)
     ///
     /// 0. `[writable]` merps_group_ai - TODO
-    /// 1. `[writable]` spot_market_ai - TODO
+    /// 1. `[]` spot_market_ai - TODO
     /// 2. `[]` dex_program_ai - TODO
     /// 3. `[signer]` admin_ai - TODO
     AddSpotMarket,
+
+    /// Add a spot market to a merps account basket
+    ///
+    /// Accounts expected by this instruction (6)
+    ///
+    /// 0. `[]` merps_group_ai - TODO
+    /// 1. `[writable]` merps_account_ai - TODO
+    /// 2. `[signer]` owner_ai - Solana account of owner of the merps account
+    /// 3. `[]` spot_market_ai - TODO
+    AddToBasket,
 
     /// Borrow by incrementing MerpsAccount.borrows given collateral ratio is below init_coll_rat
     ///
@@ -114,7 +124,8 @@ impl MerpsInstruction {
             }
             4 => MerpsInstruction::AddAsset,
             5 => MerpsInstruction::AddSpotMarket,
-            6 => {
+            6 => MerpsInstruction::AddToBasket,
+            7 => {
                 let quantity = array_ref![data, 0, 8];
                 MerpsInstruction::Borrow { quantity: u64::from_le_bytes(*quantity) }
             }
@@ -202,6 +213,69 @@ pub fn deposit(
     ];
 
     let instr = MerpsInstruction::Deposit { quantity };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn add_asset(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    token_mint_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+    vault_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    oracle_pk: &Pubkey,
+    admin_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(*token_mint_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+        AccountMeta::new_readonly(*vault_pk, false),
+        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new_readonly(*oracle_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MerpsInstruction::AddAsset;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn add_spot_market(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    dex_program_pk: &Pubkey,
+    admin_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+        AccountMeta::new_readonly(*dex_program_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MerpsInstruction::AddSpotMarket;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn add_to_basket(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*merps_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+    ];
+
+    let instr = MerpsInstruction::AddToBasket;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

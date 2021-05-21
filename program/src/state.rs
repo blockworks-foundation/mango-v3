@@ -131,6 +131,9 @@ impl MerpsGroup {
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
         self.root_banks.iter().position(|pk| pk == root_bank_pk) // TODO profile and optimize
     }
+    pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
+        self.spot_markets.iter().position(|pk| pk == spot_market_pk)
+    }
 }
 
 /// This is the root bank for one token's lending and borrowing info

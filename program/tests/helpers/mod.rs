@@ -27,6 +27,9 @@ use merps::utils::create_signer_key_and_nonce;
 use merps::instruction::init_merps_group;
 use merps::state::{MerpsGroup, NodeBank, RootBank, ZERO_I80F48, ONE_I80F48};
 
+pub const PRICE_BTC: u64 = 50000;
+pub const PRICE_ETH: u64 = 2000;
+
 trait AddPacked {
     fn add_packable_account<T: Pack>(
         &mut self,
@@ -158,39 +161,40 @@ pub struct TestAggregator {
     pub price: u64,
 }
 
-// pub fn add_aggregator(
-//     test: &mut ProgramTest,
-//     name: &str,
-//     decimals: u8,
-//     price: u64,
-//     owner: &Pubkey,
-// ) -> TestAggregator {
-//     let pubkey = Pubkey::new_unique();
+pub fn add_aggregator(
+    test: &mut ProgramTest,
+    name: &str,
+    decimals: u8,
+    price: u64,
+    owner: &Pubkey,
+) -> TestAggregator {
+    let pubkey = Pubkey::new_unique();
 
-//     let mut description = [0u8; 32];
-//     let size = name.len().min(description.len());
-//     description[0..size].copy_from_slice(&name.as_bytes()[0..size]);
+    let mut description = [0u8; 32];
+    let size = name.len().min(description.len());
+    description[0..size].copy_from_slice(&name.as_bytes()[0..size]);
 
-//     let aggregator = Aggregator {
-//         config: AggregatorConfig { description, decimals, ..AggregatorConfig::default() },
-//         is_initialized: true,
-//         answer: Answer {
-//             median: price,
-//             created_at: 1, // set to > 0 to initialize
-//             ..Answer::default()
-//         },
-//         ..Aggregator::default()
-//     };
+    let aggregator = Aggregator {
+        config: AggregatorConfig { description, decimals, ..AggregatorConfig::default() },
+        is_initialized: true,
+        answer: Answer {
+            median: price,
+            created_at: 1, // set to > 0 to initialize
+            ..Answer::default()
+        },
+        ..Aggregator::default()
+    };
 
-//     let mut account =
-//         Account::new(u32::MAX as u64, borsh_utils::get_packed_len::<Aggregator>(), &owner);
-//     let account_info = (&pubkey, false, &mut account).into_account_info();
-//     aggregator.save(&account_info).unwrap();
-//     test.add_account(pubkey, account);
+    let mut account =
+        Account::new(u32::MAX as u64, borsh_utils::get_packed_len::<Aggregator>(), &owner);
+    let account_info = (&pubkey, false, &mut account).into_account_info();
+    aggregator.save(&account_info).unwrap();
+    test.add_account(pubkey, account);
 
-//     TestAggregator { name: name.to_string(), pubkey, price }
-// }
+    TestAggregator { name: name.to_string(), pubkey, price }
+}
 
+#[derive(Copy, Clone)]
 pub struct TestNodeBank {
     pub pubkey: Pubkey,
 
@@ -275,7 +279,7 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         Account::new(u32::MAX as u64, size_of::<MerpsGroup>(), &program_id),
     );
 
-    let admin_pk = Pubkey::new_unique();
+    let admin = Keypair::new();
     let dex_program_pk = Pubkey::new_unique();
 
     let quote_mint = add_mint(test, 6);
@@ -291,7 +295,7 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         merps_group_pk,
         signer_pk,
         signer_nonce,
-        admin_pk,
+        admin_pk: admin.pubkey(),
         dex_program_pk,
         tokens,
         root_banks,

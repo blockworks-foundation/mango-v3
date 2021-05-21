@@ -51,6 +51,8 @@ pub enum MerpsErrorCode {
     InsufficientFunds,
     #[error("MerpsErrorCode::InvalidToken")]
     InvalidToken,
+    #[error("MerpsErrorCode::InvalidMarket")]
+    InvalidMarket,
     #[error("MerpsErrorCode::InvalidProgramId")]
     InvalidProgramId,
     #[error("MerpsErrorCode::NotRentExempt")]
