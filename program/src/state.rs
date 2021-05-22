@@ -6,20 +6,20 @@ use bytemuck::{
     Pod, Zeroable,
 };
 use enumflags2::BitFlags;
-use fixed::types::{I64F64, I80F48, U64F64};
-use fixed_macro::types::{I80F48, U64F64};
+use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::matching::Side;
 
 pub const MAX_TOKENS: usize = 64;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const QUOTE_INDEX: usize = 0;
-pub const ZERO_U64F64: U64F64 = U64F64!(0);
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 
@@ -29,6 +29,7 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
 
+// TODO: put Loadable trait into separate git repo along with other common Mango code
 pub trait Loadable: Pod {
     fn load_mut<'a>(account: &'a AccountInfo) -> Result<RefMut<'a, Self>, ProgramError> {
         // TODO verify if this checks for size
@@ -43,6 +44,7 @@ pub trait Loadable: Pod {
     }
 }
 
+#[macro_export]
 macro_rules! impl_loadable {
     ($type_name:ident) => {
         unsafe impl Zeroable for $type_name {}
@@ -58,15 +60,25 @@ pub enum DataType {
     RootBank,
     NodeBank,
     PerpMarket,
+    Bids,
+    Asks,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct MerpsGroup {
+pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
     pub is_initialized: bool,
     pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
+}
+unsafe impl Zeroable for MetaData {}
+unsafe impl Pod for MetaData {}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct MerpsGroup {
+    pub meta_data: MetaData,
 
     pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
@@ -108,7 +120,11 @@ impl MerpsGroup {
         check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
         let merps_group = Self::load_mut(account)?;
-        check_eq!(merps_group.data_type, DataType::MerpsGroup as u8, MerpsErrorCode::Default)?;
+        check_eq!(
+            merps_group.meta_data.data_type,
+            DataType::MerpsGroup as u8,
+            MerpsErrorCode::Default
+        )?;
 
         Ok(merps_group)
     }
@@ -119,8 +135,12 @@ impl MerpsGroup {
         check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
         let merps_group = Self::load(account)?;
-        check!(merps_group.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(merps_group.data_type, DataType::MerpsGroup as u8, MerpsErrorCode::Default)?;
+        check!(merps_group.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(
+            merps_group.meta_data.data_type,
+            DataType::MerpsGroup as u8,
+            MerpsErrorCode::Default
+        )?;
 
         Ok(merps_group)
     }
@@ -140,10 +160,7 @@ impl MerpsGroup {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct RootBank {
-    pub data_type: u8,
-    pub version: u8,
-    pub is_initialized: bool,
-    pub padding: [u8; 5],
+    pub meta_data: MetaData,
 
     pub num_node_banks: usize,
     pub node_banks: [Pubkey; MAX_NODE_BANKS],
@@ -163,8 +180,12 @@ impl RootBank {
 
         let root_bank = Self::load_mut(account)?;
 
-        check!(root_bank.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(root_bank.data_type, DataType::RootBank as u8, MerpsErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(
+            root_bank.meta_data.data_type,
+            DataType::RootBank as u8,
+            MerpsErrorCode::Default
+        )?;
 
         Ok(root_bank)
     }
@@ -177,8 +198,12 @@ impl RootBank {
 
         let root_bank = Self::load(account)?;
 
-        check!(root_bank.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(root_bank.data_type, DataType::RootBank as u8, MerpsErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(
+            root_bank.meta_data.data_type,
+            DataType::RootBank as u8,
+            MerpsErrorCode::Default
+        )?;
 
         Ok(root_bank)
     }
@@ -190,10 +215,8 @@ impl RootBank {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct NodeBank {
-    pub data_type: u8,
-    pub version: u8,
-    pub is_initialized: bool,
-    pub padding: [u8; 5],
+    pub meta_data: MetaData,
+
     pub deposits: I80F48,
     pub borrows: I80F48,
     pub vault: Pubkey,
@@ -209,8 +232,12 @@ impl NodeBank {
 
         let node_bank = Self::load_mut(account)?;
 
-        check!(node_bank.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(node_bank.data_type, DataType::NodeBank as u8, MerpsErrorCode::Default)?;
+        check!(node_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(
+            node_bank.meta_data.data_type,
+            DataType::NodeBank as u8,
+            MerpsErrorCode::Default
+        )?;
 
         Ok(node_bank)
     }
@@ -286,11 +313,21 @@ unsafe impl Pod for PerpMarketCache {}
 
 #[derive(Copy, Clone)]
 #[repr(C)]
+pub struct PerpOpenOrders {
+    pub total_base: u64,  // total contracts in sell orders
+    pub total_quote: u64, // total quote currency in buy orders
+    pub is_free_bits: u32,
+    pub is_bid_bits: u32,
+    pub orders: [u128; 32],
+    pub client_order_ids: [u64; 32],
+}
+unsafe impl Zeroable for PerpOpenOrders {}
+unsafe impl Pod for PerpOpenOrders {}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
 pub struct MerpsAccount {
-    pub data_type: u8,
-    pub version: u8,
-    pub is_initialized: bool,
-    pub padding: [u8; 5],
+    pub meta_data: MetaData,
 
     pub merps_group: Pubkey,
     pub owner: Pubkey,
@@ -304,11 +341,14 @@ pub struct MerpsAccount {
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
     pub borrows: [I80F48; MAX_TOKENS],
-    pub open_orders: [Pubkey; MAX_PAIRS],
+    pub spot_open_orders: [Pubkey; MAX_PAIRS],
 
     // Perps related data
-    pub base_positions: [I80F48; MAX_PAIRS],  // -1
-    pub quote_positions: [I80F48; MAX_PAIRS], // +44k
+    pub base_positions: [i64; MAX_PAIRS], // measured in base lots
+    pub quote_positions: [i64; MAX_PAIRS], // measured in quote lots
+    pub funding_settled: [I80F48; MAX_PAIRS],
+    pub perp_open_orders: [PerpOpenOrders; MAX_PAIRS],
+    // buy one SOL, sell one SOL-PERP
 
     // trade again at 44k
     // -1 | +44k
@@ -322,9 +362,12 @@ pub struct MerpsAccount {
     // OI goes up
     // OI stays same
     // OI goes down
-    pub funding_earned: [I80F48; MAX_PAIRS],
-    pub funding_settled: [I80F48; MAX_PAIRS],
-    // TODO hold perps open orders in here
+
+    // settlement
+    // two merps accounts are passed in
+    // only equal amounts can be settled
+    // if an account doesn't have enough of the quote currency, it is borrowed
+    // if there is no availability to borrow or account doesn't have the coll ratio, keeper may swap some of his USDC for collateral at discount
 }
 impl_loadable!(MerpsAccount);
 
@@ -339,8 +382,12 @@ impl MerpsAccount {
         check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
         let merps_account = Self::load_mut(account)?;
 
-        check_eq!(merps_account.data_type, DataType::MerpsAccount as u8, MerpsErrorCode::Default)?;
-        check!(merps_account.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(
+            merps_account.meta_data.data_type,
+            DataType::MerpsAccount as u8,
+            MerpsErrorCode::Default
+        )?;
+        check!(merps_account.meta_data.is_initialized, MerpsErrorCode::Default)?;
         check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
 
         Ok(merps_account)
@@ -375,7 +422,7 @@ impl MerpsAccount {
             if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                 return false;
             }
-            if self.open_orders[i] != Pubkey::default() {
+            if self.spot_open_orders[i] != Pubkey::default() {
                 if now_ts > self.open_orders_cache[i].last_update + valid_interval {
                     return false;
                 }
@@ -420,7 +467,7 @@ impl MerpsAccount {
                 .checked_mul(self.borrows[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-            if self.open_orders[i] != Pubkey::default() {
+            if self.spot_open_orders[i] != Pubkey::default() {
                 assets_val = self.open_orders_cache[i]
                     .quote_total
                     .checked_add(assets_val)
@@ -469,27 +516,41 @@ impl MerpsAccount {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PerpMarket {
-    pub data_type: u8,
-    pub version: u8,
-    pub is_initialized: bool,
-    pub padding: [u8; 5],
+    pub meta_data: MetaData,
 
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
     pub matching_queue: Pubkey,
-    pub funding_paid: I80F48,
+    pub funding_earned: I80F48,
     pub open_interest: I80F48,
 
+    pub quote_lot_size: i64, //
     pub mark_price: I80F48,
     pub index_oracle: Pubkey,
     pub last_updated: u64,
-    // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
-    // index_price = some function of centralized exchange spot prices
-    // book_price = average of impact bid and impact ask; used to calculate basis
-    // basis = book_price / index_price - 1; some moving average of this is used for mark price
+    pub seq_num: u64, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+                      // index_price = some function of centralized exchange spot prices
+                      // book_price = average of impact bid and impact ask; used to calculate basis
+                      // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 impl_loadable!(PerpMarket);
+
+impl PerpMarket {
+    pub fn gen_order_id(&mut self, side: Side, price: u64) -> u128 {
+        self.seq_num += 1;
+
+        let upper = (price as u128) << 64;
+        match side {
+            Side::Bid => upper | (!self.seq_num as u128),
+            Side::Ask => upper | (self.seq_num as u128),
+        }
+    }
+
+    pub fn update_funding(&mut self) -> MerpsResult<()> {
+        unimplemented!()
+    }
+}
 
 pub fn load_market_state<'a>(
     market_account: &'a AccountInfo,

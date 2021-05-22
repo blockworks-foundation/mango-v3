@@ -23,9 +23,9 @@ spl-token = { version = "^3.0.0", features = ["no-entrypoint"] }
 serum_dex = { version = "^0.2", git = "https://github.com/blockworks-foundation/serum-dex.git", features = ["no-entrypoint", "program"] }
 static_assertions = "^1.1.0"
 flux-aggregator = { version = "^0.1", git = "https://github.com/blockworks-foundation/solana-flux-aggregator.git", features = ["program", "no-entrypoint"] }
+safe-transmute = "^0.11.1"
 
 [dev-dependencies]
-safe-transmute = "^0.11.0"
 solana-sdk = "^1.6.4"
 solana-program-test = "^1.6.4"
 

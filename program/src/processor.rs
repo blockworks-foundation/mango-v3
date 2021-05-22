@@ -78,9 +78,9 @@ impl Processor {
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
 
-        merps_group.data_type = DataType::MerpsGroup as u8;
-        merps_group.is_initialized = true;
-        merps_group.version = 0;
+        merps_group.meta_data.data_type = DataType::MerpsGroup as u8;
+        merps_group.meta_data.is_initialized = true;
+        merps_group.meta_data.version = 0;
 
         // check size
         Ok(())
@@ -108,9 +108,9 @@ impl Processor {
 
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
-        merps_account.data_type = DataType::MerpsAccount as u8;
-        merps_account.is_initialized = true;
-        merps_account.version = 0;
+        merps_account.meta_data.data_type = DataType::MerpsAccount as u8;
+        merps_account.meta_data.is_initialized = true;
+        merps_account.meta_data.version = 0;
 
         Ok(())
     }
@@ -462,16 +462,66 @@ impl Processor {
         unimplemented!()
     }
 
-    fn place_perp_order() -> MerpsResult<()> {
-        // TODO
+    fn place_perp_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        is_bid: bool,
+        price: u64,
+        quantity: u64,
+        client_order_id: u64,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            owner_ai,           // read
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+            event_queue_ai,     // write
+            clock_ai,           // read
+        ] = accounts;
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
+        let clock = Clock::from_account_info(clock_ai)?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        check!(price > 0, MerpsErrorCode::Default)?;
+        check!(quantity > 0, MerpsErrorCode::Default)?;
+
+        if !merps_account.check_caches_valid(&merps_group, now_ts) {
+            return Ok(());
+        }
+
+        /*
+           How to adjust the funding settled
+           FS_t = (FS_t-1 - FE) * C_t-1 / C_t + FE
+        */
+
         /*
            1. First match against the book
+
+           funding settled
+
            2. Determine if account still above coll ratio
         */
-        unimplemented!()
+
+        // put the order onto the book
+
+        Ok(())
     }
 
     fn cancel_perp_order() -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
+    }
+
+    fn settle() -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
@@ -482,13 +532,15 @@ impl Processor {
         unimplemented!()
     }
 
-    /// Cranks should update all indexes in root banks
-    fn update_indexes(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+    /// *** Keeper Related Instructions ***
+
+    /// Update the deposit and borrow index on passed in RootBanks
+    fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
 
-    ///
+    /// similar to serum dex, but also need to do some extra magic with funding
     fn consume_event_queue(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         unimplemented!()
@@ -547,9 +599,9 @@ fn init_root_bank(
     let mut node_bank = NodeBank::load_mut(&node_bank_ai)?;
     check_eq!(node_bank_ai.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
-    node_bank.data_type = DataType::NodeBank as u8;
-    node_bank.is_initialized = true;
-    node_bank.version = 0;
+    node_bank.meta_data.data_type = DataType::NodeBank as u8;
+    node_bank.meta_data.is_initialized = true;
+    node_bank.meta_data.version = 0;
     node_bank.deposits = ZERO_I80F48;
     node_bank.borrows = ZERO_I80F48;
     node_bank.vault = *vault_ai.key;
@@ -557,8 +609,8 @@ fn init_root_bank(
     let mut root_bank = RootBank::load_mut(&root_bank_ai)?;
     check_eq!(root_bank_ai.owner, program_id, MerpsErrorCode::InvalidOwner)?;
 
-    root_bank.data_type = DataType::RootBank as u8;
-    root_bank.is_initialized = true;
+    root_bank.meta_data.data_type = DataType::RootBank as u8;
+    root_bank.meta_data.is_initialized = true;
     root_bank.node_banks[0] = *node_bank_ai.key;
     root_bank.num_node_banks = 1;
     root_bank.deposit_index = ONE_I80F48;

@@ -3,10 +3,11 @@ use bytemuck::{cast, cast_mut, cast_ref, cast_slice, cast_slice_mut, Pod, Zeroab
 
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use safe_transmute::trivial::TriviallyTransmutable;
 use solana_program::pubkey::Pubkey;
 use static_assertions::const_assert_eq;
 use std::{
-    convert::{identity, TryFrom},
+    convert::TryFrom,
     mem::{align_of, size_of},
     num::NonZeroU64,
 };
@@ -17,7 +18,7 @@ pub type NodeHandle = u32;
 
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u32)]
-enum NodeTag {
+pub enum NodeTag {
     Uninitialized = 0,
     InnerNode = 1,
     LeafNode = 2,
@@ -50,13 +51,20 @@ impl InnerNode {
 pub struct LeafNode {
     pub tag: u32,
     pub owner_slot: u8,
+    pub padding: [u8; 3],
     pub key: u128,
     pub owner: Pubkey,
-    pub quantity: u64,
+    pub quantity: i64,
     pub client_order_id: u64,
 }
 unsafe impl Zeroable for LeafNode {}
 unsafe impl Pod for LeafNode {}
+
+impl LeafNode {
+    pub fn price(&self) -> u64 {
+        (self.key >> 64) as u64
+    }
+}
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -156,20 +164,18 @@ impl AsRef<AnyNode> for LeafNode {
     }
 }
 
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct SlabHeader {
+pub struct BookSideHeader {
+    pub data_type: u8,
+    pub version: u8,
+    pub is_initialized: bool,
+    pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
+
     pub bump_index: u64,
     pub free_list_len: u64,
     pub free_list_head: u32,
-
     pub root_node: u32,
     pub leaf_count: u64,
 }
-unsafe impl Zeroable for SlabHeader {}
-unsafe impl Pod for SlabHeader {}
-
-const SLAB_HEADER_LEN: usize = size_of::<SlabHeader>();
 
 #[cfg(debug_assertions)]
 unsafe fn invariant(check: bool) {
@@ -185,6 +191,21 @@ unsafe fn invariant(check: bool) {
         std::hint::unreachable_unchecked();
     }
 }
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+struct SlabHeader {
+    pub bump_index: u64,
+    pub free_list_len: u64,
+    pub free_list_head: u32,
+
+    pub root_node: u32,
+    pub leaf_count: u64,
+}
+unsafe impl Zeroable for SlabHeader {}
+unsafe impl Pod for SlabHeader {}
+
+const SLAB_HEADER_LEN: usize = size_of::<SlabHeader>();
 
 #[repr(transparent)]
 pub struct Slab([u8]);
@@ -214,6 +235,7 @@ impl Slab {
     }
 
     fn parts(&self) -> (&SlabHeader, &[AnyNode]) {
+        // TODO possibly remove this if it's safe
         unsafe {
             invariant(self.0.len() < size_of::<SlabHeader>());
             invariant((self.0.as_ptr() as usize) % align_of::<SlabHeader>() != 0);
@@ -312,7 +334,7 @@ impl SlabView<AnyNode> for Slab {
     }
 
     fn insert(&mut self, val: &AnyNode) -> Result<u32, ()> {
-        match NodeTag::try_from(identity(val.tag)) {
+        match NodeTag::try_from(val.tag) {
             Ok(NodeTag::InnerNode) | Ok(NodeTag::LeafNode) => (),
             _ => unreachable!(),
         };
@@ -339,7 +361,7 @@ impl SlabView<AnyNode> for Slab {
 
         match NodeTag::try_from(node.tag) {
             Ok(NodeTag::FreeNode) => assert!(header.free_list_len > 1),
-            Ok(NodeTag::LastFreeNode) => assert_eq!(identity(header.free_list_len), 1),
+            Ok(NodeTag::LastFreeNode) => assert_eq!(header.free_list_len, 1),
             _ => unreachable!(),
         };
 
@@ -394,6 +416,7 @@ impl Slab {
 
     fn find_min_max(&self, find_max: bool) -> Option<NodeHandle> {
         let mut root: NodeHandle = self.root()?;
+
         loop {
             let root_contents = self.get(root).unwrap();
             match root_contents.case().unwrap() {
@@ -440,6 +463,7 @@ impl Slab {
             let root_contents = *self.get(root).unwrap();
             let root_key = root_contents.key().unwrap();
             if root_key == new_leaf.key {
+                // This should never happen
                 if let Some(NodeRef::Leaf(&old_root_as_leaf)) = root_contents.case() {
                     // clobber the existing leaf
                     *self.get_mut(root).unwrap() = *new_leaf.as_ref();
@@ -458,6 +482,7 @@ impl Slab {
                 }
                 _ => (),
             };
+            // implies root is a Leaf or Inner where shared_prefix_len < prefix_len
 
             // change the root in place to represent the LCA of [new_leaf] and [root]
             let crit_bit_mask: u128 = (1u128 << 127) >> shared_prefix_len;
@@ -521,7 +546,7 @@ impl Slab {
         match self.get(parent_h).unwrap().case().unwrap() {
             NodeRef::Leaf(&leaf) if leaf.key == search_key => {
                 let header = self.header_mut();
-                assert_eq!(identity(header.leaf_count), 1);
+                assert_eq!(header.leaf_count, 1);
                 header.root_node = 0;
                 header.leaf_count = 0;
                 let _old_root = self.remove(parent_h).unwrap();

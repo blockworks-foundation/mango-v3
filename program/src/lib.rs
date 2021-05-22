@@ -3,6 +3,7 @@ pub mod error;
 
 pub mod critbit;
 pub mod instruction;
+pub mod matching;
 pub mod processor;
 pub mod queue;
 pub mod state;
