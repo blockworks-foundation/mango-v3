@@ -3,13 +3,10 @@ use bytemuck::{cast, cast_mut, cast_ref, cast_slice, cast_slice_mut, Pod, Zeroab
 
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use safe_transmute::trivial::TriviallyTransmutable;
 use solana_program::pubkey::Pubkey;
-use static_assertions::const_assert_eq;
 use std::{
     convert::TryFrom,
     mem::{align_of, size_of},
-    num::NonZeroU64,
 };
 
 declare_check_assert_macros!(SourceFileId::Critbit);

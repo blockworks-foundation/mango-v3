@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, parse_macro_input};
 
+/// Derive `Pod` first before deriving this
 #[proc_macro_derive(Loadable)]
 pub fn loadable(input: TokenStream) -> TokenStream {
 
@@ -27,10 +28,8 @@ pub fn pod(input: TokenStream) -> TokenStream {
     match data {
         syn::Data::Struct(_) => {
             quote! {
-
                 unsafe impl bytemuck::Zeroable for #ident {}
                 unsafe impl bytemuck::Pod for #ident {}
-
             }
         }
 

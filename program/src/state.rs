@@ -1,16 +1,10 @@
 use std::cell::{Ref, RefMut};
 use std::mem::size_of;
 
-use bytemuck::{
-    cast_slice, cast_slice_mut, from_bytes, from_bytes_mut, try_from_bytes, try_from_bytes_mut,
-    Pod, Zeroable,
-};
-use enumflags2::BitFlags;
+use bytemuck::from_bytes_mut;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::entrypoint::ProgramResult;
-use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -216,6 +210,7 @@ impl NodeBank {
 
         Ok(node_bank)
     }
+    #[allow(unused)]
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -426,7 +421,7 @@ impl MerpsAccount {
                 .checked_mul(self.deposits[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-            let mut base_liabs = self.root_bank_cache[i]
+            let base_liabs = self.root_bank_cache[i]
                 .borrow_index
                 .checked_mul(self.borrows[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;

@@ -1,12 +1,7 @@
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::matching::Side;
 use bytemuck::{Pod, Zeroable};
-use enumflags2::BitFlags;
-use num_enum::TryFromPrimitive;
-use safe_transmute::{self, to_bytes::transmute_to_bytes, trivial::TriviallyTransmutable};
-use solana_program::pubkey::Pubkey;
+use safe_transmute::{self, trivial::TriviallyTransmutable};
 use std::cell::RefMut;
-use std::convert::TryInto;
 
 declare_check_assert_macros!(SourceFileId::Queue);
 

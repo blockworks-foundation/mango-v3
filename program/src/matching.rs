@@ -1,14 +1,12 @@
-use crate::critbit::{AnyNode, LeafNode, NodeHandle, NodeTag, Slab, SlabView};
-use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::critbit::{LeafNode, NodeHandle, NodeTag, Slab, SlabView};
+use crate::error::MerpsResult;
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{MerpsAccount, PerpMarket};
-use bytemuck::{cast, cast_mut, Zeroable};
-use enumflags2::BitFlags;
+use bytemuck::cast;
 use fixed::types::I80F48;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
-use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 
@@ -58,6 +56,7 @@ impl<'a> OrderBook<'a> {
     ) -> MerpsResult<()> {
         // TODO make use of the order options
         // TODO proper error handling
+        #[allow(unused_variables)]
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
             OrderType::ImmediateOrCancel => (false, false),

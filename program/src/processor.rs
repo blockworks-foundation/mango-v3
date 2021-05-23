@@ -102,7 +102,8 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
 
-        let _merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        #[allow(unused_variables)]
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
         let mut merps_account = MerpsAccount::load_mut(merps_account_ai)?;
         check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::InvalidOwner)?;
@@ -145,7 +146,7 @@ impl Processor {
         merps_group.tokens[token_index] = *mint_ai.key;
         merps_group.root_banks[token_index] = *root_bank_ai.key;
 
-        let oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
+        let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
         merps_group.oracles[token_index] = *oracle_ai.key;
         merps_group.num_tokens += 1;
 
@@ -194,6 +195,7 @@ impl Processor {
 
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
+    #[allow(unused)]
     fn add_perp_market() -> MerpsResult<()> {
         // TODO
         Ok(())
@@ -245,6 +247,7 @@ impl Processor {
     }
 
     /// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)    
+    #[allow(unused)]
     fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 3;
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -269,6 +272,7 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
     fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 3;
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -295,16 +299,19 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
     fn cache_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         Ok(())
     }
 
+    #[allow(unused)]
     fn cache_perp_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -453,16 +460,19 @@ impl Processor {
     }
 
     /// Same idea as Mango margin
+    #[allow(unused)]
     fn place_spot_order() -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
 
+    #[allow(unused)]
     fn cancel_spot_order() -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
 
+    #[allow(unused)]
     fn place_perp_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -517,17 +527,21 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
     fn cancel_perp_order() -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
 
+    /// Take two MerpsAccount and settle quote currency pnl between them
+    #[allow(unused)]
     fn settle() -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
 
     /// Liquidate an account similar to Mango
+    #[allow(unused)]
     fn liquidate() -> MerpsResult<()> {
         // TODO - still need to figure out how liquidations will work
         unimplemented!()
@@ -536,12 +550,14 @@ impl Processor {
     /// *** Keeper Related Instructions ***
 
     /// Update the deposit and borrow index on passed in RootBanks
+    #[allow(unused)]
     fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
 
     /// similar to serum dex, but also need to do some extra magic with funding
+    #[allow(unused)]
     fn consume_event_queue(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         unimplemented!()
@@ -646,6 +662,7 @@ fn invoke_transfer<'a>(
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
 }
 
+#[allow(unused)]
 fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
     Ok(ZERO_I80F48) // TODO
 }
