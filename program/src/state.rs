@@ -16,6 +16,9 @@ use solana_program::pubkey::Pubkey;
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::matching::Side;
 
+use mango_common::Loadable;
+use mango_macro::{Loadable, Pod};
+
 pub const MAX_TOKENS: usize = 64;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
@@ -29,30 +32,6 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
 
-// TODO: put Loadable trait into separate git repo along with other common Mango code
-pub trait Loadable: Pod {
-    fn load_mut<'a>(account: &'a AccountInfo) -> Result<RefMut<'a, Self>, ProgramError> {
-        // TODO verify if this checks for size
-        Ok(RefMut::map(account.try_borrow_mut_data()?, |data| from_bytes_mut(data)))
-    }
-    fn load<'a>(account: &'a AccountInfo) -> Result<Ref<'a, Self>, ProgramError> {
-        Ok(Ref::map(account.try_borrow_data()?, |data| from_bytes(data)))
-    }
-
-    fn load_from_bytes(data: &[u8]) -> Result<&Self, ProgramError> {
-        Ok(from_bytes(data))
-    }
-}
-
-#[macro_export]
-macro_rules! impl_loadable {
-    ($type_name:ident) => {
-        unsafe impl Zeroable for $type_name {}
-        unsafe impl Pod for $type_name {}
-        impl Loadable for $type_name {}
-    };
-}
-
 #[repr(u8)]
 pub enum DataType {
     MerpsGroup = 0,
@@ -64,7 +43,7 @@ pub enum DataType {
     Asks,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct MetaData {
     pub data_type: u8,
@@ -72,10 +51,8 @@ pub struct MetaData {
     pub is_initialized: bool,
     pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
 }
-unsafe impl Zeroable for MetaData {}
-unsafe impl Pod for MetaData {}
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsGroup {
     pub meta_data: MetaData,
@@ -109,7 +86,6 @@ pub struct MerpsGroup {
     //      it makes this more single threaded if cranks are writing to merps group constantly with oracle prices
     pub valid_interval: u8,
 }
-impl_loadable!(MerpsGroup);
 
 impl MerpsGroup {
     pub fn load_mut_checked<'a>(
@@ -157,7 +133,7 @@ impl MerpsGroup {
 }
 
 /// This is the root bank for one token's lending and borrowing info
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct RootBank {
     pub meta_data: MetaData,
@@ -168,7 +144,6 @@ pub struct RootBank {
     pub borrow_index: I80F48,
     pub last_updated: u64,
 }
-impl_loadable!(RootBank);
 
 impl RootBank {
     pub fn load_mut_checked<'a>(
@@ -212,7 +187,7 @@ impl RootBank {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct NodeBank {
     pub meta_data: MetaData,
@@ -221,7 +196,7 @@ pub struct NodeBank {
     pub borrows: I80F48,
     pub vault: Pubkey,
 }
-impl_loadable!(NodeBank);
+
 impl NodeBank {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -273,45 +248,37 @@ impl NodeBank {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PriceCache {
     pub price: I80F48,
     pub last_update: u64,
 }
-unsafe impl Zeroable for PriceCache {}
-unsafe impl Pod for PriceCache {}
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct RootBankCache {
     pub deposit_index: I80F48,
     pub borrow_index: I80F48,
     pub last_update: u64,
 }
-unsafe impl Zeroable for RootBankCache {}
-unsafe impl Pod for RootBankCache {}
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct OpenOrdersCache {
     pub base_total: I80F48,
     pub quote_total: I80F48,
     pub last_update: u64,
 }
-unsafe impl Zeroable for OpenOrdersCache {}
-unsafe impl Pod for OpenOrdersCache {}
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
     pub funding_paid: u128,
     pub last_update: u64,
 }
-unsafe impl Zeroable for PerpMarketCache {}
-unsafe impl Pod for PerpMarketCache {}
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpOpenOrders {
     pub total_base: u64,  // total contracts in sell orders
@@ -321,10 +288,8 @@ pub struct PerpOpenOrders {
     pub orders: [u128; 32],
     pub client_order_ids: [u64; 32],
 }
-unsafe impl Zeroable for PerpOpenOrders {}
-unsafe impl Pod for PerpOpenOrders {}
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsAccount {
     pub meta_data: MetaData,
@@ -369,7 +334,6 @@ pub struct MerpsAccount {
     // if an account doesn't have enough of the quote currency, it is borrowed
     // if there is no availability to borrow or account doesn't have the coll ratio, keeper may swap some of his USDC for collateral at discount
 }
-impl_loadable!(MerpsAccount);
 
 impl MerpsAccount {
     pub fn load_mut_checked<'a>(
@@ -513,7 +477,7 @@ impl MerpsAccount {
 
 /// This will hold top level info about the perps market
 /// Likely all perps transactions on a market will be locked on this one because this will be passed in as writable
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct PerpMarket {
     pub meta_data: MetaData,
@@ -534,7 +498,6 @@ pub struct PerpMarket {
                       // book_price = average of impact bid and impact ask; used to calculate basis
                       // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
-impl_loadable!(PerpMarket);
 
 impl PerpMarket {
     pub fn gen_order_id(&mut self, side: Side, price: u64) -> u128 {

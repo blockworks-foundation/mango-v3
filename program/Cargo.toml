@@ -24,6 +24,8 @@ serum_dex = { version = "^0.2", git = "https://github.com/blockworks-foundation/
 static_assertions = "^1.1.0"
 flux-aggregator = { version = "^0.1", git = "https://github.com/blockworks-foundation/solana-flux-aggregator.git", features = ["program", "no-entrypoint"] }
 safe-transmute = "^0.11.1"
+mango-macro = { path = "../mango-macro" }
+mango-common = { path = "../common" }
 
 [dev-dependencies]
 solana-sdk = "^1.6.4"

@@ -20,10 +20,11 @@ use spl_token::state::Account;
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::state::{
-    load_market_state, DataType, Loadable, MerpsAccount, MerpsGroup, NodeBank, PriceCache,
-    RootBank, RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank,
+    RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::gen_signer_key;
+use mango_common::Loadable;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 

@@ -1,0 +1,15 @@
+[package]
+name = "mango-macro"
+version = "0.0.1"
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "^1.0.72"
+solana-program = "^1.6.9"
+bytemuck = "^1.4.1"
+quote = "^1.0.9"
+
+mango-common = { path = "../common" }
