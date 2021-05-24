@@ -613,6 +613,12 @@ impl Processor {
             MerpsInstruction::Borrow { quantity } => {
                 Self::borrow(program_id, accounts, quantity)?;
             }
+            MerpsInstruction::CachePrices => {
+                Self::cache_prices(program_id, accounts)?;
+            }
+            MerpsInstruction::CacheRootBanks => {
+                Self::cache_root_banks(program_id, accounts)?;
+            }
         }
 
         Ok(())

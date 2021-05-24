@@ -98,6 +98,16 @@ pub enum MerpsInstruction {
     /// 4. `[writable]` node_bank_ai - Node bank owned by RootBank
     /// 5. `[]` clock_ai - Clock sysvar account
     Borrow { quantity: u64 },
+
+    /// Cache prices
+    ///
+    /// Accounts expected: 3 + Oracles
+    CachePrices,
+
+    /// Cache root banks
+    ///
+    /// Accounts expected: 3 + Root Banks
+    CacheRootBanks,
 }
 
 impl MerpsInstruction {
@@ -130,6 +140,8 @@ impl MerpsInstruction {
                 let quantity = array_ref![data, 0, 8];
                 MerpsInstruction::Borrow { quantity: u64::from_le_bytes(*quantity) }
             }
+            8 => MerpsInstruction::CachePrices,
+            9 => MerpsInstruction::CacheRootBanks,
             _ => {
                 return None;
             }
@@ -301,6 +313,40 @@ pub fn borrow(
     ];
 
     let instr = MerpsInstruction::Borrow { quantity };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cache_prices(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_cache_pk: &Pubkey,
+    oracle_pks: &[Pubkey],
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*merps_cache_pk, false),
+        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
+    ];
+    accounts.extend(oracle_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    let instr = MerpsInstruction::CachePrices;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cache_root_banks(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_cache_pk: &Pubkey,
+    root_bank_pks: &[Pubkey],
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*merps_cache_pk, false),
+        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
+    ];
+    accounts.extend(root_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    let instr = MerpsInstruction::CacheRootBanks;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
