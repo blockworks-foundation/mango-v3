@@ -10,10 +10,5 @@ async fn test_size() {
     println!("LeafNode: {} {}", size_of::<LeafNode>(), align_of::<LeafNode>());
     println!("InnerNode: {}", size_of::<InnerNode>());
     println!("AnyNode: {}", size_of::<AnyNode>());
-    println!("MerpsAccount: {}", size_of::<MerpsAccount>(),);
-}
-
-#[test]
-fn test_macro() {
-    println!("{}")
+    println!("MerpsAccount: {}", size_of::<MerpsAccount>());
 }
