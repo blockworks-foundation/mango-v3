@@ -349,7 +349,7 @@ impl MerpsCache {
             if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                 return false;
             }
-            // not needed anymore?
+            // TODO: not needed anymore?
             //
             // if self.spot_open_orders[i] != Pubkey::default() {
             //     if now_ts > self.open_orders_cache[i].last_update + valid_interval {
@@ -463,7 +463,8 @@ impl MerpsAccount {
                 continue;
             }
 
-            let mut base_assets = merps_cache.root_bank_cache[i]
+            // TODO make mut when uncommenting the todo below
+            let base_assets = merps_cache.root_bank_cache[i]
                 .deposit_index
                 .checked_mul(self.deposits[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;

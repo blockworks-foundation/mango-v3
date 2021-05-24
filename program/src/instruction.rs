@@ -17,9 +17,9 @@ pub enum MerpsInstruction {
     /// 3. `[]` admin_ai - TODO
     /// 4. `[]` quote_mint_ai - TODO
     /// 5. `[]` quote_vault_ai - TODO
-    /// 6. `[writable]` merps_cache_ai - Account to cache prices, root banks, and perp markets
     /// 6. `[writable]` quote_node_bank_ai - TODO
     /// 7. `[writable]` quote_root_bank_ai - TODO
+    /// 6. `[writable]` merps_cache_ai - Account to cache prices, root banks, and perp markets
     /// 8. `[]` dex_prog_ai - TODO
     InitMerpsGroup { signer_nonce: u64, valid_interval: u8 },
 
@@ -94,9 +94,10 @@ pub enum MerpsInstruction {
     /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
     /// 1. `[writable]` merps_account_ai - the merps account for this user
     /// 2. `[signer]` owner_ai - Solana account of owner of the MerpsAccount
-    /// 3. `[writable]` root_bank_ai - Root bank owned by MerpsGroup
-    /// 4. `[writable]` node_bank_ai - Node bank owned by RootBank
-    /// 5. `[]` clock_ai - Clock sysvar account
+    /// 3. `[]` merps_cache_ai - TODO
+    /// 4. `[]` root_bank_ai - Root bank owned by MerpsGroup
+    /// 5. `[writable]` node_bank_ai - Node bank owned by RootBank
+    /// 6. `[]` clock_ai - Clock sysvar account
     Borrow { quantity: u64 },
 
     /// Cache prices
@@ -161,6 +162,7 @@ pub fn init_merps_group(
     quote_vault_pk: &Pubkey,
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
+    merps_cache_ai: &Pubkey,
     dex_program_pk: &Pubkey,
 
     signer_nonce: u64,
@@ -175,7 +177,8 @@ pub fn init_merps_group(
         AccountMeta::new_readonly(*quote_vault_pk, false),
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
-        AccountMeta::new(*dex_program_pk, false),
+        AccountMeta::new(*merps_cache_ai, false),
+        AccountMeta::new_readonly(*dex_program_pk, false),
     ];
 
     let instr = MerpsInstruction::InitMerpsGroup { signer_nonce, valid_interval };
@@ -297,6 +300,7 @@ pub fn borrow(
     program_id: &Pubkey,
     merps_group_pk: &Pubkey,
     merps_account_pk: &Pubkey,
+    merps_cache_pk: &Pubkey,
     owner_pk: &Pubkey,
     root_bank_pk: &Pubkey,
     node_bank_pk: &Pubkey,
@@ -307,7 +311,8 @@ pub fn borrow(
         AccountMeta::new(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new_readonly(*merps_cache_pk, false),
+        AccountMeta::new_readonly(*root_bank_pk, false),
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
     ];

@@ -41,7 +41,7 @@ impl Processor {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, merps_cache_ai, quote_node_bank_ai, quote_root_bank_ai, dex_prog_ai] =
+        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, merps_cache_ai, dex_prog_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
 
@@ -285,7 +285,7 @@ impl Processor {
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read
-            merps_cache_ai,   // write
+            merps_cache_ai,     // write
             clock_ai,           // read
         ] = fixed_ais;
 

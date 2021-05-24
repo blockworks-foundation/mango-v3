@@ -148,19 +148,25 @@ async fn test_borrow_succeeds() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                // cache_prices(&program_id, &merps_group_pk, &merps_account_pk, &[btc_usdt.pubkey])
-                //     .unwrap(),
-                // cache_root_banks(
-                //     &program_id,
-                //     &merps_group_pk,
-                //     &merps_account_pk,
-
-                // )
-                // .unwrap(),
+                cache_prices(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache,
+                    &[btc_usdt.pubkey],
+                )
+                .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache,
+                    &[btc_root_bank.pubkey],
+                )
+                .unwrap(),
                 borrow(
                     &program_id,
                     &merps_group_pk,
                     &merps_account_pk,
+                    &merps_group.merps_cache,
                     &user.pubkey(),
                     &merps_group.root_banks[borrow_token_index],
                     &btc_root_bank.node_banks[0].pubkey,

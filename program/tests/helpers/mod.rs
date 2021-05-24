@@ -25,7 +25,7 @@ use spl_token::state::{Account as Token, AccountState, Mint};
 
 use merps::utils::create_signer_key_and_nonce;
 use merps::instruction::init_merps_group;
-use merps::state::{MerpsGroup, NodeBank, RootBank, ZERO_I80F48, ONE_I80F48};
+use merps::state::{MerpsGroup, MerpsCache, NodeBank, RootBank, ZERO_I80F48, ONE_I80F48};
 
 pub const PRICE_BTC: u64 = 50000;
 pub const PRICE_ETH: u64 = 2000;
@@ -236,6 +236,7 @@ pub struct TestMerpsGroup {
     pub signer_nonce: u64,
     pub admin_pk: Pubkey,
     pub dex_program_pk: Pubkey,
+    pub merps_cache_pk: Pubkey,
 
     pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
@@ -262,6 +263,7 @@ impl TestMerpsGroup {
             &self.root_banks[0].node_banks[0].vault,
             &self.root_banks[0].node_banks[0].pubkey,
             &self.root_banks[0].pubkey,
+            &self.merps_cache_pk,
             &self.dex_program_pk,
 
             self.signer_nonce,
@@ -281,6 +283,9 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
 
     let admin = Keypair::new();
     let dex_program_pk = Pubkey::new_unique();
+    
+    let merps_cache_pk = Pubkey::new_unique();
+    test.add_account(merps_cache_pk, Account::new(u32::MAX as u64, size_of::<MerpsCache>(), &program_id));
 
     let quote_mint = add_mint(test, 6);
     let quote_vault = add_token_account(test, signer_pk, quote_mint.pubkey, 0);
@@ -297,6 +302,7 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         signer_nonce,
         admin_pk: admin.pubkey(),
         dex_program_pk,
+        merps_cache_pk,
         tokens,
         root_banks,
         num_tokens: 1,
