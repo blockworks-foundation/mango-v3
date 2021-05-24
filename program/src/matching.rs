@@ -37,6 +37,12 @@ pub struct OrderBook<'a> {
 pub struct BookSide {}
 
 impl<'a> OrderBook<'a> {
+    pub fn get_best_bid_price(&self) -> Option<NodeHandle> {
+        match self.get_best_bid() {
+            None => {}
+            Some(h) =>
+        }
+    }
     pub fn get_best_bid(&self) -> Option<NodeHandle> {
         self.bids.find_max()
     }
@@ -134,12 +140,13 @@ impl<'a> OrderBook<'a> {
             merps_account.quote_positions[market_index] -= quote_used;
 
             merps_account.funding_settled[market_index] =
-                ((merps_account.funding_settled[market_index] - market.funding_earned)
+                ((merps_account.funding_settled[market_index] - market.total_funding)
                     * I80F48::from_num(base_position)
                     / I80F48::from_num(merps_account.base_positions[market_index]))
-                    + market.funding_earned;
+                    + market.total_funding;
 
             market.open_interest += I80F48::from_num(base_position);
+
         }
 
         Ok(())

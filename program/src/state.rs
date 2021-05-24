@@ -70,7 +70,7 @@ pub struct MerpsGroup {
 
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
-    pub admin: Pubkey,
+    pub admin: Pubkey, // Used to add new markets and adjust risk params
     pub dex_program_id: Pubkey,
     // TODO determine liquidation incentives for each token
     // TODO determine maint weight and init weight
@@ -269,15 +269,15 @@ pub struct OpenOrdersCache {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
-    pub funding_paid: u128,
+    pub funding_earned: I80F48,
     pub last_update: u64,
 }
 
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpOpenOrders {
-    pub total_base: u64,  // total contracts in sell orders
-    pub total_quote: u64, // total quote currency in buy orders
+    pub total_base: i64,  // total contracts in sell orders
+    pub total_quote: i64, // total quote currency in buy orders
     pub is_free_bits: u32,
     pub is_bid_bits: u32,
     pub orders: [u128; 32],
@@ -308,21 +308,6 @@ pub struct MerpsAccount {
     pub quote_positions: [i64; MAX_PAIRS], // measured in quote lots
     pub funding_settled: [I80F48; MAX_PAIRS],
     pub perp_open_orders: [PerpOpenOrders; MAX_PAIRS],
-    // buy one SOL, sell one SOL-PERP
-
-    // trade again at 44k
-    // -1 | +44k
-    // +1 | -44k
-
-    // trade again at 50k
-    // 0 | -6k
-    // 0 | +6k
-
-    // three scenarios when a trade occurs
-    // OI goes up
-    // OI stays same
-    // OI goes down
-
     // settlement
     // two merps accounts are passed in
     // only equal amounts can be settled
@@ -481,11 +466,10 @@ pub struct PerpMarket {
     pub asks: Pubkey,
     pub event_queue: Pubkey,
     pub matching_queue: Pubkey,
-    pub funding_earned: I80F48,
-    pub open_interest: I80F48,
+    pub total_funding: I80F48,
+    pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
     pub quote_lot_size: i64, //
-    pub mark_price: I80F48,
     pub index_oracle: Pubkey,
     pub last_updated: u64,
     pub seq_num: u64, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
@@ -505,6 +489,7 @@ impl PerpMarket {
         }
     }
 
+    /// Use current order book price
     pub fn update_funding(&mut self) -> MerpsResult<()> {
         unimplemented!()
     }

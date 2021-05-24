@@ -19,6 +19,7 @@ use spl_token::state::Account;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
+use crate::matching::Side;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank,
     RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
@@ -476,9 +477,9 @@ impl Processor {
     fn place_perp_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        is_bid: bool,
-        price: u64,
-        quantity: u64,
+        side: Side,
+        price: i64,
+        quantity: i64,
         client_order_id: u64,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 8;
@@ -543,7 +544,7 @@ impl Processor {
     /// Liquidate an account similar to Mango
     #[allow(unused)]
     fn liquidate() -> MerpsResult<()> {
-        // TODO - still need to figure out how liquidations will work
+        // TODO - still need to figure out how liquidations for perps will work, but
         unimplemented!()
     }
 
@@ -559,6 +560,14 @@ impl Processor {
     /// similar to serum dex, but also need to do some extra magic with funding
     #[allow(unused)]
     fn consume_event_queue(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        // TODO
+        unimplemented!()
+    }
+
+    /// Update the `funding_earned` of a `PerpMarket` using the current book price, spot index price
+    /// and time since last update
+    #[allow(unused)]
+    fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         unimplemented!()
     }
