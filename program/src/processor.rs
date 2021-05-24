@@ -21,8 +21,8 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::matching::Side;
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsGroup, NodeBank, PriceCache, RootBank,
-    RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PriceCache,
+    RootBank, RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::gen_signer_key;
 use mango_common::Loadable;
@@ -38,10 +38,10 @@ impl Processor {
         signer_nonce: u64,
         valid_interval: u8,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, dex_prog_ai] =
+        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, merps_cache_ai, quote_node_bank_ai, quote_root_bank_ai, dex_prog_ai] =
             accounts;
         // Q: do we need the dex_program_id stored on merps group?
 
@@ -83,6 +83,13 @@ impl Processor {
         merps_group.meta_data.data_type = DataType::MerpsGroup as u8;
         merps_group.meta_data.is_initialized = true;
         merps_group.meta_data.version = 0;
+
+        // init MerpsCache
+        merps_group.merps_cache = *merps_cache_ai.key;
+        let mut merps_cache = MerpsCache::load_mut(&merps_cache_ai)?;
+        merps_cache.meta_data.data_type = DataType::MerpsCache as u8;
+        merps_cache.meta_data.is_initialized = true;
+        merps_cache.meta_data.version = 0;
 
         // check size
         Ok(())
@@ -254,20 +261,19 @@ impl Processor {
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read
-            merps_account_ai,   // write
+            merps_cache_ai,   // write
             clock_ai,           // read
         ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-        let mut merps_account =
-            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
-
+        let mut merps_cache =
+            MerpsCache::load_mut_checked(merps_cache_ai, program_id, &merps_group)?;
         let clock = Clock::from_account_info(clock_ai)?;
         let now_ts = clock.unix_timestamp as u64;
         for oracle_ai in oracle_ais.iter() {
             let i = merps_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            merps_account.price_cache[i] =
+            merps_cache.price_cache[i] =
                 PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
         }
         Ok(())
@@ -279,19 +285,19 @@ impl Processor {
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read
-            merps_account_ai,   // write
+            merps_cache_ai,   // write
             clock_ai,           // read
         ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
-        let mut merps_account =
-            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+        let mut merps_cache =
+            MerpsCache::load_mut_checked(merps_cache_ai, program_id, &merps_group)?;
         let clock = Clock::from_account_info(clock_ai)?;
         let now_ts = clock.unix_timestamp as u64;
         for root_bank_ai in root_bank_ais.iter() {
             let index = merps_group.find_root_bank_index(root_bank_ai.key).unwrap();
             let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-            merps_account.root_bank_cache[index] = RootBankCache {
+            merps_cache.root_bank_cache[index] = RootBankCache {
                 deposit_index: root_bank.deposit_index,
                 borrow_index: root_bank.borrow_index,
                 last_update: now_ts,
@@ -314,9 +320,9 @@ impl Processor {
 
     #[allow(unused_variables)]
     fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 6;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [merps_group_ai, merps_account_ai, owner_ai, root_bank_ai, node_bank_ai, clock_ai] =
+        let [merps_group_ai, merps_account_ai, owner_ai, merps_cache_ai, root_bank_ai, node_bank_ai, clock_ai] =
             accounts;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -346,10 +352,11 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         // TODO implement caches valid in tests
-        // if !merps_account.check_caches_valid(&merps_group, now_ts) {
-        //     // TODO log or write to buffer that this transaction did not complete due to stale cache
-        //     return Ok(());
-        // }
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
+            // TODO log or write to buffer that this transaction did not complete due to stale cache
+            return Ok(());
+        }
 
         let deposit: I80F48 = I80F48::from_num(quantity) / root_bank.deposit_index;
         let borrow: I80F48 = I80F48::from_num(quantity) / root_bank.borrow_index;
@@ -368,12 +375,13 @@ impl Processor {
 
     /// Withdraw a token from the bank if collateral ratio permits
     fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 10;
+        const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
             owner_ai,           // read
+            merps_cache_ai,
             root_bank_ai,       // read
             node_bank_ai,       // write
             vault_ai,           // write
@@ -408,7 +416,8 @@ impl Processor {
         check_eq!(&spl_token::ID, token_prog_ai.key, MerpsErrorCode::InvalidProgramId)?;
 
         // First check all caches to make sure valid
-        if !merps_account.check_caches_valid(&merps_group, now_ts) {
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
             // TODO log or write to buffer that this transaction did not complete due to stale cache
             return Ok(());
         }
@@ -422,7 +431,7 @@ impl Processor {
             I80F48::from_num(quantity) / root_bank.deposit_index,
         )?;
 
-        let coll_ratio = merps_account.get_coll_ratio(&merps_group)?;
+        let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache)?;
         check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         // invoke_transfer()
@@ -482,12 +491,13 @@ impl Processor {
         quantity: i64,
         client_order_id: u64,
     ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 8;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
             owner_ai,           // read
+            merps_cache_ai,     // read
             perp_market_ai,     // write
             bids_ai,            // write
             asks_ai,            // write
@@ -506,7 +516,8 @@ impl Processor {
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
 
-        if !merps_account.check_caches_valid(&merps_group, now_ts) {
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
             return Ok(());
         }
 

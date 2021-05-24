@@ -13,7 +13,7 @@ use crate::matching::Side;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 
-pub const MAX_TOKENS: usize = 64;
+pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const QUOTE_INDEX: usize = 0;
@@ -35,6 +35,7 @@ pub enum DataType {
     PerpMarket,
     Bids,
     Asks,
+    MerpsCache,
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -72,6 +73,7 @@ pub struct MerpsGroup {
     pub signer_key: Pubkey,
     pub admin: Pubkey, // Used to add new markets and adjust risk params
     pub dex_program_id: Pubkey,
+    pub merps_cache: Pubkey,
     // TODO determine liquidation incentives for each token
     // TODO determine maint weight and init weight
 
@@ -258,19 +260,111 @@ pub struct RootBankCache {
     pub last_update: u64,
 }
 
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct OpenOrdersCache {
-    pub base_total: I80F48,
-    pub quote_total: I80F48,
-    pub last_update: u64,
-}
+// #[derive(Copy, Clone, Pod)]
+// #[repr(C)]
+// pub struct OpenOrdersCache {
+//     pub base_total: I80F48,
+//     pub quote_total: I80F48,
+//     pub last_update: u64,
+// }
 
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
     pub funding_earned: I80F48,
     pub last_update: u64,
+}
+
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct MerpsCache {
+    pub meta_data: MetaData,
+
+    pub price_cache: [PriceCache; MAX_PAIRS], // TODO consider only having enough space for those in basket
+    pub root_bank_cache: [RootBankCache; MAX_TOKENS],
+    pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
+}
+
+impl MerpsCache {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group: &MerpsGroup,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        // merps account must be rent exempt to even be initialized
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        let merps_cache = Self::load_mut(account)?;
+
+        check_eq!(
+            merps_cache.meta_data.data_type,
+            DataType::MerpsCache as u8,
+            MerpsErrorCode::Default
+        )?;
+        check!(merps_cache.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(&merps_group.merps_cache, account.key, MerpsErrorCode::Default)?;
+
+        Ok(merps_cache)
+    }
+
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group: &MerpsGroup,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+
+        let merps_cache = Self::load(account)?;
+
+        check_eq!(
+            merps_cache.meta_data.data_type,
+            DataType::MerpsCache as u8,
+            MerpsErrorCode::Default
+        )?;
+        check!(merps_cache.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(&merps_group.merps_cache, account.key, MerpsErrorCode::Default)?;
+
+        Ok(merps_cache)
+    }
+
+    pub fn check_caches_valid(
+        &self,
+        merps_group: &MerpsGroup,
+        merps_account: &MerpsAccount,
+        now_ts: u64,
+    ) -> bool {
+        let valid_interval = merps_group.valid_interval as u64;
+        if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
+            return false;
+        }
+
+        for i in 0..merps_group.num_markets {
+            // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
+            if !merps_account.in_basket[i] {
+                continue;
+            }
+            if now_ts > self.price_cache[i].last_update + valid_interval {
+                return false;
+            }
+            if now_ts > self.root_bank_cache[i].last_update + valid_interval {
+                return false;
+            }
+            // not needed anymore?
+            //
+            // if self.spot_open_orders[i] != Pubkey::default() {
+            //     if now_ts > self.open_orders_cache[i].last_update + valid_interval {
+            //         return false;
+            //     }
+            // }
+            if merps_group.perp_markets[i] != Pubkey::default() {
+                if now_ts > self.perp_market_cache[i].last_update + valid_interval {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -293,10 +387,6 @@ pub struct MerpsAccount {
     pub owner: Pubkey,
 
     pub in_basket: [bool; MAX_PAIRS], // this can be done with u64 and bit shifting to save space
-    pub price_cache: [PriceCache; MAX_PAIRS], // TODO consider only having enough space for those in basket
-    pub root_bank_cache: [RootBankCache; MAX_TOKENS],
-    pub open_orders_cache: [OpenOrdersCache; MAX_PAIRS],
-    pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
@@ -349,48 +439,20 @@ impl MerpsAccount {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
     }
 
-    pub fn check_caches_valid(&self, merps_group: &MerpsGroup, now_ts: u64) -> bool {
-        let valid_interval = merps_group.valid_interval as u64;
-        if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            return false;
-        }
-
-        for i in 0..merps_group.num_markets {
-            // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
-            if !self.in_basket[i] {
-                continue;
-            }
-            if now_ts > self.price_cache[i].last_update + valid_interval {
-                return false;
-            }
-            if now_ts > self.root_bank_cache[i].last_update + valid_interval {
-                return false;
-            }
-            if self.spot_open_orders[i] != Pubkey::default() {
-                if now_ts > self.open_orders_cache[i].last_update + valid_interval {
-                    return false;
-                }
-            }
-            if merps_group.perp_markets[i] != Pubkey::default() {
-                if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-
     // TODO need a new name for this as it's not exactly collateral ratio
-    pub fn get_coll_ratio(&self, merps_group: &MerpsGroup) -> MerpsResult<I80F48> {
+    pub fn get_coll_ratio(
+        &self,
+        merps_group: &MerpsGroup,
+        merps_cache: &MerpsCache,
+    ) -> MerpsResult<I80F48> {
         // Value of all assets and liabs in quote currency
         let quote_i = QUOTE_INDEX;
-        let mut assets_val = self.root_bank_cache[quote_i]
+        let mut assets_val = merps_cache.root_bank_cache[quote_i]
             .deposit_index
             .checked_mul(self.deposits[quote_i])
             .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-        let mut liabs_val = self.root_bank_cache[quote_i]
+        let mut liabs_val = merps_cache.root_bank_cache[quote_i]
             .borrow_index
             .checked_mul(self.borrows[quote_i])
             .ok_or(throw_err!(MerpsErrorCode::MathError))?;
@@ -401,26 +463,28 @@ impl MerpsAccount {
                 continue;
             }
 
-            let mut base_assets = self.root_bank_cache[i]
+            let mut base_assets = merps_cache.root_bank_cache[i]
                 .deposit_index
                 .checked_mul(self.deposits[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-            let base_liabs = self.root_bank_cache[i]
+            let base_liabs = merps_cache.root_bank_cache[i]
                 .borrow_index
                 .checked_mul(self.borrows[i])
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
             if self.spot_open_orders[i] != Pubkey::default() {
-                assets_val = self.open_orders_cache[i]
-                    .quote_total
-                    .checked_add(assets_val)
-                    .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+                //  TODO pass in open orders
+                //
+                // assets_val = self.open_orders_cache[i]
+                //     .quote_total
+                //     .checked_add(assets_val)
+                //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-                base_assets = self.open_orders_cache[i]
-                    .base_total
-                    .checked_add(base_assets)
-                    .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+                // base_assets = self.open_orders_cache[i]
+                //     .base_total
+                //     .checked_add(base_assets)
+                //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
             }
 
             if merps_group.perp_markets[i] != Pubkey::default() {
@@ -431,7 +495,7 @@ impl MerpsAccount {
             let asset_weight = merps_group.asset_weights[i];
             let liab_weight = ONE_I80F48 / asset_weight;
             assets_val = base_assets
-                .checked_mul(self.price_cache[i].price)
+                .checked_mul(merps_cache.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
                 .checked_mul(asset_weight)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
@@ -439,7 +503,7 @@ impl MerpsAccount {
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
             liabs_val = base_liabs
-                .checked_mul(self.price_cache[i].price)
+                .checked_mul(merps_cache.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
                 .checked_mul(liab_weight)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?

@@ -17,6 +17,7 @@ pub enum MerpsInstruction {
     /// 3. `[]` admin_ai - TODO
     /// 4. `[]` quote_mint_ai - TODO
     /// 5. `[]` quote_vault_ai - TODO
+    /// 6. `[writable]` merps_cache_ai - Account to cache prices, root banks, and perp markets
     /// 6. `[writable]` quote_node_bank_ai - TODO
     /// 7. `[writable]` quote_root_bank_ai - TODO
     /// 8. `[]` dex_prog_ai - TODO
