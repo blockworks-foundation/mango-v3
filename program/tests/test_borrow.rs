@@ -3,6 +3,7 @@
 
 mod helpers;
 
+use fixed::types::I80F48;
 use helpers::*;
 use merps::{
     entrypoint::process_instruction,
@@ -10,7 +11,7 @@ use merps::{
         add_asset, add_spot_market, add_to_basket, borrow, cache_prices, cache_root_banks, deposit,
         init_merps_account,
     },
-    state::{MerpsAccount, MerpsGroup, NodeBank},
+    state::{MerpsAccount, MerpsGroup, NodeBank, QUOTE_INDEX},
 };
 use solana_program::account_info::AccountInfo;
 use solana_program_test::*;
@@ -33,7 +34,6 @@ async fn test_borrow_succeeds() {
     test.set_bpf_compute_max_units(50_000);
 
     let quote_index = 0;
-    let borrow_token_index = 1;
     let initial_amount = 2;
     let deposit_amount = 1;
     // 5x leverage
@@ -105,6 +105,8 @@ async fn test_borrow_succeeds() {
                     &btc_root_bank.pubkey,
                     &btc_usdt.pubkey,
                     &admin.pubkey(),
+                    I80F48::from_num(0.83),
+                    I80F48::from_num(1),
                 )
                 .unwrap(),
                 add_spot_market(
@@ -138,6 +140,7 @@ async fn test_borrow_succeeds() {
         let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let borrow_token_index = 0;
 
         let mut transaction = Transaction::new_with_payer(
             &[
@@ -152,7 +155,7 @@ async fn test_borrow_succeeds() {
                     &program_id,
                     &merps_group_pk,
                     &merps_group.merps_cache,
-                    &[merps_group.root_banks[0], btc_root_bank.pubkey],
+                    &[merps_group.root_banks[QUOTE_INDEX], btc_root_bank.pubkey],
                 )
                 .unwrap(),
                 borrow(

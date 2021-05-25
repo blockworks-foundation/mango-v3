@@ -16,7 +16,7 @@ use mango_macro::{Loadable, Pod};
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
-pub const QUOTE_INDEX: usize = 0;
+pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 
@@ -67,7 +67,8 @@ pub struct MerpsGroup {
 
     pub root_banks: [Pubkey; MAX_TOKENS],
 
-    pub asset_weights: [I80F48; MAX_TOKENS],
+    pub maint_asset_weights: [I80F48; MAX_TOKENS],
+    pub init_asset_weights: [I80F48; MAX_TOKENS],
 
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
@@ -350,7 +351,7 @@ impl MerpsCache {
             if now_ts > self.price_cache[i].last_update + valid_interval {
                 return false;
             }
-            if now_ts > self.root_bank_cache[i + 1].last_update + valid_interval {
+            if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                 return false;
             }
             // TODO uncomment this when cache_perp_market() is implemented
@@ -497,8 +498,10 @@ impl MerpsAccount {
                 }
             }
 
-            let asset_weight = merps_group.asset_weights[i];
-            let liab_weight = ONE_I80F48 / asset_weight;
+            let asset_weight = merps_group.maint_asset_weights[i];
+            // let liab_weight = ONE_I80F48 / asset_weight;
+            let liab_weight = merps_group.init_asset_weights[i];
+
             assets_val = base_assets
                 .checked_mul(merps_cache.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?

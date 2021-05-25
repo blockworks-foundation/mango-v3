@@ -1,4 +1,5 @@
 use arrayref::{array_ref, array_refs};
+use fixed::types::I80F48;
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::program_error::ProgramError;
@@ -65,7 +66,7 @@ pub enum MerpsInstruction {
     /// 4. `[writable]` root_bank_ai - TODO
     /// 5. `[]` oracle_ai - TODO
     /// 6. `[signer]` admin_ai - TODO
-    AddAsset,
+    AddAsset { maint_asset_weight: I80F48, init_asset_weight: I80F48 },
 
     /// Add a spot market to a merps group
     ///
@@ -138,7 +139,14 @@ impl MerpsInstruction {
                 let data = array_ref![data, 0, 8];
                 MerpsInstruction::Withdraw { quantity: u64::from_le_bytes(*data) }
             }
-            4 => MerpsInstruction::AddAsset,
+            4 => {
+                let data = array_ref![data, 0, 32];
+                let (maint_asset_weight, init_asset_weight) = array_refs![data, 16, 16];
+                MerpsInstruction::AddAsset {
+                    maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
+                    init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
+                }
+            }
             5 => MerpsInstruction::AddSpotMarket,
             6 => MerpsInstruction::AddToBasket,
             7 => {
@@ -246,6 +254,9 @@ pub fn add_asset(
     root_bank_pk: &Pubkey,
     oracle_pk: &Pubkey,
     admin_pk: &Pubkey,
+
+    maint_asset_weight: I80F48,
+    init_asset_weight: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*merps_group_pk, false),
@@ -257,7 +268,7 @@ pub fn add_asset(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr = MerpsInstruction::AddAsset;
+    let instr = MerpsInstruction::AddAsset { maint_asset_weight, init_asset_weight };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

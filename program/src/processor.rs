@@ -41,9 +41,18 @@ impl Processor {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, rent_ai, signer_ai, admin_ai, quote_mint_ai, quote_vault_ai, quote_node_bank_ai, quote_root_bank_ai, merps_cache_ai, dex_prog_ai] =
-            accounts;
-        // Q: do we need the dex_program_id stored on merps group?
+        let [
+            merps_group_ai,     // write
+            rent_ai,            // read
+            signer_ai,          // read
+            admin_ai,           // read
+            quote_mint_ai,      // read
+            quote_vault_ai,     // read
+            quote_node_bank_ai, // write
+            quote_root_bank_ai, // write
+            merps_cache_ai,     // write
+            dex_prog_ai         // read
+        ] = accounts;
 
         check_eq!(merps_group_ai.owner, program_id, MerpsErrorCode::InvalidGroupOwner)?;
         let rent = Rent::from_account_info(rent_ai)?;
@@ -72,9 +81,11 @@ impl Processor {
             quote_node_bank_ai,
         )?;
 
+        merps_group.maint_asset_weights[QUOTE_INDEX] = I80F48::from_num(1);
+        merps_group.init_asset_weights[QUOTE_INDEX] = I80F48::from_num(1);
         merps_group.tokens[QUOTE_INDEX] = *quote_mint_ai.key;
         merps_group.root_banks[QUOTE_INDEX] = *quote_root_bank_ai.key;
-        merps_group.num_tokens = 1;
+        merps_group.num_tokens = 0;
         merps_group.num_markets = 0;
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
@@ -129,7 +140,12 @@ impl Processor {
     /// add_asset only adds the borrowing and lending functionality for an asset
     /// Requires a price oracle for this asset priced in quote currency
     /// Only allow admin to add to MerpsGroup
-    fn add_asset(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+    fn add_asset(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_asset_weight: I80F48,
+        init_asset_weight: I80F48,
+    ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -158,11 +174,19 @@ impl Processor {
             node_bank_ai,
         )?;
 
+        merps_group.maint_asset_weights[token_index] = maint_asset_weight;
+        merps_group.init_asset_weights[token_index] = init_asset_weight;
+
+        // check that maint weight is lower than init asset weight
+        check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
+        // // check that it's less than or equal to one
+        // check!(maint_asset_weight <= 1, MerpsErrorCode::Default)?;
+
         merps_group.tokens[token_index] = *mint_ai.key;
         merps_group.root_banks[token_index] = *root_bank_ai.key;
 
         let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
-        merps_group.oracles[token_index - 1] = *oracle_ai.key;
+        merps_group.oracles[token_index] = *oracle_ai.key;
         merps_group.num_tokens += 1;
 
         Ok(())
@@ -190,7 +214,7 @@ impl Processor {
         // TODO check the oracle for this market has already been added
 
         let market_index = merps_group.num_markets;
-        let token_index = merps_group.num_markets + 1;
+        let token_index = merps_group.num_tokens - 1;
 
         let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
         let sm_base_mint = spot_market.coin_mint;
@@ -205,7 +229,7 @@ impl Processor {
             merps_group.tokens[QUOTE_INDEX].to_aligned_bytes(),
             MerpsErrorCode::Default
         )?;
-        // check!(merps_group.oracles[market_index], MerpsErrorCode::Default)?;
+        check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
 
         merps_group.spot_markets[market_index] = *spot_market_ai.key;
         merps_group.num_markets += 1;
@@ -363,20 +387,15 @@ impl Processor {
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
         // TODO is this correct? skip check if token_index is quote currency
-        if token_index > 0 {
-            check!(merps_account.in_basket[token_index - 1], MerpsErrorCode::InvalidToken)?;
+        if token_index != QUOTE_INDEX {
+            check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
         }
 
         // First check all caches to make sure valid
         let clock = Clock::from_account_info(clock_ai)?;
         let now_ts = clock.unix_timestamp as u64;
 
-        // TODO implement caches valid in tests
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
-        // if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
-        //     // TODO log or write to buffer that this transaction did not complete due to stale cache
-        //     return Ok(());
-        // }
         check!(
             merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
             MerpsErrorCode::Default
@@ -388,11 +407,11 @@ impl Processor {
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
-        // let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache)?;
+        let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache)?;
 
         // TODO fix coll_ratio checks
-        // check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
-        // check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
+        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
 
         Ok(())
     }
@@ -425,14 +444,14 @@ impl Processor {
         let clock = Clock::from_account_info(clock_ai)?;
         let now_ts = clock.unix_timestamp as u64;
 
-        // Make sure the asset is in basket
         let token_index = merps_group
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        // TODO is this correct? skip check if token_index is quote currency
-        if token_index > 0 {
-            check!(merps_account.in_basket[token_index - 1], MerpsErrorCode::InvalidToken)?;
+        // Make sure the asset is in basket
+        // TODO is this necessary? skip check if token_index is quote currency
+        if token_index != QUOTE_INDEX {
+            check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
         }
 
         // Safety checks
@@ -630,8 +649,8 @@ impl Processor {
                 msg!("Merps: Withdraw");
                 Self::withdraw(program_id, accounts, quantity)?;
             }
-            MerpsInstruction::AddAsset => {
-                Self::add_asset(program_id, accounts)?;
+            MerpsInstruction::AddAsset { maint_asset_weight, init_asset_weight } => {
+                Self::add_asset(program_id, accounts, maint_asset_weight, init_asset_weight)?;
             }
             MerpsInstruction::AddSpotMarket => {
                 Self::add_spot_market(program_id, accounts)?;

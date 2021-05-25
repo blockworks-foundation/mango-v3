@@ -16,7 +16,7 @@ use std::mem::size_of;
 use merps::{
     entrypoint::process_instruction,
     instruction::{deposit, init_merps_account},
-    state::MerpsAccount,
+    state::{MerpsAccount, QUOTE_INDEX},
 };
 
 #[tokio::test]
@@ -95,6 +95,6 @@ async fn test_deposit_succeeds() {
         let merps_account =
             MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group.merps_group_pk)
                 .unwrap();
-        assert_eq!(merps_account.deposits[0], deposit_amount);
+        assert_eq!(merps_account.deposits[QUOTE_INDEX], deposit_amount);
     }
 }

@@ -279,7 +279,7 @@ impl TestMerpsGroup {
             &self.merps_cache_pk,
             &self.dex_program_pk,
             self.signer_nonce,
-            5,
+            5, // valid_interval
         )
         .unwrap()
     }
