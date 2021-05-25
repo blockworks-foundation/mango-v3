@@ -285,7 +285,7 @@ pub struct MerpsCache {
     pub meta_data: MetaData,
 
     pub price_cache: [PriceCache; MAX_PAIRS],
-    pub root_bank_cache: [RootBankCache; MAX_PAIRS],
+    pub root_bank_cache: [RootBankCache; MAX_TOKENS],
     pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
 }
 
@@ -383,7 +383,7 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_TOKENS], // this can be done with u64 and bit shifting to save space
+    pub in_basket: [bool; MAX_PAIRS], // this can be done with u64 and bit shifting to save space
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
