@@ -21,8 +21,8 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::matching::Side;
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PriceCache,
-    RootBank, RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PerpMarket,
+    PriceCache, RootBank, RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::gen_signer_key;
 use mango_common::Loadable;
@@ -320,10 +320,18 @@ impl Processor {
 
     #[allow(unused_variables)]
     fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
+        // TODO don't allow borrow of infinite amount of quote currency
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [merps_group_ai, merps_account_ai, owner_ai, merps_cache_ai, root_bank_ai, node_bank_ai, clock_ai] =
-            accounts;
+        let [
+            merps_group_ai,     // read 
+            merps_account_ai,   // write
+            owner_ai,           // read
+            merps_cache_ai,     // read 
+            root_bank_ai,       // read 
+            node_bank_ai,       // write  
+            clock_ai            // read  TODO: remove this and use dynamic loading
+        ] = accounts;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
@@ -621,6 +629,45 @@ impl Processor {
             }
         }
 
+        Ok(())
+    }
+}
+
+/// Convert quote lots to native quote amount using
+#[allow(unused)]
+fn quote_lots_to_native(quote_lots: i64) -> i64 {
+    unimplemented!()
+}
+
+/// pnl can only be realized if there is an equal and opposite amount of pnl realized on another account
+#[allow(unused)]
+fn realize_pnl(
+    market: &PerpMarket,
+    merps_account: &mut MerpsAccount,
+    market_index: usize,
+    price: i64,
+    quote_deposit_index: I80F48,
+    quote_borrow_index: I80F48,
+) -> MerpsResult<()> {
+    // Assume for now price is same units as quote_positions
+    let curr_quote_pos = -merps_account.base_positions[market_index] * price;
+    let pnl = merps_account.quote_positions[market_index] - curr_quote_pos;
+
+    merps_account.quote_positions[market_index] = pnl;
+
+    // Transfer pnl into deposits if it's positive, otherwise into borrows
+    if pnl > 0 {
+        merps_account.checked_add_deposit(
+            QUOTE_INDEX,
+            I80F48::from_num(pnl * market.quote_lot_size) / quote_deposit_index,
+        )
+    } else if pnl < 0 {
+        merps_account.checked_add_borrow(
+            QUOTE_INDEX,
+            I80F48::from_num(pnl * market.quote_lot_size) / quote_borrow_index,
+        )
+        // TODO if coll ratio isn't available to borrow, then some collateral must be swapped out
+    } else {
         Ok(())
     }
 }

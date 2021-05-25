@@ -142,6 +142,18 @@ pub struct RootBank {
 }
 
 impl RootBank {
+    #[allow(unused)]
+    pub fn update_index(&mut self, node_banks: &[NodeBank]) -> MerpsResult<()> {
+        unimplemented!() // TODO
+    }
+
+    #[allow(unused)]
+    pub fn get_interest_rate(&self) -> MerpsResult<()> {
+        unimplemented!() // TODO
+    }
+}
+
+impl RootBank {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -260,14 +272,6 @@ pub struct RootBankCache {
     pub last_update: u64,
 }
 
-// #[derive(Copy, Clone, Pod)]
-// #[repr(C)]
-// pub struct OpenOrdersCache {
-//     pub base_total: I80F48,
-//     pub quote_total: I80F48,
-//     pub last_update: u64,
-// }
-
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
@@ -280,8 +284,8 @@ pub struct PerpMarketCache {
 pub struct MerpsCache {
     pub meta_data: MetaData,
 
-    pub price_cache: [PriceCache; MAX_PAIRS], // TODO consider only having enough space for those in basket
-    pub root_bank_cache: [RootBankCache; MAX_TOKENS],
+    pub price_cache: [PriceCache; MAX_PAIRS],
+    pub root_bank_cache: [RootBankCache; MAX_PAIRS],
     pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
 }
 
@@ -349,13 +353,6 @@ impl MerpsCache {
             if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                 return false;
             }
-            // TODO: not needed anymore?
-            //
-            // if self.spot_open_orders[i] != Pubkey::default() {
-            //     if now_ts > self.open_orders_cache[i].last_update + valid_interval {
-            //         return false;
-            //     }
-            // }
             if merps_group.perp_markets[i] != Pubkey::default() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
                     return false;
@@ -386,7 +383,7 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_PAIRS], // this can be done with u64 and bit shifting to save space
+    pub in_basket: [bool; MAX_TOKENS], // this can be done with u64 and bit shifting to save space
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
@@ -490,7 +487,13 @@ impl MerpsAccount {
 
             if merps_group.perp_markets[i] != Pubkey::default() {
                 // TODO fill this in once perp logic is a little bit more clear
-                //
+                if self.base_positions[i] > 0 {
+                    // increment assets_val with base position and liabs val with quote position
+                    // What if both base position and quote position are positive
+                    // Do we force settling of pnl from positions?
+                    // settling of losses means marking contracts to the current price and taking any profits (losses) into deposits (borrows)
+                } else if self.base_positions[i] < 0 {
+                }
             }
 
             let asset_weight = merps_group.asset_weights[i];
@@ -537,10 +540,12 @@ pub struct PerpMarket {
     pub quote_lot_size: i64, //
     pub index_oracle: Pubkey,
     pub last_updated: u64,
-    pub seq_num: u64, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
-                      // index_price = some function of centralized exchange spot prices
-                      // book_price = average of impact bid and impact ask; used to calculate basis
-                      // basis = book_price / index_price - 1; some moving average of this is used for mark price
+    pub seq_num: u64,
+
+    pub contract_size: i64, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+                            // index_price = some function of centralized exchange spot prices
+                            // book_price = average of impact bid and impact ask; used to calculate basis
+                            // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 
 impl PerpMarket {

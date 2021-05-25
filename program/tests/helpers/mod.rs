@@ -23,9 +23,9 @@ use solana_sdk::{
 use serum_dex::state::{AccountFlag, MarketState, ToAlignedBytes};
 use spl_token::state::{Account as Token, AccountState, Mint};
 
-use merps::utils::create_signer_key_and_nonce;
 use merps::instruction::init_merps_group;
-use merps::state::{MerpsGroup, MerpsCache, NodeBank, RootBank, ZERO_I80F48, ONE_I80F48};
+use merps::state::{MerpsCache, MerpsGroup, NodeBank, RootBank, ONE_I80F48, ZERO_I80F48};
+use merps::utils::create_signer_key_and_nonce;
 
 pub const PRICE_BTC: u64 = 50000;
 pub const PRICE_ETH: u64 = 2000;
@@ -203,7 +203,11 @@ pub struct TestNodeBank {
     pub vault: Pubkey,
 }
 
-pub fn add_node_bank(test: &mut ProgramTest, program_id: &Pubkey, vault_pk: Pubkey) -> TestNodeBank {
+pub fn add_node_bank(
+    test: &mut ProgramTest,
+    program_id: &Pubkey,
+    vault_pk: Pubkey,
+) -> TestNodeBank {
     let pubkey = Pubkey::new_unique();
     test.add_account(pubkey, Account::new(u32::MAX as u64, size_of::<NodeBank>(), &program_id));
 
@@ -219,13 +223,23 @@ pub struct TestRootBank {
     pub borrow_index: I80F48,
 }
 
-pub fn add_root_bank(test: &mut ProgramTest, program_id: &Pubkey, node_bank: TestNodeBank) -> TestRootBank {
+pub fn add_root_bank(
+    test: &mut ProgramTest,
+    program_id: &Pubkey,
+    node_bank: TestNodeBank,
+) -> TestRootBank {
     let pubkey = Pubkey::new_unique();
     test.add_account(pubkey, Account::new(u32::MAX as u64, size_of::<RootBank>(), &program_id));
 
     let node_banks = vec![node_bank];
 
-    TestRootBank { num_node_banks: 1, pubkey, node_banks, deposit_index: ONE_I80F48, borrow_index: ONE_I80F48 }
+    TestRootBank {
+        num_node_banks: 1,
+        pubkey,
+        node_banks,
+        deposit_index: ONE_I80F48,
+        borrow_index: ONE_I80F48,
+    }
 }
 
 // Holds all of the dependencies for a MerpsGroup
@@ -265,7 +279,6 @@ impl TestMerpsGroup {
             &self.root_banks[0].pubkey,
             &self.merps_cache_pk,
             &self.dex_program_pk,
-
             self.signer_nonce,
             5,
         )
@@ -283,9 +296,12 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
 
     let admin = Keypair::new();
     let dex_program_pk = Pubkey::new_unique();
-    
+
     let merps_cache_pk = Pubkey::new_unique();
-    test.add_account(merps_cache_pk, Account::new(u32::MAX as u64, size_of::<MerpsCache>(), &program_id));
+    test.add_account(
+        merps_cache_pk,
+        Account::new(u32::MAX as u64, size_of::<MerpsCache>(), &program_id),
+    );
 
     let quote_mint = add_mint(test, 6);
     let quote_vault = add_token_account(test, signer_pk, quote_mint.pubkey, 0);
