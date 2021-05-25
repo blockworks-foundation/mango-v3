@@ -133,8 +133,15 @@ impl Processor {
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, mint_ai, node_bank_ai, vault_ai, root_bank_ai, oracle_ai, admin_ai] =
-            accounts;
+        let [
+            merps_group_ai, // write
+            mint_ai,        // read
+            node_bank_ai,   // write
+            vault_ai,       // read
+            root_bank_ai,   // write
+            oracle_ai,      // read
+            admin_ai        // read
+        ] = accounts;
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
@@ -167,7 +174,12 @@ impl Processor {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, spot_market_ai, dex_program_ai, admin_ai] = accounts;
+        let [
+            merps_group_ai, // write
+            spot_market_ai, // read
+            dex_program_ai, // read
+            admin_ai        // read
+        ] = accounts;
 
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
 
@@ -214,13 +226,13 @@ impl Processor {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-            merps_group_ai,  // read
-            merps_account_ai,  // write
-            owner_ai,  // read
-            root_bank_ai,  // read
-            node_bank_ai,  // write
-            vault_ai,  //
-            token_prog_ai,
+            merps_group_ai,         // read
+            merps_account_ai,       // write
+            owner_ai,               // read
+            root_bank_ai,           // read
+            node_bank_ai,           // write
+            vault_ai,               // write
+            token_prog_ai,          // read
             owner_token_account_ai, // write
         ] = accounts;
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -261,7 +273,7 @@ impl Processor {
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read
-            merps_cache_ai,   // write
+            merps_cache_ai,     // write
             clock_ai,           // read
         ] = fixed_ais;
 
@@ -389,7 +401,7 @@ impl Processor {
             merps_group_ai,     // read
             merps_account_ai,   // write
             owner_ai,           // read
-            merps_cache_ai,
+            merps_cache_ai,     // read
             root_bank_ai,       // read
             node_bank_ai,       // write
             vault_ai,           // write
@@ -460,7 +472,12 @@ impl Processor {
     fn add_to_basket(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [merps_group_ai, merps_account_ai, owner_ai, spot_market_ai] = accounts;
+        let [
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            owner_ai,           // read
+            spot_market_ai      // read
+        ] = accounts;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 

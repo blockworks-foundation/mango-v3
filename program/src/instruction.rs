@@ -37,7 +37,7 @@ pub enum MerpsInstruction {
     ///
     /// Accounts expected by this instruction (8):
     ///
-    /// 0. `[writable]` merps_group_ai - MerpsGroup that this merps account is for
+    /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
     /// 1. `[writable]` merps_account_ai - the merps account for this user
     /// 2. `[signer]` owner_ai - Solana account of owner of the merps account
     /// 3. `[]` root_bank_ai - RootBank owned by MerpsGroup
@@ -103,6 +103,10 @@ pub enum MerpsInstruction {
     /// Cache prices
     ///
     /// Accounts expected: 3 + Oracles
+    /// 0. `[]` merps_group_ai -
+    /// 1. `[writable]` merps_cache_ai -
+    /// 2. `[]` clock_ai -
+    /// 3+... `[]` oracle_ais - flux aggregator feed accounts
     CachePrices,
 
     /// Cache root banks
@@ -218,10 +222,10 @@ pub fn deposit(
     quantity: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
-        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new_readonly(*root_bank_pk, false),
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new(*vault_pk, false),
         AccountMeta::new_readonly(spl_token::ID, false),
