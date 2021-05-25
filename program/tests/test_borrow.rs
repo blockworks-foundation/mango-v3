@@ -10,9 +10,7 @@ use merps::{
         add_asset, add_spot_market, add_to_basket, borrow, cache_prices, cache_root_banks, deposit,
         init_merps_account,
     },
-    state::MerpsAccount,
-    state::MerpsGroup,
-    state::NodeBank,
+    state::{MerpsAccount, MerpsGroup, NodeBank},
 };
 use solana_program::account_info::AccountInfo;
 use solana_program_test::*;
@@ -137,11 +135,6 @@ async fn test_borrow_succeeds() {
 
     // make a borrow
     {
-        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
-
         let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
@@ -159,7 +152,7 @@ async fn test_borrow_succeeds() {
                     &program_id,
                     &merps_group_pk,
                     &merps_group.merps_cache,
-                    &[btc_root_bank.pubkey],
+                    &[merps_group.root_banks[0], btc_root_bank.pubkey],
                 )
                 .unwrap(),
                 borrow(
@@ -177,24 +170,26 @@ async fn test_borrow_succeeds() {
             Some(&payer.pubkey()),
         );
 
+        println!("number of markets is {}", merps_group.num_markets);
+
         transaction.sign(&[&payer, &user], recent_blockhash);
 
         // Test transaction succeeded
         assert!(banks_client.process_transaction(transaction).await.is_ok());
 
-        // let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        // let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
+        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
 
-        // let merps_account =
-        //     MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
-        // // Test expected borrow is in merps account
-        // assert_eq!(merps_account.borrows[borrow_token_index], borrow_amount);
+        let merps_account =
+            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        // Test expected borrow is in merps account
+        assert_eq!(merps_account.borrows[borrow_token_index], borrow_amount);
 
-        // // Test expected borrow is added to total in node bank
-        // let mut node_bank = banks_client.get_account(btc_node_bank.pubkey).await.unwrap().unwrap();
-        // let account_info: AccountInfo = (&btc_node_bank.pubkey, &mut node_bank).into();
-        // let node_bank = NodeBank::load_mut_checked(&account_info, &program_id).unwrap();
-        // assert_eq!(node_bank.borrows, borrow_amount);
+        // Test expected borrow is added to total in node bank
+        let mut node_bank = banks_client.get_account(btc_node_bank.pubkey).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&btc_node_bank.pubkey, &mut node_bank).into();
+        let node_bank = NodeBank::load_mut_checked(&account_info, &program_id).unwrap();
+        assert_eq!(node_bank.borrows, borrow_amount);
     }
 }
 

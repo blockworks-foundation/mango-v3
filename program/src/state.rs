@@ -350,14 +350,15 @@ impl MerpsCache {
             if now_ts > self.price_cache[i].last_update + valid_interval {
                 return false;
             }
-            if now_ts > self.root_bank_cache[i].last_update + valid_interval {
+            if now_ts > self.root_bank_cache[i + 1].last_update + valid_interval {
                 return false;
             }
-            if merps_group.perp_markets[i] != Pubkey::default() {
-                if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    return false;
-                }
-            }
+            // TODO uncomment this when cache_perp_market() is implemented
+            // if merps_group.perp_markets[i] != Pubkey::default() {
+            //     if now_ts > self.perp_market_cache[i].last_update + valid_interval {
+            //         return false;
+            //     }
+            // }
         }
 
         true

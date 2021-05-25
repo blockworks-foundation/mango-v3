@@ -1,7 +1,6 @@
 #![cfg(feature = "test-bpf")]
 
 use safe_transmute::{self, to_bytes::transmute_one_to_bytes};
-use std::convert::TryInto;
 use std::mem::size_of;
 
 use fixed::types::I80F48;

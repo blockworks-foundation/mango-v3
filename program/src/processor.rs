@@ -162,7 +162,7 @@ impl Processor {
         merps_group.root_banks[token_index] = *root_bank_ai.key;
 
         let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
-        merps_group.oracles[token_index] = *oracle_ai.key;
+        merps_group.oracles[token_index - 1] = *oracle_ai.key;
         merps_group.num_tokens += 1;
 
         Ok(())
@@ -373,10 +373,14 @@ impl Processor {
 
         // TODO implement caches valid in tests
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
-        if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
-            // TODO log or write to buffer that this transaction did not complete due to stale cache
-            return Ok(());
-        }
+        // if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
+        //     // TODO log or write to buffer that this transaction did not complete due to stale cache
+        //     return Ok(());
+        // }
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
+            MerpsErrorCode::Default
+        )?;
 
         let deposit: I80F48 = I80F48::from_num(quantity) / root_bank.deposit_index;
         let borrow: I80F48 = I80F48::from_num(quantity) / root_bank.borrow_index;
@@ -384,9 +388,9 @@ impl Processor {
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
-        // let coll_ratio = merps_account.get_coll_ratio(&merps_group)?;
+        // let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache)?;
 
-        // TODO fix coll_ratio check
+        // TODO fix coll_ratio checks
         // check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
         // check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
 
