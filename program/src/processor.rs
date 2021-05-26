@@ -53,7 +53,6 @@ impl Processor {
             merps_cache_ai,     // write
             dex_prog_ai         // read
         ] = accounts;
-
         check_eq!(merps_group_ai.owner, program_id, MerpsErrorCode::InvalidGroupOwner)?;
         let rent = Rent::from_account_info(rent_ai)?;
         check!(
@@ -61,7 +60,7 @@ impl Processor {
             MerpsErrorCode::GroupNotRentExempt
         )?;
 
-        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        let mut merps_group = MerpsGroup::load_mut(merps_group_ai)?;
         // TODO is there a security concern if we remove the merps_group_ai.key?
         check!(
             gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
