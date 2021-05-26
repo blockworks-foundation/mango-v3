@@ -556,9 +556,8 @@ impl MerpsAccount {
                 */
             }
 
-            let asset_weight = merps_group.maint_asset_weights[i];
-            // let liab_weight = ONE_I80F48 / asset_weight;
-            let liab_weight = merps_group.init_asset_weights[i];
+            let asset_weight = merps_group.init_asset_weights[i];
+            let liab_weight = ONE_I80F48 / asset_weight;
 
             assets_val = base_assets
                 .checked_mul(merps_cache.price_cache[i].price)
