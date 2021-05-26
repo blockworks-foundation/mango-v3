@@ -133,5 +133,16 @@ macro_rules! declare_check_assert_macros {
                 }
             };
         }
+
+        #[allow(unused_macros)]
+        macro_rules! math_err {
+            () => {
+                MerpsError::MerpsErrorCode {
+                    merps_error_code: MerpsErrorCode::MathError,
+                    line: line!(),
+                    source_file_id: $source_file_id,
+                }
+            };
+        }
     };
 }

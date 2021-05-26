@@ -28,7 +28,7 @@ pub enum NodeTag {
 pub struct InnerNode {
     pub tag: u32,
     pub prefix_len: u32,
-    pub key: u128,
+    pub key: i128,
     pub children: [u32; 2],
     pub padding: [u8; 40],
 }
@@ -36,8 +36,8 @@ unsafe impl Zeroable for InnerNode {}
 unsafe impl Pod for InnerNode {}
 
 impl InnerNode {
-    fn walk_down(&self, search_key: u128) -> (NodeHandle, bool) {
-        let crit_bit_mask = (1u128 << 127) >> self.prefix_len;
+    fn walk_down(&self, search_key: i128) -> (NodeHandle, bool) {
+        let crit_bit_mask = (1i128 << 127) >> self.prefix_len;
         let crit_bit = (search_key & crit_bit_mask) != 0;
         (self.children[crit_bit as usize], crit_bit)
     }
@@ -49,7 +49,7 @@ pub struct LeafNode {
     pub tag: u32,
     pub owner_slot: u8,
     pub padding: [u8; 3],
-    pub key: u128,
+    pub key: i128,
     pub owner: Pubkey,
     pub quantity: i64,
     pub client_order_id: u64,
@@ -58,8 +58,8 @@ unsafe impl Zeroable for LeafNode {}
 unsafe impl Pod for LeafNode {}
 
 impl LeafNode {
-    pub fn price(&self) -> u64 {
-        (self.key >> 64) as u64
+    pub fn price(&self) -> i64 {
+        (self.key >> 64) as i64
     }
 }
 
@@ -93,7 +93,7 @@ enum NodeRefMut<'a> {
 }
 
 impl AnyNode {
-    fn key(&self) -> Option<u128> {
+    fn key(&self) -> Option<i128> {
         match self.case()? {
             NodeRef::Inner(inner) => Some(inner.key),
             NodeRef::Leaf(leaf) => Some(leaf.key),
@@ -482,7 +482,7 @@ impl Slab {
             // implies root is a Leaf or Inner where shared_prefix_len < prefix_len
 
             // change the root in place to represent the LCA of [new_leaf] and [root]
-            let crit_bit_mask: u128 = (1u128 << 127) >> shared_prefix_len;
+            let crit_bit_mask: i128 = (1i128 << 127) >> shared_prefix_len;
             let new_leaf_crit_bit = (crit_bit_mask & new_leaf.key) != 0;
             let old_root_crit_bit = !new_leaf_crit_bit;
 
@@ -513,7 +513,7 @@ impl Slab {
     }
 
     #[cfg(test)]
-    fn find_by_key(&self, search_key: u128) -> Option<NodeHandle> {
+    fn find_by_key(&self, search_key: i128) -> Option<NodeHandle> {
         let mut node_handle: NodeHandle = self.root()?;
         loop {
             let node_ref = self.get(node_handle).unwrap();
@@ -526,7 +526,7 @@ impl Slab {
             match node_ref.case().unwrap() {
                 NodeRef::Leaf(_) => break Some(node_handle),
                 NodeRef::Inner(inner) => {
-                    let crit_bit_mask = (1u128 << 127) >> node_prefix_len;
+                    let crit_bit_mask = (1i128 << 127) >> node_prefix_len;
                     let _search_key_crit_bit = (search_key & crit_bit_mask) != 0;
                     node_handle = inner.walk_down(search_key).0;
                     continue;
@@ -536,7 +536,7 @@ impl Slab {
     }
 
     #[inline]
-    pub fn remove_by_key(&mut self, search_key: u128) -> Option<LeafNode> {
+    pub fn remove_by_key(&mut self, search_key: i128) -> Option<LeafNode> {
         let mut parent_h = self.root()?;
         let mut child_h;
         let mut crit_bit;

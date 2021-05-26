@@ -568,6 +568,12 @@ impl Processor {
         if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
             return Ok(());
         }
+        // let orderbook = load_orderbook();
+        //
+        // match side {
+        //     Side::Bid => orderbook.new_bid(),
+        //     Side::Ask => orderbook.new_ask(),
+        // }
 
         /*
            How to adjust the funding settled
@@ -821,7 +827,6 @@ TODO list
 7. insurance fund
 8. Basic DAO
 9. Token Sale
-10.
 
 Crank keeps the oracle prices updated
 Make adding perp markets very easy

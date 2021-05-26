@@ -67,8 +67,13 @@ pub struct MerpsGroup {
 
     pub root_banks: [Pubkey; MAX_TOKENS],
 
+    // TODO add liab versions of each of these as a compute optimization
     pub maint_asset_weights: [I80F48; MAX_TOKENS],
     pub init_asset_weights: [I80F48; MAX_TOKENS],
+
+    pub maint_perp_weights: [I80F48; MAX_PAIRS],
+    pub init_perp_weights: [I80F48; MAX_PAIRS],
+    pub contract_sizes: [i64; MAX_PAIRS],
 
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
@@ -143,18 +148,6 @@ pub struct RootBank {
 }
 
 impl RootBank {
-    #[allow(unused)]
-    pub fn update_index(&mut self, node_banks: &[NodeBank]) -> MerpsResult<()> {
-        unimplemented!() // TODO
-    }
-
-    #[allow(unused)]
-    pub fn get_interest_rate(&self) -> MerpsResult<()> {
-        unimplemented!() // TODO
-    }
-}
-
-impl RootBank {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -193,6 +186,15 @@ impl RootBank {
     }
     pub fn find_node_bank_index(&self, node_bank_pk: &Pubkey) -> Option<usize> {
         self.node_banks.iter().position(|pk| pk == node_bank_pk)
+    }
+
+    #[allow(unused)]
+    pub fn update_index(&mut self, node_banks: &[NodeBank]) -> MerpsResult<()> {
+        unimplemented!() // TODO
+    }
+    #[allow(unused)]
+    pub fn get_interest_rate(&self) -> MerpsResult<()> {
+        unimplemented!() // TODO
     }
 }
 
@@ -261,7 +263,7 @@ impl NodeBank {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PriceCache {
-    pub price: I80F48,
+    pub price: I80F48, // unit is interpreted as how many quote native tokens for 1 base native token
     pub last_update: u64,
 }
 
@@ -276,7 +278,7 @@ pub struct RootBankCache {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
-    pub funding_earned: I80F48,
+    pub total_funding: I80F48,
     pub last_update: u64,
 }
 
@@ -373,7 +375,7 @@ pub struct PerpOpenOrders {
     pub total_quote: i64, // total quote currency in buy orders
     pub is_free_bits: u32,
     pub is_bid_bits: u32,
-    pub orders: [u128; 32],
+    pub orders: [i128; 32],
     pub client_order_ids: [u64; 32],
 }
 
@@ -393,6 +395,8 @@ pub struct MerpsAccount {
     pub spot_open_orders: [Pubkey; MAX_PAIRS],
 
     // Perps related data
+
+    // TODO consider storing positions as two separate arrays, i.e. base_longs, base_shorts
     pub base_positions: [i64; MAX_PAIRS], // measured in base lots
     pub quote_positions: [i64; MAX_PAIRS], // measured in quote lots
     pub funding_settled: [I80F48; MAX_PAIRS],
@@ -489,13 +493,66 @@ impl MerpsAccount {
 
             if merps_group.perp_markets[i] != Pubkey::default() {
                 // TODO fill this in once perp logic is a little bit more clear
+                let native_pos = I80F48::from_num(
+                    self.base_positions[i]
+                        + self.perp_open_orders[i]
+                            .total_base
+                            .checked_mul(merps_group.contract_sizes[i])
+                            .ok_or(throw_err!(MerpsErrorCode::MathError))?,
+                );
+
                 if self.base_positions[i] > 0 {
-                    // increment assets_val with base position and liabs val with quote position
-                    // What if both base position and quote position are positive
-                    // Do we force settling of pnl from positions?
-                    // settling of losses means marking contracts to the current price and taking any profits (losses) into deposits (borrows)
+                    assets_val = native_pos
+                        .checked_mul(merps_group.init_perp_weights[i])
+                        .ok_or(math_err!())?
+                        .checked_mul(merps_cache.price_cache[i].price)
+                        .ok_or(math_err!())?
+                        .checked_add(assets_val)
+                        .ok_or(math_err!())?;
                 } else if self.base_positions[i] < 0 {
+                    liabs_val = -native_pos
+                        .checked_mul(ONE_I80F48 / merps_group.init_perp_weights[i])
+                        .ok_or(math_err!())?
+                        .checked_mul(merps_cache.price_cache[i].price)
+                        .ok_or(math_err!())?
+                        .checked_add(assets_val)
+                        .ok_or(math_err!())?;
                 }
+
+                if self.quote_positions[i] < 0 {
+                    // TODO
+                }
+
+                // Account for unrealized funding payments
+                // TODO make checked
+                let funding: I80F48 = (merps_cache.perp_market_cache[i].total_funding
+                    - self.funding_settled[i])
+                    * I80F48::from_num(self.base_positions[i]);
+
+                // units
+                // total_funding: I80F48 - native quote currency per contract
+                // funding_settled: I80F48 - native quote currency per contract
+                // base_positions: i64 - number of contracts
+                // funding: I80F48 - native quote currency
+                // assets_val: I80F48 - native quote currency
+
+                if funding > ZERO_I80F48 {
+                    // funding positive, means liab
+                    liabs_val += funding;
+                } else if funding < ZERO_I80F48 {
+                    assets_val -= funding;
+                }
+
+                // Account for open orders
+                let _oo_base = I80F48::from_num(self.perp_open_orders[i].total_base); // num contracts
+                let _oo_quote = I80F48::from_num(self.perp_open_orders[i].total_quote);
+                // lot price
+
+                /*
+                    1. The amount on the open orders that are closing existing positions don't count against collateral
+                    2. open orders that are opening do count against collateral
+                    3. Possibly the open orders itself can store this information
+                */
             }
 
             let asset_weight = merps_group.maint_asset_weights[i];
@@ -541,31 +598,42 @@ pub struct PerpMarket {
     pub total_funding: I80F48,
     pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
-    pub quote_lot_size: i64, //
+    pub quote_lot_size: i64, // number of quote native
     pub index_oracle: Pubkey,
     pub last_updated: u64,
     pub seq_num: u64,
 
-    pub contract_size: i64, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+    pub contract_size: i64, // represents number of base native quantity; greater than 0
+
+                            // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
                             // index_price = some function of centralized exchange spot prices
                             // book_price = average of impact bid and impact ask; used to calculate basis
                             // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 
 impl PerpMarket {
-    pub fn gen_order_id(&mut self, side: Side, price: u64) -> u128 {
+    pub fn gen_order_id(&mut self, side: Side, price: i64) -> i128 {
         self.seq_num += 1;
 
-        let upper = (price as u128) << 64;
+        let upper = (price as i128) << 64;
         match side {
-            Side::Bid => upper | (!self.seq_num as u128),
-            Side::Ask => upper | (self.seq_num as u128),
+            Side::Bid => upper | (!self.seq_num as i128),
+            Side::Ask => upper | (self.seq_num as i128),
         }
     }
 
     /// Use current order book price
     pub fn update_funding(&mut self) -> MerpsResult<()> {
         unimplemented!()
+    }
+
+    /// Convert from the price stored on the book to the price used in value calculations
+    pub fn lot_to_native_price(&self, price: i64) -> I80F48 {
+        I80F48::from_num(price)
+            .checked_mul(I80F48::from_num(self.quote_lot_size))
+            .unwrap()
+            .checked_div(I80F48::from_num(self.contract_size))
+            .unwrap()
     }
 }
 

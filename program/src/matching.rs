@@ -52,7 +52,7 @@ impl<'a> OrderBook<'a> {
         market: &mut PerpMarket,
         merps_account: &mut MerpsAccount,
         merps_account_pk: &Pubkey,
-        price: u64,
+        price: i64,
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         client_order_id: u64,
@@ -87,7 +87,7 @@ impl<'a> OrderBook<'a> {
 
             let match_quantity = rem_quantity.min(best_ask.quantity);
             rem_quantity -= match_quantity;
-            quote_used += match_quantity * (best_ask_price as i64);
+            quote_used += match_quantity * best_ask_price;
             best_ask.quantity -= match_quantity;
 
             // TODO fill out FillEvent
