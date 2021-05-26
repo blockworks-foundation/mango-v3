@@ -15,6 +15,7 @@ use std::mem::size_of;
 
 use merps::{
     entrypoint::process_instruction, instruction::init_merps_account, state::MerpsAccount,
+    state::MerpsGroup,
 };
 
 #[tokio::test]
@@ -42,6 +43,12 @@ async fn test_init_merps_group() {
     transaction.sign(&[&payer], recent_blockhash);
 
     assert!(banks_client.process_transaction(transaction).await.is_ok());
+
+    let mut account = banks_client.get_account(merps_group.merps_group_pk).await.unwrap().unwrap();
+    let account_info: AccountInfo = (&merps_group.merps_group_pk, &mut account).into();
+    let merps_group_loaded = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+
+    assert_eq!(merps_group_loaded.valid_interval, 5)
 }
 
 #[tokio::test]

@@ -11,7 +11,7 @@ use merps::{
         add_asset, add_spot_market, add_to_basket, borrow, cache_prices, cache_root_banks, deposit,
         init_merps_account,
     },
-    state::{MerpsAccount, MerpsGroup, NodeBank, QUOTE_INDEX},
+    state::{MerpsAccount, MerpsCache, MerpsGroup, NodeBank, ONE_I80F48, QUOTE_INDEX},
 };
 use solana_program::account_info::AccountInfo;
 use solana_program_test::*;
@@ -34,10 +34,10 @@ async fn test_borrow_succeeds() {
     test.set_bpf_compute_max_units(50_000);
 
     let quote_index = 0;
-    let initial_amount = 2;
-    let deposit_amount = 1;
+    let initial_amount = 200;
+    let deposit_amount = 100;
     // 5x leverage
-    let borrow_amount = (deposit_amount * PRICE_BTC * 5) / PRICE_ETH;
+    let borrow_amount = (deposit_amount * 5) / PRICE_BTC;
 
     let merps_group = add_merps_group_prodlike(&mut test, program_id);
     let merps_group_pk = merps_group.merps_group_pk;
@@ -142,6 +142,8 @@ async fn test_borrow_succeeds() {
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
         let borrow_token_index = 0;
 
+        println!("borrow amount: {}", borrow_amount);
+
         let mut transaction = Transaction::new_with_payer(
             &[
                 cache_prices(
@@ -173,8 +175,6 @@ async fn test_borrow_succeeds() {
             Some(&payer.pubkey()),
         );
 
-        println!("number of markets is {}", merps_group.num_markets);
-
         transaction.sign(&[&payer, &user], recent_blockhash);
 
         // Test transaction succeeded
@@ -187,6 +187,14 @@ async fn test_borrow_succeeds() {
             MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
         // Test expected borrow is in merps account
         assert_eq!(merps_account.borrows[borrow_token_index], borrow_amount);
+
+        let mut merps_cache =
+            banks_client.get_account(merps_group.merps_cache).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_group.merps_cache, &mut merps_cache).into();
+        let merps_cache =
+            MerpsCache::load_checked(&account_info, &program_id, &merps_group).unwrap();
+        let col_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache).unwrap();
+        println!("coll ratio {}", col_ratio);
 
         // Test expected borrow is added to total in node bank
         let mut node_bank = banks_client.get_account(btc_node_bank.pubkey).await.unwrap().unwrap();

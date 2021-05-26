@@ -26,8 +26,7 @@ use merps::instruction::init_merps_group;
 use merps::state::{MerpsCache, MerpsGroup, NodeBank, RootBank, ONE_I80F48, ZERO_I80F48};
 use merps::utils::create_signer_key_and_nonce;
 
-pub const PRICE_BTC: u64 = 50000;
-pub const PRICE_ETH: u64 = 2000;
+pub const PRICE_BTC: u64 = 100;
 
 trait AddPacked {
     fn add_packable_account<T: Pack>(
