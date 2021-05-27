@@ -5,10 +5,13 @@ use bytemuck::bytes_of;
 use fixed::types::I80F48;
 use flux_aggregator::borsh_state::InitBorshState;
 
+use serum_dex::matching::Side as SerumSide;
 use serum_dex::state::ToAlignedBytes;
+
 use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
+use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::{IsInitialized, Pack};
@@ -22,9 +25,9 @@ use crate::instruction::MerpsInstruction;
 use crate::matching::Side;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PerpMarket,
-    PriceCache, RootBank, RootBankCache, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    PriceCache, RootBank, RootBankCache, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
-use crate::utils::gen_signer_key;
+use crate::utils::{gen_signer_key, gen_signer_seeds};
 use mango_common::Loadable;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -375,8 +378,6 @@ impl Processor {
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
 
-        // TODO check node_bank indexes have been updated via the Keeper
-
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
@@ -393,6 +394,9 @@ impl Processor {
         // First check all caches to make sure valid
         let clock = Clock::from_account_info(clock_ai)?;
         let now_ts = clock.unix_timestamp as u64;
+
+        let valid_interval = merps_group.valid_interval as u64;
+        check!(now_ts > root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
 
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
         check!(
@@ -516,9 +520,121 @@ impl Processor {
         Ok(())
     }
 
-    /// Same idea as Mango margin
     #[allow(unused)]
-    fn place_spot_order() -> MerpsResult<()> {
+    fn place_spot_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        order: serum_dex::instruction::NewOrderInstructionV3,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 19;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let [
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            owner_ai,           // read
+            merps_cache_ai,     // read
+            dex_program_ai,     // read
+            spot_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+            dex_request_queue_ai,// write
+            dex_event_queue_ai, // write
+            dex_base_ai,        // write
+            dex_quote_ai,       // write
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+            vault_ai,           // write
+            token_program_ai,   // read
+            signer_ai,          // read
+            rent_ai,            // read
+            clock_ai,           // read
+        ] = fixed_accs;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
+        let clock = Clock::from_account_info(clock_ai)?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
+
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+
+        // Make sure the root bank is in the merps group
+        let token_index = merps_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
+
+        // First check all caches to make sure valid
+        let clock = Clock::from_account_info(clock_ai)?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        let valid_interval = merps_group.valid_interval as u64;
+        check!(now_ts > root_bank.last_updated + valid_interval, MerpsErrorCode::Default);
+
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
+            MerpsErrorCode::Default
+        )?;
+
+        let spot_market_index = merps_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MerpsErrorCode::InvalidMarket))?;
+
+        let side = order.side;
+        let token_i = match order.side {
+            SerumSide::Bid => QUOTE_INDEX,
+            SerumSide::Ask => spot_market_index,
+        };
+        check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::Default)?;
+
+        check_eq!(token_program_ai.key, &spl_token::id(), MerpsErrorCode::Default)?;
+        check_eq!(dex_program_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
+        let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
+        let instruction = Instruction {
+            program_id: *dex_program_ai.key,
+            data,
+            accounts: vec![
+                AccountMeta::new(*spot_market_ai.key, false),
+                AccountMeta::new(*open_orders_ais[spot_market_index].key, false),
+                AccountMeta::new(*dex_request_queue_ai.key, false),
+                AccountMeta::new(*dex_event_queue_ai.key, false),
+                AccountMeta::new(*bids_ai.key, false),
+                AccountMeta::new(*asks_ai.key, false),
+                AccountMeta::new(*vault_ai.key, false),
+                AccountMeta::new_readonly(*signer_ai.key, true),
+                AccountMeta::new(*dex_base_ai.key, false),
+                AccountMeta::new(*dex_quote_ai.key, false),
+                AccountMeta::new_readonly(*token_program_ai.key, false),
+                AccountMeta::new_readonly(*rent_ai.key, false),
+                // AccountMeta::new(*srm_vault_ai.key, false),
+            ],
+        };
+        let account_infos = [
+            dex_program_ai.clone(), // Have to add account of the program id
+            spot_market_ai.clone(),
+            open_orders_ais[spot_market_index].clone(),
+            dex_request_queue_ai.clone(),
+            dex_event_queue_ai.clone(),
+            bids_ai.clone(),
+            asks_ai.clone(),
+            vault_ai.clone(),
+            signer_ai.clone(),
+            dex_base_ai.clone(),
+            dex_quote_ai.clone(),
+            token_program_ai.clone(),
+            rent_ai.clone(),
+            // srm_vault_ai.clone(),
+        ];
+
+        let signer_seeds = gen_signer_seeds(&merps_group.signer_nonce, merps_group_ai.key);
+        solana_program::program::invoke_signed(&instruction, &account_infos, &[&signer_seeds])?;
+
         // TODO
         unimplemented!()
     }
@@ -676,6 +792,9 @@ impl Processor {
             }
             MerpsInstruction::CacheRootBanks => {
                 Self::cache_root_banks(program_id, accounts)?;
+            }
+            MerpsInstruction::PlaceSpotOrder { order } => {
+                Self::place_spot_order(program_id, accounts, order)?;
             }
         }
 

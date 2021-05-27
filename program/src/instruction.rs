@@ -1,9 +1,12 @@
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
+use num_enum::TryFromPrimitive;
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
+use std::convert::TryInto;
+use std::num::NonZeroU64;
 
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -114,6 +117,12 @@ pub enum MerpsInstruction {
     ///
     /// Accounts expected: 3 + Root Banks
     CacheRootBanks,
+
+    /// Place an order on the Serum Dex using Merps account
+    ///
+    /// Accounts expected by this instruction (19 + MAX_PAIRS):
+    ///
+    PlaceSpotOrder { order: serum_dex::instruction::NewOrderInstructionV3 },
 }
 
 impl MerpsInstruction {
@@ -155,6 +164,11 @@ impl MerpsInstruction {
             }
             8 => MerpsInstruction::CachePrices,
             9 => MerpsInstruction::CacheRootBanks,
+            10 => {
+                let data_arr = array_ref![data, 0, 46];
+                let order = unpack_dex_new_order_v3(data_arr)?;
+                MerpsInstruction::PlaceSpotOrder { order }
+            }
             _ => {
                 return None;
             }
@@ -163,6 +177,51 @@ impl MerpsInstruction {
     pub fn pack(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
+}
+
+fn unpack_dex_new_order_v3(
+    data: &[u8; 46],
+) -> Option<serum_dex::instruction::NewOrderInstructionV3> {
+    let (
+        &side_arr,
+        &price_arr,
+        &max_coin_qty_arr,
+        &max_native_pc_qty_arr,
+        &self_trade_behavior_arr,
+        &otype_arr,
+        &client_order_id_bytes,
+        &limit_arr,
+    ) = array_refs![data, 4, 8, 8, 8, 4, 4, 8, 2];
+
+    let side = serum_dex::matching::Side::try_from_primitive(
+        u32::from_le_bytes(side_arr).try_into().ok()?,
+    )
+    .ok()?;
+    let limit_price = NonZeroU64::new(u64::from_le_bytes(price_arr))?;
+    let max_coin_qty = NonZeroU64::new(u64::from_le_bytes(max_coin_qty_arr))?;
+    let max_native_pc_qty_including_fees =
+        NonZeroU64::new(u64::from_le_bytes(max_native_pc_qty_arr))?;
+    let self_trade_behavior = serum_dex::instruction::SelfTradeBehavior::try_from_primitive(
+        u32::from_le_bytes(self_trade_behavior_arr).try_into().ok()?,
+    )
+    .ok()?;
+    let order_type = serum_dex::matching::OrderType::try_from_primitive(
+        u32::from_le_bytes(otype_arr).try_into().ok()?,
+    )
+    .ok()?;
+    let client_order_id = u64::from_le_bytes(client_order_id_bytes);
+    let limit = u16::from_le_bytes(limit_arr);
+
+    Some(serum_dex::instruction::NewOrderInstructionV3 {
+        side,
+        limit_price,
+        max_coin_qty,
+        max_native_pc_qty_including_fees,
+        self_trade_behavior,
+        order_type,
+        client_order_id,
+        limit,
+    })
 }
 
 pub fn init_merps_group(
