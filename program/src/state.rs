@@ -10,6 +10,7 @@ use solana_program::pubkey::Pubkey;
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::matching::Side;
 
+use crate::critbit::LeafNode;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 
@@ -581,6 +582,16 @@ impl MerpsAccount {
         } else {
             assets_val.checked_div(liabs_val).ok_or(throw!())
         }
+    }
+
+    #[allow(unused)]
+    pub fn add_perp_bid(&mut self, order: &LeafNode) -> MerpsResult<()> {
+        unimplemented!()
+    }
+
+    #[allow(unused)]
+    pub fn add_perp_ask(&mut self, order: &LeafNode) -> MerpsResult<()> {
+        unimplemented!()
     }
 }
 

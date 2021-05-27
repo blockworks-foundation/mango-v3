@@ -59,6 +59,8 @@ pub enum MerpsErrorCode {
     InvalidProgramId,
     #[error("MerpsErrorCode::NotRentExempt")]
     GroupNotRentExempt,
+    #[error("MerpsErrorCode::OutOfSpace")]
+    OutOfSpace,
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

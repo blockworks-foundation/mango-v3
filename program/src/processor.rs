@@ -561,6 +561,7 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
 
@@ -568,6 +569,7 @@ impl Processor {
         if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
             return Ok(());
         }
+
         // let orderbook = load_orderbook();
         //
         // match side {
@@ -602,7 +604,7 @@ impl Processor {
     /// Take two MerpsAccount and settle quote currency pnl between them
     #[allow(unused)]
     fn settle() -> MerpsResult<()> {
-        // TODO
+        // TODO - take two accounts
         unimplemented!()
     }
 
@@ -610,6 +612,9 @@ impl Processor {
     #[allow(unused)]
     fn liquidate() -> MerpsResult<()> {
         // TODO - still need to figure out how liquidations for perps will work, but
+        // liqor passes in his own account and the liqee merps account
+        // position is transfered to the liqor at favorable rate
+        //
         unimplemented!()
     }
 

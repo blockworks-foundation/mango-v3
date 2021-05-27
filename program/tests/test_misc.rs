@@ -12,3 +12,8 @@ async fn test_size() {
     println!("AnyNode: {}", size_of::<AnyNode>());
     println!("MerpsAccount: {}", size_of::<MerpsAccount>());
 }
+
+#[tokio::test]
+async fn test_int() {
+    println!("{}", 1i32 << 31);
+}

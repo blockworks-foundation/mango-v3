@@ -33,9 +33,6 @@ pub struct OrderBook<'a> {
     pub bids: &'a mut Slab,
     pub asks: &'a mut Slab,
 }
-
-pub struct BookSide {}
-
 impl<'a> OrderBook<'a> {
     pub fn get_best_bid_price(&self) -> Option<NodeHandle> {
         unimplemented!()
@@ -52,8 +49,9 @@ impl<'a> OrderBook<'a> {
         market: &mut PerpMarket,
         merps_account: &mut MerpsAccount,
         merps_account_pk: &Pubkey,
+        market_index: usize,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
     ) -> MerpsResult<()> {
@@ -118,8 +116,9 @@ impl<'a> OrderBook<'a> {
                 quantity: rem_quantity,
                 client_order_id,
             };
+
+            merps_account.add_perp_bid(&new_bid)?;
             self.bids.insert_leaf(&new_bid).unwrap();
-            // TODO adjust merps_account to account for new order and locked funds
         }
 
         // Edit merps_account if some contracts were matched
@@ -128,8 +127,6 @@ impl<'a> OrderBook<'a> {
                 How to adjust the funding settled
                 FS_t = (FS_t-1 - FE) * C_t-1 / C_t + FE
             */
-
-            let market_index = 0; // TODO
 
             let base_position = merps_account.base_positions[market_index];
 
@@ -142,7 +139,7 @@ impl<'a> OrderBook<'a> {
                     / I80F48::from_num(merps_account.base_positions[market_index]))
                     + market.total_funding;
 
-            market.open_interest += base_position;
+            market.open_interest += quantity - rem_quantity;
         }
 
         Ok(())
