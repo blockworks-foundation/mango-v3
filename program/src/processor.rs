@@ -22,7 +22,8 @@ use spl_token::state::Account;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
-use crate::matching::Side;
+use crate::matching::{Book, OrderType, Side};
+use crate::queue::EventQueue;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PerpMarket,
     PriceCache, RootBank, RootBankCache, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
@@ -527,7 +528,9 @@ impl Processor {
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 19;
+
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+
         let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
         let [
             merps_group_ai,     // read
@@ -653,6 +656,7 @@ impl Processor {
         price: i64,
         quantity: i64,
         client_order_id: u64,
+        order_type: OrderType,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -685,27 +689,25 @@ impl Processor {
             return Ok(());
         }
 
-        // let orderbook = load_orderbook();
-        //
-        // match side {
-        //     Side::Bid => orderbook.new_bid(),
-        //     Side::Ask => orderbook.new_ask(),
-        // }
+        let mut book = Book::load(program_id, bids_ai, asks_ai)?;
+        let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
+        let mut perp_market = PerpMarket::load_mut_checked(perp_market_ai, program_id)?;
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        book.new_order(
+            &mut event_queue,
+            &mut perp_market,
+            &mut merps_account,
+            merps_account_ai.key,
+            market_index,
+            side,
+            price,
+            quantity,
+            order_type,
+            client_order_id,
+        )?;
 
-        /*
-           How to adjust the funding settled
-           FS_t = (FS_t-1 - FE) * C_t-1 / C_t + FE
-        */
-
-        /*
-           1. First match against the book
-
-           funding settled
-
-           2. Determine if account still above coll ratio
-        */
-
-        // put the order onto the book
+        let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache)?;
+        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
@@ -802,10 +804,10 @@ impl Processor {
     }
 }
 
-/// Convert quote lots to native quote amount using
+/// Take two MerpsAccounts and settle unrealized trading pnl and funding pnl between them
 #[allow(unused)]
-fn quote_lots_to_native(quote_lots: i64) -> i64 {
-    unimplemented!()
+fn settle_trading_pnl(ma0: &mut MerpsAccount, ma1: &mut MerpsAccount) -> MerpsResult<()> {
+    unimplemented!();
 }
 
 /// pnl can only be realized if there is an equal and opposite amount of pnl realized on another account

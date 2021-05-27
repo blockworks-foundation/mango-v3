@@ -8,9 +8,8 @@ use solana_program::account_info::AccountInfo;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::matching::Side;
+use crate::matching::{LeafNode, Side};
 
-use crate::critbit::LeafNode;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 
@@ -132,6 +131,9 @@ impl MerpsGroup {
     }
     pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
         self.spot_markets.iter().position(|pk| pk == spot_market_pk)
+    }
+    pub fn find_perp_market_index(&self, perp_market_pk: &Pubkey) -> Option<usize> {
+        self.perp_markets.iter().position(|pk| pk == perp_market_pk)
     }
 }
 
@@ -622,6 +624,14 @@ pub struct PerpMarket {
 }
 
 impl PerpMarket {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        _program_id: &Pubkey,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        // TODO
+        Ok(Self::load_mut(account)?)
+    }
+
     pub fn gen_order_id(&mut self, side: Side, price: i64) -> i128 {
         self.seq_num += 1;
 
