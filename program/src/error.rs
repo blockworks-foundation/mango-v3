@@ -61,6 +61,8 @@ pub enum MerpsErrorCode {
     GroupNotRentExempt,
     #[error("MerpsErrorCode::OutOfSpace")]
     OutOfSpace,
+    #[error("MerpsErrorCode::InvalidCache")]
+    InvalidCache,
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

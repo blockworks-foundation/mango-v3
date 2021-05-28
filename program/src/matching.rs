@@ -397,6 +397,14 @@ impl<'a> Book<'a> {
         })
     }
 
+    pub fn get_best_bid_price(&self) -> Option<i64> {
+        Some(self.bids.get_max()?.price())
+    }
+
+    pub fn get_best_ask_price(&self) -> Option<i64> {
+        Some(self.asks.get_min()?.price())
+    }
+
     fn get_best_ask_handle(&self) -> Option<NodeHandle> {
         self.asks.find_max()
     }

@@ -1,4 +1,4 @@
-use bytemuck::{bytes_of, cast_slice_mut, try_from_bytes_mut, Contiguous, Pod};
+use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 
 use crate::error::MerpsResult;
 use solana_program::account_info::AccountInfo;
@@ -39,19 +39,8 @@ fn remove_slop_mut<T: Pod>(bytes: &mut [u8]) -> &mut [T] {
 pub fn strip_header_mut<'a, H: Pod, D: Pod>(
     account: &'a AccountInfo,
 ) -> MerpsResult<(RefMut<'a, H>, RefMut<'a, [D]>)> {
-    let (header, inner): (RefMut<'a, [H]>, RefMut<'a, [D]>) =
-        RefMut::map_split(account.try_borrow_mut_data()?, |raw_data| {
-            let data: &mut [u8] = *raw_data;
-            let (header_bytes, inner_bytes) = data.split_at_mut(size_of::<H>());
-            let header: &mut H;
-            let inner: &mut [D];
-            header = try_from_bytes_mut(header_bytes).unwrap();
-
-            inner = remove_slop_mut(inner_bytes);
-
-            (std::slice::from_mut(header), inner)
-        });
-
-    let header = RefMut::map(header, |s| s.first_mut().unwrap_or_else(|| unreachable!()));
-    Ok((header, inner))
+    Ok(RefMut::map_split(account.try_borrow_mut_data()?, |data| {
+        let (header_bytes, inner_bytes) = data.split_at_mut(size_of::<H>());
+        (from_bytes_mut(header_bytes), remove_slop_mut(inner_bytes))
+    }))
 }

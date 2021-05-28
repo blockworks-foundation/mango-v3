@@ -8,7 +8,7 @@ use solana_program::account_info::AccountInfo;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::matching::{LeafNode, Side};
+use crate::matching::{Book, LeafNode, Side};
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
@@ -19,6 +19,7 @@ pub const MAX_NODE_BANKS: usize = 8;
 pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
+pub const DAY: I80F48 = I80F48!(86400);
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -643,8 +644,38 @@ impl PerpMarket {
     }
 
     /// Use current order book price
-    pub fn update_funding(&mut self) -> MerpsResult<()> {
-        unimplemented!()
+    pub fn update_funding(
+        &mut self,
+        merps_group: &MerpsGroup,
+        book: &Book,
+        merps_cache: &MerpsCache,
+        market_index: usize,
+        now_ts: u64,
+    ) -> MerpsResult<()> {
+        // Get current book price
+        // compare it to index price using the merps cache
+
+        let bid = book.get_best_bid_price().unwrap();
+        let ask = book.get_best_ask_price().unwrap(); // TODO handle case of one sided book
+
+        let book_price = self.lot_to_native_price((bid + ask) / 2);
+
+        // TODO make checked
+        let price_cache = &merps_cache.price_cache[market_index];
+        check!(
+            now_ts <= price_cache.last_update + (merps_group.valid_interval as u64),
+            MerpsErrorCode::InvalidCache
+        )?;
+
+        let index_price = price_cache.price;
+        let diff: I80F48 = (book_price / index_price) - ONE_I80F48;
+        let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
+        let funding_delta: I80F48 =
+            diff * time_factor * I80F48::from_num(self.open_interest) * index_price;
+        self.total_funding += funding_delta;
+
+        self.last_updated = now_ts;
+        Ok(())
     }
 
     /// Convert from the price stored on the book to the price used in value calculations

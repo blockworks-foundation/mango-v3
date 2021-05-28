@@ -806,8 +806,31 @@ impl Processor {
 
 /// Take two MerpsAccounts and settle unrealized trading pnl and funding pnl between them
 #[allow(unused)]
-fn settle_trading_pnl(ma0: &mut MerpsAccount, ma1: &mut MerpsAccount) -> MerpsResult<()> {
-    unimplemented!();
+fn settle_trading_pnl(
+    a: &mut MerpsAccount,
+    b: &mut MerpsAccount,
+    market_index: usize,
+    price: i64, // TODO price usually comes in I80F48
+) -> MerpsResult<()> {
+    /*
+    TODO consider rule: Can only settle if both accounts remain above bankruptcy
+     */
+    let base_position = a.base_positions[market_index];
+
+    let new_quote_pos_a = -a.base_positions[market_index] * price;
+    let new_quote_pos_b = -b.base_positions[market_index] * price;
+    let a_pnl = a.quote_positions[market_index] - new_quote_pos_a;
+    let b_pnl = b.quote_positions[market_index] - new_quote_pos_b;
+
+    // pnl must be opposite signs for there to be a settlement
+
+    if a_pnl > 0 && b_pnl < 0 {
+        let settlement = a_pnl.min(b_pnl.abs());
+    } else if a_pnl < 0 && b_pnl > 0 {
+    } else {
+        return Err(throw!());
+    }
+    Ok(())
 }
 
 /// pnl can only be realized if there is an equal and opposite amount of pnl realized on another account
