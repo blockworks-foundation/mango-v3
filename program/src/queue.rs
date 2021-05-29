@@ -1,11 +1,12 @@
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::state::MetaData;
+use crate::state::{DataType, MetaData};
 use crate::utils::strip_header_mut;
 use bytemuck::Pod;
 use mango_macro::Pod;
 use safe_transmute::{self, trivial::TriviallyTransmutable};
 use solana_program::account_info::AccountInfo;
 use solana_program::pubkey::Pubkey;
+use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Queue);
@@ -170,6 +171,23 @@ impl<'a> EventQueue<'a> {
     pub fn load_mut_checked(account: &'a AccountInfo, _program_id: &Pubkey) -> MerpsResult<Self> {
         // TODO - do some checking
         Self::load_mut(account)
+    }
+
+    pub fn load_and_init(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        rent: &Rent,
+    ) -> MerpsResult<Self> {
+        let mut state = Self::load_mut(account)?;
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), account.data_len()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+
+        check!(!state.header.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        state.header.meta_data = MetaData::new(DataType::EventQueue, 0, true);
+        Ok(state)
     }
 }
 

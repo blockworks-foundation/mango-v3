@@ -1,6 +1,6 @@
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
-use crate::state::{MerpsAccount, MetaData, PerpMarket};
+use crate::state::{DataType, MerpsAccount, MetaData, PerpMarket};
 use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
 use fixed::types::I80F48;
 use mango_common::Loadable;
@@ -9,6 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
 use solana_program::pubkey::Pubkey;
+use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
 use std::convert::TryFrom;
 
@@ -181,6 +182,24 @@ impl BookSide {
         // TODO
         Ok(Self::load_mut(account)?)
     }
+
+    pub fn load_and_init<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        data_type: DataType,
+        rent: &Rent,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        let mut state = Self::load_mut(account)?;
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), account.data_len()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+        check!(!state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        state.meta_data = MetaData::new(data_type, 0, true);
+        Ok(state)
+    }
+
     fn get_mut(&mut self, key: u32) -> Option<&mut AnyNode> {
         let node = &mut self.nodes[key as usize];
         let tag = NodeTag::try_from(node.tag);
