@@ -29,7 +29,7 @@ pub trait QueueHeader: Pod {
 }
 
 pub struct Queue<'a, H: QueueHeader> {
-    header: RefMut<'a, H>,
+    pub header: RefMut<'a, H>,
     buf: RefMut<'a, [H::Item]>,
 }
 
@@ -134,7 +134,7 @@ impl<'a, 'b, H: QueueHeader> Iterator for QueueIterator<'a, 'b, H> {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct EventQueueHeader {
-    meta_data: MetaData,
+    pub meta_data: MetaData,
     head: usize,
     count: usize,
     seq_num: usize,

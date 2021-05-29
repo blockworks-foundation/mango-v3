@@ -63,6 +63,10 @@ pub enum MerpsErrorCode {
     OutOfSpace,
     #[error("MerpsErrorCode::InvalidCache")]
     InvalidCache,
+
+    #[error("MerpsErrorCode::AccountNotRentExempt")]
+    AccountNotRentExempt,
+
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

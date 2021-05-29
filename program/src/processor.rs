@@ -22,11 +22,12 @@ use spl_token::state::Account;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
-use crate::matching::{Book, OrderType, Side};
+use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PerpMarket,
-    PriceCache, RootBank, RootBankCache, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
+    PerpMarket, PriceCache, RootBank, RootBankCache, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use mango_common::Loadable;
@@ -240,11 +241,133 @@ impl Processor {
         Ok(())
     }
 
+    /// Add an oracle to the MerpsGroup
+    /// This must be called first before `add_spot_market` or `add_perp_market`
+    #[allow(unused)]
+    fn add_oracle(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        unimplemented!()
+    }
+
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
     #[allow(unused)]
-    fn add_perp_market() -> MerpsResult<()> {
+    fn add_perp_market(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+        maint_perp_weight: I80F48,
+        init_perp_weight: I80F48,
+        contract_size: i64,
+        quote_lot_size: i64,
+    ) -> MerpsResult<()> {
         // TODO
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            merps_group_ai, // write
+            perp_market_ai, // write
+            event_queue_ai, // write
+            bids_ai,        // write
+            asks_ai,        // write
+
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let rent = Rent::get()?; // dynamically load rent sysvar
+
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+
+        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
+
+        check!(market_index < merps_group.num_oracles, MerpsErrorCode::Default)?;
+
+        // if mi > num_markets => we are attempting to skip
+        check!(market_index <= merps_group.num_markets, MerpsErrorCode::Default)?;
+        if market_index == merps_group.num_markets {
+            merps_group.num_markets += 1;
+        }
+
+        // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
+        check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
+
+        // Make sure perp market at this index not already initialized
+        check!(
+            merps_group.perp_markets[market_index] == Pubkey::default(),
+            MerpsErrorCode::Default
+        )?;
+
+        merps_group.perp_markets[market_index] = *perp_market_ai.key;
+        merps_group.maint_perp_weights[market_index] = maint_perp_weight;
+        merps_group.init_perp_weights[market_index] = init_perp_weight;
+        merps_group.contract_sizes[market_index] = contract_size;
+
+        // Initialize the Bids -- TODO put all these initialize into own functions
+        let mut bids = BookSide::load_mut(bids_ai)?;
+        check!(bids_ai.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(bids_ai.lamports(), size_of::<BookSide>()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+        check!(!bids.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        bids.meta_data = MetaData::new(DataType::Bids, 0, true);
+
+        // Initialize the Asks
+        let mut asks = BookSide::load_mut(asks_ai)?;
+        check!(asks_ai.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(asks_ai.lamports(), size_of::<BookSide>()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+        check!(!asks.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        asks.meta_data = MetaData::new(DataType::Asks, 0, true);
+
+        // Initialize the EventQueue
+        let mut event_queue = EventQueue::load_mut(event_queue_ai)?;
+        check!(event_queue_ai.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(event_queue_ai.lamports(), event_queue_ai.data_len()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+        check!(!event_queue.header.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        event_queue.header.meta_data = MetaData::new(DataType::EventQueue, 0, true);
+
+        // Now initialize the PerpMarket itself
+        let _perp_market = PerpMarket::load_and_init(
+            perp_market_ai,
+            program_id,
+            merps_group_ai,
+            bids_ai,
+            asks_ai,
+            event_queue_ai,
+            &merps_group,
+            &rent,
+            market_index,
+            contract_size,
+            quote_lot_size,
+        )?;
+        // let perp_market = PerpMarket::load_mut(perp_market_ai)?;
+        // check!(&perp_market_ai.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        // check!(
+        //     rent.is_exempt(perp_market_ai.lamports(), size_of::<PerpMarket>()),
+        //     MerpsErrorCode::AccountNotRentExempt
+        // )?;
+        // check!(!perp_market.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        //
+        // perp_market.meta_data = MetaData {
+        //     data_type: PerpMarket as u8,
+        //     version: 0,
+        //     is_initialized: true,
+        //     padding: [5; u8],
+        // };
+        // perp_market.merps_group = *merps_group_ai.key;
+        // perp_market.bids = *bids_ai.key;
+        // perp_market.asks = *asks_ai.key;
+        // perp_market.event_queue = *event_queue_ai.key;
+        // perp_market.quote_lot_size = quote_lot_size;
+        // perp_market.index_oracle = merps_group.oracles[market_index];
+        // perp_market.contract_size = contract_size;
         Ok(())
     }
 
@@ -691,7 +814,8 @@ impl Processor {
 
         let mut book = Book::load(program_id, bids_ai, asks_ai)?;
         let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
-        let mut perp_market = PerpMarket::load_mut_checked(perp_market_ai, program_id)?;
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
         book.new_order(
             &mut event_queue,
@@ -874,6 +998,8 @@ fn init_root_bank(
     root_bank_ai: &AccountInfo,
     node_bank_ai: &AccountInfo,
 ) -> MerpsResult<RootBank> {
+    // TODO check rent exempt
+
     let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
     check!(vault.is_initialized(), MerpsErrorCode::Default)?;
     check_eq!(vault.owner, merps_group.signer_key, MerpsErrorCode::Default)?;

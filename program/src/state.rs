@@ -12,6 +12,7 @@ use crate::matching::{Book, LeafNode, Side};
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
+use solana_program::sysvar::rent::Rent;
 
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -37,6 +38,7 @@ pub enum DataType {
     Bids,
     Asks,
     MerpsCache,
+    EventQueue,
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -48,6 +50,33 @@ pub struct MetaData {
     pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
 }
 
+impl MetaData {
+    pub fn new(data_type: DataType, version: u8, is_initialized: bool) -> Self {
+        Self { data_type: data_type as u8, version, is_initialized, padding: [0u8; 5] }
+    }
+}
+
+// #[derive(Copy, Clone, Pod)]
+// #[repr(C)]
+// pub struct MarketInfo {
+//     pub token: Pubkey,     // empty if spot market empty
+//     pub root_bank: Pubkey, // empty if spot market empty
+//     pub oracle_index: usize,
+//     pub spot_market: Pubkey, // One of these may be empty
+//     pub maint_asset_weight: I80F48,
+//     pub init_asset_weight: I80F48,
+// }
+//
+// #[derive(Copy, Clone, Pod)]
+// #[repr(C)]
+// pub struct PerpMarketInfo {
+//     pub oracle_index: usize,
+//     pub perp_market: Pubkey, // One of these may be empty
+//     pub maint_perp_weight: I80F48,
+//     pub init_perp_weight: I80F48,
+//     pub contract_size: i64,
+// }
+
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsGroup {
@@ -55,7 +84,7 @@ pub struct MerpsGroup {
 
     pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
-
+    pub num_oracles: usize, // incremented every time add_oracle is called
     pub tokens: [Pubkey; MAX_TOKENS],
     pub oracles: [Pubkey; MAX_PAIRS],
     // Note: oracle used for perps mark price is same as the one for spot. This is not ideal so it may change
@@ -537,6 +566,7 @@ impl MerpsAccount {
                 // total_funding: I80F48 - native quote currency per contract
                 // funding_settled: I80F48 - native quote currency per contract
                 // base_positions: i64 - number of contracts
+                // quote_positions: i64 - number of quote_lot_size
                 // funding: I80F48 - native quote currency
                 // assets_val: I80F48 - native quote currency
 
@@ -550,6 +580,7 @@ impl MerpsAccount {
                 // Account for open orders
                 let _oo_base = I80F48::from_num(self.perp_open_orders[i].total_base); // num contracts
                 let _oo_quote = I80F48::from_num(self.perp_open_orders[i].total_quote);
+
                 // lot price
 
                 /*
@@ -604,14 +635,14 @@ impl MerpsAccount {
 pub struct PerpMarket {
     pub meta_data: MetaData,
 
+    pub merps_group: Pubkey,
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
-    pub matching_queue: Pubkey,
     pub total_funding: I80F48,
     pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
-    pub quote_lot_size: i64, // number of quote native
+    pub quote_lot_size: i64, // number of quote native that reresents min tick
     pub index_oracle: Pubkey,
     pub last_updated: u64,
     pub seq_num: u64,
@@ -625,12 +656,51 @@ pub struct PerpMarket {
 }
 
 impl PerpMarket {
+    pub fn load_and_init<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group_ai: &'a AccountInfo,
+        bids_ai: &'a AccountInfo,
+        asks_ai: &'a AccountInfo,
+        event_queue_ai: &'a AccountInfo,
+
+        merps_group: &MerpsGroup,
+        rent: &Rent,
+
+        market_index: usize,
+        contract_size: i64,
+        quote_lot_size: i64,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        let mut state = Self::load_mut(account)?;
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), size_of::<Self>()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+        check!(!state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+
+        state.meta_data = MetaData::new(DataType::PerpMarket, 0, true);
+        state.merps_group = *merps_group_ai.key;
+        state.bids = *bids_ai.key;
+        state.asks = *asks_ai.key;
+        state.event_queue = *event_queue_ai.key;
+        state.quote_lot_size = quote_lot_size;
+        state.index_oracle = merps_group.oracles[market_index];
+        state.contract_size = contract_size;
+
+        Ok(state)
+    }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
-        _program_id: &Pubkey,
+        program_id: &Pubkey,
+        merps_group_pk: &Pubkey,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        // TODO
-        Ok(Self::load_mut(account)?)
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        let state = Self::load_mut(account)?;
+        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MerpsErrorCode::Default)?;
+        check!(merps_group_pk == &state.merps_group, MerpsErrorCode::Default)?;
+        Ok(state)
     }
 
     pub fn gen_order_id(&mut self, side: Side, price: i64) -> i128 {
@@ -670,11 +740,15 @@ impl PerpMarket {
         let index_price = price_cache.price;
         let diff: I80F48 = (book_price / index_price) - ONE_I80F48;
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
-        let funding_delta: I80F48 =
-            diff * time_factor * I80F48::from_num(self.open_interest) * index_price;
-        self.total_funding += funding_delta;
+        let funding_delta: I80F48 = diff
+            * time_factor
+            * I80F48::from_num(self.open_interest)
+            * I80F48::from_num(self.contract_size)
+            * index_price;
 
+        self.total_funding += funding_delta;
         self.last_updated = now_ts;
+
         Ok(())
     }
 
