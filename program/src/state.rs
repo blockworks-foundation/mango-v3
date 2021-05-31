@@ -462,6 +462,12 @@ impl MerpsAccount {
 
         Ok(merps_account)
     }
+    pub fn get_native_deposit(&self, root_bank: &RootBank, token_i: usize) -> u64 {
+        (self.deposits[token_i] * root_bank.deposit_index).to_num()
+    }
+    pub fn get_native_borrow(&self, root_bank: &RootBank, token_i: usize) -> u64 {
+        (self.borrows[token_i] * root_bank.borrow_index).to_num()
+    }
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
     }
@@ -480,6 +486,7 @@ impl MerpsAccount {
         &self,
         merps_group: &MerpsGroup,
         merps_cache: &MerpsCache,
+        _open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> MerpsResult<I80F48> {
         // Value of all assets and liabs in quote currency
         let quote_i = QUOTE_INDEX;
@@ -511,14 +518,14 @@ impl MerpsAccount {
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
             if self.spot_open_orders[i] != Pubkey::default() {
-                //  TODO pass in open orders
+                //  TODO load open orders
                 //
-                // assets_val = self.open_orders_cache[i]
+                // assets_val = open_orders_ais[i]
                 //     .quote_total
                 //     .checked_add(assets_val)
                 //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-                // base_assets = self.open_orders_cache[i]
+                // base_assets = open_orders_ais[i]
                 //     .base_total
                 //     .checked_add(base_assets)
                 //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;

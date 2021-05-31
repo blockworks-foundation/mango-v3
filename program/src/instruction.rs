@@ -55,8 +55,19 @@ pub enum MerpsInstruction {
     ///
     /// Accounts expected by this instruction (10):
     ///
-    /// TODO
-    Withdraw { quantity: u64 },
+    /// 0. `[read]` merps_group_ai,   -
+    /// 1. `[write]` merps_account_ai, -
+    /// 2. `[read]` owner_ai,         -
+    /// 3. `[read]` merps_cache_ai,   -
+    /// 4. `[read]` root_bank_ai,     -
+    /// 5. `[write]` node_bank_ai,     -
+    /// 6. `[write]` vault_ai,         -
+    /// 7. `[write]` token_account_ai, -
+    /// 8. `[read]` signer_ai,        -
+    /// 9. `[read]` token_prog_ai,    -
+    /// 10. `[read]` clock_ai,         -
+    /// 11..+ `[]` open_orders_accs - open orders for each of the spot market
+    Withdraw { quantity: u64, allow_borrow: bool },
 
     /// Add a token to a merps group
     ///
@@ -145,8 +156,18 @@ impl MerpsInstruction {
                 MerpsInstruction::Deposit { quantity: u64::from_le_bytes(*quantity) }
             }
             3 => {
-                let data = array_ref![data, 0, 8];
-                MerpsInstruction::Withdraw { quantity: u64::from_le_bytes(*data) }
+                let data = array_ref![data, 0, 9];
+                let (quantity, allow_borrow) = array_refs![data, 8, 1];
+
+                let allow_borrow = match allow_borrow {
+                    [0] => false,
+                    [1] => true,
+                    _ => return None,
+                };
+                MerpsInstruction::Withdraw {
+                    quantity: u64::from_le_bytes(*quantity),
+                    allow_borrow: allow_borrow,
+                }
             }
             4 => {
                 let data = array_ref![data, 0, 32];
@@ -370,6 +391,43 @@ pub fn add_to_basket(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn withdraw(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    merps_cache_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+    vault_pk: &Pubkey,
+    token_account_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    open_orders_pks: &[Pubkey],
+
+    quantity: u64,
+    allow_borrow: bool,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new(*merps_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*merps_cache_pk, false),
+        AccountMeta::new_readonly(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+        AccountMeta::new(*vault_pk, false),
+        AccountMeta::new(*token_account_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MerpsInstruction::Withdraw { quantity, allow_borrow };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn borrow(
     program_id: &Pubkey,
     merps_group_pk: &Pubkey,
@@ -378,10 +436,11 @@ pub fn borrow(
     owner_pk: &Pubkey,
     root_bank_pk: &Pubkey,
     node_bank_pk: &Pubkey,
+    open_orders_pks: &[Pubkey],
 
     quantity: u64,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
@@ -390,6 +449,8 @@ pub fn borrow(
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
     ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new(*pk, false)));
 
     let instr = MerpsInstruction::Borrow { quantity };
     let data = instr.pack();

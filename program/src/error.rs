@@ -39,6 +39,8 @@ pub enum MerpsError {
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, IntoPrimitive)]
 #[repr(u32)]
 pub enum MerpsErrorCode {
+    #[error("MerpsErrorCode::InvalidCache")]
+    InvalidCache,
     #[error("MerpsErrorCode::InvalidOwner")]
     InvalidOwner,
     #[error("MerpsErrorCode::InvalidGroupOwner")]
