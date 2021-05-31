@@ -74,23 +74,15 @@ pub enum MerpsInstruction {
     /// Accounts expected by this instruction (7):
     ///
     /// 0. `[writable]` merps_group_ai - TODO
+    /// 1. `[]` spot_market_ai - TODO
+    /// 2. `[]` dex_program_ai - TODO
     /// 1. `[]` mint_ai - TODO
     /// 2. `[writable]` node_bank_ai - TODO
     /// 3. `[]` vault_ai - TODO
     /// 4. `[writable]` root_bank_ai - TODO
     /// 5. `[]` oracle_ai - TODO
     /// 6. `[signer]` admin_ai - TODO
-    AddAsset { maint_asset_weight: I80F48, init_asset_weight: I80F48 },
-
-    /// Add a spot market to a merps group
-    ///
-    /// Accounts expected by this instruction (4)
-    ///
-    /// 0. `[writable]` merps_group_ai - TODO
-    /// 1. `[]` spot_market_ai - TODO
-    /// 2. `[]` dex_program_ai - TODO
-    /// 3. `[signer]` admin_ai - TODO
-    AddSpotMarket,
+    AddSpotMarket { maint_asset_weight: I80F48, init_asset_weight: I80F48 },
 
     /// Add a spot market to a merps account basket
     ///
@@ -172,20 +164,19 @@ impl MerpsInstruction {
             4 => {
                 let data = array_ref![data, 0, 32];
                 let (maint_asset_weight, init_asset_weight) = array_refs![data, 16, 16];
-                MerpsInstruction::AddAsset {
+                MerpsInstruction::AddSpotMarket {
                     maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
                     init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
                 }
             }
-            5 => MerpsInstruction::AddSpotMarket,
-            6 => MerpsInstruction::AddToBasket,
-            7 => {
+            5 => MerpsInstruction::AddToBasket,
+            6 => {
                 let quantity = array_ref![data, 0, 8];
                 MerpsInstruction::Borrow { quantity: u64::from_le_bytes(*quantity) }
             }
-            8 => MerpsInstruction::CachePrices,
-            9 => MerpsInstruction::CacheRootBanks,
-            10 => {
+            7 => MerpsInstruction::CachePrices,
+            8 => MerpsInstruction::CacheRootBanks,
+            9 => {
                 let data_arr = array_ref![data, 0, 46];
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MerpsInstruction::PlaceSpotOrder { order }
@@ -262,7 +253,6 @@ pub fn init_merps_group(
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*merps_group_pk, false),
-        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
         AccountMeta::new_readonly(*signer_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
         AccountMeta::new_readonly(*quote_mint_pk, false),
@@ -325,9 +315,11 @@ pub fn deposit(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-pub fn add_asset(
+pub fn add_spot_market(
     program_id: &Pubkey,
     merps_group_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    dex_program_pk: &Pubkey,
     token_mint_pk: &Pubkey,
     node_bank_pk: &Pubkey,
     vault_pk: &Pubkey,
@@ -340,6 +332,8 @@ pub fn add_asset(
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+        AccountMeta::new_readonly(*dex_program_pk, false),
         AccountMeta::new_readonly(*token_mint_pk, false),
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new_readonly(*vault_pk, false),
@@ -348,26 +342,7 @@ pub fn add_asset(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr = MerpsInstruction::AddAsset { maint_asset_weight, init_asset_weight };
-    let data = instr.pack();
-    Ok(Instruction { program_id: *program_id, accounts, data })
-}
-
-pub fn add_spot_market(
-    program_id: &Pubkey,
-    merps_group_pk: &Pubkey,
-    spot_market_pk: &Pubkey,
-    dex_program_pk: &Pubkey,
-    admin_pk: &Pubkey,
-) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
-        AccountMeta::new(*merps_group_pk, false),
-        AccountMeta::new_readonly(*spot_market_pk, false),
-        AccountMeta::new_readonly(*dex_program_pk, false),
-        AccountMeta::new_readonly(*admin_pk, true),
-    ];
-
-    let instr = MerpsInstruction::AddSpotMarket;
+    let instr = MerpsInstruction::AddSpotMarket { maint_asset_weight, init_asset_weight };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -447,7 +422,6 @@ pub fn borrow(
         AccountMeta::new_readonly(*merps_cache_pk, false),
         AccountMeta::new_readonly(*root_bank_pk, false),
         AccountMeta::new(*node_bank_pk, false),
-        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
     ];
 
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new(*pk, false)));
@@ -466,7 +440,6 @@ pub fn cache_prices(
     let mut accounts = vec![
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_cache_pk, false),
-        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
     ];
     accounts.extend(oracle_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MerpsInstruction::CachePrices;
@@ -483,7 +456,6 @@ pub fn cache_root_banks(
     let mut accounts = vec![
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_cache_pk, false),
-        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
     ];
     accounts.extend(root_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MerpsInstruction::CacheRootBanks;

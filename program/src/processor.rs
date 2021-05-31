@@ -139,23 +139,23 @@ impl Processor {
         Ok(())
     }
 
+    /// Add asset and spot market to merps group
     /// Initialize a root bank and add it to the merps group
-    /// add_asset only adds the borrowing and lending functionality for an asset
     /// Requires a price oracle for this asset priced in quote currency
     /// Only allow admin to add to MerpsGroup
-
-    // get rid of this and combine with add_spot_market
-    fn add_asset(
+    // TODO think about how to remove an asset. Maybe this just can't be done?
+    fn add_spot_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         maint_asset_weight: I80F48,
         init_asset_weight: I80F48,
     ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 7;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
-
         let [
             merps_group_ai, // write
+            spot_market_ai, // read
+            dex_program_ai, // read
             mint_ai,        // read
             node_bank_ai,   // write
             vault_ai,       // read
@@ -164,8 +164,9 @@ impl Processor {
             admin_ai        // read
         ] = accounts;
 
-        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+
+        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
         let rent = Rent::get()?;
@@ -196,33 +197,6 @@ impl Processor {
         merps_group.oracles[token_index] = *oracle_ai.key;
         merps_group.num_tokens += 1;
 
-        Ok(())
-    }
-
-    // TODO think about how to remove an asset. Maybe this just can't be done?
-    /// Add spot market to merps group
-    fn add_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 4;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-
-        let [
-            merps_group_ai, // write
-            spot_market_ai, // read
-            dex_program_ai, // read
-            admin_ai        // read
-        ] = accounts;
-
-        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
-
-        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
-        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
-
-        // TODO check the base asset for this market has already been added
-        // TODO check the oracle for this market has already been added
-
-        let market_index = merps_group.num_markets;
-        let token_index = merps_group.num_tokens - 1;
-
         let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
         let sm_base_mint = spot_market.coin_mint;
         let sm_quote_mint = spot_market.pc_mint;
@@ -236,8 +210,9 @@ impl Processor {
             merps_group.tokens[QUOTE_INDEX].to_aligned_bytes(),
             MerpsErrorCode::Default
         )?;
-        check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
 
+        let market_index = merps_group.num_markets;
+        check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
         merps_group.spot_markets[market_index] = *spot_market_ai.key;
         merps_group.num_markets += 1;
 
@@ -1036,11 +1011,8 @@ impl Processor {
                 msg!("Merps: Withdraw");
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)?;
             }
-            MerpsInstruction::AddAsset { maint_asset_weight, init_asset_weight } => {
-                Self::add_asset(program_id, accounts, maint_asset_weight, init_asset_weight)?;
-            }
-            MerpsInstruction::AddSpotMarket => {
-                Self::add_spot_market(program_id, accounts)?;
+            MerpsInstruction::AddSpotMarket { maint_asset_weight, init_asset_weight } => {
+                Self::add_spot_market(program_id, accounts, maint_asset_weight, init_asset_weight)?;
             }
             MerpsInstruction::AddToBasket => {
                 Self::add_to_basket(program_id, accounts)?;

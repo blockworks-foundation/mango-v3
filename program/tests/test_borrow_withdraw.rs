@@ -8,10 +8,10 @@ use helpers::*;
 use merps::{
     entrypoint::process_instruction,
     instruction::{
-        add_asset, add_spot_market, add_to_basket, borrow, cache_prices, cache_root_banks, deposit,
+        add_spot_market, add_to_basket, cache_prices, cache_root_banks, deposit,
         init_merps_account, withdraw,
     },
-    state::{MerpsAccount, MerpsCache, MerpsGroup, NodeBank, ONE_I80F48, QUOTE_INDEX},
+    state::{MerpsAccount, MerpsGroup, NodeBank, QUOTE_INDEX},
 };
 use solana_program::account_info::AccountInfo;
 use solana_program_test::*;
@@ -21,7 +21,6 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::Transaction,
 };
-use spl_token::state::{Account as Token, AccountState, Mint};
 use std::mem::size_of;
 
 #[tokio::test]
@@ -101,9 +100,11 @@ async fn test_borrow_succeeds() {
                     deposit_amount,
                 )
                 .unwrap(),
-                add_asset(
+                add_spot_market(
                     &program_id,
                     &merps_group_pk,
+                    &btc_usdt_spot_mkt.pubkey,
+                    &dex_program_pk,
                     &btc_mint.pubkey,
                     &btc_root_bank.node_banks[0].pubkey,
                     &btc_vault.pubkey,
@@ -112,14 +113,6 @@ async fn test_borrow_succeeds() {
                     &admin.pubkey(),
                     I80F48::from_num(0.83),
                     I80F48::from_num(1),
-                )
-                .unwrap(),
-                add_spot_market(
-                    &program_id,
-                    &merps_group_pk,
-                    &btc_usdt_spot_mkt.pubkey,
-                    &dex_program_pk,
-                    &admin.pubkey(),
                 )
                 .unwrap(),
                 add_to_basket(
