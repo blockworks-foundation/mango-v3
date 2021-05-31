@@ -486,7 +486,7 @@ impl MerpsAccount {
         &self,
         merps_group: &MerpsGroup,
         merps_cache: &MerpsCache,
-        _open_orders_ais: &[AccountInfo; MAX_PAIRS],
+        _spot_open_orders_ais: &[AccountInfo],
     ) -> MerpsResult<I80F48> {
         // Value of all assets and liabs in quote currency
         let quote_i = QUOTE_INDEX;

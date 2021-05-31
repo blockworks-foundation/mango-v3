@@ -428,12 +428,6 @@ impl Processor {
     }
 
     #[allow(unused)]
-    fn cache_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO
-        Ok(())
-    }
-
-    #[allow(unused)]
     fn cache_perp_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         // TODO
         Ok(())
@@ -930,7 +924,7 @@ impl Processor {
             client_order_id,
         )?;
 
-        let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache)?;
+        let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache, &[])?;
         check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())

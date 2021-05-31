@@ -63,8 +63,6 @@ pub enum MerpsErrorCode {
     GroupNotRentExempt,
     #[error("MerpsErrorCode::OutOfSpace")]
     OutOfSpace,
-    #[error("MerpsErrorCode::InvalidCache")]
-    InvalidCache,
 
     #[error("MerpsErrorCode::AccountNotRentExempt")]
     AccountNotRentExempt,
