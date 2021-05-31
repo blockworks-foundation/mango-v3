@@ -181,6 +181,28 @@ pub struct RootBank {
 }
 
 impl RootBank {
+    pub fn load_and_init<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        node_bank_ai: &'a AccountInfo,
+
+        rent: &Rent,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        let mut root_bank = Self::load_mut(account)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), size_of::<Self>()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+
+        root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
+        root_bank.node_banks[0] = *node_bank_ai.key;
+        root_bank.num_node_banks = 1;
+        root_bank.deposit_index = ONE_I80F48;
+        root_bank.borrow_index = ONE_I80F48;
+
+        Ok(root_bank)
+    }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -242,6 +264,27 @@ pub struct NodeBank {
 }
 
 impl NodeBank {
+    pub fn load_and_init<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        vault_ai: &'a AccountInfo,
+
+        rent: &Rent,
+    ) -> MerpsResult<RefMut<'a, Self>> {
+        let mut node_bank = Self::load_mut(account)?;
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), size_of::<Self>()),
+            MerpsErrorCode::AccountNotRentExempt
+        )?;
+
+        node_bank.meta_data = MetaData::new(DataType::NodeBank, 0, true);
+        node_bank.deposits = ZERO_I80F48;
+        node_bank.borrows = ZERO_I80F48;
+        node_bank.vault = *vault_ai.key;
+
+        Ok(node_bank)
+    }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
