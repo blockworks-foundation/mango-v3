@@ -462,6 +462,26 @@ impl MerpsAccount {
 
         Ok(merps_account)
     }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group_pk: &Pubkey,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<MerpsAccount>(), MerpsErrorCode::Default)?;
+
+        let merps_account = Self::load(account)?;
+
+        check_eq!(
+            merps_account.meta_data.data_type,
+            DataType::MerpsAccount as u8,
+            MerpsErrorCode::Default
+        )?;
+        check!(merps_account.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
+
+        Ok(merps_account)
+    }
     pub fn get_native_deposit(&self, root_bank: &RootBank, token_i: usize) -> u64 {
         (self.deposits[token_i] * root_bank.deposit_index).to_num()
     }

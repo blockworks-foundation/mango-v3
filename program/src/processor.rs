@@ -860,9 +860,57 @@ impl Processor {
     }
 
     #[allow(unused)]
-    fn cancel_spot_order() -> MerpsResult<()> {
-        // TODO
-        unimplemented!()
+    fn cancel_spot_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        data: Vec<u8>,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 11;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            merps_group_ai,
+            owner_ai,  // signer
+            merps_account_ai,
+            clock_ai,
+            dex_prog_ai,
+            spot_market_ai,
+            bids_ai,
+            asks_ai,
+            open_orders_ai,
+            signer_ai,
+            dex_event_queue_ai,
+        ] = accounts;
+
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        let merps_account =
+            MerpsAccount::load_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+        let clock = Clock::from_account_info(clock_ai)?;
+
+        check_eq!(dex_prog_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
+
+        let market_i = merps_group.find_spot_market_index(spot_market_ai.key).unwrap();
+        check_eq!(
+            &merps_account.spot_open_orders[market_i],
+            open_orders_ai.key,
+            MerpsErrorCode::Default
+        )?;
+
+        let signer_seeds = gen_signer_seeds(&merps_group.signer_nonce, merps_group_ai.key);
+        invoke_cancel_order(
+            dex_prog_ai,
+            spot_market_ai,
+            bids_ai,
+            asks_ai,
+            open_orders_ai,
+            signer_ai,
+            dex_event_queue_ai,
+            data,
+            &[&signer_seeds],
+        )?;
+        Ok(())
     }
 
     #[allow(unused)]
@@ -1164,6 +1212,42 @@ fn invoke_settle_funds<'a>(
         quote_vault_acc.clone(),
         dex_signer_acc.clone(),
         token_prog_acc.clone(),
+    ];
+    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
+
+fn invoke_cancel_order<'a>(
+    dex_prog_ai: &AccountInfo<'a>,
+    spot_market_ai: &AccountInfo<'a>,
+    bids_ai: &AccountInfo<'a>,
+    asks_ai: &AccountInfo<'a>,
+    open_orders_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    dex_event_queue_ai: &AccountInfo<'a>,
+    data: Vec<u8>,
+    signers_seeds: &[&[&[u8]]],
+) -> ProgramResult {
+    let instruction = Instruction {
+        program_id: *dex_prog_ai.key,
+        data,
+        accounts: vec![
+            AccountMeta::new(*spot_market_ai.key, false),
+            AccountMeta::new(*bids_ai.key, false),
+            AccountMeta::new(*asks_ai.key, false),
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new(*dex_event_queue_ai.key, false),
+        ],
+    };
+
+    let account_infos = [
+        dex_prog_ai.clone(),
+        spot_market_ai.clone(),
+        bids_ai.clone(),
+        asks_ai.clone(),
+        open_orders_ai.clone(),
+        signer_ai.clone(),
+        dex_event_queue_ai.clone(),
     ];
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
