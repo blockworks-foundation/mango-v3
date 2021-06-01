@@ -63,6 +63,8 @@ pub enum MerpsErrorCode {
     GroupNotRentExempt,
     #[error("MerpsErrorCode::OutOfSpace")]
     OutOfSpace,
+    #[error("MerpsErrorCode::TooManyOpenOrders Reached the maximum number of open orders for this market")]
+    TooManyOpenOrders,
 
     #[error("MerpsErrorCode::AccountNotRentExempt")]
     AccountNotRentExempt,

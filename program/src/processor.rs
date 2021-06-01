@@ -891,7 +891,7 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
     ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai,     // read
@@ -902,14 +902,13 @@ impl Processor {
             bids_ai,            // write
             asks_ai,            // write
             event_queue_ai,     // write
-            clock_ai,           // read
         ] = accounts;
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
         let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
-        let clock = Clock::from_account_info(clock_ai)?;
+        let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
         check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
@@ -918,14 +917,17 @@ impl Processor {
         check!(quantity > 0, MerpsErrorCode::Default)?;
 
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
-        if !merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts) {
-            return Ok(());
-        }
 
-        let mut book = Book::load(program_id, bids_ai, asks_ai)?;
-        let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
+            MerpsErrorCode::Default
+        )?;
+
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
         book.new_order(
             &mut event_queue,
@@ -965,7 +967,6 @@ impl Processor {
         // TODO - still need to figure out how liquidations for perps will work, but
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
-        //
         unimplemented!()
     }
 

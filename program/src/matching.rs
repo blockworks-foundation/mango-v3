@@ -1,4 +1,4 @@
-use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{DataType, MerpsAccount, MetaData, PerpMarket};
 use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
@@ -174,13 +174,22 @@ pub struct BookSide {
 }
 
 impl BookSide {
-    #[allow(unused)]
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
+        perp_market: &PerpMarket,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        // TODO
-        Ok(Self::load_mut(account)?)
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        let state = Self::load_mut(account)?;
+        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+
+        match DataType::try_from(state.meta_data.data_type).unwrap() {
+            DataType::Bids => check!(account.key == &perp_market.bids, MerpsErrorCode::Default)?,
+            DataType::Asks => check!(account.key == &perp_market.asks, MerpsErrorCode::Default)?,
+            _ => return Err(throw!()),
+        }
+
+        Ok(state)
     }
 
     pub fn load_and_init<'a>(
@@ -405,14 +414,15 @@ pub struct Book<'a> {
 }
 
 impl<'a> Book<'a> {
-    pub fn load(
+    pub fn load_checked(
         program_id: &Pubkey,
         bids_ai: &'a AccountInfo,
         asks_ai: &'a AccountInfo,
+        perp_market: &PerpMarket,
     ) -> MerpsResult<Self> {
         Ok(Self {
-            bids: BookSide::load_mut_checked(bids_ai, program_id)?,
-            asks: BookSide::load_mut_checked(asks_ai, program_id)?,
+            bids: BookSide::load_mut_checked(bids_ai, program_id, perp_market)?,
+            asks: BookSide::load_mut_checked(asks_ai, program_id, perp_market)?,
         })
     }
 
@@ -488,8 +498,8 @@ impl<'a> Book<'a> {
         #[allow(unused_variables)]
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel => (false, false),
-            OrderType::PostOnly => (true, true),
+            OrderType::ImmediateOrCancel => unimplemented!(),
+            OrderType::PostOnly => unimplemented!(),
         };
         let order_id = market.gen_order_id(Side::Bid, price);
 
@@ -555,7 +565,7 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.bids.insert_leaf(&new_bid)?;
-            merps_account.add_perp_bid(&new_bid)?;
+            merps_account.perp_open_orders[market_index].add_order(Side::Bid, &new_bid)?;
         }
 
         // Edit merps_account if some contracts were matched

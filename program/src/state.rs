@@ -12,6 +12,7 @@ use crate::matching::{Book, LeafNode, Side};
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use solana_program::sysvar::rent::Rent;
 
 pub const MAX_TOKENS: usize = 32;
@@ -29,6 +30,7 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO add GUI hoster fee discount
 
 #[repr(u8)]
+#[derive(IntoPrimitive, TryFromPrimitive)]
 pub enum DataType {
     MerpsGroup = 0,
     MerpsAccount,
@@ -58,23 +60,33 @@ impl MetaData {
 
 // #[derive(Copy, Clone, Pod)]
 // #[repr(C)]
+// pub struct TokenInfo {
+//     pub mint: Pubkey,
+//     pub root_bank: Pubkey,
+//     pub decimals: u8,
+//     pub padding: [u8; 7],
+// }
+//
+// #[derive(Copy, Clone, Pod)]
+// #[repr(C)]
 // pub struct MarketInfo {
-//     pub token: Pubkey,     // empty if spot market empty
-//     pub root_bank: Pubkey, // empty if spot market empty
-//     pub oracle_index: usize,
-//     pub spot_market: Pubkey, // One of these may be empty
+//     pub spot_market: Pubkey,
 //     pub maint_asset_weight: I80F48,
 //     pub init_asset_weight: I80F48,
+//     pub maint_liab_weight: I80F48,
+//     pub init_liab_weight: I80F48,
 // }
 //
 // #[derive(Copy, Clone, Pod)]
 // #[repr(C)]
 // pub struct PerpMarketInfo {
-//     pub oracle_index: usize,
 //     pub perp_market: Pubkey, // One of these may be empty
-//     pub maint_perp_weight: I80F48,
-//     pub init_perp_weight: I80F48,
-//     pub contract_size: i64,
+//     pub maint_asset_weight: I80F48,
+//     pub init_asset_weight: I80F48,
+//     pub maint_liab_weight: I80F48,
+//     pub init_liab_weight: I80F48,
+//     pub base_lot_size: i64,  // The lot size of the underlying
+//     pub quote_lot_size: i64, // min tick
 // }
 
 #[derive(Copy, Clone, Pod, Loadable)]
@@ -455,6 +467,31 @@ pub struct PerpOpenOrders {
     pub client_order_ids: [u64; 32],
 }
 
+impl PerpOpenOrders {
+    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MerpsResult<()> {
+        check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
+        let slot = self.is_free_bits.trailing_zeros();
+        let slot_mask = 1u32 << slot;
+        self.is_free_bits &= !slot_mask;
+        match side {
+            Side::Bid => {
+                // TODO make checked
+                self.is_bid_bits |= slot_mask;
+                self.total_base += order.quantity;
+                self.total_quote -= order.quantity * order.price();
+            }
+            Side::Ask => {
+                self.is_bid_bits &= !slot_mask;
+                self.total_base -= order.quantity;
+                self.total_quote += order.quantity * order.price();
+            }
+        };
+
+        self.orders[slot as usize] = order.key;
+        Ok(())
+    }
+}
+
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsAccount {
@@ -648,8 +685,20 @@ impl MerpsAccount {
                 }
 
                 // Account for open orders
-                let _oo_base = I80F48::from_num(self.perp_open_orders[i].total_base); // num contracts
+
+                let oo_base = I80F48::from_num(self.perp_open_orders[i].total_base); // num contracts
                 let _oo_quote = I80F48::from_num(self.perp_open_orders[i].total_quote);
+
+                if self.base_positions[i] > 0 {
+                    if oo_base > 0 { // open long
+                    } else if oo_base < 0 {
+                        // close long
+                    }
+                } else if self.base_positions[i] < 0 {
+                    if oo_base > 0 { // close short
+                    } else if oo_base < 0 { // open short
+                    }
+                }
 
                 // lot price
 
@@ -685,16 +734,6 @@ impl MerpsAccount {
         } else {
             assets_val.checked_div(liabs_val).ok_or(throw!())
         }
-    }
-
-    #[allow(unused)]
-    pub fn add_perp_bid(&mut self, order: &LeafNode) -> MerpsResult<()> {
-        unimplemented!()
-    }
-
-    #[allow(unused)]
-    pub fn add_perp_ask(&mut self, order: &LeafNode) -> MerpsResult<()> {
-        unimplemented!()
     }
 }
 
@@ -795,8 +834,10 @@ impl PerpMarket {
         // Get current book price
         // compare it to index price using the merps cache
 
+        // TODO handle case of one sided book
+        // TODO get impact bid and impact ask if compute allows
         let bid = book.get_best_bid_price().unwrap();
-        let ask = book.get_best_ask_price().unwrap(); // TODO handle case of one sided book
+        let ask = book.get_best_ask_price().unwrap();
 
         let book_price = self.lot_to_native_price((bid + ask) / 2);
 
