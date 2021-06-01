@@ -26,8 +26,8 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
-    PerpMarket, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, MAX_PAIRS,
-    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
+    MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use mango_common::Loadable;
@@ -154,7 +154,7 @@ impl Processor {
         maint_asset_weight: I80F48,
         init_asset_weight: I80F48,
     ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai, // write
@@ -164,7 +164,6 @@ impl Processor {
             node_bank_ai,   // write
             vault_ai,       // read
             root_bank_ai,   // write
-            oracle_ai,      // read
             admin_ai        // read
         ] = accounts;
 
@@ -186,16 +185,10 @@ impl Processor {
         check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
 
         // Make sure spot market at this index not already initialized
-        check!(
-            merps_group.spot_markets[market_index].spot_market == Pubkey::default(),
-            MerpsErrorCode::Default
-        )?;
+        check!(merps_group.spot_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
         // Make sure token at this index not already initialized
-        check!(
-            merps_group.tokens[market_index].mint != Pubkey::default(),
-            MerpsErrorCode::Default
-        )?;
+        check!(merps_group.tokens[market_index].is_empty(), MerpsErrorCode::Default)?;
         let _root_bank = init_root_bank(
             program_id,
             &merps_group,
@@ -265,7 +258,8 @@ impl Processor {
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
         let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
-        merps_group.oracles[merps_group.num_oracles] = *oracle_ai.key;
+        let oracle_index = merps_group.num_oracles;
+        merps_group.oracles[oracle_index] = *oracle_ai.key;
         merps_group.num_oracles += 1;
 
         Ok(())
@@ -278,9 +272,9 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-        maint_perp_weight: I80F48,
-        init_perp_weight: I80F48,
-        contract_size: i64,
+        maint_asset_weight: I80F48,
+        init_asset_weight: I80F48,
+        base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
         // TODO
@@ -316,15 +310,19 @@ impl Processor {
         check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
 
         // Make sure perp market at this index not already initialized
-        check!(
-            merps_group.perp_markets[market_index] == Pubkey::default(),
-            MerpsErrorCode::Default
-        )?;
+        check!(merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
-        merps_group.perp_markets[market_index] = *perp_market_ai.key;
-        merps_group.maint_perp_weights[market_index] = maint_perp_weight;
-        merps_group.init_perp_weights[market_index] = init_perp_weight;
-        merps_group.contract_sizes[market_index] = contract_size;
+        check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
+        check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
+        merps_group.perp_markets[market_index] = PerpMarketInfo {
+            perp_market: *perp_market_ai.key,
+            maint_asset_weight,
+            init_asset_weight,
+            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
+            init_liab_weight: ONE_I80F48 / init_asset_weight,
+            base_lot_size,
+            quote_lot_size,
+        };
 
         // Initialize the Bids
         let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
@@ -346,7 +344,7 @@ impl Processor {
             &merps_group,
             &rent,
             market_index,
-            contract_size,
+            base_lot_size,
             quote_lot_size,
         )?;
         Ok(())

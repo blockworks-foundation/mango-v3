@@ -81,8 +81,7 @@ pub enum MerpsInstruction {
     /// 2. `[writable]` node_bank_ai - TODO
     /// 3. `[]` vault_ai - TODO
     /// 4. `[writable]` root_bank_ai - TODO
-    /// 5. `[]` oracle_ai - TODO
-    /// 6. `[signer]` admin_ai - TODO
+    /// 5. `[signer]` admin_ai - TODO
     AddSpotMarket { market_index: usize, maint_asset_weight: I80F48, init_asset_weight: I80F48 },
 
     /// Add a spot market to a merps account basket
@@ -336,7 +335,6 @@ pub fn add_spot_market(
     node_bank_pk: &Pubkey,
     vault_pk: &Pubkey,
     root_bank_pk: &Pubkey,
-    oracle_pk: &Pubkey,
     admin_pk: &Pubkey,
 
     market_index: usize,
@@ -351,7 +349,6 @@ pub fn add_spot_market(
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new_readonly(*vault_pk, false),
         AccountMeta::new(*root_bank_pk, false),
-        AccountMeta::new_readonly(*oracle_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
@@ -473,6 +470,23 @@ pub fn cache_root_banks(
     ];
     accounts.extend(root_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MerpsInstruction::CacheRootBanks;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn add_oracle(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    oracle_pk: &Pubkey,
+    admin_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(*oracle_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MerpsInstruction::AddOracle;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

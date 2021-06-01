@@ -67,6 +67,12 @@ pub struct TokenInfo {
     pub padding: [u8; 7],
 }
 
+impl TokenInfo {
+    pub fn is_empty(&self) -> bool {
+        self.mint == Pubkey::default()
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct SpotMarketInfo {
@@ -75,6 +81,12 @@ pub struct SpotMarketInfo {
     pub init_asset_weight: I80F48,
     pub maint_liab_weight: I80F48,
     pub init_liab_weight: I80F48,
+}
+
+impl SpotMarketInfo {
+    pub fn is_empty(&self) -> bool {
+        self.spot_market == Pubkey::default()
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -87,6 +99,12 @@ pub struct PerpMarketInfo {
     pub init_liab_weight: I80F48,
     pub base_lot_size: i64,  // The lot size of the underlying
     pub quote_lot_size: i64, // min tick
+}
+
+impl PerpMarketInfo {
+    pub fn is_empty(&self) -> bool {
+        self.perp_market == Pubkey::default()
+    }
 }
 
 #[derive(Copy, Clone, Pod, Loadable)]
@@ -156,13 +174,18 @@ impl MerpsGroup {
         self.oracles.iter().position(|pk| pk == oracle_pk) // TODO profile and optimize
     }
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
-        self.root_banks.iter().position(|pk| pk == root_bank_pk) // TODO profile and optimize
+        // TODO profile and optimize
+        self.tokens.iter().position(|token_info| &token_info.root_bank == root_bank_pk)
     }
     pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
-        self.spot_markets.iter().position(|pk| pk == spot_market_pk)
+        self.spot_markets
+            .iter()
+            .position(|spot_market_info| &spot_market_info.spot_market == spot_market_pk)
     }
     pub fn find_perp_market_index(&self, perp_market_pk: &Pubkey) -> Option<usize> {
-        self.perp_markets.iter().position(|pk| pk == perp_market_pk)
+        self.perp_markets
+            .iter()
+            .position(|perp_market_info| &perp_market_info.perp_market == perp_market_pk)
     }
 }
 
@@ -620,19 +643,20 @@ impl MerpsAccount {
                 //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
             }
 
-            if merps_group.perp_markets[i] != Pubkey::default() {
+            let perp_market_info = &merps_group.perp_markets[i];
+            if !perp_market_info.is_empty() {
                 // TODO fill this in once perp logic is a little bit more clear
                 let native_pos = I80F48::from_num(
                     self.base_positions[i]
                         + self.perp_open_orders[i]
                             .total_base
-                            .checked_mul(merps_group.contract_sizes[i])
+                            .checked_mul(perp_market_info.base_lot_size)
                             .ok_or(throw_err!(MerpsErrorCode::MathError))?,
                 );
 
                 if self.base_positions[i] > 0 {
                     assets_val = native_pos
-                        .checked_mul(merps_group.init_perp_weights[i])
+                        .checked_mul(perp_market_info.init_asset_weight)
                         .ok_or(math_err!())?
                         .checked_mul(merps_cache.price_cache[i].price)
                         .ok_or(math_err!())?
@@ -640,7 +664,7 @@ impl MerpsAccount {
                         .ok_or(math_err!())?;
                 } else if self.base_positions[i] < 0 {
                     liabs_val = -native_pos
-                        .checked_mul(ONE_I80F48 / merps_group.init_perp_weights[i])
+                        .checked_mul(perp_market_info.init_liab_weight)
                         .ok_or(math_err!())?
                         .checked_mul(merps_cache.price_cache[i].price)
                         .ok_or(math_err!())?
@@ -698,13 +722,10 @@ impl MerpsAccount {
                 */
             }
 
-            let asset_weight = merps_group.init_asset_weights[i];
-            let liab_weight = ONE_I80F48 / asset_weight;
-
             assets_val = base_assets
                 .checked_mul(merps_cache.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
-                .checked_mul(asset_weight)
+                .checked_mul(merps_group.spot_markets[i].init_asset_weight)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
                 .checked_add(assets_val)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;
@@ -712,7 +733,7 @@ impl MerpsAccount {
             liabs_val = base_liabs
                 .checked_mul(merps_cache.price_cache[i].price)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
-                .checked_mul(liab_weight)
+                .checked_mul(merps_group.spot_markets[i].init_liab_weight)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?
                 .checked_add(liabs_val)
                 .ok_or(throw_err!(MerpsErrorCode::MathError))?;

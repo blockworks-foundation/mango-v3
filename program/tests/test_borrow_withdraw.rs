@@ -5,6 +5,7 @@ mod helpers;
 
 use fixed::types::I80F48;
 use helpers::*;
+use merps::instruction::add_oracle;
 use merps::{
     entrypoint::process_instruction,
     instruction::{
@@ -100,6 +101,8 @@ async fn test_borrow_succeeds() {
                     deposit_amount,
                 )
                 .unwrap(),
+                add_oracle(&program_id, &merps_group_pk, &btc_usdt.pubkey, &admin.pubkey())
+                    .unwrap(),
                 add_spot_market(
                     &program_id,
                     &merps_group_pk,
@@ -109,8 +112,8 @@ async fn test_borrow_succeeds() {
                     &btc_root_bank.node_banks[0].pubkey,
                     &btc_vault.pubkey,
                     &btc_root_bank.pubkey,
-                    &btc_usdt.pubkey,
                     &admin.pubkey(),
+                    0,
                     I80F48::from_num(0.83),
                     I80F48::from_num(1),
                 )
@@ -167,7 +170,7 @@ async fn test_borrow_succeeds() {
                     &program_id,
                     &merps_group_pk,
                     &merps_group.merps_cache,
-                    &[merps_group.root_banks[QUOTE_INDEX], btc_root_bank.pubkey],
+                    &[merps_group.tokens[QUOTE_INDEX].root_bank, btc_root_bank.pubkey],
                 )
                 .unwrap(),
                 withdraw(
@@ -176,7 +179,7 @@ async fn test_borrow_succeeds() {
                     &merps_account_pk,
                     &user.pubkey(),
                     &merps_group.merps_cache,
-                    &merps_group.root_banks[borrow_token_index],
+                    &merps_group.tokens[borrow_token_index].root_bank,
                     &btc_root_bank.node_banks[0].pubkey,
                     &btc_vault.pubkey,
                     &user_btc_account.pubkey,
