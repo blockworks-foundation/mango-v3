@@ -178,6 +178,7 @@ impl Processor {
         // if mi > num_markets => we are attempting to skip
         check!(market_index <= merps_group.num_markets, MerpsErrorCode::Default)?;
         if market_index == merps_group.num_markets {
+            // implies we want to expand num_markets
             merps_group.num_markets += 1;
         }
 
@@ -189,8 +190,6 @@ impl Processor {
             merps_group.spot_markets[market_index].spot_market == Pubkey::default(),
             MerpsErrorCode::Default
         )?;
-
-        let rent = Rent::get()?;
 
         // Make sure token at this index not already initialized
         check!(
@@ -204,10 +203,10 @@ impl Processor {
             vault_ai,
             root_bank_ai,
             node_bank_ai,
-            &rent,
+            &Rent::get()?,
         )?;
 
-        let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
+        let mint = Mint::unpack(&mint_ai.try_borrow_data()?)?;
         merps_group.tokens[market_index] = TokenInfo {
             mint: *mint_ai.key,
             root_bank: *root_bank_ai.key,
@@ -236,12 +235,12 @@ impl Processor {
 
         check_eq!(
             identity(spot_market.coin_mint),
-            merps_group.tokens[token_index].to_aligned_bytes(),
+            mint_ai.key.to_aligned_bytes(),
             MerpsErrorCode::Default
         )?;
         check_eq!(
             identity(spot_market.pc_mint),
-            merps_group.tokens[QUOTE_INDEX].to_aligned_bytes(),
+            merps_group.tokens[QUOTE_INDEX].mint.to_aligned_bytes(),
             MerpsErrorCode::Default
         )?;
 
@@ -1041,8 +1040,18 @@ impl Processor {
                 msg!("Merps: Withdraw");
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)?;
             }
-            MerpsInstruction::AddSpotMarket { maint_asset_weight, init_asset_weight } => {
-                Self::add_spot_market(program_id, accounts, maint_asset_weight, init_asset_weight)?;
+            MerpsInstruction::AddSpotMarket {
+                market_index,
+                maint_asset_weight,
+                init_asset_weight,
+            } => {
+                Self::add_spot_market(
+                    program_id,
+                    accounts,
+                    market_index,
+                    maint_asset_weight,
+                    init_asset_weight,
+                )?;
             }
             MerpsInstruction::AddToBasket => {
                 Self::add_to_basket(program_id, accounts)?;

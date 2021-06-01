@@ -82,7 +82,7 @@ pub enum MerpsInstruction {
     /// 4. `[writable]` root_bank_ai - TODO
     /// 5. `[]` oracle_ai - TODO
     /// 6. `[signer]` admin_ai - TODO
-    AddSpotMarket { maint_asset_weight: I80F48, init_asset_weight: I80F48 },
+    AddSpotMarket { market_index: usize, maint_asset_weight: I80F48, init_asset_weight: I80F48 },
 
     /// Add a spot market to a merps account basket
     ///
@@ -162,9 +162,11 @@ impl MerpsInstruction {
                 }
             }
             4 => {
-                let data = array_ref![data, 0, 32];
-                let (maint_asset_weight, init_asset_weight) = array_refs![data, 16, 16];
+                let data = array_ref![data, 0, 40];
+                let (market_index, maint_asset_weight, init_asset_weight) =
+                    array_refs![data, 8, 16, 16];
                 MerpsInstruction::AddSpotMarket {
+                    market_index: usize::from_le_bytes(*market_index),
                     maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
                     init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
                 }
@@ -327,6 +329,7 @@ pub fn add_spot_market(
     oracle_pk: &Pubkey,
     admin_pk: &Pubkey,
 
+    market_index: usize,
     maint_asset_weight: I80F48,
     init_asset_weight: I80F48,
 ) -> Result<Instruction, ProgramError> {
@@ -342,7 +345,8 @@ pub fn add_spot_market(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr = MerpsInstruction::AddSpotMarket { maint_asset_weight, init_asset_weight };
+    let instr =
+        MerpsInstruction::AddSpotMarket { market_index, maint_asset_weight, init_asset_weight };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
