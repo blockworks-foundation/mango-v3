@@ -113,7 +113,7 @@ async fn test_borrow_succeeds() {
                     &btc_vault.pubkey,
                     &btc_root_bank.pubkey,
                     &admin.pubkey(),
-                    0,
+                    0, // index of the oracle
                     I80F48::from_num(0.83),
                     I80F48::from_num(1),
                 )

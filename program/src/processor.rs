@@ -174,13 +174,6 @@ impl Processor {
 
         check!(market_index < merps_group.num_oracles, MerpsErrorCode::Default)?;
 
-        // if mi > num_markets => we are attempting to skip
-        check!(market_index <= merps_group.num_markets, MerpsErrorCode::Default)?;
-        if market_index == merps_group.num_markets {
-            // implies we want to expand num_markets
-            merps_group.num_markets += 1;
-        }
-
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
         check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
 
@@ -210,7 +203,7 @@ impl Processor {
         // check that maint weight is lower than init asset weight
         check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
         check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
-        // check!(maint_asset_weight <= 1, MerpsErrorCode::Default)?;
+        check!(maint_asset_weight <= 1, MerpsErrorCode::Default)?;
 
         merps_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
@@ -299,12 +292,6 @@ impl Processor {
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
         check!(market_index < merps_group.num_oracles, MerpsErrorCode::Default)?;
-
-        // if mi > num_markets => we are attempting to skip
-        check!(market_index <= merps_group.num_markets, MerpsErrorCode::Default)?;
-        if market_index == merps_group.num_markets {
-            merps_group.num_markets += 1;
-        }
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
         check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;

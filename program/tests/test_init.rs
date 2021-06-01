@@ -31,7 +31,7 @@ async fn test_init_merps_group() {
 
     let merps_group = add_merps_group_prodlike(&mut test, program_id);
 
-    assert_eq!(merps_group.num_markets, 0);
+    assert_eq!(merps_group.num_oracles, 0);
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
 

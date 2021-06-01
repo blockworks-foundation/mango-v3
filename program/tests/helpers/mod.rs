@@ -251,7 +251,7 @@ pub struct TestMerpsGroup {
     pub merps_cache_pk: Pubkey,
 
     pub num_tokens: usize,
-    pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
+    pub num_oracles: usize, // Note: does not increase if there is a spot and perp market for same base token
 
     pub tokens: Vec<TestMint>,
     // pub oracles: Vec<TestAggregator>,
@@ -320,7 +320,7 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         tokens,
         root_banks,
         num_tokens: 1,
-        num_markets: 0,
+        num_oracles: 0,
         valid_interval: 5,
     }
 }

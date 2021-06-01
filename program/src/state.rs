@@ -111,8 +111,6 @@ impl PerpMarketInfo {
 #[repr(C)]
 pub struct MerpsGroup {
     pub meta_data: MetaData,
-
-    pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
     pub num_oracles: usize, // incremented every time add_oracle is called
 
     pub tokens: [TokenInfo; MAX_TOKENS],
@@ -445,7 +443,7 @@ impl MerpsCache {
             return false;
         }
 
-        for i in 0..merps_group.num_markets {
+        for i in 0..merps_group.num_oracles {
             // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
             if !merps_account.in_basket[i] {
                 continue;
@@ -612,7 +610,7 @@ impl MerpsAccount {
             .checked_mul(self.borrows[quote_i])
             .ok_or(throw_err!(MerpsErrorCode::MathError))?;
 
-        for i in 0..merps_group.num_markets {
+        for i in 0..merps_group.num_oracles {
             // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
             if !self.in_basket[i] {
                 continue;
