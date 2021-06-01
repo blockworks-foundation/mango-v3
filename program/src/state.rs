@@ -58,65 +58,52 @@ impl MetaData {
     }
 }
 
-// #[derive(Copy, Clone, Pod)]
-// #[repr(C)]
-// pub struct TokenInfo {
-//     pub mint: Pubkey,
-//     pub root_bank: Pubkey,
-//     pub decimals: u8,
-//     pub padding: [u8; 7],
-// }
-//
-// #[derive(Copy, Clone, Pod)]
-// #[repr(C)]
-// pub struct MarketInfo {
-//     pub spot_market: Pubkey,
-//     pub maint_asset_weight: I80F48,
-//     pub init_asset_weight: I80F48,
-//     pub maint_liab_weight: I80F48,
-//     pub init_liab_weight: I80F48,
-// }
-//
-// #[derive(Copy, Clone, Pod)]
-// #[repr(C)]
-// pub struct PerpMarketInfo {
-//     pub perp_market: Pubkey, // One of these may be empty
-//     pub maint_asset_weight: I80F48,
-//     pub init_asset_weight: I80F48,
-//     pub maint_liab_weight: I80F48,
-//     pub init_liab_weight: I80F48,
-//     pub base_lot_size: i64,  // The lot size of the underlying
-//     pub quote_lot_size: i64, // min tick
-// }
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct TokenInfo {
+    pub mint: Pubkey,
+    pub root_bank: Pubkey,
+    pub decimals: u8,
+    pub padding: [u8; 7],
+}
+
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct SpotMarketInfo {
+    pub spot_market: Pubkey,
+    pub maint_asset_weight: I80F48,
+    pub init_asset_weight: I80F48,
+    pub maint_liab_weight: I80F48,
+    pub init_liab_weight: I80F48,
+}
+
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct PerpMarketInfo {
+    pub perp_market: Pubkey, // One of these may be empty
+    pub maint_asset_weight: I80F48,
+    pub init_asset_weight: I80F48,
+    pub maint_liab_weight: I80F48,
+    pub init_liab_weight: I80F48,
+    pub base_lot_size: i64,  // The lot size of the underlying
+    pub quote_lot_size: i64, // min tick
+}
 
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsGroup {
     pub meta_data: MetaData,
 
-    pub num_tokens: usize,
     pub num_markets: usize, // Note: does not increase if there is a spot and perp market for same base token
     pub num_oracles: usize, // incremented every time add_oracle is called
-    pub tokens: [Pubkey; MAX_TOKENS],
+
+    pub tokens: [TokenInfo; MAX_TOKENS],
+    pub spot_markets: [SpotMarketInfo; MAX_PAIRS],
+    pub perp_markets: [PerpMarketInfo; MAX_PAIRS],
+
     pub oracles: [Pubkey; MAX_PAIRS],
-    // Note: oracle used for perps mark price is same as the one for spot. This is not ideal so it may change
-
-    // Right now Serum dex spot markets. TODO make this general to an interface
-    pub spot_markets: [Pubkey; MAX_PAIRS],
-
-    // Pubkeys of different perpetuals markets
-    pub perp_markets: [Pubkey; MAX_PAIRS],
-
-    pub root_banks: [Pubkey; MAX_TOKENS],
 
     // TODO add liab versions of each of these as a compute optimization
-    pub maint_asset_weights: [I80F48; MAX_TOKENS],
-    pub init_asset_weights: [I80F48; MAX_TOKENS],
-
-    pub maint_perp_weights: [I80F48; MAX_PAIRS],
-    pub init_perp_weights: [I80F48; MAX_PAIRS],
-    pub contract_sizes: [i64; MAX_PAIRS],
-
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
     pub admin: Pubkey, // Used to add new markets and adjust risk params

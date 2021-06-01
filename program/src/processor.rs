@@ -18,15 +18,16 @@ use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
-use spl_token::state::Account;
+use spl_token::state::{Account, Mint};
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PerpMarket,
-    PriceCache, RootBank, RootBankCache, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
+    PerpMarket, PriceCache, RootBank, RootBankCache, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use mango_common::Loadable;
@@ -62,8 +63,9 @@ impl Processor {
             rent.is_exempt(merps_group_ai.lamports(), size_of::<MerpsGroup>()),
             MerpsErrorCode::GroupNotRentExempt
         )?;
-
         let mut merps_group = MerpsGroup::load_mut(merps_group_ai)?;
+        check!(!merps_group.meta_data.is_initialized, MerpsErrorCode::Default)?;
+
         // TODO is there a security concern if we remove the merps_group_ai.key?
         check!(
             gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
@@ -84,26 +86,24 @@ impl Processor {
             &rent,
         )?;
 
-        merps_group.maint_asset_weights[QUOTE_INDEX] = I80F48::from_num(1);
-        merps_group.init_asset_weights[QUOTE_INDEX] = I80F48::from_num(1);
-        merps_group.tokens[QUOTE_INDEX] = *quote_mint_ai.key;
-        merps_group.root_banks[QUOTE_INDEX] = *quote_root_bank_ai.key;
-        merps_group.num_tokens = 0;
-        merps_group.num_markets = 0;
+        let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
+        merps_group.tokens[QUOTE_INDEX] = TokenInfo {
+            mint: *quote_mint_ai.key,
+            root_bank: *quote_root_bank_ai.key,
+            decimals: mint.decimals,
+            padding: [0u8; 7],
+        };
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
 
-        merps_group.meta_data.data_type = DataType::MerpsGroup as u8;
-        merps_group.meta_data.is_initialized = true;
-        merps_group.meta_data.version = 0;
+        merps_group.meta_data = MetaData::new(DataType::MerpsGroup, 0, true);
 
         // init MerpsCache
-        merps_group.merps_cache = *merps_cache_ai.key;
         let mut merps_cache = MerpsCache::load_mut(&merps_cache_ai)?;
-        merps_cache.meta_data.data_type = DataType::MerpsCache as u8;
-        merps_cache.meta_data.is_initialized = true;
-        merps_cache.meta_data.version = 0;
+        check!(!merps_cache.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        merps_cache.meta_data = MetaData::new(DataType::MerpsCache, 0, true);
+        merps_group.merps_cache = *merps_cache_ai.key;
 
         // check size
         Ok(())
