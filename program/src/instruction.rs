@@ -1,3 +1,4 @@
+use crate::instruction::MerpsInstruction::AddOracle;
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -126,6 +127,14 @@ pub enum MerpsInstruction {
     /// Accounts expected by this instruction (19 + MAX_PAIRS):
     ///
     PlaceSpotOrder { order: serum_dex::instruction::NewOrderInstructionV3 },
+
+    /// Add oracle
+    ///
+    /// Accounts expected: 3
+    /// 0. `[writable]` merps_group_ai - MerpsGroup
+    /// 1. `[]` oracle_ai - oracle
+    /// 2. `[signer]` admin_ai - admin
+    AddOracle,
 }
 
 impl MerpsInstruction {
@@ -183,6 +192,7 @@ impl MerpsInstruction {
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MerpsInstruction::PlaceSpotOrder { order }
             }
+            10 => AddOracle,
             _ => {
                 return None;
             }

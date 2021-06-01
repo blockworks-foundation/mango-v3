@@ -249,9 +249,26 @@ impl Processor {
 
     /// Add an oracle to the MerpsGroup
     /// This must be called first before `add_spot_market` or `add_perp_market`
+    /// There will never be a gap in the merps_group.oracles array
     #[allow(unused)]
     fn add_oracle(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        unimplemented!()
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai, // write
+            oracle_ai,      // read
+            admin_ai        // read
+        ] = accounts;
+
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
+
+        let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
+        merps_group.oracles[merps_group.num_oracles] = *oracle_ai.key;
+        merps_group.num_oracles += 1;
+
+        Ok(())
     }
 
     /// Initialize perp market including orderbooks and queues
@@ -1068,6 +1085,7 @@ impl Processor {
             MerpsInstruction::PlaceSpotOrder { order } => {
                 Self::place_spot_order(program_id, accounts, order)?;
             }
+            MerpsInstruction::AddOracle => Self::add_oracle(program_id, accounts)?,
         }
 
         Ok(())
