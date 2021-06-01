@@ -193,6 +193,7 @@ impl RootBank {
             rent.is_exempt(account.lamports(), size_of::<Self>()),
             MerpsErrorCode::AccountNotRentExempt
         )?;
+        check!(!root_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
 
         root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
         root_bank.node_banks[0] = *node_bank_ai.key;
@@ -276,6 +277,7 @@ impl NodeBank {
             rent.is_exempt(account.lamports(), size_of::<Self>()),
             MerpsErrorCode::AccountNotRentExempt
         )?;
+        check!(!node_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
 
         node_bank.meta_data = MetaData::new(DataType::NodeBank, 0, true);
         node_bank.deposits = ZERO_I80F48;
