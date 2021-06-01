@@ -1,3 +1,4 @@
+use crate::instruction::MerpsInstruction::AddOracle;
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -80,9 +81,8 @@ pub enum MerpsInstruction {
     /// 2. `[writable]` node_bank_ai - TODO
     /// 3. `[]` vault_ai - TODO
     /// 4. `[writable]` root_bank_ai - TODO
-    /// 5. `[]` oracle_ai - TODO
-    /// 6. `[signer]` admin_ai - TODO
-    AddSpotMarket { maint_asset_weight: I80F48, init_asset_weight: I80F48 },
+    /// 5. `[signer]` admin_ai - TODO
+    AddSpotMarket { market_index: usize, maint_asset_weight: I80F48, init_asset_weight: I80F48 },
 
     /// Add a spot market to a merps account basket
     ///
@@ -126,6 +126,14 @@ pub enum MerpsInstruction {
     /// Accounts expected by this instruction (19 + MAX_PAIRS):
     ///
     PlaceSpotOrder { order: serum_dex::instruction::NewOrderInstructionV3 },
+
+    /// Add oracle
+    ///
+    /// Accounts expected: 3
+    /// 0. `[writable]` merps_group_ai - MerpsGroup
+    /// 1. `[]` oracle_ai - oracle
+    /// 2. `[signer]` admin_ai - admin
+    AddOracle,
 }
 
 impl MerpsInstruction {
@@ -162,9 +170,11 @@ impl MerpsInstruction {
                 }
             }
             4 => {
-                let data = array_ref![data, 0, 32];
-                let (maint_asset_weight, init_asset_weight) = array_refs![data, 16, 16];
+                let data = array_ref![data, 0, 40];
+                let (market_index, maint_asset_weight, init_asset_weight) =
+                    array_refs![data, 8, 16, 16];
                 MerpsInstruction::AddSpotMarket {
+                    market_index: usize::from_le_bytes(*market_index),
                     maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
                     init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
                 }
@@ -181,6 +191,7 @@ impl MerpsInstruction {
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MerpsInstruction::PlaceSpotOrder { order }
             }
+            10 => AddOracle,
             _ => {
                 return None;
             }
@@ -324,9 +335,9 @@ pub fn add_spot_market(
     node_bank_pk: &Pubkey,
     vault_pk: &Pubkey,
     root_bank_pk: &Pubkey,
-    oracle_pk: &Pubkey,
     admin_pk: &Pubkey,
 
+    market_index: usize,
     maint_asset_weight: I80F48,
     init_asset_weight: I80F48,
 ) -> Result<Instruction, ProgramError> {
@@ -338,11 +349,11 @@ pub fn add_spot_market(
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new_readonly(*vault_pk, false),
         AccountMeta::new(*root_bank_pk, false),
-        AccountMeta::new_readonly(*oracle_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr = MerpsInstruction::AddSpotMarket { maint_asset_weight, init_asset_weight };
+    let instr =
+        MerpsInstruction::AddSpotMarket { market_index, maint_asset_weight, init_asset_weight };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -459,6 +470,23 @@ pub fn cache_root_banks(
     ];
     accounts.extend(root_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MerpsInstruction::CacheRootBanks;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn add_oracle(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    oracle_pk: &Pubkey,
+    admin_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new_readonly(*oracle_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MerpsInstruction::AddOracle;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

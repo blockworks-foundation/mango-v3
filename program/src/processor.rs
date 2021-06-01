@@ -18,18 +18,20 @@ use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
-use spl_token::state::Account;
+use spl_token::state::{Account, Mint};
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, NodeBank, PerpMarket,
-    PriceCache, RootBank, RootBankCache, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
+    PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
+    MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use mango_common::Loadable;
+use std::convert::identity;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -62,8 +64,9 @@ impl Processor {
             rent.is_exempt(merps_group_ai.lamports(), size_of::<MerpsGroup>()),
             MerpsErrorCode::GroupNotRentExempt
         )?;
-
         let mut merps_group = MerpsGroup::load_mut(merps_group_ai)?;
+        check!(!merps_group.meta_data.is_initialized, MerpsErrorCode::Default)?;
+
         // TODO is there a security concern if we remove the merps_group_ai.key?
         check!(
             gen_signer_key(signer_nonce, merps_group_ai.key, program_id)? == *signer_ai.key,
@@ -84,26 +87,24 @@ impl Processor {
             &rent,
         )?;
 
-        merps_group.maint_asset_weights[QUOTE_INDEX] = I80F48::from_num(1);
-        merps_group.init_asset_weights[QUOTE_INDEX] = I80F48::from_num(1);
-        merps_group.tokens[QUOTE_INDEX] = *quote_mint_ai.key;
-        merps_group.root_banks[QUOTE_INDEX] = *quote_root_bank_ai.key;
-        merps_group.num_tokens = 0;
-        merps_group.num_markets = 0;
+        let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
+        merps_group.tokens[QUOTE_INDEX] = TokenInfo {
+            mint: *quote_mint_ai.key,
+            root_bank: *quote_root_bank_ai.key,
+            decimals: mint.decimals,
+            padding: [0u8; 7],
+        };
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         merps_group.admin = *admin_ai.key;
 
-        merps_group.meta_data.data_type = DataType::MerpsGroup as u8;
-        merps_group.meta_data.is_initialized = true;
-        merps_group.meta_data.version = 0;
+        merps_group.meta_data = MetaData::new(DataType::MerpsGroup, 0, true);
 
         // init MerpsCache
-        merps_group.merps_cache = *merps_cache_ai.key;
         let mut merps_cache = MerpsCache::load_mut(&merps_cache_ai)?;
-        merps_cache.meta_data.data_type = DataType::MerpsCache as u8;
-        merps_cache.meta_data.is_initialized = true;
-        merps_cache.meta_data.version = 0;
+        check!(!merps_cache.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        merps_cache.meta_data = MetaData::new(DataType::MerpsCache, 0, true);
+        merps_group.merps_cache = *merps_cache_ai.key;
 
         // check size
         Ok(())
@@ -115,7 +116,11 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [merps_group_ai, merps_account_ai, owner_ai] = accounts;
+        let [
+            merps_group_ai,     // read 
+            merps_account_ai,   // write
+            owner_ai            // read, signer
+        ] = accounts;
 
         let rent = Rent::get()?;
         check!(
@@ -124,17 +129,15 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
 
-        #[allow(unused_variables)]
-        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let _merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
         let mut merps_account = MerpsAccount::load_mut(merps_account_ai)?;
         check_eq!(&merps_account_ai.owner, &program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(!merps_account.meta_data.is_initialized, MerpsErrorCode::Default)?;
 
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
-        merps_account.meta_data.data_type = DataType::MerpsAccount as u8;
-        merps_account.meta_data.is_initialized = true;
-        merps_account.meta_data.version = 0;
+        merps_account.meta_data = MetaData::new(DataType::MerpsAccount, 0, true);
 
         Ok(())
     }
@@ -147,10 +150,11 @@ impl Processor {
     fn add_spot_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
+        market_index: usize,
         maint_asset_weight: I80F48,
         init_asset_weight: I80F48,
     ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai, // write
@@ -160,7 +164,6 @@ impl Processor {
             node_bank_ai,   // write
             vault_ai,       // read
             root_bank_ai,   // write
-            oracle_ai,      // read
             admin_ai        // read
         ] = accounts;
 
@@ -169,9 +172,23 @@ impl Processor {
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
-        let rent = Rent::get()?;
-        let token_index = merps_group.num_tokens;
+        check!(market_index < merps_group.num_oracles, MerpsErrorCode::Default)?;
 
+        // if mi > num_markets => we are attempting to skip
+        check!(market_index <= merps_group.num_markets, MerpsErrorCode::Default)?;
+        if market_index == merps_group.num_markets {
+            // implies we want to expand num_markets
+            merps_group.num_markets += 1;
+        }
+
+        // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
+        check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
+
+        // Make sure spot market at this index not already initialized
+        check!(merps_group.spot_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
+
+        // Make sure token at this index not already initialized
+        check!(merps_group.tokens[market_index].is_empty(), MerpsErrorCode::Default)?;
         let _root_bank = init_root_bank(
             program_id,
             &merps_group,
@@ -179,51 +196,73 @@ impl Processor {
             vault_ai,
             root_bank_ai,
             node_bank_ai,
-            &rent,
+            &Rent::get()?,
         )?;
 
-        merps_group.maint_asset_weights[token_index] = maint_asset_weight;
-        merps_group.init_asset_weights[token_index] = init_asset_weight;
+        let mint = Mint::unpack(&mint_ai.try_borrow_data()?)?;
+        merps_group.tokens[market_index] = TokenInfo {
+            mint: *mint_ai.key,
+            root_bank: *root_bank_ai.key,
+            decimals: mint.decimals,
+            padding: [0u8; 7],
+        };
 
         // check that maint weight is lower than init asset weight
         check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
-        // // check that it's less than or equal to one
+        check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
         // check!(maint_asset_weight <= 1, MerpsErrorCode::Default)?;
 
-        merps_group.tokens[token_index] = *mint_ai.key;
-        merps_group.root_banks[token_index] = *root_bank_ai.key;
+        merps_group.spot_markets[market_index] = SpotMarketInfo {
+            spot_market: *spot_market_ai.key,
+            maint_asset_weight,
+            init_asset_weight,
+            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
+            init_liab_weight: ONE_I80F48 / init_asset_weight,
+        };
 
-        let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
-        merps_group.oracles[token_index] = *oracle_ai.key;
-        merps_group.num_tokens += 1;
+        // TODO needs to be moved into add_oracle
+        // let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
+        // merps_group.oracles[token_index] = *oracle_ai.key;
 
         let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
-        let sm_base_mint = spot_market.coin_mint;
-        let sm_quote_mint = spot_market.pc_mint;
-        check_eq!(
-            sm_base_mint,
-            merps_group.tokens[token_index].to_aligned_bytes(),
-            MerpsErrorCode::Default
-        )?;
-        check_eq!(
-            sm_quote_mint,
-            merps_group.tokens[QUOTE_INDEX].to_aligned_bytes(),
-            MerpsErrorCode::Default
-        )?;
 
-        let market_index = merps_group.num_markets;
-        check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
-        merps_group.spot_markets[market_index] = *spot_market_ai.key;
-        merps_group.num_markets += 1;
+        check_eq!(
+            identity(spot_market.coin_mint),
+            mint_ai.key.to_aligned_bytes(),
+            MerpsErrorCode::Default
+        )?;
+        check_eq!(
+            identity(spot_market.pc_mint),
+            merps_group.tokens[QUOTE_INDEX].mint.to_aligned_bytes(),
+            MerpsErrorCode::Default
+        )?;
 
         Ok(())
     }
 
     /// Add an oracle to the MerpsGroup
     /// This must be called first before `add_spot_market` or `add_perp_market`
+    /// There will never be a gap in the merps_group.oracles array
     #[allow(unused)]
     fn add_oracle(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        unimplemented!()
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai, // write
+            oracle_ai,      // read
+            admin_ai        // read
+        ] = accounts;
+
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
+
+        let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
+        let oracle_index = merps_group.num_oracles;
+        merps_group.oracles[oracle_index] = *oracle_ai.key;
+        merps_group.num_oracles += 1;
+
+        Ok(())
     }
 
     /// Initialize perp market including orderbooks and queues
@@ -233,9 +272,9 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-        maint_perp_weight: I80F48,
-        init_perp_weight: I80F48,
-        contract_size: i64,
+        maint_asset_weight: I80F48,
+        init_asset_weight: I80F48,
+        base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
         // TODO
@@ -271,15 +310,19 @@ impl Processor {
         check!(merps_group.oracles[market_index] != Pubkey::default(), MerpsErrorCode::Default)?;
 
         // Make sure perp market at this index not already initialized
-        check!(
-            merps_group.perp_markets[market_index] == Pubkey::default(),
-            MerpsErrorCode::Default
-        )?;
+        check!(merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
-        merps_group.perp_markets[market_index] = *perp_market_ai.key;
-        merps_group.maint_perp_weights[market_index] = maint_perp_weight;
-        merps_group.init_perp_weights[market_index] = init_perp_weight;
-        merps_group.contract_sizes[market_index] = contract_size;
+        check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
+        check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
+        merps_group.perp_markets[market_index] = PerpMarketInfo {
+            perp_market: *perp_market_ai.key,
+            maint_asset_weight,
+            init_asset_weight,
+            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
+            init_liab_weight: ONE_I80F48 / init_asset_weight,
+            base_lot_size,
+            quote_lot_size,
+        };
 
         // Initialize the Bids
         let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
@@ -301,7 +344,7 @@ impl Processor {
             &merps_group,
             &rent,
             market_index,
-            contract_size,
+            base_lot_size,
             quote_lot_size,
         )?;
         Ok(())
@@ -1012,8 +1055,18 @@ impl Processor {
                 msg!("Merps: Withdraw");
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)?;
             }
-            MerpsInstruction::AddSpotMarket { maint_asset_weight, init_asset_weight } => {
-                Self::add_spot_market(program_id, accounts, maint_asset_weight, init_asset_weight)?;
+            MerpsInstruction::AddSpotMarket {
+                market_index,
+                maint_asset_weight,
+                init_asset_weight,
+            } => {
+                Self::add_spot_market(
+                    program_id,
+                    accounts,
+                    market_index,
+                    maint_asset_weight,
+                    init_asset_weight,
+                )?;
             }
             MerpsInstruction::AddToBasket => {
                 Self::add_to_basket(program_id, accounts)?;
@@ -1030,6 +1083,7 @@ impl Processor {
             MerpsInstruction::PlaceSpotOrder { order } => {
                 Self::place_spot_order(program_id, accounts, order)?;
             }
+            MerpsInstruction::AddOracle => Self::add_oracle(program_id, accounts)?,
         }
 
         Ok(())
