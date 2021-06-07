@@ -122,8 +122,8 @@ pub struct MerpsGroup {
     // TODO add liab versions of each of these as a compute optimization
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
-    pub admin: Pubkey, // Used to add new markets and adjust risk params
-    pub dex_program_id: Pubkey,
+    pub admin: Pubkey,          // Used to add new markets and adjust risk params
+    pub dex_program_id: Pubkey, // Consider allowing more
     pub merps_cache: Pubkey,
     // TODO determine liquidation incentives for each token
     // TODO determine maint weight and init weight
@@ -844,12 +844,13 @@ impl PerpMarket {
 
         // TODO handle case of one sided book
         // TODO get impact bid and impact ask if compute allows
+        // TODO consider corner cases of funding being updated
         let bid = book.get_best_bid_price().unwrap();
         let ask = book.get_best_ask_price().unwrap();
 
         let book_price = self.lot_to_native_price((bid + ask) / 2);
 
-        // TODO make checked
+        // TODO make everything here checked
         let price_cache = &merps_cache.price_cache[market_index];
         check!(
             now_ts <= price_cache.last_update + (merps_group.valid_interval as u64),
@@ -861,7 +862,7 @@ impl PerpMarket {
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff
             * time_factor
-            * I80F48::from_num(self.open_interest)
+            * I80F48::from_num(self.open_interest)  // TODO check the cost of conversion op
             * I80F48::from_num(self.contract_size)
             * index_price;
 

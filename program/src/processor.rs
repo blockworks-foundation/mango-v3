@@ -250,6 +250,7 @@ impl Processor {
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
+        // TODO allow more oracle types including purely on chain price feeds
         let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
         let oracle_index = merps_group.num_oracles;
         merps_group.oracles[oracle_index] = *oracle_ai.key;
@@ -1005,14 +1006,15 @@ impl Processor {
     /// Update the deposit and borrow index on passed in RootBanks
     #[allow(unused)]
     fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO
+        // TODO - just copy the interest functions from Mango v1 and v2
         unimplemented!()
     }
 
     /// similar to serum dex, but also need to do some extra magic with funding
     #[allow(unused)]
     fn consume_event_queue(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO
+        // TODO - similar to serum dex event queue
+        // TODO - @Daffy needs to determine how the maker's merps account is updated and
         unimplemented!()
     }
 
@@ -1020,7 +1022,7 @@ impl Processor {
     /// and time since last update
     #[allow(unused)]
     fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO
+        // TODO - unpack accounts and call perp_market.update_funding()
         unimplemented!()
     }
 
