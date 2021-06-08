@@ -113,6 +113,7 @@ impl Processor {
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
     /// TODO make the merps account a derived address
     fn init_merps_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -261,7 +262,6 @@ impl Processor {
 
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
-    #[allow(unused)]
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -271,7 +271,7 @@ impl Processor {
         base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
-        // TODO
+        
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -335,6 +335,8 @@ impl Processor {
             base_lot_size,
             quote_lot_size,
         )?;
+
+        //*/
         Ok(())
     }
 
@@ -1073,6 +1075,16 @@ impl Processor {
                 Self::place_spot_order(program_id, accounts, order)?;
             }
             MerpsInstruction::AddOracle => Self::add_oracle(program_id, accounts)?,
+
+            MerpsInstruction::AddPerpMarket {
+                market_index,
+                maint_asset_weight,
+                init_asset_weight,
+                base_lot_size,
+                quote_lot_size
+            } => {
+                Self::add_perp_market(program_id, accounts, market_index, maint_asset_weight, init_asset_weight, base_lot_size, quote_lot_size)?;
+            }
         }
 
         Ok(())

@@ -134,6 +134,19 @@ pub enum MerpsInstruction {
     /// 1. `[]` oracle_ai - oracle
     /// 2. `[signer]` admin_ai - admin
     AddOracle,
+
+    /// Add a perp market to a merps group
+    ///
+    /// Accounts expected by this instruction (6):
+    ///
+    /// 0. `[writable]` merps_group_ai - TODO
+    /// 1. `[writable]` perp_market_ai - TODO
+    /// 2. `[writable]` event_queue_ai - TODO
+    /// 3. `[writable]` bids_ai - TODO
+    /// 4. `[writable]` asks_ai - TODO
+    /// 5. `[signer]` admin_ai - TODO
+    AddPerpMarket { market_index: usize, maint_asset_weight: I80F48, init_asset_weight: I80F48, base_lot_size: i64, quote_lot_size: i64 },
+
 }
 
 impl MerpsInstruction {
@@ -192,6 +205,18 @@ impl MerpsInstruction {
                 MerpsInstruction::PlaceSpotOrder { order }
             }
             10 => AddOracle,
+            11 => {
+                let data_arr = array_ref![data, 0, 56];
+                let (market_index, maint_asset_weight, init_asset_weight, base_lot_size, quote_lot_size) =
+                    array_refs![data_arr, 8, 16, 16, 8, 8];
+                MerpsInstruction::AddPerpMarket {
+                    market_index: usize::from_le_bytes(*market_index),
+                    maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
+                    init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
+                    base_lot_size: i64::from_le_bytes(*base_lot_size),
+                    quote_lot_size: i64::from_le_bytes(*quote_lot_size),
+                }
+            },
             _ => {
                 return None;
             }
@@ -357,6 +382,37 @@ pub fn add_spot_market(
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
+
+pub fn add_perp_market(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    admin_pk: &Pubkey,
+
+    market_index: usize,
+    maint_asset_weight: I80F48,
+    init_asset_weight: I80F48,
+    base_lot_size: i64,
+    quote_lot_size: i64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*merps_group_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr =
+    MerpsInstruction::AddPerpMarket { market_index, maint_asset_weight, init_asset_weight, base_lot_size, quote_lot_size };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 
 pub fn add_to_basket(
     program_id: &Pubkey,

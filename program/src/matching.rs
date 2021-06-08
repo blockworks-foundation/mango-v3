@@ -12,6 +12,7 @@ use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
 use std::convert::TryFrom;
+use solana_program::msg;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -198,12 +199,14 @@ impl BookSide {
         data_type: DataType,
         rent: &Rent,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        let mut state = Self::load_mut(account)?;
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        // NOTE: check this first so we can borrow account later
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),
             MerpsErrorCode::AccountNotRentExempt
         )?;
+
+        let mut state = Self::load_mut(account)?;
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
         check!(!state.meta_data.is_initialized, MerpsErrorCode::Default)?;
         state.meta_data = MetaData::new(data_type, 0, true);
         Ok(state)
