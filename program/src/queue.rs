@@ -178,7 +178,6 @@ impl<'a> EventQueue<'a> {
         program_id: &Pubkey,
         rent: &Rent,
     ) -> MerpsResult<Self> {
-
         // TODO: check for size
 
         // NOTE: check this first so we can borrow account later

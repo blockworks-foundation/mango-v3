@@ -331,7 +331,6 @@ pub async fn get_token_balance(banks_client: &mut BanksClient, pubkey: Pubkey) -
     spl_token::state::Account::unpack(&token.data[..]).unwrap().amount
 }
 
-
 pub fn add_test_account_with_owner<T>(test: &mut ProgramTest, owner: &Pubkey) -> Pubkey {
     let pk = Pubkey::new_unique();
     let size = size_of::<T>();
@@ -340,8 +339,11 @@ pub fn add_test_account_with_owner<T>(test: &mut ProgramTest, owner: &Pubkey) ->
     return pk;
 }
 
-
-pub fn add_test_account_with_owner_and_extra_size<T>(test: &mut ProgramTest, owner: &Pubkey, extra_size: usize) -> Pubkey {
+pub fn add_test_account_with_owner_and_extra_size<T>(
+    test: &mut ProgramTest,
+    owner: &Pubkey,
+    extra_size: usize,
+) -> Pubkey {
     let pk = Pubkey::new_unique();
     let size = size_of::<T>() + extra_size;
     println!("add_test_account_with_owner type={} size={}", type_name::<T>(), size);

@@ -113,7 +113,6 @@ impl Processor {
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
     /// TODO make the merps account a derived address
     fn init_merps_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -271,7 +270,6 @@ impl Processor {
         base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
-        
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -319,6 +317,7 @@ impl Processor {
         let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent)?;
 
         // Initialize the EventQueue
+        // TODO: check that the event queue is reasonably large
         let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
 
         // Now initialize the PerpMarket itself
@@ -336,7 +335,6 @@ impl Processor {
             quote_lot_size,
         )?;
 
-        //*/
         Ok(())
     }
 
@@ -1081,9 +1079,17 @@ impl Processor {
                 maint_asset_weight,
                 init_asset_weight,
                 base_lot_size,
-                quote_lot_size
+                quote_lot_size,
             } => {
-                Self::add_perp_market(program_id, accounts, market_index, maint_asset_weight, init_asset_weight, base_lot_size, quote_lot_size)?;
+                Self::add_perp_market(
+                    program_id,
+                    accounts,
+                    market_index,
+                    maint_asset_weight,
+                    init_asset_weight,
+                    base_lot_size,
+                    quote_lot_size,
+                )?;
             }
         }
 

@@ -12,7 +12,6 @@ use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
 use std::convert::TryFrom;
-use solana_program::msg;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;

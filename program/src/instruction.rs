@@ -145,8 +145,13 @@ pub enum MerpsInstruction {
     /// 3. `[writable]` bids_ai - TODO
     /// 4. `[writable]` asks_ai - TODO
     /// 5. `[signer]` admin_ai - TODO
-    AddPerpMarket { market_index: usize, maint_asset_weight: I80F48, init_asset_weight: I80F48, base_lot_size: i64, quote_lot_size: i64 },
-
+    AddPerpMarket {
+        market_index: usize,
+        maint_asset_weight: I80F48,
+        init_asset_weight: I80F48,
+        base_lot_size: i64,
+        quote_lot_size: i64,
+    },
 }
 
 impl MerpsInstruction {
@@ -207,8 +212,13 @@ impl MerpsInstruction {
             10 => AddOracle,
             11 => {
                 let data_arr = array_ref![data, 0, 56];
-                let (market_index, maint_asset_weight, init_asset_weight, base_lot_size, quote_lot_size) =
-                    array_refs![data_arr, 8, 16, 16, 8, 8];
+                let (
+                    market_index,
+                    maint_asset_weight,
+                    init_asset_weight,
+                    base_lot_size,
+                    quote_lot_size,
+                ) = array_refs![data_arr, 8, 16, 16, 8, 8];
                 MerpsInstruction::AddPerpMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
@@ -216,7 +226,7 @@ impl MerpsInstruction {
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
                 }
-            },
+            }
             _ => {
                 return None;
             }
@@ -407,12 +417,16 @@ pub fn add_perp_market(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr =
-    MerpsInstruction::AddPerpMarket { market_index, maint_asset_weight, init_asset_weight, base_lot_size, quote_lot_size };
+    let instr = MerpsInstruction::AddPerpMarket {
+        market_index,
+        maint_asset_weight,
+        init_asset_weight,
+        base_lot_size,
+        quote_lot_size,
+    };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
-
 
 pub fn add_to_basket(
     program_id: &Pubkey,

@@ -1,5 +1,3 @@
-
-
 // Tests related to placing orders on a perp market
 mod helpers;
 use std::mem::size_of;
@@ -7,7 +5,13 @@ use std::mem::size_of;
 use fixed::types::I80F48;
 use helpers::*;
 
-use merps::{entrypoint::process_instruction, instruction::*, matching::BookSide, queue::{AnyEvent, EventQueue}, state::*};
+use merps::{
+    entrypoint::process_instruction,
+    instruction::*,
+    matching::BookSide,
+    queue::{AnyEvent, EventQueue},
+    state::*,
+};
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use solana_sdk::{account::Account, signature::Keypair, signer::Signer, transaction::Transaction};
@@ -35,7 +39,6 @@ async fn test_init_perp_market() {
         user_initial_amount,
     );
 
-
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let TSLA_DEC: u8 = 4;
@@ -46,7 +49,11 @@ async fn test_init_perp_market() {
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
 
-    let event_queue_pk = add_test_account_with_owner_and_extra_size::<EventQueue>(&mut test, &program_id, size_of::<AnyEvent>() * 32);
+    let event_queue_pk = add_test_account_with_owner_and_extra_size::<EventQueue>(
+        &mut test,
+        &program_id,
+        size_of::<AnyEvent>() * 32,
+    );
 
     let bids_pk = add_test_account_with_owner::<BookSide>(&mut test, &program_id);
     let asks_pk = add_test_account_with_owner::<BookSide>(&mut test, &program_id);
@@ -55,22 +62,30 @@ async fn test_init_perp_market() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
 
-      // setup merps group, perp market & merps account
-      {
+    // setup merps group, perp market & merps account
+    {
         let mut transaction = Transaction::new_with_payer(
             &[
                 merps_group.init_merps_group(&admin.pubkey()),
-                
                 init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
                     .unwrap(),
-                
-                    add_oracle(&program_id, &merps_group_pk, &tsla_usd.pubkey, &admin.pubkey())
+                add_oracle(&program_id, &merps_group_pk, &tsla_usd.pubkey, &admin.pubkey())
                     .unwrap(),
-
-                    add_perp_market(&program_id, &merps_group_pk, &perp_market_pk, &event_queue_pk, &bids_pk, &asks_pk, &admin.pubkey(), perp_market_idx,                     I80F48::from_num(0.83),
-                    I80F48::from_num(1), 100, 10).unwrap()
-                
-                
+                add_perp_market(
+                    &program_id,
+                    &merps_group_pk,
+                    &perp_market_pk,
+                    &event_queue_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &admin.pubkey(),
+                    perp_market_idx,
+                    I80F48::from_num(0.83),
+                    I80F48::from_num(1),
+                    100,
+                    10,
+                )
+                .unwrap(),
             ],
             Some(&payer.pubkey()),
         );
@@ -79,7 +94,5 @@ async fn test_init_perp_market() {
 
         // Test transaction succeeded
         assert!(banks_client.process_transaction(transaction).await.is_ok());
-
     }
-
 }
