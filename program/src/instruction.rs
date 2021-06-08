@@ -404,7 +404,6 @@ pub fn withdraw(
         AccountMeta::new(*token_account_pk, false),
         AccountMeta::new_readonly(*signer_pk, false),
         AccountMeta::new_readonly(spl_token::ID, false),
-        AccountMeta::new_readonly(solana_program::sysvar::clock::ID, false),
     ];
 
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
