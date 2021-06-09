@@ -25,7 +25,6 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
-use crate::state::PerpOpenOrders;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
     PerpAccount, PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
@@ -139,7 +138,10 @@ impl Processor {
 
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
-        merps_account.perp_open_orders.iter_mut().for_each(|oo| oo.is_free_bits = u32::MAX);
+        merps_account
+            .perp_accounts
+            .iter_mut()
+            .for_each(|pa| pa.open_orders.is_free_bits = u32::MAX);
         merps_account.meta_data = MetaData::new(DataType::MerpsAccount, 0, true);
 
         Ok(())
