@@ -565,28 +565,48 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.bids.insert_leaf(&new_bid)?;
-            merps_account.perp_open_orders[market_index].add_order(Side::Bid, &new_bid)?;
+            merps_account.perp_accounts[market_index].open_orders.add_order(Side::Bid, &new_bid)?;
         }
 
         // Edit merps_account if some contracts were matched
         if rem_quantity < quantity {
             /*
                 How to adjust the funding settled
-                FS_t = (FS_t-1 - FE) * C_t-1 / C_t + FE
+                FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
             */
 
-            let base_position = merps_account.base_positions[market_index];
+            // TODO what if this is zero
 
-            merps_account.base_positions[market_index] += quantity - rem_quantity; // TODO make these checked
-            merps_account.quote_positions[market_index] -= quote_used;
+            // transfer into a new variable any unrealized funding if C_t == 0
+            /*
+            TF = 10k
+            FS0 = 1k
+            BP0 = -10
 
-            merps_account.funding_settled[market_index] =
-                ((merps_account.funding_settled[market_index] - market.total_funding)
-                    * I80F48::from_num(base_position)
-                    / I80F48::from_num(merps_account.base_positions[market_index]))
-                    + market.total_funding;
+            BP1 = +5
 
-            market.open_interest += quantity - rem_quantity;
+            -90k = (TF - FS) * bp0 => negative funding so need to receive payment
+
+            FS1 = (FS0 - TF) * BP0 / BP1 + TF
+                = (-9k) * (-2) + 10k = 28k
+                =
+
+            FO1 = (10k - 28k) * (5) = -90k
+
+            Make sure when a position changes sign, make sure to zero out the settle funding and
+            push it onto funding_settled
+
+             */
+
+            let base_change = quantity - rem_quantity;
+            merps_account.perp_accounts[market_index].change_position(
+                base_change,
+                I80F48::from_num(quote_used * market.quote_lot_size),
+                market.long_funding,
+                market.short_funding,
+            )?;
+
+            market.open_interest += base_change; // We know base_change > 0
         }
 
         Ok(())

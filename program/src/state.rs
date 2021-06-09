@@ -43,7 +43,7 @@ pub enum DataType {
     EventQueue,
 }
 
-#[derive(Copy, Clone, Pod)]
+#[derive(Copy, Clone, Pod, Default)]
 #[repr(C)]
 pub struct MetaData {
     pub data_type: u8,
@@ -119,18 +119,13 @@ pub struct MerpsGroup {
 
     pub oracles: [Pubkey; MAX_PAIRS],
 
-    // TODO add liab versions of each of these as a compute optimization
     pub signer_nonce: u64,
     pub signer_key: Pubkey,
     pub admin: Pubkey,          // Used to add new markets and adjust risk params
     pub dex_program_id: Pubkey, // Consider allowing more
     pub merps_cache: Pubkey,
     // TODO determine liquidation incentives for each token
-    // TODO determine maint weight and init weight
-
     // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
-    // TODO consider storing oracle prices here
-    //      it makes this more single threaded if cranks are writing to merps group constantly with oracle prices
     pub valid_interval: u8,
 }
 
@@ -376,7 +371,8 @@ pub struct RootBankCache {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
-    pub total_funding: I80F48,
+    pub long_funding: I80F48,
+    pub short_funding: I80F48,
     pub last_update: u64,
 }
 
@@ -502,6 +498,73 @@ impl PerpOpenOrders {
     }
 }
 
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct PerpAccount {
+    pub base_position: i64,     // measured in base lots
+    pub quote_position: I80F48, // measured in native quote
+    pub long_settled_funding: I80F48,
+    pub short_settled_funding: I80F48,
+    pub open_orders: PerpOpenOrders,
+}
+
+impl PerpAccount {
+    pub fn change_position(
+        &mut self,
+        base_change: i64,
+        quote_change: I80F48,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> MerpsResult<()> {
+        /*
+            How to adjust the funding settled
+            FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
+
+            Funding owed:
+            FO_t = (TF - FS_t) * BP_t
+        */
+
+        let bp0 = self.base_position;
+        self.base_position += base_change;
+        self.quote_position += quote_change;
+
+        if bp0 > 0 {
+            if self.base_position <= 0 {
+                // implies there was a sign change
+                let funding_owed = (long_funding - self.long_settled_funding)
+                    * I80F48::from_num(self.base_position);
+                self.quote_position -= funding_owed;
+                self.short_settled_funding = short_funding;
+            } else {
+                self.long_settled_funding = (self.long_settled_funding - long_funding)
+                    * I80F48::from_num(bp0 / self.base_position)
+                    + long_funding;
+            }
+        } else if bp0 < 0 {
+            if self.base_position >= 0 {
+                let funding_owed = (short_funding - self.short_settled_funding)
+                    * I80F48::from_num(self.base_position);
+                self.quote_position -= funding_owed;
+                self.long_settled_funding = long_funding;
+            } else {
+                self.short_settled_funding = (self.short_settled_funding - short_funding)
+                    * I80F48::from_num(bp0 / self.base_position)
+                    + short_funding;
+            }
+        } else {
+            if base_change > 0 {
+                self.long_settled_funding = long_funding;
+            } else {
+                // base_change must be less than 0, if == 0, that's error state
+
+                self.short_settled_funding = short_funding;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsAccount {
@@ -510,7 +573,7 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_PAIRS], // this can be done with u64 and bit shifting to save space
+    pub in_basket: [bool; MAX_PAIRS],
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
@@ -518,17 +581,7 @@ pub struct MerpsAccount {
     pub spot_open_orders: [Pubkey; MAX_PAIRS],
 
     // Perps related data
-
-    // TODO consider storing positions as two separate arrays, i.e. base_longs, base_shorts
-    pub base_positions: [i64; MAX_PAIRS], // measured in base lots
-    pub quote_positions: [i64; MAX_PAIRS], // measured in quote lots
-    pub funding_settled: [I80F48; MAX_PAIRS],
-    pub perp_open_orders: [PerpOpenOrders; MAX_PAIRS],
-    // settlement
-    // two merps accounts are passed in
-    // only equal amounts can be settled
-    // if an account doesn't have enough of the quote currency, it is borrowed
-    // if there is no availability to borrow or account doesn't have the coll ratio, keeper may swap some of his USDC for collateral at discount
+    pub perp_accounts: [PerpAccount; MAX_PAIRS],
 }
 
 impl MerpsAccount {
@@ -644,15 +697,19 @@ impl MerpsAccount {
             let perp_market_info = &merps_group.perp_markets[i];
             if !perp_market_info.is_empty() {
                 // TODO fill this in once perp logic is a little bit more clear
+
+                let perp_account = &self.perp_accounts[i];
+
                 let native_pos = I80F48::from_num(
-                    self.base_positions[i]
-                        + self.perp_open_orders[i]
+                    perp_account.base_position
+                        + perp_account
+                            .open_orders
                             .total_base
                             .checked_mul(perp_market_info.base_lot_size)
                             .ok_or(throw_err!(MerpsErrorCode::MathError))?,
                 );
 
-                if self.base_positions[i] > 0 {
+                if perp_account.base_position > 0 {
                     assets_val = native_pos
                         .checked_mul(perp_market_info.init_asset_weight)
                         .ok_or(math_err!())?
@@ -660,7 +717,7 @@ impl MerpsAccount {
                         .ok_or(math_err!())?
                         .checked_add(assets_val)
                         .ok_or(math_err!())?;
-                } else if self.base_positions[i] < 0 {
+                } else if perp_account.base_position < 0 {
                     liabs_val = -native_pos
                         .checked_mul(perp_market_info.init_liab_weight)
                         .ok_or(math_err!())?
@@ -670,15 +727,23 @@ impl MerpsAccount {
                         .ok_or(math_err!())?;
                 }
 
-                if self.quote_positions[i] < 0 {
+                if perp_account.quote_position < 0 {
                     // TODO
                 }
 
                 // Account for unrealized funding payments
                 // TODO make checked
-                let funding: I80F48 = (merps_cache.perp_market_cache[i].total_funding
-                    - self.funding_settled[i])
-                    * I80F48::from_num(self.base_positions[i]);
+                let funding: I80F48 = if perp_account.base_position > 0 {
+                    (merps_cache.perp_market_cache[i].long_funding
+                        - perp_account.long_settled_funding)
+                        * I80F48::from_num(perp_account.base_position)
+                } else if perp_account.base_position < 0 {
+                    (merps_cache.perp_market_cache[i].short_funding
+                        - perp_account.short_settled_funding)
+                        * I80F48::from_num(perp_account.base_position)
+                } else {
+                    ZERO_I80F48
+                };
 
                 // units
                 // total_funding: I80F48 - native quote currency per contract
@@ -697,15 +762,15 @@ impl MerpsAccount {
 
                 // Account for open orders
 
-                let oo_base = I80F48::from_num(self.perp_open_orders[i].total_base); // num contracts
-                let _oo_quote = I80F48::from_num(self.perp_open_orders[i].total_quote);
+                let oo_base = I80F48::from_num(perp_account.open_orders.total_base); // num contracts
+                let _oo_quote = I80F48::from_num(perp_account.open_orders.total_quote);
 
-                if self.base_positions[i] > 0 {
+                if perp_account.base_position > 0 {
                     if oo_base > 0 { // open long
                     } else if oo_base < 0 {
                         // close long
                     }
-                } else if self.base_positions[i] < 0 {
+                } else if perp_account.base_position < 0 {
                     if oo_base > 0 { // close short
                     } else if oo_base < 0 { // open short
                     }
@@ -747,7 +812,7 @@ impl MerpsAccount {
 
 /// This will hold top level info about the perps market
 /// Likely all perps transactions on a market will be locked on this one because this will be passed in as writable
-#[derive(Copy, Clone, Pod, Loadable)]
+#[derive(Copy, Clone, Pod, Loadable, Default)]
 #[repr(C)]
 pub struct PerpMarket {
     pub meta_data: MetaData,
@@ -756,7 +821,10 @@ pub struct PerpMarket {
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
-    pub total_funding: I80F48,
+
+    pub long_funding: I80F48,
+    pub short_funding: I80F48,
+
     pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
     pub quote_lot_size: i64, // number of quote native that reresents min tick
@@ -866,7 +934,8 @@ impl PerpMarket {
             * I80F48::from_num(self.contract_size)
             * index_price;
 
-        self.total_funding += funding_delta;
+        self.long_funding += funding_delta;
+        self.short_funding += funding_delta;
         self.last_updated = now_ts;
 
         Ok(())

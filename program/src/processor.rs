@@ -26,8 +26,8 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
-    PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    PerpAccount, PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
+    TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use mango_common::Loadable;
@@ -616,7 +616,7 @@ impl Processor {
         let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
-
+        // TODO make it so you can add_to_basket when adding a perp market without corresponding spot market -- just ask user to send in market_index
         let spot_market_index = merps_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidMarket))?;
@@ -1082,20 +1082,19 @@ impl Processor {
 /// Take two MerpsAccounts and settle unrealized trading pnl and funding pnl between them
 #[allow(unused)]
 fn settle_trading_pnl(
-    a: &mut MerpsAccount,
-    b: &mut MerpsAccount,
-    market_index: usize,
-    price: i64, // TODO price usually comes in I80F48
+    a: &mut PerpAccount,
+    b: &mut PerpAccount,
+    price: I80F48, // TODO price usually comes in I80F48
+    contract_size: i64,
 ) -> MerpsResult<()> {
     /*
     TODO consider rule: Can only settle if both accounts remain above bankruptcy
      */
-    let base_position = a.base_positions[market_index];
 
-    let new_quote_pos_a = -a.base_positions[market_index] * price;
-    let new_quote_pos_b = -b.base_positions[market_index] * price;
-    let a_pnl = a.quote_positions[market_index] - new_quote_pos_a;
-    let b_pnl = b.quote_positions[market_index] - new_quote_pos_b;
+    let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
+    let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
+    let a_pnl = a.quote_position - new_quote_pos_a;
+    let b_pnl = b.quote_position - new_quote_pos_b;
 
     // pnl must be opposite signs for there to be a settlement
 
@@ -1106,39 +1105,6 @@ fn settle_trading_pnl(
         return Err(throw!());
     }
     Ok(())
-}
-
-/// pnl can only be realized if there is an equal and opposite amount of pnl realized on another account
-#[allow(unused)]
-fn realize_pnl(
-    market: &PerpMarket,
-    merps_account: &mut MerpsAccount,
-    market_index: usize,
-    price: i64,
-    quote_deposit_index: I80F48,
-    quote_borrow_index: I80F48,
-) -> MerpsResult<()> {
-    // Assume for now price is same units as quote_positions
-    let curr_quote_pos = -merps_account.base_positions[market_index] * price;
-    let pnl = merps_account.quote_positions[market_index] - curr_quote_pos;
-
-    merps_account.quote_positions[market_index] = pnl;
-
-    // Transfer pnl into deposits if it's positive, otherwise into borrows
-    if pnl > 0 {
-        merps_account.checked_add_deposit(
-            QUOTE_INDEX,
-            I80F48::from_num(pnl * market.quote_lot_size) / quote_deposit_index,
-        )
-    } else if pnl < 0 {
-        merps_account.checked_add_borrow(
-            QUOTE_INDEX,
-            I80F48::from_num(pnl * market.quote_lot_size) / quote_borrow_index,
-        )
-        // TODO if coll ratio isn't available to borrow, then some collateral must be swapped out
-    } else {
-        Ok(())
-    }
 }
 
 fn init_root_bank(
