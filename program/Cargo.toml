@@ -9,7 +9,7 @@ no-entrypoint = []
 test-bpf = []
 
 [dependencies]
-solana-program = "^1.6.4"
+solana-program = "^1.7.1"
 arrayref = "^0.3.6"
 serde = "^1.0.118"
 bytemuck = "^1.4.1"
@@ -28,8 +28,8 @@ mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
 
 [dev-dependencies]
-solana-sdk = "^1.6.4"
-solana-program-test = "^1.6.4"
+solana-sdk = "^1.7.1"
+solana-program-test = "^1.7.1"
 
 
 [profile.release]
