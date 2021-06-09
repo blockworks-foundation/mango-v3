@@ -198,12 +198,14 @@ impl BookSide {
         data_type: DataType,
         rent: &Rent,
     ) -> MerpsResult<RefMut<'a, Self>> {
-        let mut state = Self::load_mut(account)?;
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        // NOTE: check this first so we can borrow account later
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),
             MerpsErrorCode::AccountNotRentExempt
         )?;
+
+        let mut state = Self::load_mut(account)?;
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
         check!(!state.meta_data.is_initialized, MerpsErrorCode::Default)?;
         state.meta_data = MetaData::new(data_type, 0, true);
         Ok(state)

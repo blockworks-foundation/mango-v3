@@ -1,6 +1,5 @@
-#![cfg(feature = "test-bpf")]
-
 use safe_transmute::{self, to_bytes::transmute_one_to_bytes};
+use std::any::type_name;
 use std::mem::size_of;
 
 use fixed::types::I80F48;
@@ -330,4 +329,24 @@ pub async fn get_token_balance(banks_client: &mut BanksClient, pubkey: Pubkey) -
     let token: Account = banks_client.get_account(pubkey).await.unwrap().unwrap();
 
     spl_token::state::Account::unpack(&token.data[..]).unwrap().amount
+}
+
+pub fn add_test_account_with_owner<T>(test: &mut ProgramTest, owner: &Pubkey) -> Pubkey {
+    let pk = Pubkey::new_unique();
+    let size = size_of::<T>();
+    println!("add_test_account_with_owner type={} size={}", type_name::<T>(), size);
+    test.add_account(pk, Account::new(u32::MAX as u64, size, owner));
+    return pk;
+}
+
+pub fn add_test_account_with_owner_and_extra_size<T>(
+    test: &mut ProgramTest,
+    owner: &Pubkey,
+    extra_size: usize,
+) -> Pubkey {
+    let pk = Pubkey::new_unique();
+    let size = size_of::<T>() + extra_size;
+    println!("add_test_account_with_owner type={} size={}", type_name::<T>(), size);
+    test.add_account(pk, Account::new(u32::MAX as u64, size, owner));
+    return pk;
 }

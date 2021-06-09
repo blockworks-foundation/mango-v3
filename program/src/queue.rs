@@ -178,12 +178,16 @@ impl<'a> EventQueue<'a> {
         program_id: &Pubkey,
         rent: &Rent,
     ) -> MerpsResult<Self> {
-        let mut state = Self::load_mut(account)?;
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        // TODO: check for size
+
+        // NOTE: check this first so we can borrow account later
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),
             MerpsErrorCode::AccountNotRentExempt
         )?;
+
+        let mut state = Self::load_mut(account)?;
+        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
 
         check!(!state.header.meta_data.is_initialized, MerpsErrorCode::Default)?;
         state.header.meta_data = MetaData::new(DataType::EventQueue, 0, true);
