@@ -1,5 +1,6 @@
 use std::cmp;
 use std::mem::size_of;
+use std::vec;
 
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -24,6 +25,7 @@ use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, Source
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::EventQueue;
+use crate::state::PerpOpenOrders;
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
     PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
@@ -137,6 +139,7 @@ impl Processor {
 
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
+        merps_account.perp_open_orders.iter_mut().for_each(|oo| oo.is_free_bits = u32::MAX);
         merps_account.meta_data = MetaData::new(DataType::MerpsAccount, 0, true);
 
         Ok(())
@@ -927,7 +930,7 @@ impl Processor {
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
-            owner_ai,           // read
+            owner_ai,           // read, signer
             merps_cache_ai,     // read
             perp_market_ai,     // write
             bids_ai,            // write
@@ -942,7 +945,8 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
         // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
@@ -1089,6 +1093,23 @@ impl Processor {
                     init_asset_weight,
                     base_lot_size,
                     quote_lot_size,
+                )?;
+            }
+            MerpsInstruction::PlacePerpOrder {
+                side,
+                price,
+                quantity,
+                client_order_id,
+                order_type,
+            } => {
+                Self::place_perp_order(
+                    program_id,
+                    accounts,
+                    side,
+                    price,
+                    quantity,
+                    client_order_id,
+                    order_type,
                 )?;
             }
         }
