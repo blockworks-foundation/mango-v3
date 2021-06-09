@@ -208,7 +208,7 @@ async fn test_borrow_succeeds() {
         // Test expected borrow is in merps account
         assert_eq!(merps_account.borrows[borrow_token_index], borrow_and_withdraw_amount);
 
-        // // Test expected borrow is added to total in node bank
+        // Test expected borrow is added to total in node bank
         let mut node_bank = banks_client.get_account(btc_node_bank.pubkey).await.unwrap().unwrap();
         let account_info: AccountInfo = (&btc_node_bank.pubkey, &mut node_bank).into();
         let node_bank = NodeBank::load_mut_checked(&account_info, &program_id).unwrap();
