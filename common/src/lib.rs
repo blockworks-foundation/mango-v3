@@ -5,7 +5,6 @@ use std::cell::{Ref, RefMut};
 
 pub trait Loadable: Pod {
     fn load_mut<'a>(account: &'a AccountInfo) -> Result<RefMut<'a, Self>, ProgramError> {
-        // TODO verify if this checks for size
         Ok(RefMut::map(account.try_borrow_mut_data()?, |data| {
             from_bytes_mut(data)
         }))

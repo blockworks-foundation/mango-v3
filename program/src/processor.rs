@@ -1,5 +1,6 @@
 use std::cmp;
 use std::mem::size_of;
+use std::vec;
 
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -137,6 +138,10 @@ impl Processor {
 
         merps_account.merps_group = *merps_group_ai.key;
         merps_account.owner = *owner_ai.key;
+        merps_account
+            .perp_accounts
+            .iter_mut()
+            .for_each(|pa| pa.open_orders.is_free_bits = u32::MAX);
         merps_account.meta_data = MetaData::new(DataType::MerpsAccount, 0, true);
 
         Ok(())
@@ -261,7 +266,6 @@ impl Processor {
 
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
-    #[allow(unused)]
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -271,7 +275,6 @@ impl Processor {
         base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
-        // TODO
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -319,6 +322,7 @@ impl Processor {
         let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent)?;
 
         // Initialize the EventQueue
+        // TODO: check that the event queue is reasonably large
         let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
 
         // Now initialize the PerpMarket itself
@@ -335,6 +339,7 @@ impl Processor {
             base_lot_size,
             quote_lot_size,
         )?;
+
         Ok(())
     }
 
@@ -927,7 +932,7 @@ impl Processor {
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
-            owner_ai,           // read
+            owner_ai,           // read, signer
             merps_cache_ai,     // read
             perp_market_ai,     // write
             bids_ai,            // write
@@ -942,7 +947,8 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
         // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
@@ -1073,6 +1079,41 @@ impl Processor {
                 Self::place_spot_order(program_id, accounts, order)?;
             }
             MerpsInstruction::AddOracle => Self::add_oracle(program_id, accounts)?,
+
+            MerpsInstruction::AddPerpMarket {
+                market_index,
+                maint_asset_weight,
+                init_asset_weight,
+                base_lot_size,
+                quote_lot_size,
+            } => {
+                Self::add_perp_market(
+                    program_id,
+                    accounts,
+                    market_index,
+                    maint_asset_weight,
+                    init_asset_weight,
+                    base_lot_size,
+                    quote_lot_size,
+                )?;
+            }
+            MerpsInstruction::PlacePerpOrder {
+                side,
+                price,
+                quantity,
+                client_order_id,
+                order_type,
+            } => {
+                Self::place_perp_order(
+                    program_id,
+                    accounts,
+                    side,
+                    price,
+                    quantity,
+                    client_order_id,
+                    order_type,
+                )?;
+            }
         }
 
         Ok(())
