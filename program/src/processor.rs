@@ -636,7 +636,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
     fn place_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -681,11 +680,11 @@ impl Processor {
         check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
 
-        let mut base_root_bank = RootBank::load_mut_checked(base_root_bank_ai, program_id)?;
-        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+        let base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
 
-        let mut quote_root_bank = RootBank::load_mut_checked(quote_root_bank_ai, program_id)?;
-        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        let quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
 
         // First check all caches to make sure valid
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
@@ -705,8 +704,8 @@ impl Processor {
 
         // Check that root banks have been updated by Keeper
         let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts > base_root_bank.last_updated + valid_interval, MerpsErrorCode::Default);
-        check!(now_ts > quote_root_bank.last_updated + valid_interval, MerpsErrorCode::Default);
+        check!(now_ts <= base_root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(now_ts <= quote_root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
 
         let spot_market_index = merps_group
             .find_spot_market_index(spot_market_ai.key)
@@ -797,8 +796,7 @@ impl Processor {
             SerumSide::Ask => (pre_quote, pre_base, post_quote, post_base),
         };
 
-        let (mut out_root_bank, mut out_node_bank, mut in_root_bank, mut in_node_bank) = match side
-        {
+        let (out_root_bank, mut out_node_bank, in_root_bank, mut in_node_bank) = match side {
             SerumSide::Bid => (quote_root_bank, quote_node_bank, base_root_bank, base_node_bank),
             SerumSide::Ask => (base_root_bank, base_node_bank, quote_root_bank, quote_node_bank),
         };
@@ -849,13 +847,13 @@ impl Processor {
         // Settle borrow
         // TODO only do ops on tokens that have borrows and deposits
         settle_borrow_full_unchecked(
-            &mut out_root_bank,
+            &out_root_bank,
             &mut out_node_bank,
             &mut merps_account,
             out_token_i,
         )?;
         settle_borrow_full_unchecked(
-            &mut in_root_bank,
+            &in_root_bank,
             &mut in_node_bank,
             &mut merps_account,
             in_token_i,
@@ -1338,7 +1336,7 @@ fn checked_sub_borrow(
 }
 
 fn settle_borrow_full_unchecked(
-    root_bank: &mut RootBank,
+    root_bank: &RootBank,
     node_bank: &mut NodeBank,
     merps_account: &mut MerpsAccount,
     token_index: usize,

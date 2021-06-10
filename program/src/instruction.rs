@@ -113,8 +113,7 @@ pub enum MerpsInstruction {
     /// Accounts expected: 3 + Oracles
     /// 0. `[]` merps_group_ai -
     /// 1. `[writable]` merps_cache_ai -
-    /// 2. `[]` clock_ai -
-    /// 3+... `[]` oracle_ais - flux aggregator feed accounts
+    /// 2+... `[]` oracle_ais - flux aggregator feed accounts
     CachePrices,
 
     /// Cache root banks
