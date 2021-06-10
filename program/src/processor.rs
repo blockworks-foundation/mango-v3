@@ -303,8 +303,13 @@ impl Processor {
         // Make sure perp market at this index not already initialized
         check!(merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
-        check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
-        check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
+        check!(
+            maint_asset_weight <= ONE_I80F48
+                && maint_asset_weight > init_asset_weight
+                && init_asset_weight > ZERO_I80F48,
+            MerpsErrorCode::Default
+        )?;
+
         merps_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
             maint_asset_weight,
@@ -499,7 +504,7 @@ impl Processor {
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
         let coll_ratio =
-            merps_account.get_coll_ratio(&merps_group, &merps_cache, open_orders_ais)?;
+            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
 
         // TODO fix coll_ratio checks
         check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
@@ -586,7 +591,7 @@ impl Processor {
         }
 
         let coll_ratio =
-            merps_account.get_coll_ratio(&merps_group, &merps_cache, open_orders_ais)?;
+            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
         check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         // invoke_transfer()
@@ -690,7 +695,7 @@ impl Processor {
         )?;
 
         let coll_ratio =
-            merps_account.get_coll_ratio(&merps_group, &merps_cache, open_orders_ais)?;
+            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
         let reduce_only = coll_ratio < ONE_I80F48;
 
         // Make sure the root bank is in the merps group
@@ -857,7 +862,7 @@ impl Processor {
         )?;
 
         let coll_ratio =
-            merps_account.get_coll_ratio(&merps_group, &merps_cache, open_orders_ais)?;
+            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
         check!(reduce_only || coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
         check!(out_node_bank.has_valid_deposits_borrows(&out_root_bank), MerpsErrorCode::Default)?;
 
@@ -979,7 +984,7 @@ impl Processor {
             client_order_id,
         )?;
 
-        let coll_ratio = merps_account.get_coll_ratio(&merps_group, &merps_cache, &[])?;
+        let coll_ratio = merps_account.get_health_factor(&merps_group, &merps_cache, &[])?;
         check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
@@ -1055,6 +1060,7 @@ impl Processor {
                 maint_asset_weight,
                 init_asset_weight,
             } => {
+                msg!("Merps: AddSpotMarket");
                 Self::add_spot_market(
                     program_id,
                     accounts,
@@ -1064,21 +1070,29 @@ impl Processor {
                 )?;
             }
             MerpsInstruction::AddToBasket => {
+                msg!("Merps: AddToBasket");
                 Self::add_to_basket(program_id, accounts)?;
             }
             MerpsInstruction::Borrow { quantity } => {
+                msg!("Merps: Borrow");
                 Self::borrow(program_id, accounts, quantity)?;
             }
             MerpsInstruction::CachePrices => {
+                msg!("Merps: CachePrices");
                 Self::cache_prices(program_id, accounts)?;
             }
             MerpsInstruction::CacheRootBanks => {
+                msg!("Merps: CacheRootBanks");
                 Self::cache_root_banks(program_id, accounts)?;
             }
             MerpsInstruction::PlaceSpotOrder { order } => {
+                msg!("Merps: PlaceSpotOrder");
                 Self::place_spot_order(program_id, accounts, order)?;
             }
-            MerpsInstruction::AddOracle => Self::add_oracle(program_id, accounts)?,
+            MerpsInstruction::AddOracle => {
+                msg!("Merps: AddOracle");
+                Self::add_oracle(program_id, accounts)?
+            }
 
             MerpsInstruction::AddPerpMarket {
                 market_index,
@@ -1087,6 +1101,7 @@ impl Processor {
                 base_lot_size,
                 quote_lot_size,
             } => {
+                msg!("Merps: AddPerpMarket");
                 Self::add_perp_market(
                     program_id,
                     accounts,
@@ -1104,6 +1119,7 @@ impl Processor {
                 client_order_id,
                 order_type,
             } => {
+                msg!("Merps: PlacePerpOrder");
                 Self::place_perp_order(
                     program_id,
                     accounts,

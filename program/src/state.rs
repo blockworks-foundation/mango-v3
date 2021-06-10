@@ -1,7 +1,7 @@
 use std::cell::{Ref, RefMut};
 use std::mem::size_of;
 
-use bytemuck::from_bytes_mut;
+use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
@@ -13,8 +13,10 @@ use crate::matching::{Book, LeafNode, Side};
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use serum_dex::state::ToAlignedBytes;
+use solana_program::program_error::ProgramError;
 use solana_program::sysvar::rent::Rent;
-
+use std::convert::identity;
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
@@ -511,8 +513,8 @@ pub struct PerpAccount {
 impl PerpAccount {
     pub fn change_position(
         &mut self,
-        base_change: i64,
-        quote_change: I80F48,
+        base_change: i64,     // this is in contract size
+        quote_change: I80F48, // this is in native units
         long_funding: I80F48,
         short_funding: I80F48,
     ) -> MerpsResult<()> {
@@ -523,6 +525,9 @@ impl PerpAccount {
             Funding owed:
             FO_t = (TF - FS_t) * BP_t
         */
+
+        // TODO this check unnecessary if callers are smart
+        check!(base_change != 0, MerpsErrorCode::Default)?;
 
         let bp0 = self.base_position;
         self.base_position += base_change;
@@ -556,12 +561,77 @@ impl PerpAccount {
                 self.long_settled_funding = long_funding;
             } else {
                 // base_change must be less than 0, if == 0, that's error state
-
                 self.short_settled_funding = short_funding;
             }
         }
 
         Ok(())
+    }
+
+    #[allow(unused_variables)]
+    pub fn get_weighted_assets_liabs_val(
+        &self,
+        perp_market_info: &PerpMarketInfo,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+    ) -> MerpsResult<(I80F48, I80F48)> {
+        // Account for existing positions
+
+        // Account for orders that are expansionary
+        if self.base_position > 0 {
+        } else if self.base_position < 0 {
+        } else {
+        }
+
+        // Account for unrealized funding payments
+        // TODO make checked
+        // let funding: I80F48 = if perp_account.base_position > 0 {
+        //     (merps_cache.perp_market_cache[i].long_funding
+        //         - perp_account.long_settled_funding)
+        //         * I80F48::from_num(perp_account.base_position)
+        // } else if perp_account.base_position < 0 {
+        //     (merps_cache.perp_market_cache[i].short_funding
+        //         - perp_account.short_settled_funding)
+        //         * I80F48::from_num(perp_account.base_position)
+        // } else {
+        //     ZERO_I80F48
+        // };
+        // if funding > ZERO_I80F48 {
+        //     // funding positive, means liab
+        //     liabs_val += funding;
+        // } else if funding < ZERO_I80F48 {
+        //     assets_val -= funding;
+        // }
+        // units
+        // total_funding: I80F48 - native quote currency per contract
+        // funding_settled: I80F48 - native quote currency per contract
+        // base_positions: i64 - number of contracts
+        // quote_positions: i64 - number of quote_lot_size
+        // funding: I80F48 - native quote currency
+        // assets_val: I80F48 - native quote currency
+
+        // Account for open orders
+        let oos = &self.open_orders;
+        if self.base_position > 0 {
+            if oos.total_base > 0 {
+                // open long
+            } else if oos.total_base < 0 {
+                // close long
+            }
+        } else if self.base_position < 0 {
+            if oos.total_base > 0 { // close short
+            } else if oos.total_base < 0 { // open short
+            }
+        }
+
+        // lot price
+
+        /*
+            1. The amount on the open orders that are closing existing positions don't count against collateral
+            2. open orders that are opening do count against collateral
+            3. Possibly the open orders itself can store this information
+        */
+        Ok((ZERO_I80F48, ZERO_I80F48))
     }
 }
 
@@ -644,12 +714,38 @@ impl MerpsAccount {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
     }
 
-    // TODO need a new name for this as it's not exactly collateral ratio
-    pub fn get_coll_ratio(
+    pub fn get_spot_weighted_assets_liabs_val(
+        &self,
+        merps_cache: &MerpsCache,
+        market_index: usize,
+        open_orders_ai: &AccountInfo,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+    ) -> MerpsResult<(I80F48, I80F48)> {
+        // TODO make checked
+
+        let bank_cache = &merps_cache.root_bank_cache[market_index];
+        let price = merps_cache.price_cache[market_index].price;
+
+        let assets: I80F48 = self.deposits[market_index] * bank_cache.deposit_index;
+        let assets_val = if self.spot_open_orders[market_index] == Pubkey::default() {
+            assets * price * asset_weight
+        } else {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            (assets + I80F48::from_num(open_orders.native_coin_total)) * price * asset_weight
+                + I80F48::from_num(open_orders.native_pc_total)
+        };
+
+        let liabs_val = self.borrows[market_index] * bank_cache.borrow_index * price * liab_weight;
+
+        Ok((assets_val, liabs_val))
+    }
+
+    pub fn get_health_factor(
         &self,
         merps_group: &MerpsGroup,
         merps_cache: &MerpsCache,
-        _spot_open_orders_ais: &[AccountInfo],
+        spot_open_orders_ais: &[AccountInfo],
     ) -> MerpsResult<I80F48> {
         // Value of all assets and liabs in quote currency
         let quote_i = QUOTE_INDEX;
@@ -669,137 +765,24 @@ impl MerpsAccount {
                 continue;
             }
 
-            // TODO make mut when uncommenting the todo below
-            let base_assets = merps_cache.root_bank_cache[i]
-                .deposit_index
-                .checked_mul(self.deposits[i])
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
-
-            let base_liabs = merps_cache.root_bank_cache[i]
-                .borrow_index
-                .checked_mul(self.borrows[i])
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
-
-            if self.spot_open_orders[i] != Pubkey::default() {
-                //  TODO load open orders
-                //
-                // assets_val = open_orders_ais[i]
-                //     .quote_total
-                //     .checked_add(assets_val)
-                //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
-
-                // base_assets = open_orders_ais[i]
-                //     .base_total
-                //     .checked_add(base_assets)
-                //     .ok_or(throw_err!(MerpsErrorCode::MathError))?;
-            }
+            let (spot_assets_val_i, spot_liabs_val_i) = self.get_spot_weighted_assets_liabs_val(
+                merps_cache,
+                i,
+                &spot_open_orders_ais[i],
+                merps_group.spot_markets[i].init_asset_weight,
+                merps_group.spot_markets[i].init_liab_weight,
+            )?;
 
             let perp_market_info = &merps_group.perp_markets[i];
-            if !perp_market_info.is_empty() {
-                // TODO fill this in once perp logic is a little bit more clear
+            let (perp_assets_val_i, perp_liabs_val_i) = self.perp_accounts[i]
+                .get_weighted_assets_liabs_val(
+                    perp_market_info,
+                    perp_market_info.init_asset_weight,
+                    perp_market_info.init_liab_weight,
+                )?;
 
-                let perp_account = &self.perp_accounts[i];
-
-                let native_pos = I80F48::from_num(
-                    perp_account.base_position
-                        + perp_account
-                            .open_orders
-                            .total_base
-                            .checked_mul(perp_market_info.base_lot_size)
-                            .ok_or(throw_err!(MerpsErrorCode::MathError))?,
-                );
-
-                if perp_account.base_position > 0 {
-                    assets_val = native_pos
-                        .checked_mul(perp_market_info.init_asset_weight)
-                        .ok_or(math_err!())?
-                        .checked_mul(merps_cache.price_cache[i].price)
-                        .ok_or(math_err!())?
-                        .checked_add(assets_val)
-                        .ok_or(math_err!())?;
-                } else if perp_account.base_position < 0 {
-                    liabs_val = -native_pos
-                        .checked_mul(perp_market_info.init_liab_weight)
-                        .ok_or(math_err!())?
-                        .checked_mul(merps_cache.price_cache[i].price)
-                        .ok_or(math_err!())?
-                        .checked_add(assets_val)
-                        .ok_or(math_err!())?;
-                }
-
-                if perp_account.quote_position < 0 {
-                    // TODO
-                }
-
-                // Account for unrealized funding payments
-                // TODO make checked
-                let funding: I80F48 = if perp_account.base_position > 0 {
-                    (merps_cache.perp_market_cache[i].long_funding
-                        - perp_account.long_settled_funding)
-                        * I80F48::from_num(perp_account.base_position)
-                } else if perp_account.base_position < 0 {
-                    (merps_cache.perp_market_cache[i].short_funding
-                        - perp_account.short_settled_funding)
-                        * I80F48::from_num(perp_account.base_position)
-                } else {
-                    ZERO_I80F48
-                };
-
-                // units
-                // total_funding: I80F48 - native quote currency per contract
-                // funding_settled: I80F48 - native quote currency per contract
-                // base_positions: i64 - number of contracts
-                // quote_positions: i64 - number of quote_lot_size
-                // funding: I80F48 - native quote currency
-                // assets_val: I80F48 - native quote currency
-
-                if funding > ZERO_I80F48 {
-                    // funding positive, means liab
-                    liabs_val += funding;
-                } else if funding < ZERO_I80F48 {
-                    assets_val -= funding;
-                }
-
-                // Account for open orders
-
-                let oo_base = I80F48::from_num(perp_account.open_orders.total_base); // num contracts
-                let _oo_quote = I80F48::from_num(perp_account.open_orders.total_quote);
-
-                if perp_account.base_position > 0 {
-                    if oo_base > 0 { // open long
-                    } else if oo_base < 0 {
-                        // close long
-                    }
-                } else if perp_account.base_position < 0 {
-                    if oo_base > 0 { // close short
-                    } else if oo_base < 0 { // open short
-                    }
-                }
-
-                // lot price
-
-                /*
-                    1. The amount on the open orders that are closing existing positions don't count against collateral
-                    2. open orders that are opening do count against collateral
-                    3. Possibly the open orders itself can store this information
-                */
-            }
-
-            assets_val = base_assets
-                .checked_mul(merps_cache.price_cache[i].price)
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?
-                .checked_mul(merps_group.spot_markets[i].init_asset_weight)
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?
-                .checked_add(assets_val)
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
-
-            liabs_val = base_liabs
-                .checked_mul(merps_cache.price_cache[i].price)
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?
-                .checked_mul(merps_group.spot_markets[i].init_liab_weight)
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?
-                .checked_add(liabs_val)
-                .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+            assets_val += spot_assets_val_i + perp_assets_val_i;
+            liabs_val += spot_liabs_val_i + perp_liabs_val_i;
         }
 
         if liabs_val == ZERO_I80F48 {
@@ -967,4 +950,36 @@ pub fn load_market_state<'a>(
 
     state.check_flags()?;
     Ok(state)
+}
+
+fn strip_dex_padding<'a>(acc: &'a AccountInfo) -> MerpsResult<Ref<'a, [u8]>> {
+    check!(acc.data_len() >= 12, MerpsErrorCode::Default)?;
+    let unpadded_data: Ref<[u8]> = Ref::map(acc.try_borrow_data()?, |data| {
+        let data_len = data.len() - 12;
+        let (_, rest) = data.split_at(5);
+        let (mid, _) = rest.split_at(data_len);
+        mid
+    });
+    Ok(unpadded_data)
+}
+
+pub fn load_open_orders<'a>(
+    acc: &'a AccountInfo,
+) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {
+    Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
+}
+
+pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MerpsResult<()> {
+    if *acc.key == Pubkey::default() {
+        return Ok(());
+    }
+    // if it's not default, it must be initialized
+    let open_orders = load_open_orders(acc)?;
+    let valid_flags = (serum_dex::state::AccountFlag::Initialized
+        | serum_dex::state::AccountFlag::OpenOrders)
+        .bits();
+    check_eq!(open_orders.account_flags, valid_flags, MerpsErrorCode::Default)?;
+    check_eq!(identity(open_orders.owner), owner.to_aligned_bytes(), MerpsErrorCode::Default)?;
+
+    Ok(())
 }

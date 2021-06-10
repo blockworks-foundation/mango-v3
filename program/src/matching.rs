@@ -577,29 +577,6 @@ impl<'a> Book<'a> {
                 FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
             */
 
-            // TODO what if this is zero
-
-            // transfer into a new variable any unrealized funding if C_t == 0
-            /*
-            TF = 10k
-            FS0 = 1k
-            BP0 = -10
-
-            BP1 = +5
-
-            -90k = (TF - FS) * bp0 => negative funding so need to receive payment
-
-            FS1 = (FS0 - TF) * BP0 / BP1 + TF
-                = (-9k) * (-2) + 10k = 28k
-                =
-
-            FO1 = (10k - 28k) * (5) = -90k
-
-            Make sure when a position changes sign, make sure to zero out the settle funding and
-            push it onto funding_settled
-
-             */
-
             let base_change = quantity - rem_quantity;
             merps_account.perp_accounts[market_index].change_position(
                 base_change,

@@ -56,6 +56,7 @@ async fn test_init_perp_market() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
 
+    let max_lev = 10;
     // setup merps group, perp market & merps account
     {
         let mut transaction = Transaction::new_with_payer(
@@ -74,8 +75,8 @@ async fn test_init_perp_market() {
                     &asks_pk,
                     &admin.pubkey(),
                     perp_market_idx,
-                    I80F48::from_num(0.83),
-                    I80F48::from_num(1),
+                    I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
+                    I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
                     100,
                     10,
                 )
@@ -136,6 +137,7 @@ async fn test_place_order() {
     let admin = Keypair::new();
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
+    let max_lev = 10;
 
     // setup merps group, perp market & merps account
     {
@@ -155,8 +157,8 @@ async fn test_place_order() {
                     &asks_pk,
                     &admin.pubkey(),
                     perp_market_idx,
-                    I80F48::from_num(0.83),
-                    I80F48::from_num(1),
+                    I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
+                    I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
                     100,
                     10,
                 )
