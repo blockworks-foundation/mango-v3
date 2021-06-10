@@ -440,9 +440,9 @@ impl<'a> Book<'a> {
         self.asks.find_max()
     }
 
-    // fn get_best_bid_handle(&self) -> Option<NodeHandle> {
-    //     self.bids.find_min()
-    // }
+    fn get_best_bid_handle(&self) -> Option<NodeHandle> {
+        self.bids.find_min()
+    }
 
     pub fn new_order(
         &mut self,
@@ -580,18 +580,15 @@ impl<'a> Book<'a> {
             let base_change = quantity - rem_quantity;
             merps_account.perp_accounts[market_index].change_position(
                 base_change,
-                I80F48::from_num(quote_used * market.quote_lot_size),
+                I80F48::from_num(-quote_used * market.quote_lot_size),
                 market.long_funding,
                 market.short_funding,
             )?;
-
-            market.open_interest += base_change; // We know base_change > 0
         }
 
         Ok(())
     }
 
-    #[allow(unused)]
     pub fn new_ask(
         &mut self,
         event_queue: &mut EventQueue,
@@ -604,6 +601,97 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
     ) -> MerpsResult<()> {
-        unimplemented!()
+        // TODO make use of the order options
+        // TODO proper error handling
+        #[allow(unused_variables)]
+        let (post_only, post_allowed) = match order_type {
+            OrderType::Limit => (false, true),
+            OrderType::ImmediateOrCancel => unimplemented!(),
+            OrderType::PostOnly => unimplemented!(),
+        };
+        let order_id = market.gen_order_id(Side::Ask, price);
+
+        // if post only and price >= best_ask, return
+        // Iterate through book and match against this new bid
+        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut quote_used = 0; // quote lots
+        while rem_quantity > 0 {
+            let best_bid_h = match self.get_best_bid_handle() {
+                None => {
+                    break;
+                }
+                Some(h) => h,
+            };
+
+            let best_bid = self.bids.get_mut(best_bid_h).unwrap().as_leaf_mut().unwrap();
+            let best_bid_price = best_bid.price();
+            if price > best_bid_price {
+                break;
+            }
+
+            let match_quantity = rem_quantity.min(best_bid.quantity);
+            rem_quantity -= match_quantity;
+            quote_used += match_quantity * best_bid_price;
+            best_bid.quantity -= match_quantity;
+
+            // TODO fill out FillEvent
+            let maker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            event_queue.push_back(cast(maker_fill)).unwrap();
+
+            // This fill is not necessary, purely for stats purposes
+            let taker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            event_queue.push_back(cast(taker_fill)).unwrap();
+
+            // now either best_ask.quantity == 0 or rem_quantity == 0 or both
+            if best_bid.quantity == 0 {
+                // Create an Out event
+                let event = OutEvent { event_type: EventType::Out as u8, padding: [0; 7] };
+                event_queue.push_back(cast(event)).unwrap();
+                // Remove the order from the book
+                let _removed_node = self.bids.remove(best_bid_h).unwrap();
+            }
+        }
+
+        // If there are still quantity unmatched, place on the book
+        if rem_quantity > 0 {
+            if self.bids.is_full() {
+                // If this asks is lower than highest ask, boot that ask and insert this one
+                let max_ask_handle = self.asks.find_min().unwrap();
+                let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
+                check!(price < max_ask.price(), MerpsErrorCode::OutOfSpace)?;
+                let _removed_node = self.asks.remove(max_ask_handle).unwrap();
+            }
+
+            let new_ask = LeafNode {
+                tag: NodeTag::LeafNode as u32,
+                owner_slot: 0, // TODO
+                padding: [0; 3],
+                key: order_id,
+                owner: *merps_account_pk,
+                quantity: rem_quantity,
+                client_order_id,
+            };
+
+            let _result = self.asks.insert_leaf(&new_ask)?;
+            merps_account.perp_accounts[market_index].open_orders.add_order(Side::Ask, &new_ask)?;
+        }
+
+        // Edit merps_account if some contracts were matched
+        if rem_quantity < quantity {
+            /*
+                How to adjust the funding settled
+                FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
+            */
+
+            let base_change = -(quantity - rem_quantity); // negative because short
+            merps_account.perp_accounts[market_index].change_position(
+                base_change,
+                I80F48::from_num(quote_used * market.quote_lot_size),
+                market.long_funding,
+                market.short_funding,
+            )?;
+        }
+
+        Ok(())
     }
 }
