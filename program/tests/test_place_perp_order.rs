@@ -249,21 +249,19 @@ async fn test_place_and_cancel_order() {
     // cancel bid by client_id
     {
         let mut transaction = Transaction::new_with_payer(
-            &[
-                cancel_perp_order_by_client_id(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
-                    &perp_market_pk,
-                    &bids_pk,
-                    &asks_pk,
-                    &event_queue_pk,
-                    Side::Bid,
-                    bid_id
-                )
-                .unwrap(),
-            ],
+            &[cancel_perp_order_by_client_id(
+                &program_id,
+                &merps_group_pk,
+                &merps_account_pk,
+                &user.pubkey(),
+                &perp_market_pk,
+                &bids_pk,
+                &asks_pk,
+                &event_queue_pk,
+                Side::Bid,
+                bid_id,
+            )
+            .unwrap()],
             Some(&payer.pubkey()),
         );
 

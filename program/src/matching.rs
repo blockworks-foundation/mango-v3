@@ -530,17 +530,17 @@ impl<'a> Book<'a> {
             best_ask.quantity -= match_quantity;
 
             // TODO fill out FillEvent
-            let maker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let maker_fill = FillEvent::new(true, best_ask.owner);
             event_queue.push_back(cast(maker_fill)).unwrap();
 
             // This fill is not necessary, purely for stats purposes
-            let taker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let taker_fill = FillEvent::new(false, *merps_account_pk);
             event_queue.push_back(cast(taker_fill)).unwrap();
 
             // now either best_ask.quantity == 0 or rem_quantity == 0 or both
             if best_ask.quantity == 0 {
                 // Create an Out event
-                let event = OutEvent { event_type: EventType::Out as u8, padding: [0; 7] };
+                let event = OutEvent::new();
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
                 let _removed_node = self.asks.remove(best_ask_h).unwrap();
@@ -568,10 +568,7 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.bids.insert_leaf(&new_bid)?;
-            merps_account.perp_accounts[market_index].open_orders.add_order(
-                Side::Bid,
-                &new_bid,
-            )?;
+            merps_account.perp_accounts[market_index].open_orders.add_order(Side::Bid, &new_bid)?;
         }
 
         // Edit merps_account if some contracts were matched
@@ -634,17 +631,17 @@ impl<'a> Book<'a> {
             best_bid.quantity -= match_quantity;
 
             // TODO fill out FillEvent
-            let maker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let maker_fill = FillEvent::new(true, best_bid.owner);
             event_queue.push_back(cast(maker_fill)).unwrap();
 
             // This fill is not necessary, purely for stats purposes
-            let taker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let taker_fill = FillEvent::new(false, *merps_account_pk);
             event_queue.push_back(cast(taker_fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
             if best_bid.quantity == 0 {
                 // Create an Out event
-                let event = OutEvent { event_type: EventType::Out as u8, padding: [0; 7] };
+                let event = OutEvent::new();
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
                 let _removed_node = self.bids.remove(best_bid_h).unwrap();
@@ -672,10 +669,7 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.asks.insert_leaf(&new_ask)?;
-            merps_account.perp_accounts[market_index].open_orders.add_order(
-                Side::Ask,
-                &new_ask,
-            )?;
+            merps_account.perp_accounts[market_index].open_orders.add_order(Side::Ask, &new_ask)?;
         }
 
         // Edit merps_account if some contracts were matched

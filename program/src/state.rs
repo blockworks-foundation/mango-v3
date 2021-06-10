@@ -487,11 +487,7 @@ pub struct PerpOpenOrders {
 }
 
 impl PerpOpenOrders {
-    pub fn add_order(
-        &mut self,
-        side: Side,
-        order: &LeafNode,
-    ) -> MerpsResult<()> {
+    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MerpsResult<()> {
         check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
         let slot = self.is_free_bits.trailing_zeros();
         let slot_mask = 1u32 << slot;
@@ -948,6 +944,20 @@ impl PerpMarket {
 
         Ok(state)
     }
+
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group_pk: &Pubkey,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        let state = Self::load(account)?;
+        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MerpsErrorCode::Default)?;
+        check!(merps_group_pk == &state.merps_group, MerpsErrorCode::Default)?;
+        Ok(state)
+    }
+
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,

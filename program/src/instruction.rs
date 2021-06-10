@@ -27,7 +27,10 @@ pub enum MerpsInstruction {
     /// 7. `[writable]` quote_root_bank_ai - TODO
     /// 6. `[writable]` merps_cache_ai - Account to cache prices, root banks, and perp markets
     /// 8. `[]` dex_prog_ai - TODO
-    InitMerpsGroup { signer_nonce: u64, valid_interval: u8 },
+    InitMerpsGroup {
+        signer_nonce: u64,
+        valid_interval: u8,
+    },
 
     /// Initialize a merps account for a user
     ///
@@ -51,7 +54,9 @@ pub enum MerpsInstruction {
     /// 5. `[writable]` vault_ai - TokenAccount owned by MerpsGroup
     /// 6. `[]` token_prog_ai - acc pointed to by SPL token program id
     /// 7. `[writable]` owner_token_account_ai - TokenAccount owned by user which will be sending the funds
-    Deposit { quantity: u64 },
+    Deposit {
+        quantity: u64,
+    },
 
     /// Withdraw funds that were deposited earlier.
     ///
@@ -69,7 +74,10 @@ pub enum MerpsInstruction {
     /// 9. `[read]` token_prog_ai,    -
     /// 10. `[read]` clock_ai,         -
     /// 11..+ `[]` open_orders_accs - open orders for each of the spot market
-    Withdraw { quantity: u64, allow_borrow: bool },
+    Withdraw {
+        quantity: u64,
+        allow_borrow: bool,
+    },
 
     /// Add a token to a merps group
     ///
@@ -83,7 +91,11 @@ pub enum MerpsInstruction {
     /// 3. `[]` vault_ai - TODO
     /// 4. `[writable]` root_bank_ai - TODO
     /// 5. `[signer]` admin_ai - TODO
-    AddSpotMarket { market_index: usize, maint_asset_weight: I80F48, init_asset_weight: I80F48 },
+    AddSpotMarket {
+        market_index: usize,
+        maint_asset_weight: I80F48,
+        init_asset_weight: I80F48,
+    },
 
     /// Add a spot market to a merps account basket
     ///
@@ -106,7 +118,9 @@ pub enum MerpsInstruction {
     /// 4. `[]` root_bank_ai - Root bank owned by MerpsGroup
     /// 5. `[writable]` node_bank_ai - Node bank owned by RootBank
     /// 6. `[]` clock_ai - Clock sysvar account
-    Borrow { quantity: u64 },
+    Borrow {
+        quantity: u64,
+    },
 
     /// Cache prices
     ///
@@ -125,7 +139,9 @@ pub enum MerpsInstruction {
     ///
     /// Accounts expected by this instruction (19 + MAX_PAIRS):
     ///
-    PlaceSpotOrder { order: serum_dex::instruction::NewOrderInstructionV3 },
+    PlaceSpotOrder {
+        order: serum_dex::instruction::NewOrderInstructionV3,
+    },
 
     /// Add oracle
     ///
@@ -174,7 +190,7 @@ pub enum MerpsInstruction {
     CancelPerpOrderByClientId {
         side: Side,
         client_order_id: u64,
-    }
+    },
 }
 
 impl MerpsInstruction {
@@ -264,8 +280,7 @@ impl MerpsInstruction {
             }
             13 => {
                 let data_arr = array_ref![data, 0, 9];
-                let (side, client_order_id) =
-                    array_refs![data_arr, 1, 8];
+                let (side, client_order_id) = array_refs![data_arr, 1, 8];
                 MerpsInstruction::CancelPerpOrderByClientId {
                     side: Side::try_from_primitive(side[0]).ok()?,
                     client_order_id: u64::from_le_bytes(*client_order_id),
@@ -506,13 +521,13 @@ pub fn place_perp_order(
 
 pub fn cancel_perp_order_by_client_id(
     program_id: &Pubkey,
-    merps_group_pk: &Pubkey,     // read
-    merps_account_pk: &Pubkey,   // write
-    owner_pk: &Pubkey,           // read, signer
-    perp_market_pk: &Pubkey,     // write
-    bids_pk: &Pubkey,            // write
-    asks_pk: &Pubkey,            // write
-    event_queue_pk: &Pubkey,     // write
+    merps_group_pk: &Pubkey,   // read
+    merps_account_pk: &Pubkey, // write
+    owner_pk: &Pubkey,         // read, signer
+    perp_market_pk: &Pubkey,   // write
+    bids_pk: &Pubkey,          // write
+    asks_pk: &Pubkey,          // write
+    event_queue_pk: &Pubkey,   // write
     side: Side,
     client_order_id: u64,
 ) -> Result<Instruction, ProgramError> {
@@ -525,8 +540,7 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
-    let instr =
-        MerpsInstruction::CancelPerpOrderByClientId { side, client_order_id };
+    let instr = MerpsInstruction::CancelPerpOrderByClientId { side, client_order_id };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
