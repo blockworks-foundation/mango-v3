@@ -567,16 +567,15 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.bids.insert_leaf(&new_bid)?;
-            merps_account.perp_accounts[market_index].open_orders.add_order(Side::Bid, &new_bid)?;
+            merps_account.perp_accounts[market_index].open_orders.add_order(
+                Side::Bid,
+                &new_bid,
+                client_order_id,
+            )?;
         }
 
         // Edit merps_account if some contracts were matched
         if rem_quantity < quantity {
-            /*
-                How to adjust the funding settled
-                FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
-            */
-
             let base_change = quantity - rem_quantity;
             merps_account.perp_accounts[market_index].change_position(
                 base_change,
@@ -642,7 +641,7 @@ impl<'a> Book<'a> {
             let taker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
             event_queue.push_back(cast(taker_fill)).unwrap();
 
-            // now either best_ask.quantity == 0 or rem_quantity == 0 or both
+            // now either best_bid.quantity == 0 or rem_quantity == 0 or both
             if best_bid.quantity == 0 {
                 // Create an Out event
                 let event = OutEvent { event_type: EventType::Out as u8, padding: [0; 7] };
@@ -673,16 +672,15 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.asks.insert_leaf(&new_ask)?;
-            merps_account.perp_accounts[market_index].open_orders.add_order(Side::Ask, &new_ask)?;
+            merps_account.perp_accounts[market_index].open_orders.add_order(
+                Side::Ask,
+                &new_ask,
+                client_order_id,
+            )?;
         }
 
         // Edit merps_account if some contracts were matched
         if rem_quantity < quantity {
-            /*
-                How to adjust the funding settled
-                FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
-            */
-
             let base_change = -(quantity - rem_quantity); // negative because short
             merps_account.perp_accounts[market_index].change_position(
                 base_change,

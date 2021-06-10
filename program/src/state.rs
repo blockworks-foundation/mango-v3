@@ -467,8 +467,8 @@ impl MerpsCache {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpOpenOrders {
-    pub total_base: i64,  // total contracts in sell orders
-    pub total_quote: i64, // total quote currency in buy orders
+    pub long_base: i64,  // total contracts in sell orders
+    pub short_base: i64, // total quote currency in buy orders
     pub is_free_bits: u32,
     pub is_bid_bits: u32,
     pub orders: [i128; 32],
@@ -476,7 +476,12 @@ pub struct PerpOpenOrders {
 }
 
 impl PerpOpenOrders {
-    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MerpsResult<()> {
+    pub fn add_order(
+        &mut self,
+        side: Side,
+        order: &LeafNode,
+        client_order_id: u64,
+    ) -> MerpsResult<()> {
         check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
         let slot = self.is_free_bits.trailing_zeros();
         let slot_mask = 1u32 << slot;
@@ -485,17 +490,16 @@ impl PerpOpenOrders {
             Side::Bid => {
                 // TODO make checked
                 self.is_bid_bits |= slot_mask;
-                self.total_base += order.quantity;
-                self.total_quote -= order.quantity * order.price();
+                self.long_base += order.quantity;
             }
             Side::Ask => {
                 self.is_bid_bits &= !slot_mask;
-                self.total_base -= order.quantity;
-                self.total_quote += order.quantity * order.price();
+                self.short_base += order.quantity;
             }
         };
 
         self.orders[slot as usize] = order.key;
+        self.client_order_ids[slot as usize] = client_order_id;
         Ok(())
     }
 }
@@ -611,21 +615,8 @@ impl PerpAccount {
         // assets_val: I80F48 - native quote currency
 
         // Account for open orders
-        let oos = &self.open_orders;
-        if self.base_position > 0 {
-            if oos.total_base > 0 {
-                // open long
-            } else if oos.total_base < 0 {
-                // close long
-            }
-        } else if self.base_position < 0 {
-            if oos.total_base > 0 { // close short
-            } else if oos.total_base < 0 { // open short
-            }
-        }
 
         // lot price
-
         /*
             1. The amount on the open orders that are closing existing positions don't count against collateral
             2. open orders that are opening do count against collateral
