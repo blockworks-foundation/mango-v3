@@ -6,6 +6,7 @@ use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -17,7 +18,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::program_error::ProgramError;
 use solana_program::sysvar::rent::Rent;
-use std::convert::identity;
+use std::convert::{identity, TryInto};
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
@@ -487,13 +488,13 @@ pub struct PerpOpenOrders {
 }
 
 impl PerpOpenOrders {
-    pub fn add_order(
-        &mut self,
-        side: Side,
-        order: &LeafNode,
-    ) -> MerpsResult<()> {
+    pub fn next_order_slot(self) -> u8 {
+        return self.is_free_bits.trailing_zeros().try_into().unwrap();
+    }
+
+    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MerpsResult<()> {
         check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
-        let slot = self.is_free_bits.trailing_zeros();
+        let slot = self.next_order_slot();
         let slot_mask = 1u32 << slot;
         self.is_free_bits &= !slot_mask;
         match side {
@@ -510,6 +511,37 @@ impl PerpOpenOrders {
 
         self.orders[slot as usize] = order.key;
         self.client_order_ids[slot as usize] = order.client_order_id;
+        Ok(())
+    }
+
+    pub fn cancel_order(
+        &mut self,
+        order: &LeafNode,
+        order_id: i128,
+        side: Side,
+    ) -> MerpsResult<()> {
+        // input verification
+        let slot = order.owner_slot;
+        let slot_mask = 1u32 << slot;
+        check_eq!(0u32, slot_mask & self.is_free_bits, MerpsErrorCode::Default)?;
+        check_eq!(Some(side), self.slot_side(slot), MerpsErrorCode::Default)?;
+        check_eq!(order_id, self.orders[slot as usize], MerpsErrorCode::Default)?;
+
+        // accounting
+        match side {
+            Side::Bid => {
+                self.long_base -= order.quantity;
+            }
+            Side::Ask => {
+                self.short_base -= order.quantity;
+            }
+        }
+
+        // release space
+        self.is_free_bits |= slot_mask;
+        self.orders[slot as usize] = 0i128;
+        self.client_order_ids[slot as usize] = 0u64;
+
         Ok(())
     }
 
