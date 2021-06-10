@@ -12,7 +12,8 @@ use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
-use std::convert::TryFrom;
+use std::convert::{identity, TryFrom};
+use std::ops::DerefMut;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -92,6 +93,13 @@ impl AnyNode {
         match self.case()? {
             NodeRef::Inner(inner) => Some(inner.key),
             NodeRef::Leaf(leaf) => Some(leaf.key),
+        }
+    }
+
+    fn children(&self) -> Option<[u32; 2]> {
+        match self.case().unwrap() {
+            NodeRef::Inner(&InnerNode { children, .. }) => Some(children),
+            NodeRef::Leaf(_) => None,
         }
     }
 
@@ -278,6 +286,52 @@ impl BookSide {
                 }
             }
         }
+    }
+
+    fn remove_by_key(&mut self, search_key: i128) -> Option<LeafNode> {
+        let mut parent_h = self.root()?;
+        let mut child_h;
+        let mut crit_bit;
+        match self.get(parent_h).unwrap().case().unwrap() {
+            NodeRef::Leaf(&leaf) if leaf.key == search_key => {
+                assert_eq!(self.leaf_count, 1);
+                self.root_node = 0;
+                self.leaf_count = 0;
+                let _old_root = self.remove(parent_h).unwrap();
+                return Some(leaf);
+            }
+            NodeRef::Leaf(_) => return None,
+            NodeRef::Inner(inner) => {
+                let (ch, cb) = inner.walk_down(search_key);
+                child_h = ch;
+                crit_bit = cb;
+            }
+        }
+        loop {
+            match self.get(child_h).unwrap().case().unwrap() {
+                NodeRef::Inner(inner) => {
+                    let (grandchild_h, grandchild_crit_bit) = inner.walk_down(search_key);
+                    parent_h = child_h;
+                    child_h = grandchild_h;
+                    crit_bit = grandchild_crit_bit;
+                    continue;
+                }
+                NodeRef::Leaf(&leaf) => {
+                    if leaf.key != search_key {
+                        return None;
+                    }
+
+                    break;
+                }
+            }
+        }
+        // replace parent with its remaining child node
+        // free child_h, replace *parent_h with *other_child_h, free other_child_h
+        let other_child_h = self.get(parent_h).unwrap().children().unwrap()[!crit_bit as usize];
+        let other_child_node_contents = self.remove(other_child_h).unwrap();
+        *self.get_mut(parent_h).unwrap() = other_child_node_contents;
+        self.leaf_count -= 1;
+        Some(cast(self.remove(child_h).unwrap()))
     }
 
     fn remove(&mut self, key: u32) -> Option<AnyNode> {
@@ -557,9 +611,11 @@ impl<'a> Book<'a> {
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
+            let oo = &mut merps_account.perp_accounts[market_index].open_orders;
+
             let new_bid = LeafNode {
                 tag: NodeTag::LeafNode as u32,
-                owner_slot: 0, // TODO
+                owner_slot: oo.next_order_slot(),
                 padding: [0; 3],
                 key: order_id,
                 owner: *merps_account_pk,
@@ -568,10 +624,7 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.bids.insert_leaf(&new_bid)?;
-            merps_account.perp_accounts[market_index].open_orders.add_order(
-                Side::Bid,
-                &new_bid,
-            )?;
+            oo.add_order(Side::Bid, &new_bid)?;
         }
 
         // Edit merps_account if some contracts were matched
@@ -661,9 +714,11 @@ impl<'a> Book<'a> {
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
 
+            let oo = &mut merps_account.perp_accounts[market_index].open_orders;
+
             let new_ask = LeafNode {
                 tag: NodeTag::LeafNode as u32,
-                owner_slot: 0, // TODO
+                owner_slot: oo.next_order_slot(),
                 padding: [0; 3],
                 key: order_id,
                 owner: *merps_account_pk,
@@ -672,10 +727,7 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.asks.insert_leaf(&new_ask)?;
-            merps_account.perp_accounts[market_index].open_orders.add_order(
-                Side::Ask,
-                &new_ask,
-            )?;
+            oo.add_order(Side::Ask, &new_ask)?;
         }
 
         // Edit merps_account if some contracts were matched
@@ -701,7 +753,17 @@ impl<'a> Book<'a> {
         order_id: i128,
         side: Side,
     ) -> MerpsResult<()> {
-        msg!("cancel_order  oo={}", oo.is_free_bits);
+        let book_side = match side {
+            Side::Bid => self.bids.deref_mut(),
+            Side::Ask => self.asks.deref_mut(),
+        };
+
+        let order = book_side.remove_by_key(order_id).ok_or(throw_err!(MerpsErrorCode::Default))?;
+        check_eq!(order.owner, *merps_account_pk, MerpsErrorCode::Default)?;
+
+        oo.cancel_order(&order, order_id, side)?;
+
+        // TODO: write to event queue
 
         Ok(())
     }
