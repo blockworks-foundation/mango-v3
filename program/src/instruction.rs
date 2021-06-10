@@ -170,6 +170,11 @@ pub enum MerpsInstruction {
         client_order_id: u64,
         order_type: OrderType,
     },
+
+    CancelPerpOrderByClientId {
+        side: Side,
+        client_order_id: u64,
+    }
 }
 
 impl MerpsInstruction {
@@ -255,6 +260,15 @@ impl MerpsInstruction {
                     quantity: i64::from_le_bytes(*quantity),
                     client_order_id: u64::from_le_bytes(*client_order_id),
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                }
+            }
+            13 => {
+                let data_arr = array_ref![data, 0, 9];
+                let (side, client_order_id) =
+                    array_refs![data_arr, 1, 8];
+                MerpsInstruction::CancelPerpOrderByClientId {
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    client_order_id: u64::from_le_bytes(*client_order_id),
                 }
             }
             _ => {
@@ -486,6 +500,33 @@ pub fn place_perp_order(
     ];
     let instr =
         MerpsInstruction::PlacePerpOrder { side, price, quantity, client_order_id, order_type };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cancel_perp_order_by_client_id(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,     // read
+    merps_account_pk: &Pubkey,   // write
+    owner_pk: &Pubkey,           // read, signer
+    perp_market_pk: &Pubkey,     // write
+    bids_pk: &Pubkey,            // write
+    asks_pk: &Pubkey,            // write
+    event_queue_pk: &Pubkey,     // write
+    side: Side,
+    client_order_id: u64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*merps_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+    ];
+    let instr =
+        MerpsInstruction::CancelPerpOrderByClientId { side, client_order_id };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

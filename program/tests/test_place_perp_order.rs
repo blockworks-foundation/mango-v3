@@ -93,7 +93,7 @@ async fn test_init_perp_market() {
 }
 
 #[tokio::test]
-async fn test_place_order() {
+async fn test_place_and_cancel_order() {
     let program_id = Pubkey::new_unique();
     let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
 
@@ -174,6 +174,9 @@ async fn test_place_order() {
     }
 
     // place an order
+
+    let bid_id = 1337;
+    let ask_id = 1338;
     {
         let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
@@ -210,9 +213,26 @@ async fn test_place_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    TSLA_PRICE as i64,
+                    ((TSLA_PRICE - 1) * unit) as i64,
                     10,
-                    1,
+                    bid_id,
+                    OrderType::Limit,
+                )
+                .unwrap(),
+                place_perp_order(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &merps_group.merps_cache,
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &event_queue_pk,
+                    Side::Ask,
+                    ((TSLA_PRICE + 1) * unit) as i64,
+                    10,
+                    ask_id,
                     OrderType::Limit,
                 )
                 .unwrap(),
@@ -225,4 +245,116 @@ async fn test_place_order() {
         // Setup transaction succeeded
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
+
+    // cancel bid by client_id
+    {
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                cancel_perp_order_by_client_id(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &event_queue_pk,
+                    Side::Bid,
+                    bid_id
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer, &user], recent_blockhash);
+
+        // Setup transaction succeeded
+        assert!(banks_client.process_transaction(transaction).await.is_ok());
+    }
+
+    /*
+    // error when cancelling bid twice
+    {
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                cancel_perp_order_by_client_id(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &event_queue_pk,
+                    Side::Bid,
+                    bid_id
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer, &user], recent_blockhash);
+
+        // Setup transaction succeeded
+        assert!(banks_client.process_transaction(transaction).await.is_err());
+    }
+
+    // error when cancelling wrong side / client id
+    {
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                cancel_perp_order_by_client_id(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &event_queue_pk,
+                    Side::Bid,
+                    ask_id
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer, &user], recent_blockhash);
+
+        // Setup transaction succeeded
+        assert!(banks_client.process_transaction(transaction).await.is_err());
+    }
+
+
+    // cancel ask by client_id
+    {
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                cancel_perp_order_by_client_id(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &event_queue_pk,
+                    Side::Ask,
+                    ask_id
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer, &user], recent_blockhash);
+
+        // Setup transaction succeeded
+        assert!(banks_client.process_transaction(transaction).await.is_ok());
+    }
+
+    */
 }

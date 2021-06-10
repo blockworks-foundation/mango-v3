@@ -1,6 +1,6 @@
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
-use crate::state::{DataType, MerpsAccount, MetaData, PerpMarket};
+use crate::state::{DataType, MerpsAccount, MetaData, PerpMarket, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
 use fixed::types::I80F48;
 use mango_common::Loadable;
@@ -8,6 +8,7 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
@@ -570,7 +571,6 @@ impl<'a> Book<'a> {
             merps_account.perp_accounts[market_index].open_orders.add_order(
                 Side::Bid,
                 &new_bid,
-                client_order_id,
             )?;
         }
 
@@ -675,7 +675,6 @@ impl<'a> Book<'a> {
             merps_account.perp_accounts[market_index].open_orders.add_order(
                 Side::Ask,
                 &new_ask,
-                client_order_id,
             )?;
         }
 
@@ -689,6 +688,20 @@ impl<'a> Book<'a> {
                 market.short_funding,
             )?;
         }
+
+        Ok(())
+    }
+
+    pub fn cancel_order(
+        &mut self,
+        event_queue: &mut EventQueue,
+        oo: &mut PerpOpenOrders,
+        merps_account_pk: &Pubkey,
+        market_index: usize,
+        order_id: i128,
+        side: Side,
+    ) -> MerpsResult<()> {
+        msg!("cancel_order  oo={}", oo.is_free_bits);
 
         Ok(())
     }

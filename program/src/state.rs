@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefMut};
 use std::mem::size_of;
+use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
@@ -480,7 +481,6 @@ impl PerpOpenOrders {
         &mut self,
         side: Side,
         order: &LeafNode,
-        client_order_id: u64,
     ) -> MerpsResult<()> {
         check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
         let slot = self.is_free_bits.trailing_zeros();
@@ -499,8 +499,52 @@ impl PerpOpenOrders {
         };
 
         self.orders[slot as usize] = order.key;
-        self.client_order_ids[slot as usize] = client_order_id;
+        self.client_order_ids[slot as usize] = order.client_order_id;
         Ok(())
+    }
+
+    #[inline]
+    fn iter_filled_slots(&self) -> impl Iterator<Item = u8> {
+        struct Iter {
+            bits: u32,
+        }
+        impl Iterator for Iter {
+            type Item = u8;
+            #[inline(always)]
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.bits == 0 {
+                    None
+                } else {
+                    let next = self.bits.trailing_zeros();
+                    let mask = 1u32 << next;
+                    self.bits &= !mask;
+                    Some(next as u8)
+                }
+            }
+        }
+        Iter { bits: !self.is_free_bits }
+    }
+
+    #[inline]
+    pub fn slot_side(&self, slot: u8) -> Option<Side> {
+        let slot_mask = 1u32 << slot;
+        if self.is_free_bits & slot_mask != 0 {
+            None
+        } else if self.is_bid_bits & slot_mask != 0 {
+            Some(Side::Bid)
+        } else {
+            Some(Side::Ask)
+        }
+    }
+
+    #[inline]
+    pub fn orders_with_client_ids(&self) -> impl Iterator<Item = (NonZeroU64, i128, Side)> + '_ {
+        self.iter_filled_slots().filter_map(move |slot| {
+            let client_order_id = NonZeroU64::new(self.client_order_ids[slot as usize])?;
+            let order_id = self.orders[slot as usize];
+            let side = self.slot_side(slot).unwrap();
+            Some((client_order_id, order_id, side))
+        })
     }
 }
 

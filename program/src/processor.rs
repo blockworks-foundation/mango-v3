@@ -1,5 +1,6 @@
 use std::cmp;
 use std::mem::size_of;
+use std::num::NonZeroU64;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
@@ -989,10 +990,69 @@ impl Processor {
     }
 
     #[allow(unused)]
-    fn cancel_perp_order() -> MerpsResult<()> {
-        // TODO
-        unimplemented!()
+    fn cancel_perp_order_by_client_id(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,
+        client_order_id: u64,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+            event_queue_ai,     // write
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let mut oo = merps_account.perp_accounts[market_index].open_orders;
+
+        // we should consider not throwing an error but to silently ignore cancel_order when it passes an unknown
+        // client_order_id, this would allow batching multiple cancel instructions with place instructions for
+        // super-efficient updating of orders. if not then the same usage pattern might often trigger errors due
+        // to the possibility of already filled orders?
+        let (_, order_id, side) = oo
+            .orders_with_client_ids()
+            .find(|entry| client_order_id == u64::from(entry.0))
+            .ok_or(throw_err!(MerpsErrorCode::ClientIdNotFound))?;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
+
+        book.cancel_order(
+            &mut event_queue,
+            &mut oo,
+            merps_account_ai.key,
+            market_index,
+            order_id,
+            side,
+        )?;
+
+        Ok(())
     }
+
+    /*
+    fn cancel_perp_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,    )
+        */
 
     /// Take two MerpsAccount and settle quote currency pnl between them
     #[allow(unused)]
@@ -1128,6 +1188,13 @@ impl Processor {
                     order_type,
                 )?;
             }
+            MerpsInstruction::CancelPerpOrderByClientId {
+                side,
+                client_order_id,
+            } => {
+                Self::cancel_perp_order_by_client_id(program_id, accounts, side, client_order_id)?;
+            }
+
         }
 
         Ok(())

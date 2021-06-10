@@ -69,6 +69,9 @@ pub enum MerpsErrorCode {
     #[error("MerpsErrorCode::AccountNotRentExempt")]
     AccountNotRentExempt,
 
+    #[error("MerpsErrorCode::ClientIdNotFound")]
+    ClientIdNotFound,
+
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }
