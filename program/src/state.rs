@@ -32,6 +32,16 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
 
+// units
+// long_funding: I80F48 - native quote currency per contract
+// short_funding: I80F48 - native quote currency per contract
+// long_funding_settled: I80F48 - native quote currency per contract
+// short_funding_settled: I80F48 - native quote currency per contract
+// base_positions: i64 - number of contracts
+// quote_positions: I80F48 - native quote currency
+// price: I80F48 - native quote per native base
+// price: i64 - quote lots per base lot
+
 #[repr(u8)]
 #[derive(IntoPrimitive, TryFromPrimitive)]
 pub enum DataType {
@@ -616,57 +626,98 @@ impl PerpAccount {
         Ok(())
     }
 
+    /// Return the assets_val and liabs_val given some change to the current position at current price
+    fn sim_assets_liabs_val(
+        &self,
+        perp_market_info: &PerpMarketInfo,
+        price: I80F48,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+        base_change: i64,
+    ) -> (I80F48, I80F48) {
+        // TODO make checked
+        let new_base = self.base_position + base_change;
+        let new_quote: I80F48 = self.quote_position
+            - I80F48::from_num(base_change * perp_market_info.base_lot_size) * price;
+
+        let mut assets_val = ZERO_I80F48;
+        let mut liabs_val = ZERO_I80F48;
+        if new_base > 0 {
+            assets_val +=
+                asset_weight * I80F48::from_num(new_base * perp_market_info.base_lot_size) * price;
+        } else {
+            liabs_val -=
+                liab_weight * I80F48::from_num(new_base * perp_market_info.base_lot_size) * price;
+        }
+
+        if new_quote > 0 {
+            assets_val += new_quote;
+        } else {
+            liabs_val -= new_quote;
+        }
+
+        (assets_val, liabs_val)
+    }
     #[allow(unused_variables)]
     pub fn get_weighted_assets_liabs_val(
         &self,
         perp_market_info: &PerpMarketInfo,
+        price: I80F48,
         asset_weight: I80F48,
         liab_weight: I80F48,
-    ) -> MerpsResult<(I80F48, I80F48)> {
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> (I80F48, I80F48) {
         // Account for existing positions
 
         // Account for orders that are expansionary
-        if self.base_position > 0 {
-        } else if self.base_position < 0 {
+        let (bids_assets_val, bids_liabs_val) = self.sim_assets_liabs_val(
+            perp_market_info,
+            price,
+            asset_weight,
+            liab_weight,
+            self.open_orders.long_base,
+        );
+
+        let (asks_assets_val, asks_liabs_val) = self.sim_assets_liabs_val(
+            perp_market_info,
+            price,
+            asset_weight,
+            liab_weight,
+            -self.open_orders.short_base,
+        );
+
+        let bids_hf = bids_assets_val - bids_liabs_val;
+        let asks_hf = asks_assets_val - asks_liabs_val;
+
+        // Take the worst case scenario for assets_val and liabs_val
+        let (mut assets_val, mut liabs_val) = if bids_hf < asks_hf {
+            (bids_assets_val, bids_liabs_val)
         } else {
-        }
+            (asks_assets_val, asks_liabs_val)
+        };
 
         // Account for unrealized funding payments
         // TODO make checked
-        // let funding: I80F48 = if perp_account.base_position > 0 {
-        //     (merps_cache.perp_market_cache[i].long_funding
-        //         - perp_account.long_settled_funding)
-        //         * I80F48::from_num(perp_account.base_position)
-        // } else if perp_account.base_position < 0 {
-        //     (merps_cache.perp_market_cache[i].short_funding
-        //         - perp_account.short_settled_funding)
-        //         * I80F48::from_num(perp_account.base_position)
-        // } else {
-        //     ZERO_I80F48
-        // };
-        // if funding > ZERO_I80F48 {
-        //     // funding positive, means liab
-        //     liabs_val += funding;
-        // } else if funding < ZERO_I80F48 {
-        //     assets_val -= funding;
-        // }
-        // units
-        // total_funding: I80F48 - native quote currency per contract
-        // funding_settled: I80F48 - native quote currency per contract
-        // base_positions: i64 - number of contracts
-        // quote_positions: i64 - number of quote_lot_size
-        // funding: I80F48 - native quote currency
-        // assets_val: I80F48 - native quote currency
-
-        // Account for open orders
-
-        // lot price
+        let funding: I80F48 = if self.base_position > 0 {
+            (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position)
+        } else if self.base_position < 0 {
+            (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
+        } else {
+            ZERO_I80F48
+        };
+        if funding > ZERO_I80F48 {
+            // funding positive, means liab
+            liabs_val += funding;
+        } else if funding < ZERO_I80F48 {
+            assets_val -= funding;
+        }
         /*
             1. The amount on the open orders that are closing existing positions don't count against collateral
             2. open orders that are opening do count against collateral
             3. Possibly the open orders itself can store this information
         */
-        Ok((ZERO_I80F48, ZERO_I80F48))
+        (assets_val, liabs_val)
     }
 }
 
@@ -776,6 +827,7 @@ impl MerpsAccount {
         Ok((assets_val, liabs_val))
     }
 
+    /// TODO change this to be additive function
     pub fn get_health_factor(
         &self,
         merps_group: &MerpsGroup,
@@ -812,9 +864,12 @@ impl MerpsAccount {
             let (perp_assets_val_i, perp_liabs_val_i) = self.perp_accounts[i]
                 .get_weighted_assets_liabs_val(
                     perp_market_info,
+                    merps_cache.price_cache[i].price,
                     perp_market_info.init_asset_weight,
                     perp_market_info.init_liab_weight,
-                )?;
+                    merps_cache.perp_market_cache[i].long_funding,
+                    merps_cache.perp_market_cache[i].short_funding,
+                );
 
             assets_val += spot_assets_val_i + perp_assets_val_i;
             liabs_val += spot_liabs_val_i + perp_liabs_val_i;
