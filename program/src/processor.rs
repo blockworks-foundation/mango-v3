@@ -923,7 +923,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
     fn place_perp_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -996,7 +995,6 @@ impl Processor {
     fn cancel_perp_order_by_client_id(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        side: Side,
         client_order_id: u64,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 7;
@@ -1222,7 +1220,7 @@ impl Processor {
                 client_order_id,
                 order_type,
             } => {
-                msg!("Merps: PlacePerpOrder");
+                msg!("Merps: PlacePerpOrder client_order_id={}", client_order_id);
                 Self::place_perp_order(
                     program_id,
                     accounts,
@@ -1233,8 +1231,9 @@ impl Processor {
                     order_type,
                 )?;
             }
-            MerpsInstruction::CancelPerpOrderByClientId { side, client_order_id } => {
-                Self::cancel_perp_order_by_client_id(program_id, accounts, side, client_order_id)?;
+            MerpsInstruction::CancelPerpOrderByClientId { client_order_id } => {
+                msg!("Merps: CancelPerpOrderByClientId client_order_id={}", client_order_id);
+                Self::cancel_perp_order_by_client_id(program_id, accounts, client_order_id)?;
             }
         }
 

@@ -180,15 +180,14 @@ pub enum MerpsInstruction {
     /// 6. `[writable]` asks_ai - TODO  
     /// 7. `[writable]` event_queue_ai - TODO  
     PlacePerpOrder {
-        side: Side,
         price: i64,
         quantity: i64,
         client_order_id: u64,
+        side: Side,
         order_type: OrderType,
     },
 
     CancelPerpOrderByClientId {
-        side: Side,
         client_order_id: u64,
     },
 }
@@ -268,22 +267,20 @@ impl MerpsInstruction {
             }
             12 => {
                 let data_arr = array_ref![data, 0, 26];
-                let (side, price, quantity, client_order_id, order_type) =
-                    array_refs![data_arr, 1, 8, 8, 8, 1];
+                let (price, quantity, client_order_id, side, order_type) =
+                    array_refs![data_arr, 8, 8, 8, 1, 1];
                 MerpsInstruction::PlacePerpOrder {
-                    side: Side::try_from_primitive(side[0]).ok()?,
                     price: i64::from_le_bytes(*price),
                     quantity: i64::from_le_bytes(*quantity),
                     client_order_id: u64::from_le_bytes(*client_order_id),
+                    side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                 }
             }
             13 => {
-                let data_arr = array_ref![data, 0, 9];
-                let (side, client_order_id) = array_refs![data_arr, 1, 8];
+                let data_arr = array_ref![data, 0, 8];
                 MerpsInstruction::CancelPerpOrderByClientId {
-                    side: Side::try_from_primitive(side[0]).ok()?,
-                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    client_order_id: u64::from_le_bytes(*data_arr),
                 }
             }
             _ => {
@@ -528,7 +525,6 @@ pub fn cancel_perp_order_by_client_id(
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
     event_queue_pk: &Pubkey,   // write
-    side: Side,
     client_order_id: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
@@ -540,7 +536,7 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
-    let instr = MerpsInstruction::CancelPerpOrderByClientId { side, client_order_id };
+    let instr = MerpsInstruction::CancelPerpOrderByClientId { client_order_id };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
