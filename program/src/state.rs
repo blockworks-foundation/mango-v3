@@ -913,8 +913,7 @@ impl PerpMarket {
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff
             * time_factor
-            * I80F48::from_num(self.open_interest)  // TODO check the cost of conversion op
-            * I80F48::from_num(self.contract_size)
+            * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
             * index_price;
 
         self.long_funding += funding_delta;
