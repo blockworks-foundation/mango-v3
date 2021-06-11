@@ -116,6 +116,10 @@ impl<'a, H: QueueHeader> Queue<'a, H> {
     pub fn iter(&self) -> impl Iterator<Item = &H::Item> {
         QueueIterator { queue: self, index: 0 }
     }
+
+    pub fn debug_buf(&self) -> &[H::Item] {
+        self.buf.as_ref()
+    }
 }
 
 struct QueueIterator<'a, 'b, H: QueueHeader> {

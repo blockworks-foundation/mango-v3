@@ -1,9 +1,10 @@
 // Tests related to placing orders on a perp market
 mod helpers;
-use std::mem::size_of;
-
+use arrayref::array_ref;
+use bytemuck::cast_ref;
 use fixed::types::I80F48;
 use helpers::*;
+use std::mem::size_of;
 
 use merps::{entrypoint::process_instruction, instruction::*, matching::*, queue::*, state::*};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey};
@@ -588,7 +589,7 @@ async fn test_place_and_match_order() {
                     &perp_market_pk,
                     &event_queue_pk,
                     &[merps_account_bid_pk, merps_account_ask_pk],
-                    2,
+                    3,
                 )
                 .unwrap(),
             ],
@@ -613,7 +614,6 @@ async fn test_place_and_match_order() {
         // TODO: add fees
         assert_eq!(base_position, quantity as i64 * tsla_unit as i64 / tsla_lot);
         assert_eq!(quote_position, -101 * (quantity as i64 * quote_unit as i64));
-        // assert_eq!(quote_position, -101 * (quantity * quote_unit) as i64 * tsla_lot * quote_lot);
     }
 
     {
@@ -629,5 +629,58 @@ async fn test_place_and_match_order() {
         // TODO: add fees
         assert_eq!(base_position, -1 * quantity as i64 * tsla_unit as i64 / tsla_lot);
         assert_eq!(quote_position, (101 * quantity * quote_unit) as i64);
+    }
+
+    {
+        let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
+        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+
+        let mut perp_market = banks_client
+            .get_account(merps_group.perp_markets[perp_market_idx].perp_market)
+            .await
+            .unwrap()
+            .unwrap();
+        let account_info =
+            (&merps_group.perp_markets[perp_market_idx].perp_market, &mut perp_market).into();
+        let perp_market =
+            PerpMarket::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+
+        let mut event_queue = banks_client
+            .get_account_with_commitment(event_queue_pk, CommitmentLevel::Processed)
+            .await
+            .unwrap()
+            .unwrap();
+        let account_info: AccountInfo = (&event_queue_pk, &mut event_queue).into();
+        let event_queue =
+            EventQueue::load_mut_checked(&account_info, &program_id, &perp_market).unwrap();
+
+        assert!(event_queue.empty());
+        assert_eq!(event_queue.header.head(), 3);
+
+        let [e1, e2, e3] = array_ref![event_queue.debug_buf(), 0, 3];
+        assert_eq!(e1.event_type, EventType::Fill as u8);
+        assert_eq!(e2.event_type, EventType::Fill as u8);
+        assert_eq!(e3.event_type, EventType::Out as u8);
+
+        let e1: &FillEvent = cast_ref(e1);
+        let e2: &FillEvent = cast_ref(e2);
+        let e3: &OutEvent = cast_ref(e3);
+
+        println!(
+            "e1:{},{},{},{},{} e2:{},{},{},{},{} e3:{},{}",
+            e1.maker,
+            e1.base_change,
+            e1.quote_change,
+            e1.long_funding,
+            e1.short_funding,
+            e2.maker,
+            e2.base_change,
+            e2.quote_change,
+            e2.long_funding,
+            e2.short_funding,
+            e3.side as u8,
+            e3.quantity
+        );
     }
 }
