@@ -1,7 +1,9 @@
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
 use bytemuck::Pod;
+use fixed::types::I80F48;
 use mango_macro::Pod;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_transmute::{self, trivial::TriviallyTransmutable};
@@ -208,7 +210,7 @@ pub enum EventType {
     Out,
 }
 
-const EVENT_SIZE: usize = 40;
+const EVENT_SIZE: usize = 96;
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct AnyEvent {
@@ -222,14 +224,34 @@ unsafe impl TriviallyTransmutable for AnyEvent {}
 pub struct FillEvent {
     pub event_type: u8,
     pub maker: bool,
-    pub padding: [u8; 6],
+    padding: [u8; 6],
     pub owner: Pubkey,
+    pub base_change: i64,
+    pub quote_change: i64, // number of quote lots
+    pub long_funding: I80F48,
+    pub short_funding: I80F48,
 }
 unsafe impl TriviallyTransmutable for FillEvent {}
 
 impl FillEvent {
-    pub fn new(maker: bool, owner: Pubkey) -> Self {
-        Self { event_type: EventType::Fill.into(), maker, padding: [0; 6], owner }
+    pub fn new(
+        maker: bool,
+        owner: Pubkey,
+        base_change: i64,
+        quote_change: i64,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> Self {
+        Self {
+            event_type: EventType::Fill.into(),
+            maker,
+            padding: [0; 6],
+            owner,
+            base_change,
+            quote_change,
+            long_funding,
+            short_funding,
+        }
     }
 }
 
@@ -237,11 +259,24 @@ impl FillEvent {
 #[repr(C)]
 pub struct OutEvent {
     pub event_type: u8,
-    pub padding: [u8; EVENT_SIZE - 1],
+    pub side: Side,
+    pub slot: u8,
+    padding0: [u8; 5],
+    pub owner: Pubkey,
+    pub quantity: i64,
+    padding1: [u8; EVENT_SIZE - 16],
 }
 unsafe impl TriviallyTransmutable for OutEvent {}
 impl OutEvent {
-    pub fn new() -> Self {
-        Self { event_type: EventType::Out.into(), padding: [0; EVENT_SIZE - 1] }
+    pub fn new(side: Side, slot: u8, quantity: i64, owner: Pubkey) -> Self {
+        Self {
+            event_type: EventType::Out.into(),
+            side,
+            slot,
+            padding0: [0; 5],
+            owner,
+            quantity,
+            padding1: [0; EVENT_SIZE - 16],
+        }
     }
 }

@@ -1,6 +1,5 @@
 use std::cmp;
 use std::mem::size_of;
-use std::num::NonZeroU64;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
@@ -25,7 +24,7 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::queue::{AnyEvent, EventQueue, EventType, FillEvent};
+use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
     PerpAccount, PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
@@ -1088,8 +1087,7 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MerpsResult<()> {
-        // TODO - similar to serum dex event queue
-        // TODO - @Daffy needs to determine how the maker's merps account is updated and
+        // TODO - fee behavior
 
         const NUM_FIXED: usize = 3;
         let (fixed_ais, merps_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -1104,6 +1102,7 @@ impl Processor {
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
         for _ in 0..limit {
             let event = match event_queue.peek_front() {
                 None => break,
@@ -1113,8 +1112,38 @@ impl Processor {
             match EventType::try_from(event.event_type).map_err(|_| throw!())? {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
+
+                    if fill_event.maker {
+                        let mut merps_account = match merps_account_ais
+                            .binary_search_by_key(&fill_event.owner, |ai| *ai.key)
+                        {
+                            Ok(i) => MerpsAccount::load_mut_checked(
+                                &merps_account_ais[i],
+                                program_id,
+                                merps_group_ai.key,
+                            )?,
+                            Err(_) => return Ok(()), // If it's not found, stop consuming events
+                        };
+
+                        let perp_account = &mut merps_account.perp_accounts[market_index];
+                        perp_account.change_position(
+                            fill_event.base_change,
+                            I80F48::from_num(perp_market.quote_lot_size * fill_event.quote_change),
+                            fill_event.long_funding,
+                            fill_event.short_funding,
+                        )?;
+
+                        if fill_event.base_change > 0 {
+                            perp_account.open_orders.bids_quantity -= fill_event.base_change;
+                        } else {
+                            perp_account.open_orders.asks_quantity += fill_event.base_change;
+                        }
+                    }
+                }
+                EventType::Out => {
+                    let out_event: &OutEvent = cast_ref(event);
                     let mut merps_account = match merps_account_ais
-                        .binary_search_by_key(&fill_event.owner, |ai| *ai.key)
+                        .binary_search_by_key(&out_event.owner, |ai| *ai.key)
                     {
                         Ok(i) => MerpsAccount::load_mut_checked(
                             &merps_account_ais[i],
@@ -1123,9 +1152,17 @@ impl Processor {
                         )?,
                         Err(_) => return Ok(()), // If it's not found, stop consuming events
                     };
+                    let mut perp_account = &mut merps_account.perp_accounts[market_index];
+                    perp_account.open_orders.remove_order(
+                        out_event.side,
+                        out_event.slot,
+                        out_event.quantity,
+                    )?;
                 }
-                EventType::Out => {}
             }
+
+            // consume this event
+            event_queue.pop_front().map_err(|_| throw!())?;
         }
         Ok(())
     }
