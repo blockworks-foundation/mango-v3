@@ -73,6 +73,7 @@ async fn test_borrow_succeeds() {
     let btc_usdt = add_aggregator(&mut test, "BTC:USDT", 6, PRICE_BTC * unit, &program_id);
 
     let dex_program_pk = Pubkey::new_unique();
+    let btc_usdt_spot_mkt_idx = 0;
     let btc_usdt_spot_mkt = add_dex_empty(
         &mut test,
         btc_mint.pubkey,
@@ -115,7 +116,7 @@ async fn test_borrow_succeeds() {
                     &btc_vault.pubkey,
                     &btc_root_bank.pubkey,
                     &admin.pubkey(),
-                    0, // index of the oracle
+                    btc_usdt_spot_mkt_idx,
                     I80F48::from_num(0.83),
                     I80F48::from_num(1),
                 )
@@ -125,7 +126,7 @@ async fn test_borrow_succeeds() {
                     &merps_group_pk,
                     &merps_account_pk,
                     &user.pubkey(),
-                    &btc_usdt_spot_mkt.pubkey,
+                    btc_usdt_spot_mkt_idx,
                 )
                 .unwrap(),
             ],

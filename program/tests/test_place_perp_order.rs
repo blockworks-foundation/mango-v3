@@ -85,6 +85,14 @@ async fn test_init_perp_market() {
                     10,
                 )
                 .unwrap(),
+                add_to_basket(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    perp_market_idx,
+                )
+                .unwrap(),
             ],
             Some(&payer.pubkey()),
         );
@@ -167,6 +175,14 @@ async fn test_place_and_cancel_order() {
                     I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
                     100,
                     10,
+                )
+                .unwrap(),
+                add_to_basket(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    perp_market_idx,
                 )
                 .unwrap(),
             ],
@@ -433,6 +449,14 @@ async fn test_place_and_match_order() {
                     10,
                 )
                 .unwrap(),
+                add_to_basket(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    perp_market_idx,
+                )
+                .unwrap(),
             ],
             Some(&payer.pubkey()),
         );
@@ -510,4 +534,6 @@ async fn test_place_and_match_order() {
         transaction.sign(&[&payer, &user], recent_blockhash);
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
+
+    // TODO verify position
 }

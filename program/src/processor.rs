@@ -612,14 +612,17 @@ impl Processor {
         Ok(())
     }
 
-    fn add_to_basket(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 4;
+    fn add_to_basket(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
             owner_ai,           // read
-            spot_market_ai      // read
         ] = accounts;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -627,12 +630,9 @@ impl Processor {
         let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
-        // TODO make it so you can add_to_basket when adding a perp market without corresponding spot market -- just ask user to send in market_index
-        let spot_market_index = merps_group
-            .find_spot_market_index(spot_market_ai.key)
-            .ok_or(throw_err!(MerpsErrorCode::InvalidMarket))?;
 
-        merps_account.in_basket[spot_market_index] = true;
+        check!(market_index < merps_group.num_oracles, MerpsErrorCode::Default)?;
+        merps_account.in_basket[market_index] = true;
 
         Ok(())
     }
@@ -966,11 +966,13 @@ impl Processor {
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        check!(merps_account.in_basket[market_index], MerpsErrorCode::Default)?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
         book.new_order(
             &mut event_queue,
             &mut perp_market,
@@ -1246,9 +1248,9 @@ impl Processor {
                     init_asset_weight,
                 )?;
             }
-            MerpsInstruction::AddToBasket => {
+            MerpsInstruction::AddToBasket { market_index } => {
                 msg!("Merps: AddToBasket");
-                Self::add_to_basket(program_id, accounts)?;
+                Self::add_to_basket(program_id, accounts, market_index)?;
             }
             MerpsInstruction::Borrow { quantity } => {
                 msg!("Merps: Borrow");

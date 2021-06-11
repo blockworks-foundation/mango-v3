@@ -105,7 +105,9 @@ pub enum MerpsInstruction {
     /// 1. `[writable]` merps_account_ai - TODO
     /// 2. `[signer]` owner_ai - Solana account of owner of the merps account
     /// 3. `[]` spot_market_ai - TODO
-    AddToBasket,
+    AddToBasket {
+        market_index: usize,
+    },
 
     /// Borrow by incrementing MerpsAccount.borrows given collateral ratio is below init_coll_rat
     ///
@@ -244,7 +246,10 @@ impl MerpsInstruction {
                     init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
                 }
             }
-            5 => MerpsInstruction::AddToBasket,
+            5 => {
+                let market_index = array_ref![data, 0, 8];
+                MerpsInstruction::AddToBasket { market_index: usize::from_le_bytes(*market_index) }
+            }
             6 => {
                 let quantity = array_ref![data, 0, 8];
                 MerpsInstruction::Borrow { quantity: u64::from_le_bytes(*quantity) }
@@ -610,16 +615,15 @@ pub fn add_to_basket(
     merps_group_pk: &Pubkey,
     merps_account_pk: &Pubkey,
     owner_pk: &Pubkey,
-    spot_market_pk: &Pubkey,
+    market_index: usize,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(*spot_market_pk, false),
     ];
 
-    let instr = MerpsInstruction::AddToBasket;
+    let instr = MerpsInstruction::AddToBasket { market_index };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
