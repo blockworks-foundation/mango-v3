@@ -471,9 +471,9 @@ impl MerpsCache {
             }
 
             if (!merps_group.perp_markets[i].is_empty()) {
-                //     if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                //         return false;
-                //     }
+                if now_ts > self.perp_market_cache[i].last_update + valid_interval {
+                    return false;
+                }
             }
         }
 

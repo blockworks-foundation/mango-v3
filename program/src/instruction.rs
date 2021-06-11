@@ -134,7 +134,9 @@ pub enum MerpsInstruction {
 
     /// Cache root banks
     ///
-    /// Accounts expected: 3 + Root Banks
+    /// Accounts expected: 2 + Root Banks
+    /// 0. `[]` merps_group_ai
+    /// 1. `[writable]` merps_cache_ai
     CacheRootBanks,
 
     /// Place an order on the Serum Dex using Merps account
@@ -201,6 +203,13 @@ pub enum MerpsInstruction {
     ConsumeEvents {
         limit: usize,
     },
+
+    /// Cache perp markets
+    ///
+    /// Accounts expected: 2 + Perp Markets
+    /// 0. `[]` merps_group_ai
+    /// 1. `[writable]` merps_cache_ai
+    CachePerpMarkets,
 }
 
 impl MerpsInstruction {
@@ -309,6 +318,7 @@ impl MerpsInstruction {
                 let data_arr = array_ref![data, 0, 8];
                 MerpsInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
             }
+            16 => MerpsInstruction::CachePerpMarkets,
             _ => {
                 return None;
             }
@@ -720,6 +730,22 @@ pub fn cache_root_banks(
     ];
     accounts.extend(root_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MerpsInstruction::CacheRootBanks;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cache_perp_markets(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    merps_cache_pk: &Pubkey,
+    perp_market_pks: &[Pubkey],
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*merps_cache_pk, false),
+    ];
+    accounts.extend(perp_market_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    let instr = MerpsInstruction::CachePerpMarkets;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

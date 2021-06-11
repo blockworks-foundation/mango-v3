@@ -220,6 +220,13 @@ async fn test_place_and_cancel_order() {
                     &[merps_group.tokens[QUOTE_INDEX].root_bank],
                 )
                 .unwrap(),
+                cache_perp_markets(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache,
+                    &[merps_group.perp_markets[perp_market_idx].perp_market],
+                )
+                .unwrap(),
                 place_perp_order(
                     &program_id,
                     &merps_group_pk,
@@ -490,6 +497,13 @@ async fn test_place_and_match_order() {
                     &merps_group_pk,
                     &merps_group.merps_cache,
                     &[merps_group.tokens[QUOTE_INDEX].root_bank],
+                )
+                .unwrap(),
+                cache_perp_markets(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache,
+                    &[merps_group.perp_markets[perp_market_idx].perp_market],
                 )
                 .unwrap(),
                 place_perp_order(
