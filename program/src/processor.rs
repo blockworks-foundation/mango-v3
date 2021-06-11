@@ -207,9 +207,12 @@ impl Processor {
         };
 
         // check that maint weight is lower than init asset weight
-        check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
-        check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
-        check!(maint_asset_weight <= 1, MerpsErrorCode::Default)?;
+        check!(
+            maint_asset_weight <= ONE_I80F48
+                && maint_asset_weight > init_asset_weight
+                && init_asset_weight > ZERO_I80F48,
+            MerpsErrorCode::Default
+        )?;
 
         merps_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
