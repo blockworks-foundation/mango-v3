@@ -8,7 +8,6 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
-use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
@@ -673,7 +672,6 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
     ) -> MerpsResult<()> {
-        msg!("new_ask {}", line!());
         // TODO make use of the order options
         // TODO proper error handling
         #[allow(unused_variables)]
@@ -683,7 +681,6 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => unimplemented!(),
         };
         let order_id = market.gen_order_id(Side::Ask, price);
-        msg!("new_ask {}", line!());
 
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
@@ -696,21 +693,18 @@ impl<'a> Book<'a> {
                 }
                 Some(h) => h,
             };
-            msg!("new_ask {}", line!());
 
             let best_bid = self.bids.get_mut(best_bid_h).unwrap().as_leaf_mut().unwrap();
             let best_bid_price = best_bid.price();
             if price > best_bid_price {
                 break;
             }
-            msg!("new_ask {}", line!());
 
             let match_quantity = rem_quantity.min(best_bid.quantity);
             let quote_change = match_quantity * best_bid_price;
             rem_quantity -= match_quantity;
             quote_used += quote_change;
             best_bid.quantity -= match_quantity;
-            msg!("new_ask {}", line!());
 
             let maker_fill = FillEvent::new(
                 true,
@@ -720,10 +714,7 @@ impl<'a> Book<'a> {
                 market.long_funding,
                 market.short_funding,
             );
-            msg!("new_ask {}", line!());
-
             event_queue.push_back(cast(maker_fill)).unwrap();
-            msg!("new_ask {}", line!());
 
             // This fill is not necessary, purely for stats purposes
             let taker_fill = FillEvent::new(
@@ -734,19 +725,12 @@ impl<'a> Book<'a> {
                 market.long_funding,
                 market.short_funding,
             );
-            msg!("new_ask {}", line!());
-
             event_queue.push_back(cast(taker_fill)).unwrap();
-            msg!("new_ask {}", line!());
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
             if best_bid.quantity == 0 {
-                msg!("new_ask {}", line!());
-
                 // Create an Out event
                 let event = OutEvent::new(Side::Bid, best_bid.owner_slot, 0, best_bid.owner);
-                msg!("new_ask {}", line!());
-
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
                 let _removed_node = self.bids.remove(best_bid_h).unwrap();
@@ -755,28 +739,18 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 {
-            msg!("new_ask {}", line!());
-
             if self.bids.is_full() {
-                msg!("new_ask {}", line!());
-
                 // If this asks is lower than highest ask, boot that ask and insert this one
                 let max_ask_handle = self.asks.find_min().unwrap();
                 let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
                 check!(price < max_ask.price(), MerpsErrorCode::OutOfSpace)?;
-                msg!("new_ask {}", line!());
-
                 let event =
                     OutEvent::new(Side::Ask, max_ask.owner_slot, max_ask.quantity, max_ask.owner);
-                msg!("new_ask {}", line!());
-
                 event_queue.push_back(cast(event)).unwrap();
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
-            msg!("new_ask {}", line!());
 
             let oo = &mut merps_account.perp_accounts[market_index].open_orders;
-            msg!("new_ask {}", line!());
 
             let new_ask = LeafNode {
                 tag: NodeTag::LeafNode as u32,
@@ -787,11 +761,8 @@ impl<'a> Book<'a> {
                 quantity: rem_quantity,
                 client_order_id,
             };
-            msg!("new_ask {}", line!());
 
             let _result = self.asks.insert_leaf(&new_ask)?;
-            msg!("new_ask {}", line!());
-
             oo.add_order(Side::Ask, &new_ask)?;
         }
 
