@@ -24,6 +24,8 @@ use solana_sdk::{
 };
 use std::mem::size_of;
 
+const PRICE_BTC: u64 = 100;
+
 #[tokio::test]
 async fn test_borrow_succeeds() {
     // Test that the borrow instruction succeeds and the expected side effects occurr

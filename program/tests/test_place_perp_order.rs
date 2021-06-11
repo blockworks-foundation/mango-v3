@@ -8,7 +8,10 @@ use helpers::*;
 use merps::{entrypoint::process_instruction, instruction::*, matching::*, queue::*, state::*};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey};
 use solana_program_test::*;
-use solana_sdk::{account::Account, signature::Keypair, signer::Signer, transaction::Transaction};
+use solana_sdk::{
+    account::Account, commitment_config::CommitmentLevel, signature::Keypair, signer::Signer,
+    transaction::Transaction,
+};
 
 #[tokio::test]
 async fn test_init_perp_market() {
@@ -35,10 +38,11 @@ async fn test_init_perp_market() {
 
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
-    let TSLA_DEC: u8 = 4;
-    let TSLA_PRICE = 9000;
-    let unit = 10u64.pow(TSLA_DEC as u32);
-    let tsla_usd = add_aggregator(&mut test, "TSLA:USD", TSLA_DEC, TSLA_PRICE * unit, &program_id);
+    let tsla_decimals: u8 = 4;
+    let tsla_price = 9000;
+    let unit = 10u64.pow(tsla_decimals as u32);
+    let tsla_usd =
+        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * unit, &program_id);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -106,6 +110,7 @@ async fn test_place_and_cancel_order() {
     let user = Keypair::new();
     test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
 
+    // TODO: this still needs to be deposited into the merps account
     let quote_index = 0;
     let user_initial_amount = 200;
     let user_quote_account = add_token_account(
@@ -117,10 +122,11 @@ async fn test_place_and_cancel_order() {
 
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
-    let TSLA_DEC: u8 = 4;
-    let TSLA_PRICE = 100;
-    let unit = 10u64.pow(TSLA_DEC as u32);
-    let tsla_usd = add_aggregator(&mut test, "TSLA:USD", TSLA_DEC, TSLA_PRICE * unit, &program_id);
+    let tsla_decimals: u8 = 4;
+    let tsla_price = 100;
+    let unit = 10u64.pow(tsla_decimals as u32);
+    let tsla_usd =
+        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * unit, &program_id);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -178,10 +184,6 @@ async fn test_place_and_cancel_order() {
     let bid_id = 1337;
     let ask_id = 1338;
     {
-        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
         let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
@@ -213,7 +215,7 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((TSLA_PRICE - 1) * unit) as i64,
+                    ((tsla_price - 1) * unit) as i64,
                     10,
                     bid_id,
                     OrderType::Limit,
@@ -230,7 +232,7 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((TSLA_PRICE + 1) * unit) as i64,
+                    ((tsla_price + 1) * unit) as i64,
                     10,
                     ask_id,
                     OrderType::Limit,
@@ -239,10 +241,7 @@ async fn test_place_and_cancel_order() {
             ],
             Some(&payer.pubkey()),
         );
-
         transaction.sign(&[&payer, &user], recent_blockhash);
-
-        // Setup transaction succeeded
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
 
@@ -263,14 +262,50 @@ async fn test_place_and_cancel_order() {
             .unwrap()],
             Some(&payer.pubkey()),
         );
-
         transaction.sign(&[&payer, &user], recent_blockhash);
-
-        // Setup transaction succeeded
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
 
-    // no error when cancelling bid twice
+    // cancel ask directly
+    {
+        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
+        let merps_account =
+            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+
+        let (client_order_id, order_id, side) =
+            merps_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
+        assert_eq!(u64::from(client_order_id), ask_id);
+        assert_eq!(side, Side::Ask);
+
+        let mut transaction = Transaction::new_with_payer(
+            &[cancel_perp_order(
+                &program_id,
+                &merps_group_pk,
+                &merps_account_pk,
+                &user.pubkey(),
+                &perp_market_pk,
+                &bids_pk,
+                &asks_pk,
+                &event_queue_pk,
+                order_id,
+                side,
+            )
+            .unwrap()],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer, &user], recent_blockhash);
+        assert!(banks_client.process_transaction(transaction).await.is_ok());
+    }
+
+    // update blockhash so that instructions do not get filtered as duplicates
+    let (_, recent_blockhash, _) = banks_client
+        .get_fees_with_commitment_and_context(tarpc::context::current(), CommitmentLevel::Processed)
+        .await
+        .unwrap();
+
+    // error when cancelling bid twice
     {
         let mut transaction = Transaction::new_with_payer(
             &[cancel_perp_order_by_client_id(
@@ -287,17 +322,24 @@ async fn test_place_and_cancel_order() {
             .unwrap()],
             Some(&payer.pubkey()),
         );
-
         transaction.sign(&[&payer, &user], recent_blockhash);
-
-        // Setup transaction succeeded
-        assert!(banks_client.process_transaction(transaction).await.is_ok());
+        assert!(banks_client.process_transaction(transaction).await.is_err());
     }
 
-    // cancel ask directly
+    // error when cancelling ask twice
     {
+        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
+        let merps_account =
+            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+
+        let (client_order_id, order_id, side) =
+            merps_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
+        assert_eq!(u64::from(client_order_id), ask_id);
+        assert_eq!(side, Side::Ask);
+
         let mut transaction = Transaction::new_with_payer(
-            &[cancel_perp_order_by_client_id(
+            &[cancel_perp_order(
                 &program_id,
                 &merps_group_pk,
                 &merps_account_pk,
@@ -306,15 +348,14 @@ async fn test_place_and_cancel_order() {
                 &bids_pk,
                 &asks_pk,
                 &event_queue_pk,
-                ask_id,
+                order_id,
+                side,
             )
             .unwrap()],
             Some(&payer.pubkey()),
         );
 
         transaction.sign(&[&payer, &user], recent_blockhash);
-
-        // Setup transaction succeeded
-        assert!(banks_client.process_transaction(transaction).await.is_ok());
+        assert!(banks_client.process_transaction(transaction).await.is_err());
     }
 }

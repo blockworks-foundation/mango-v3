@@ -1571,6 +1571,7 @@ dependencies = [
  "solana-sdk",
  "spl-token",
  "static_assertions",
+ "tarpc",
  "thiserror",
 ]
 

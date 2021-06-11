@@ -990,7 +990,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
     fn cancel_perp_order_by_client_id(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1010,13 +1009,13 @@ impl Processor {
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
-        let mut merps_account =
+        let merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
-        let mut perp_market =
+        let perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
 
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
@@ -1048,12 +1047,53 @@ impl Processor {
         Ok(())
     }
 
-    /*
     fn cancel_perp_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        side: Side,    )
-        */
+        order_id: i128,
+        side: Side,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+            event_queue_ai,     // write
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+
+        let perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        let mut oo = merps_account.perp_accounts[market_index].open_orders;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+
+        book.cancel_order(
+            &mut event_queue,
+            &mut oo,
+            merps_account_ai.key,
+            market_index,
+            order_id,
+            side,
+        )?;
+
+        Ok(())
+    }
 
     /// Take two MerpsAccount and settle quote currency pnl between them
     #[allow(unused)]
@@ -1271,6 +1311,10 @@ impl Processor {
             MerpsInstruction::CancelPerpOrderByClientId { client_order_id } => {
                 msg!("Merps: CancelPerpOrderByClientId client_order_id={}", client_order_id);
                 Self::cancel_perp_order_by_client_id(program_id, accounts, client_order_id)?;
+            }
+            MerpsInstruction::CancelPerpOrder { order_id, side } => {
+                msg!("Merps: CancelPerpOrder order_id={} side={}", order_id, side as u8);
+                Self::cancel_perp_order(program_id, accounts, order_id, side)?;
             }
         }
 
