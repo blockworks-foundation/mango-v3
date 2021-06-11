@@ -943,8 +943,10 @@ impl Processor {
             asks_ai,            // write
             event_queue_ai,     // write
         ] = accounts;
+        msg!("load merps group");
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
+        msg!("load merps acc");
         let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
@@ -957,6 +959,8 @@ impl Processor {
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
 
+        msg!("load merps cache");
+
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
 
         check!(
@@ -964,13 +968,20 @@ impl Processor {
             MerpsErrorCode::Default
         )?;
 
+        msg!("load perp market");
+
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
 
+        msg!("load book");
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+
+        msg!("load event queue");
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        msg!("new order ");
         book.new_order(
             &mut event_queue,
             &mut perp_market,
@@ -984,6 +995,7 @@ impl Processor {
             client_order_id,
         )?;
 
+        msg!("get health");
         let coll_ratio = merps_account.get_health_factor(&merps_group, &merps_cache, &[])?;
         check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
