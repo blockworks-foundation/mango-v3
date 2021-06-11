@@ -450,24 +450,21 @@ impl MerpsCache {
         now_ts: u64,
     ) -> bool {
         let valid_interval = merps_group.valid_interval as u64;
-        msg!("check_caches_valid {}", line!());
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
             return false;
         }
-        msg!("check_caches_valid {}", line!());
+
         for i in 0..merps_group.num_oracles {
-            msg!("check_caches_valid {}", line!());
             // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
             if !merps_account.in_basket[i] {
                 continue;
             }
-            msg!("check_caches_valid {}", line!());
+
             if now_ts > self.price_cache[i].last_update + valid_interval {
                 return false;
             }
 
             if (!merps_group.spot_markets[i].is_empty()) {
-                msg!("check_caches_valid {}", line!());
                 if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                     return false;
                 }
