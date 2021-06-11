@@ -105,7 +105,9 @@ pub enum MerpsInstruction {
     /// 1. `[writable]` merps_account_ai - TODO
     /// 2. `[signer]` owner_ai - Solana account of owner of the merps account
     /// 3. `[]` spot_market_ai - TODO
-    AddToBasket,
+    AddToBasket {
+        market_index: usize,
+    },
 
     /// Borrow by incrementing MerpsAccount.borrows given collateral ratio is below init_coll_rat
     ///
@@ -195,6 +197,10 @@ pub enum MerpsInstruction {
         order_id: i128,
         side: Side,
     },
+
+    ConsumeEvents {
+        limit: usize,
+    },
 }
 
 impl MerpsInstruction {
@@ -240,7 +246,10 @@ impl MerpsInstruction {
                     init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
                 }
             }
-            5 => MerpsInstruction::AddToBasket,
+            5 => {
+                let market_index = array_ref![data, 0, 8];
+                MerpsInstruction::AddToBasket { market_index: usize::from_le_bytes(*market_index) }
+            }
             6 => {
                 let quantity = array_ref![data, 0, 8];
                 MerpsInstruction::Borrow { quantity: u64::from_le_bytes(*quantity) }
@@ -295,6 +304,10 @@ impl MerpsInstruction {
                     order_id: i128::from_le_bytes(*order_id),
                     side: Side::try_from_primitive(side[0]).ok()?,
                 }
+            }
+            15 => {
+                let data_arr = array_ref![data, 0, 8];
+                MerpsInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
             }
             _ => {
                 return None;
@@ -580,21 +593,37 @@ pub fn cancel_perp_order(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn consume_events(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey, // read
+    perp_market_pk: &Pubkey, // read
+    event_queue_pk: &Pubkey, // write
+    limit: usize,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+    ];
+    let instr = MerpsInstruction::ConsumeEvents { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn add_to_basket(
     program_id: &Pubkey,
     merps_group_pk: &Pubkey,
     merps_account_pk: &Pubkey,
     owner_pk: &Pubkey,
-    spot_market_pk: &Pubkey,
+    market_index: usize,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(*spot_market_pk, false),
     ];
 
-    let instr = MerpsInstruction::AddToBasket;
+    let instr = MerpsInstruction::AddToBasket { market_index };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

@@ -4,8 +4,10 @@ use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
+use fixed::FixedI128;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -457,18 +459,22 @@ impl MerpsCache {
             if !merps_account.in_basket[i] {
                 continue;
             }
+
             if now_ts > self.price_cache[i].last_update + valid_interval {
                 return false;
             }
-            if now_ts > self.root_bank_cache[i].last_update + valid_interval {
-                return false;
+
+            if (!merps_group.spot_markets[i].is_empty()) {
+                if now_ts > self.root_bank_cache[i].last_update + valid_interval {
+                    return false;
+                }
             }
-            // TODO uncomment this when cache_perp_market() is implemented
-            // if merps_group.perp_markets[i] != Pubkey::default() {
-            //     if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-            //         return false;
-            //     }
-            // }
+
+            if (!merps_group.perp_markets[i].is_empty()) {
+                //     if now_ts > self.perp_market_cache[i].last_update + valid_interval {
+                //         return false;
+                //     }
+            }
         }
 
         true
@@ -903,24 +909,33 @@ impl MerpsAccount {
                 continue;
             }
 
-            let (spot_assets_val_i, spot_liabs_val_i) = self.get_spot_weighted_assets_liabs_val(
-                merps_cache,
-                i,
-                &spot_open_orders_ais[i],
-                merps_group.spot_markets[i].init_asset_weight,
-                merps_group.spot_markets[i].init_liab_weight,
-            )?;
+            let spot_market_info = &merps_group.spot_markets[i];
+            let mut spot_assets_val_i = ZERO_I80F48;
+            let mut spot_liabs_val_i = ZERO_I80F48;
+            if (!spot_market_info.is_empty()) {
+                (spot_assets_val_i, spot_liabs_val_i) = self.get_spot_weighted_assets_liabs_val(
+                    merps_cache,
+                    i,
+                    &spot_open_orders_ais[i],
+                    spot_market_info.init_asset_weight,
+                    spot_market_info.init_liab_weight,
+                )?;
+            }
 
             let perp_market_info = &merps_group.perp_markets[i];
-            let (perp_assets_val_i, perp_liabs_val_i) = self.perp_accounts[i]
-                .get_weighted_assets_liabs_val(
-                    perp_market_info,
-                    merps_cache.price_cache[i].price,
-                    perp_market_info.init_asset_weight,
-                    perp_market_info.init_liab_weight,
-                    merps_cache.perp_market_cache[i].long_funding,
-                    merps_cache.perp_market_cache[i].short_funding,
-                );
+            let mut perp_assets_val_i = ZERO_I80F48;
+            let mut perp_liabs_val_i = ZERO_I80F48;
+            if (!perp_market_info.is_empty()) {
+                (perp_assets_val_i, perp_liabs_val_i) = self.perp_accounts[i]
+                    .get_weighted_assets_liabs_val(
+                        perp_market_info,
+                        merps_cache.price_cache[i].price,
+                        perp_market_info.init_asset_weight,
+                        perp_market_info.init_liab_weight,
+                        merps_cache.perp_market_cache[i].long_funding,
+                        merps_cache.perp_market_cache[i].short_funding,
+                    );
+            }
 
             assets_val += spot_assets_val_i + perp_assets_val_i;
             liabs_val += spot_liabs_val_i + perp_liabs_val_i;
