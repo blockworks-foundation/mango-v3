@@ -557,8 +557,9 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((tsla_price + 1) * quote_unit) as i64,
-                    (quantity * tsla_unit) as i64,
+                    ((tsla_price as i64 + 1) * quote_unit as i64 * tsla_lot)
+                        / (tsla_unit as i64 * quote_lot),
+                    (quantity as i64 * tsla_unit as i64) / tsla_lot,
                     bid_id,
                     OrderType::Limit,
                 )
@@ -574,8 +575,9 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((tsla_price - 1) * quote_unit) as i64,
-                    (quantity * tsla_unit) as i64,
+                    ((tsla_price as i64 - 1) * quote_unit as i64 * tsla_lot)
+                        / (tsla_unit as i64 * quote_lot),
+                    (quantity as i64 * tsla_unit as i64) / tsla_lot,
                     ask_id,
                     OrderType::Limit,
                 )
