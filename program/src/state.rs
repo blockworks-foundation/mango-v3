@@ -6,7 +6,6 @@ use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -18,7 +17,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::program_error::ProgramError;
 use solana_program::sysvar::rent::Rent;
-use std::convert::{identity, TryInto};
+use std::convert::identity;
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
@@ -479,8 +478,8 @@ impl MerpsCache {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpOpenOrders {
-    pub long_base: i64,  // total contracts in sell orders
-    pub short_base: i64, // total quote currency in buy orders
+    pub bids_quantity: i64, // total contracts in sell orders
+    pub asks_quantity: i64, // total quote currency in buy orders
     pub is_free_bits: u32,
     pub is_bid_bits: u32,
     pub orders: [i128; 32],
@@ -489,9 +488,29 @@ pub struct PerpOpenOrders {
 
 impl PerpOpenOrders {
     pub fn next_order_slot(self) -> u8 {
-        return self.is_free_bits.trailing_zeros().try_into().unwrap();
+        self.is_free_bits.trailing_zeros() as u8
     }
 
+    pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MerpsResult<()> {
+        let slot_mask = 1u32 << slot;
+        check_eq!(Some(side), self.slot_side(slot), MerpsErrorCode::Default)?;
+
+        // accounting
+        match side {
+            Side::Bid => {
+                self.bids_quantity -= quantity;
+            }
+            Side::Ask => {
+                self.asks_quantity -= quantity;
+            }
+        }
+
+        // release space
+        self.is_free_bits |= slot_mask;
+        self.orders[slot as usize] = 0i128;
+        self.client_order_ids[slot as usize] = 0u64;
+        Ok(())
+    }
     pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MerpsResult<()> {
         check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
         let slot = self.next_order_slot();
@@ -501,11 +520,11 @@ impl PerpOpenOrders {
             Side::Bid => {
                 // TODO make checked
                 self.is_bid_bits |= slot_mask;
-                self.long_base += order.quantity;
+                self.bids_quantity += order.quantity;
             }
             Side::Ask => {
                 self.is_bid_bits &= !slot_mask;
-                self.short_base += order.quantity;
+                self.asks_quantity += order.quantity;
             }
         };
 
@@ -530,10 +549,10 @@ impl PerpOpenOrders {
         // accounting
         match side {
             Side::Bid => {
-                self.long_base -= order.quantity;
+                self.bids_quantity -= order.quantity;
             }
             Side::Ask => {
-                self.short_base -= order.quantity;
+                self.asks_quantity -= order.quantity;
             }
         }
 
@@ -708,7 +727,7 @@ impl PerpAccount {
             price,
             asset_weight,
             liab_weight,
-            self.open_orders.long_base,
+            self.open_orders.bids_quantity,
         );
 
         let (asks_assets_val, asks_liabs_val) = self.sim_assets_liabs_val(
@@ -716,7 +735,7 @@ impl PerpAccount {
             price,
             asset_weight,
             liab_weight,
-            -self.open_orders.short_base,
+            -self.open_orders.asks_quantity,
         );
 
         let bids_hf = bids_assets_val - bids_liabs_val;
@@ -920,6 +939,7 @@ impl MerpsAccount {
 #[derive(Copy, Clone, Pod, Loadable, Default)]
 #[repr(C)]
 pub struct PerpMarket {
+    // TODO consider adding the market_index here for easy lookup
     pub meta_data: MetaData,
 
     pub merps_group: Pubkey,
@@ -980,6 +1000,20 @@ impl PerpMarket {
 
         Ok(state)
     }
+
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        merps_group_pk: &Pubkey,
+    ) -> MerpsResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        let state = Self::load(account)?;
+        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MerpsErrorCode::Default)?;
+        check!(merps_group_pk == &state.merps_group, MerpsErrorCode::Default)?;
+        Ok(state)
+    }
+
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,

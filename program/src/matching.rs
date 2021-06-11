@@ -1,5 +1,5 @@
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
+use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{DataType, MerpsAccount, MetaData, PerpMarket, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
 use fixed::types::I80F48;
@@ -8,11 +8,10 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
-use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
-use std::convert::{identity, TryFrom};
+use std::convert::TryFrom;
 use std::ops::DerefMut;
 
 declare_check_assert_macros!(SourceFileId::Matching);
@@ -552,6 +551,7 @@ impl<'a> Book<'a> {
     ) -> MerpsResult<()> {
         // TODO make use of the order options
         // TODO proper error handling
+        // TODO handle the case where we run out of compute
         #[allow(unused_variables)]
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
@@ -580,21 +580,35 @@ impl<'a> Book<'a> {
 
             let match_quantity = rem_quantity.min(best_ask.quantity);
             rem_quantity -= match_quantity;
-            quote_used += match_quantity * best_ask_price;
+            let quote_change = match_quantity * best_ask_price;
+            quote_used += quote_change;
             best_ask.quantity -= match_quantity;
 
-            // TODO fill out FillEvent
-            let maker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let maker_fill = FillEvent::new(
+                true,
+                best_ask.owner,
+                -match_quantity,
+                quote_change,
+                market.long_funding,
+                market.short_funding,
+            );
             event_queue.push_back(cast(maker_fill)).unwrap();
 
             // This fill is not necessary, purely for stats purposes
-            let taker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let taker_fill = FillEvent::new(
+                false,
+                *merps_account_pk,
+                match_quantity,
+                -quote_change,
+                market.long_funding,
+                market.short_funding,
+            );
             event_queue.push_back(cast(taker_fill)).unwrap();
 
             // now either best_ask.quantity == 0 or rem_quantity == 0 or both
             if best_ask.quantity == 0 {
                 // Create an Out event
-                let event = OutEvent { event_type: EventType::Out as u8, padding: [0; 7] };
+                let event = OutEvent::new(Side::Ask, best_ask.owner_slot, 0, best_ask.owner);
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
                 let _removed_node = self.asks.remove(best_ask_h).unwrap();
@@ -608,6 +622,10 @@ impl<'a> Book<'a> {
                 let min_bid_handle = self.bids.find_min().unwrap();
                 let min_bid = self.bids.get(min_bid_handle).unwrap().as_leaf().unwrap();
                 check!(price > min_bid.price(), MerpsErrorCode::OutOfSpace)?;
+                let event =
+                    OutEvent::new(Side::Bid, min_bid.owner_slot, min_bid.quantity, min_bid.owner);
+                event_queue.push_back(cast(event)).unwrap();
+
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
@@ -641,6 +659,7 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
+    // TODO implement self trade behavior
     pub fn new_ask(
         &mut self,
         event_queue: &mut EventQueue,
@@ -682,22 +701,36 @@ impl<'a> Book<'a> {
             }
 
             let match_quantity = rem_quantity.min(best_bid.quantity);
+            let quote_change = match_quantity * best_bid_price;
             rem_quantity -= match_quantity;
-            quote_used += match_quantity * best_bid_price;
+            quote_used += quote_change;
             best_bid.quantity -= match_quantity;
 
-            // TODO fill out FillEvent
-            let maker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let maker_fill = FillEvent::new(
+                true,
+                best_bid.owner,
+                match_quantity,
+                -quote_change,
+                market.long_funding,
+                market.short_funding,
+            );
             event_queue.push_back(cast(maker_fill)).unwrap();
 
             // This fill is not necessary, purely for stats purposes
-            let taker_fill = FillEvent { event_type: EventType::Fill as u8, padding: [0; 7] };
+            let taker_fill = FillEvent::new(
+                false,
+                *merps_account_pk,
+                -match_quantity,
+                quote_change,
+                market.long_funding,
+                market.short_funding,
+            );
             event_queue.push_back(cast(taker_fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
             if best_bid.quantity == 0 {
                 // Create an Out event
-                let event = OutEvent { event_type: EventType::Out as u8, padding: [0; 7] };
+                let event = OutEvent::new(Side::Bid, best_bid.owner_slot, 0, best_bid.owner);
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
                 let _removed_node = self.bids.remove(best_bid_h).unwrap();
@@ -711,6 +744,9 @@ impl<'a> Book<'a> {
                 let max_ask_handle = self.asks.find_min().unwrap();
                 let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
                 check!(price < max_ask.price(), MerpsErrorCode::OutOfSpace)?;
+                let event =
+                    OutEvent::new(Side::Ask, max_ask.owner_slot, max_ask.quantity, max_ask.owner);
+                event_queue.push_back(cast(event)).unwrap();
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
 
@@ -746,10 +782,10 @@ impl<'a> Book<'a> {
 
     pub fn cancel_order(
         &mut self,
-        event_queue: &mut EventQueue,
+        _event_queue: &mut EventQueue, // TODO remove
         oo: &mut PerpOpenOrders,
         merps_account_pk: &Pubkey,
-        market_index: usize,
+        _market_index: usize, // TODO remove
         order_id: i128,
         side: Side,
     ) -> MerpsResult<()> {

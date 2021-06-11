@@ -1,8 +1,11 @@
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::state::{DataType, MetaData};
+use crate::matching::Side;
+use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
 use bytemuck::Pod;
+use fixed::types::I80F48;
 use mango_macro::Pod;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_transmute::{self, trivial::TriviallyTransmutable};
 use solana_program::account_info::AccountInfo;
 use solana_program::pubkey::Pubkey;
@@ -168,8 +171,13 @@ impl QueueHeader for EventQueueHeader {
 pub type EventQueue<'a> = Queue<'a, EventQueueHeader>;
 
 impl<'a> EventQueue<'a> {
-    pub fn load_mut_checked(account: &'a AccountInfo, _program_id: &Pubkey) -> MerpsResult<Self> {
-        // TODO - do some checking
+    pub fn load_mut_checked(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        perp_market: &PerpMarket,
+    ) -> MerpsResult<Self> {
+        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check_eq!(&perp_market.event_queue, account.key, MerpsErrorCode::Default)?;
         Self::load_mut(account)
     }
 
@@ -195,18 +203,19 @@ impl<'a> EventQueue<'a> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum EventType {
     Fill,
     Out,
 }
 
+const EVENT_SIZE: usize = 96;
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct AnyEvent {
     pub event_type: u8,
-    pub padding: [u8; 7],
+    pub padding: [u8; EVENT_SIZE - 1],
 }
 unsafe impl TriviallyTransmutable for AnyEvent {}
 
@@ -214,15 +223,60 @@ unsafe impl TriviallyTransmutable for AnyEvent {}
 #[repr(C)]
 pub struct FillEvent {
     pub event_type: u8,
-    pub padding: [u8; 7],
+    pub maker: bool,
+    padding: [u8; 6],
+    pub owner: Pubkey,
+    pub base_change: i64,
+    pub quote_change: i64, // number of quote lots
+    pub long_funding: I80F48,
+    pub short_funding: I80F48,
 }
-
 unsafe impl TriviallyTransmutable for FillEvent {}
+
+impl FillEvent {
+    pub fn new(
+        maker: bool,
+        owner: Pubkey,
+        base_change: i64,
+        quote_change: i64,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> Self {
+        Self {
+            event_type: EventType::Fill.into(),
+            maker,
+            padding: [0; 6],
+            owner,
+            base_change,
+            quote_change,
+            long_funding,
+            short_funding,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct OutEvent {
     pub event_type: u8,
-    pub padding: [u8; 7],
+    pub side: Side,
+    pub slot: u8,
+    padding0: [u8; 5],
+    pub owner: Pubkey,
+    pub quantity: i64,
+    padding1: [u8; EVENT_SIZE - 16],
 }
 unsafe impl TriviallyTransmutable for OutEvent {}
+impl OutEvent {
+    pub fn new(side: Side, slot: u8, quantity: i64, owner: Pubkey) -> Self {
+        Self {
+            event_type: EventType::Out.into(),
+            side,
+            slot,
+            padding0: [0; 5],
+            owner,
+            quantity,
+            padding1: [0; EVENT_SIZE - 16],
+        }
+    }
+}

@@ -1,6 +1,5 @@
 use std::cmp;
 use std::mem::size_of;
-use std::num::NonZeroU64;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
@@ -25,15 +24,16 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::queue::EventQueue;
+use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
     PerpAccount, PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
     TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use bytemuck::cast_ref;
 use mango_common::Loadable;
-use std::convert::identity;
+use std::convert::{identity, TryFrom};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -637,6 +637,7 @@ impl Processor {
         Ok(())
     }
 
+    // TODO - add serum dex fee discount functionality
     fn place_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -967,7 +968,8 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
         book.new_order(
             &mut event_queue,
@@ -1031,7 +1033,8 @@ impl Processor {
             .ok_or(throw_err!(MerpsErrorCode::ClientIdNotFound))?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        let mut event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
         book.cancel_order(
             &mut event_queue,
@@ -1079,10 +1082,89 @@ impl Processor {
 
     /// similar to serum dex, but also need to do some extra magic with funding
     #[allow(unused)]
-    fn consume_event_queue(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO - similar to serum dex event queue
-        // TODO - @Daffy needs to determine how the maker's merps account is updated and
-        unimplemented!()
+    fn consume_events(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        limit: usize,
+    ) -> MerpsResult<()> {
+        // TODO - fee behavior
+
+        const NUM_FIXED: usize = 3;
+        let (fixed_ais, merps_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            merps_group_ai,     // read
+            perp_market_ai,     // read
+            event_queue_ai,     // write
+        ] = fixed_ais;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        for _ in 0..limit {
+            let event = match event_queue.peek_front() {
+                None => break,
+                Some(e) => e,
+            };
+
+            match EventType::try_from(event.event_type).map_err(|_| throw!())? {
+                EventType::Fill => {
+                    let fill_event: &FillEvent = cast_ref(event);
+
+                    if fill_event.maker {
+                        let mut merps_account = match merps_account_ais
+                            .binary_search_by_key(&fill_event.owner, |ai| *ai.key)
+                        {
+                            Ok(i) => MerpsAccount::load_mut_checked(
+                                &merps_account_ais[i],
+                                program_id,
+                                merps_group_ai.key,
+                            )?,
+                            Err(_) => return Ok(()), // If it's not found, stop consuming events
+                        };
+
+                        let perp_account = &mut merps_account.perp_accounts[market_index];
+                        perp_account.change_position(
+                            fill_event.base_change,
+                            I80F48::from_num(perp_market.quote_lot_size * fill_event.quote_change),
+                            fill_event.long_funding,
+                            fill_event.short_funding,
+                        )?;
+
+                        if fill_event.base_change > 0 {
+                            perp_account.open_orders.bids_quantity -= fill_event.base_change;
+                        } else {
+                            perp_account.open_orders.asks_quantity += fill_event.base_change;
+                        }
+                    }
+                }
+                EventType::Out => {
+                    let out_event: &OutEvent = cast_ref(event);
+                    let mut merps_account = match merps_account_ais
+                        .binary_search_by_key(&out_event.owner, |ai| *ai.key)
+                    {
+                        Ok(i) => MerpsAccount::load_mut_checked(
+                            &merps_account_ais[i],
+                            program_id,
+                            merps_group_ai.key,
+                        )?,
+                        Err(_) => return Ok(()), // If it's not found, stop consuming events
+                    };
+                    let mut perp_account = &mut merps_account.perp_accounts[market_index];
+                    perp_account.open_orders.remove_order(
+                        out_event.side,
+                        out_event.slot,
+                        out_event.quantity,
+                    )?;
+                }
+            }
+
+            // consume this event
+            event_queue.pop_front().map_err(|_| throw!())?;
+        }
+        Ok(())
     }
 
     /// Update the `funding_earned` of a `PerpMarket` using the current book price, spot index price
