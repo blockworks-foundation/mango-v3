@@ -1121,7 +1121,6 @@ impl Processor {
     }
 
     /// similar to serum dex, but also need to do some extra magic with funding
-    #[allow(unused)]
     fn consume_events(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1315,6 +1314,10 @@ impl Processor {
             MerpsInstruction::CancelPerpOrder { order_id, side } => {
                 msg!("Merps: CancelPerpOrder order_id={} side={}", order_id, side as u8);
                 Self::cancel_perp_order(program_id, accounts, order_id, side)?;
+            }
+            MerpsInstruction::ConsumeEvents { limit } => {
+                msg!("Merps: ConsumeEvents limit={}", limit);
+                Self::consume_events(program_id, accounts, limit)?;
             }
         }
 

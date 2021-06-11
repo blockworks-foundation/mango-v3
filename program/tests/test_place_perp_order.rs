@@ -502,6 +502,8 @@ async fn test_place_and_match_order() {
                     OrderType::Limit,
                 )
                 .unwrap(),
+                consume_events(&program_id, &merps_group_pk, &perp_market_pk, &event_queue_pk, 1)
+                    .unwrap(),
             ],
             Some(&payer.pubkey()),
         );

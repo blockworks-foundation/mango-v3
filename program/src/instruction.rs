@@ -195,6 +195,10 @@ pub enum MerpsInstruction {
         order_id: i128,
         side: Side,
     },
+
+    ConsumeEvents {
+        limit: usize,
+    },
 }
 
 impl MerpsInstruction {
@@ -295,6 +299,10 @@ impl MerpsInstruction {
                     order_id: i128::from_le_bytes(*order_id),
                     side: Side::try_from_primitive(side[0]).ok()?,
                 }
+            }
+            15 => {
+                let data_arr = array_ref![data, 0, 8];
+                MerpsInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
             }
             _ => {
                 return None;
@@ -576,6 +584,23 @@ pub fn cancel_perp_order(
         AccountMeta::new(*event_queue_pk, false),
     ];
     let instr = MerpsInstruction::CancelPerpOrder { order_id, side };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn consume_events(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey, // read
+    perp_market_pk: &Pubkey, // read
+    event_queue_pk: &Pubkey, // write
+    limit: usize,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+    ];
+    let instr = MerpsInstruction::ConsumeEvents { limit };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
