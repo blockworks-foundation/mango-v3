@@ -394,26 +394,45 @@ async fn test_place_and_match_order() {
     let merps_group = add_merps_group_prodlike(&mut test, program_id);
     let merps_group_pk = merps_group.merps_group_pk;
 
-    let user = Keypair::new();
-    test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
-
-    // TODO: this still needs to be deposited into the merps account
     let quote_index = 0;
-    let user_initial_amount = 200;
-    let user_quote_account = add_token_account(
+    let quote_decimals = 6;
+    let quote_unit = 10u64.pow(quote_decimals as u32);
+    let quote_lot = 100;
+
+    let user_bid = Keypair::new();
+    test.add_account(user_bid.pubkey(), Account::new(u32::MAX as u64, 0, &user_bid.pubkey()));
+
+    // TODO: this still needs to be deposited into the merps account and should be connected to leverage
+    let user_bid_initial_amount = 1 * quote_unit;
+    let user_bid_quote_account = add_token_account(
         &mut test,
-        user.pubkey(),
+        user_bid.pubkey(),
         merps_group.tokens[quote_index].pubkey,
-        user_initial_amount,
+        user_bid_initial_amount,
     );
 
-    let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let merps_account_bid_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+
+    let user_ask = Keypair::new();
+    test.add_account(user_ask.pubkey(), Account::new(u32::MAX as u64, 0, &user_ask.pubkey()));
+
+    // TODO: this still needs to be deposited into the merps account and should be connected to leverage
+    let user_ask_initial_amount = 1 * quote_unit;
+    let user_ask_quote_account = add_token_account(
+        &mut test,
+        user_ask.pubkey(),
+        merps_group.tokens[quote_index].pubkey,
+        user_ask_initial_amount,
+    );
+
+    let merps_account_ask_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let tsla_decimals: u8 = 4;
     let tsla_price = 100;
-    let unit = 10u64.pow(tsla_decimals as u32);
+    let tsla_unit = 10u64.pow(tsla_decimals as u32);
+    let tsla_lot = 10;
     let tsla_usd =
-        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * unit, &program_id);
+        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * tsla_unit, &program_id);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -431,14 +450,27 @@ async fn test_place_and_match_order() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
     let max_lev = 10;
+    let quantity = 3;
 
     // setup merps group, perp market & merps account
     {
         let mut transaction = Transaction::new_with_payer(
             &[
                 merps_group.init_merps_group(&admin.pubkey()),
-                init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
-                    .unwrap(),
+                init_merps_account(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_bid_pk,
+                    &user_bid.pubkey(),
+                )
+                .unwrap(),
+                init_merps_account(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_ask_pk,
+                    &user_ask.pubkey(),
+                )
+                .unwrap(),
                 add_oracle(&program_id, &merps_group_pk, &tsla_usd.pubkey, &admin.pubkey())
                     .unwrap(),
                 add_perp_market(
@@ -452,15 +484,23 @@ async fn test_place_and_match_order() {
                     perp_market_idx,
                     I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
                     I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
-                    100,
-                    10,
+                    tsla_lot,
+                    quote_lot,
                 )
                 .unwrap(),
                 add_to_basket(
                     &program_id,
                     &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
+                    &merps_account_bid_pk,
+                    &user_bid.pubkey(),
+                    perp_market_idx,
+                )
+                .unwrap(),
+                add_to_basket(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_ask_pk,
+                    &user_ask.pubkey(),
                     perp_market_idx,
                 )
                 .unwrap(),
@@ -468,7 +508,7 @@ async fn test_place_and_match_order() {
             Some(&payer.pubkey()),
         );
 
-        transaction.sign(&[&payer, &admin, &user], recent_blockhash);
+        transaction.sign(&[&payer, &admin, &user_bid, &user_ask], recent_blockhash);
 
         // Setup transaction succeeded
         assert!(banks_client.process_transaction(transaction).await.is_ok());
@@ -509,16 +549,16 @@ async fn test_place_and_match_order() {
                 place_perp_order(
                     &program_id,
                     &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
+                    &merps_account_bid_pk,
+                    &user_bid.pubkey(),
                     &merps_group.merps_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((tsla_price + 1) * unit) as i64,
-                    10,
+                    ((tsla_price + 1) * quote_unit) as i64,
+                    (quantity * tsla_unit) as i64,
                     bid_id,
                     OrderType::Limit,
                 )
@@ -526,28 +566,66 @@ async fn test_place_and_match_order() {
                 place_perp_order(
                     &program_id,
                     &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
+                    &merps_account_ask_pk,
+                    &user_ask.pubkey(),
                     &merps_group.merps_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((tsla_price - 1) * unit) as i64,
-                    10,
+                    ((tsla_price - 1) * quote_unit) as i64,
+                    (quantity * tsla_unit) as i64,
                     ask_id,
                     OrderType::Limit,
                 )
                 .unwrap(),
-                consume_events(&program_id, &merps_group_pk, &perp_market_pk, &event_queue_pk, 1)
-                    .unwrap(),
+                consume_events(
+                    &program_id,
+                    &merps_group_pk,
+                    &perp_market_pk,
+                    &event_queue_pk,
+                    &[merps_account_bid_pk, merps_account_ask_pk],
+                    2,
+                )
+                .unwrap(),
             ],
             Some(&payer.pubkey()),
         );
-        transaction.sign(&[&payer, &user], recent_blockhash);
+        transaction.sign(&[&payer, &user_bid, &user_ask], recent_blockhash);
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
 
-    // TODO verify position
+    {
+        let mut merps_account =
+            banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_account_bid_pk, &mut merps_account).into();
+        let merps_account =
+            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+
+        let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
+        let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
+
+        println!("base:{} quote:{}", base_position, quote_position);
+
+        // TODO: add fees
+        assert_eq!(base_position, (quantity * tsla_unit) as i64);
+        assert_eq!(quote_position, -101 * (quantity * quote_unit) as i64);
+        // assert_eq!(quote_position, -101 * (quantity * quote_unit) as i64 * tsla_lot * quote_lot);
+    }
+
+    {
+        let mut merps_account =
+            banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&merps_account_ask_pk, &mut merps_account).into();
+        let merps_account =
+            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+
+        let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
+        let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
+
+        // TODO: add fees
+        assert_eq!(base_position, -1 * (quantity * tsla_unit) as i64);
+        assert_eq!(quote_position, (101 * quantity * quote_unit) as i64);
+    }
 }
