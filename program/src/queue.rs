@@ -10,7 +10,9 @@ use safe_transmute::{self, trivial::TriviallyTransmutable};
 use solana_program::account_info::AccountInfo;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
+use static_assertions::const_assert_eq;
 use std::cell::RefMut;
+use std::mem::size_of;
 
 declare_check_assert_macros!(SourceFileId::Queue);
 
@@ -210,7 +212,7 @@ pub enum EventType {
     Out,
 }
 
-const EVENT_SIZE: usize = 96;
+const EVENT_SIZE: usize = 88;
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct AnyEvent {
@@ -264,7 +266,7 @@ pub struct OutEvent {
     padding0: [u8; 5],
     pub owner: Pubkey,
     pub quantity: i64,
-    padding1: [u8; EVENT_SIZE - 16],
+    padding1: [u8; EVENT_SIZE - 48],
 }
 unsafe impl TriviallyTransmutable for OutEvent {}
 impl OutEvent {
@@ -276,7 +278,10 @@ impl OutEvent {
             padding0: [0; 5],
             owner,
             quantity,
-            padding1: [0; EVENT_SIZE - 16],
+            padding1: [0; EVENT_SIZE - 48],
         }
     }
 }
+
+const_assert_eq!(size_of::<AnyEvent>(), size_of::<FillEvent>());
+const_assert_eq!(size_of::<AnyEvent>(), size_of::<OutEvent>());

@@ -457,6 +457,8 @@ impl MerpsCache {
             if !merps_account.in_basket[i] {
                 continue;
             }
+
+            merps_group.r
             if now_ts > self.price_cache[i].last_update + valid_interval {
                 return false;
             }

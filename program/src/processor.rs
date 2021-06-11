@@ -432,6 +432,7 @@ impl Processor {
             MerpsCache::load_mut_checked(merps_cache_ai, program_id, &merps_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
         for root_bank_ai in root_bank_ais.iter() {
             let index = merps_group.find_root_bank_index(root_bank_ai.key).unwrap();
             let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -971,6 +972,7 @@ impl Processor {
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        check!(merps_account.in_basket[market_index], MerpsErrorCode::Default)?;
         book.new_order(
             &mut event_queue,
             &mut perp_market,
@@ -1097,8 +1099,9 @@ impl Processor {
 
     /// Take two MerpsAccount and settle quote currency pnl between them
     #[allow(unused)]
-    fn settle() -> MerpsResult<()> {
+    fn settle_pnl() -> MerpsResult<()> {
         // TODO - take two accounts
+
         unimplemented!()
     }
 
@@ -1324,15 +1327,21 @@ impl Processor {
 
 /// Take two MerpsAccounts and settle unrealized trading pnl and funding pnl between them
 #[allow(unused)]
-fn settle_trading_pnl(
-    a: &mut PerpAccount,
-    b: &mut PerpAccount,
-    price: I80F48, // TODO price usually comes in I80F48
+fn settle_pnl(
+    merps_account_a: &mut MerpsAccount,
+    merps_account_b: &mut MerpsAccount,
+    market_index: usize,
+    price: I80F48,
     contract_size: i64,
+    merps_cache: &MerpsCache,
+    now_ts: u64,
 ) -> MerpsResult<()> {
     /*
     TODO consider rule: Can only settle if both accounts remain above bankruptcy
      */
+
+    let a = &mut merps_account_a.perp_accounts[market_index];
+    let b = &mut merps_account_b.perp_accounts[market_index];
 
     let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
     let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
@@ -1343,7 +1352,13 @@ fn settle_trading_pnl(
 
     if a_pnl > 0 && b_pnl < 0 {
         let settlement = a_pnl.min(b_pnl.abs());
+        // TODO reduce borrows if it exists instead of increase deposits
+        // TODO reduce deposits if it exists instead of increase borrows
+
+        // move funds from b to a
+        // consider: if b doesn't have enough init health
     } else if a_pnl < 0 && b_pnl > 0 {
+        let settlement = a_pnl.min(b_pnl.abs());
     } else {
         return Err(throw!());
     }
