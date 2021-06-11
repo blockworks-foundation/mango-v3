@@ -611,8 +611,8 @@ async fn test_place_and_match_order() {
         println!("base:{} quote:{}", base_position, quote_position);
 
         // TODO: add fees
-        assert_eq!(base_position, (quantity * tsla_unit) as i64);
-        assert_eq!(quote_position, -101 * (quantity * quote_unit) as i64);
+        assert_eq!(base_position, quantity as i64 * tsla_unit as i64 / tsla_lot);
+        assert_eq!(quote_position, -101 * (quantity as i64 * quote_unit as i64));
         // assert_eq!(quote_position, -101 * (quantity * quote_unit) as i64 * tsla_lot * quote_lot);
     }
 
@@ -627,7 +627,7 @@ async fn test_place_and_match_order() {
         let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
 
         // TODO: add fees
-        assert_eq!(base_position, -1 * (quantity * tsla_unit) as i64);
+        assert_eq!(base_position, -1 * quantity as i64 * tsla_unit as i64 / tsla_lot);
         assert_eq!(quote_position, (101 * quantity * quote_unit) as i64);
     }
 }
