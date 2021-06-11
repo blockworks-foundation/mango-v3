@@ -261,7 +261,7 @@ impl MerpsInstruction {
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MerpsInstruction::PlaceSpotOrder { order }
             }
-            10 => AddOracle,
+            10 => MerpsInstruction::AddOracle,
             11 => {
                 let data_arr = array_ref![data, 0, 56];
                 let (
