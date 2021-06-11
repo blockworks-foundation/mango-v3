@@ -27,7 +27,7 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
-    PerpAccount, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
     SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
@@ -372,8 +372,10 @@ impl Processor {
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        // TODO does a token pair need to be in basket to deposit? what about USDC deposits?
-        // check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
+        check!(
+            token_index == QUOTE_INDEX || merps_account.in_basket[token_index],
+            MerpsErrorCode::InvalidToken
+        )?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
@@ -1120,10 +1122,95 @@ impl Processor {
 
     /// Take two MerpsAccount and settle quote currency pnl between them
     #[allow(unused)]
-    fn settle_pnl() -> MerpsResult<()> {
-        // TODO - take two accounts
+    fn settle_pnl(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        // TODO - what if someone has no collateral except other perps contracts
+        //  maybe you don't allow people to withdraw if they don't have enough
+        //  when liquidating, make sure you settle their pnl first?
+        // TODO consider doing this in batches of 32 accounts that are close to zero sum
 
-        unimplemented!()
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_account_a_ai, // write
+            merps_account_b_ai, // write
+            merps_cache_ai,     // read
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+        ] = accounts;
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let mut merps_account_a =
+            MerpsAccount::load_mut_checked(merps_account_a_ai, program_id, merps_group_ai.key)?;
+        let mut merps_account_b =
+            MerpsAccount::load_mut_checked(merps_account_b_ai, program_id, merps_group_ai.key)?;
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
+
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        let valid_last_update = now_ts - (merps_group.valid_interval as u64);
+        let perp_market_cache = &merps_cache.perp_market_cache[market_index];
+
+        check!(
+            valid_last_update <= merps_cache.price_cache[market_index].last_update,
+            MerpsErrorCode::InvalidCache
+        )?;
+        check!(
+            valid_last_update <= merps_cache.root_bank_cache[QUOTE_INDEX].last_update,
+            MerpsErrorCode::InvalidCache
+        )?;
+        check!(valid_last_update <= perp_market_cache.last_update, MerpsErrorCode::InvalidCache)?;
+
+        let price = merps_cache.price_cache[market_index].price;
+
+        // No need to check if market_index is in basket because if it's not, it will be zero and not possible to settle
+
+        let a = &mut merps_account_a.perp_accounts[market_index];
+        let b = &mut merps_account_b.perp_accounts[market_index];
+
+        // Account for unrealized funding payments before settling
+        a.move_funding(perp_market_cache.long_funding, perp_market_cache.short_funding);
+        b.move_funding(perp_market_cache.long_funding, perp_market_cache.short_funding);
+
+        let contract_size = merps_group.perp_markets[market_index].base_lot_size;
+        let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
+        let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
+        let a_pnl = a.quote_position - new_quote_pos_a;
+        let b_pnl = b.quote_position - new_quote_pos_b;
+
+        let deposit_index = merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index;
+        let borrow_index = merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index;
+
+        // pnl must be opposite signs for there to be a settlement
+        if a_pnl * b_pnl >= 0 {
+            return Ok(());
+        }
+
+        let settlement = a_pnl.abs().min(b_pnl.abs());
+        checked_add_deposit(
+            &mut node_bank,
+            if a_pnl > 0 { &mut merps_account_a } else { &mut merps_account_b },
+            QUOTE_INDEX,
+            settlement / deposit_index,
+        )?;
+
+        checked_add_borrow(
+            &mut node_bank,
+            if a_pnl > 0 { &mut merps_account_b } else { &mut merps_account_a },
+            QUOTE_INDEX,
+            settlement / borrow_index,
+        )?;
+        check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
+
+        Ok(())
     }
 
     /// Liquidate an account similar to Mango
@@ -1215,7 +1302,7 @@ impl Processor {
                         )?,
                         Err(_) => return Ok(()), // If it's not found, stop consuming events
                     };
-                    let mut perp_account = &mut merps_account.perp_accounts[market_index];
+                    let perp_account = &mut merps_account.perp_accounts[market_index];
                     perp_account.open_orders.remove_order(
                         out_event.side,
                         out_event.slot,
@@ -1351,46 +1438,6 @@ impl Processor {
 
         Ok(())
     }
-}
-
-/// Take two MerpsAccounts and settle unrealized trading pnl and funding pnl between them
-#[allow(unused)]
-fn settle_pnl(
-    merps_account_a: &mut MerpsAccount,
-    merps_account_b: &mut MerpsAccount,
-    market_index: usize,
-    price: I80F48,
-    contract_size: i64,
-    merps_cache: &MerpsCache,
-    now_ts: u64,
-) -> MerpsResult<()> {
-    /*
-    TODO consider rule: Can only settle if both accounts remain above bankruptcy
-     */
-
-    let a = &mut merps_account_a.perp_accounts[market_index];
-    let b = &mut merps_account_b.perp_accounts[market_index];
-
-    let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
-    let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
-    let a_pnl = a.quote_position - new_quote_pos_a;
-    let b_pnl = b.quote_position - new_quote_pos_b;
-
-    // pnl must be opposite signs for there to be a settlement
-
-    if a_pnl > 0 && b_pnl < 0 {
-        let settlement = a_pnl.min(b_pnl.abs());
-        // TODO reduce borrows if it exists instead of increase deposits
-        // TODO reduce deposits if it exists instead of increase borrows
-
-        // move funds from b to a
-        // consider: if b doesn't have enough init health
-    } else if a_pnl < 0 && b_pnl > 0 {
-        let settlement = a_pnl.min(b_pnl.abs());
-    } else {
-        return Err(throw!());
-    }
-    Ok(())
 }
 
 fn init_root_bank(

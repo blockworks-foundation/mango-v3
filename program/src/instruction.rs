@@ -1,4 +1,3 @@
-use crate::instruction::MerpsInstruction::AddOracle;
 use crate::matching::{OrderType, Side};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;

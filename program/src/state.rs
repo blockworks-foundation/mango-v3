@@ -4,10 +4,8 @@ use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
-use fixed::FixedI128;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -33,6 +31,7 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO: all unit numbers are just place holders. make decisions on each unit number
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
+// TODO double check all the
 
 // units
 // long_funding: I80F48 - native quote currency per contract
@@ -322,8 +321,10 @@ impl NodeBank {
         program_id: &Pubkey,
     ) -> MerpsResult<RefMut<'a, Self>> {
         check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
 
+        // TODO verify if size check necessary. We know load_mut fails if account size is too small for struct,
+        //  does it also fail if it's too big?
+        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
         let node_bank = Self::load_mut(account)?;
 
         check!(node_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
@@ -464,13 +465,13 @@ impl MerpsCache {
                 return false;
             }
 
-            if (!merps_group.spot_markets[i].is_empty()) {
+            if !merps_group.spot_markets[i].is_empty() {
                 if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                     return false;
                 }
             }
 
-            if (!merps_group.perp_markets[i].is_empty()) {
+            if !merps_group.perp_markets[i].is_empty() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
                     return false;
                 }
@@ -681,6 +682,19 @@ impl PerpAccount {
         }
 
         Ok(())
+    }
+
+    /// Move unrealized funding payments into the quote_position
+    pub fn move_funding(&mut self, long_funding: I80F48, short_funding: I80F48) {
+        if self.base_position > 0 {
+            self.quote_position -=
+                (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position);
+            self.long_settled_funding = long_funding;
+        } else if self.base_position < 0 {
+            self.quote_position -=
+                (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position);
+            self.short_settled_funding = short_funding;
+        };
     }
 
     /// Return the assets_val and liabs_val given some change to the current position at current price
@@ -912,7 +926,7 @@ impl MerpsAccount {
             let spot_market_info = &merps_group.spot_markets[i];
             let mut spot_assets_val_i = ZERO_I80F48;
             let mut spot_liabs_val_i = ZERO_I80F48;
-            if (!spot_market_info.is_empty()) {
+            if !spot_market_info.is_empty() {
                 (spot_assets_val_i, spot_liabs_val_i) = self.get_spot_weighted_assets_liabs_val(
                     merps_cache,
                     i,
@@ -925,7 +939,7 @@ impl MerpsAccount {
             let perp_market_info = &merps_group.perp_markets[i];
             let mut perp_assets_val_i = ZERO_I80F48;
             let mut perp_liabs_val_i = ZERO_I80F48;
-            if (!perp_market_info.is_empty()) {
+            if !perp_market_info.is_empty() {
                 (perp_assets_val_i, perp_liabs_val_i) = self.perp_accounts[i]
                     .get_weighted_assets_liabs_val(
                         perp_market_info,
