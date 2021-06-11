@@ -643,6 +643,7 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MerpsResult<()> {
+        // TODO use MerpsCache instead of RootBanks to get the deposit/borrow indexes
         const NUM_FIXED: usize = 22;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
 
@@ -662,7 +663,7 @@ impl Processor {
             dex_quote_ai,           // write
             base_root_bank_ai,      // read
             base_node_bank_ai,      // write
-            quote_root_bank_ai,     // write
+            quote_root_bank_ai,     // read
             quote_node_bank_ai,     // write
             quote_vault_ai,         // write
             base_vault_ai,          // write
