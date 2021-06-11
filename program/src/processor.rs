@@ -27,8 +27,8 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
-    PerpAccount, PerpMarket, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
-    TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    PerpAccount, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use bytemuck::cast_ref;
@@ -418,7 +418,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
     fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -445,9 +444,29 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
-    fn cache_perp_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO
+    fn cache_perp_markets(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 2;
+        let (fixed_ais, perp_market_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            merps_group_ai,     // read
+            merps_cache_ai,     // write
+        ] = fixed_ais;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let mut merps_cache =
+            MerpsCache::load_mut_checked(merps_cache_ai, program_id, &merps_group)?;
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        for perp_market_ai in perp_market_ais.iter() {
+            let index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+            let perp_market =
+                PerpMarket::load_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+            merps_cache.perp_market_cache[index] = PerpMarketCache {
+                long_funding: perp_market.long_funding,
+                short_funding: perp_market.short_funding,
+                last_update: now_ts,
+            };
+        }
         Ok(())
     }
 
@@ -1323,6 +1342,10 @@ impl Processor {
             MerpsInstruction::ConsumeEvents { limit } => {
                 msg!("Merps: ConsumeEvents limit={}", limit);
                 Self::consume_events(program_id, accounts, limit)?;
+            }
+            MerpsInstruction::CachePerpMarkets => {
+                msg!("Merps: CachePerpMarkets");
+                Self::cache_perp_markets(program_id, accounts)?;
             }
         }
 
