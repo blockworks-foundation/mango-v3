@@ -210,6 +210,8 @@ pub enum MerpsInstruction {
     /// 0. `[]` merps_group_ai
     /// 1. `[writable]` merps_cache_ai
     CachePerpMarkets,
+
+    UpdateFunding,
 }
 
 impl MerpsInstruction {
@@ -319,6 +321,7 @@ impl MerpsInstruction {
                 MerpsInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
             }
             16 => MerpsInstruction::CachePerpMarkets,
+            17 => MerpsInstruction::UpdateFunding,
             _ => {
                 return None;
             }
@@ -620,6 +623,26 @@ pub fn consume_events(
     let merps_accounts = merps_acc_pks.into_iter().map(|pk| AccountMeta::new(*pk, false));
     let accounts = fixed_accounts.into_iter().chain(merps_accounts).collect();
     let instr = MerpsInstruction::ConsumeEvents { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn update_funding(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey, // read
+    merps_cache_pk: &Pubkey, // read
+    perp_market_pk: &Pubkey, // write
+    bids_pk: &Pubkey,        // read
+    asks_pk: &Pubkey,        // read
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new_readonly(*merps_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new_readonly(*bids_pk, false),
+        AccountMeta::new_readonly(*asks_pk, false),
+    ];
+    let instr = MerpsInstruction::UpdateFunding {};
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

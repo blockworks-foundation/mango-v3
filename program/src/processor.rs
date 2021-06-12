@@ -1232,8 +1232,33 @@ impl Processor {
     /// and time since last update
     #[allow(unused)]
     fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO - unpack accounts and call perp_market.update_funding()
-        unimplemented!()
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_cache_ai,     // read
+            perp_market_ai,     // write
+            bids_ai,            // read
+            asks_ai,            // read
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        perp_market.update_funding(&merps_group, &book, &merps_cache, market_index, now_ts)?;
+
+        Ok(())
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MerpsResult<()> {
@@ -1344,6 +1369,10 @@ impl Processor {
             MerpsInstruction::CachePerpMarkets => {
                 msg!("Merps: CachePerpMarkets");
                 Self::cache_perp_markets(program_id, accounts)?;
+            }
+            MerpsInstruction::UpdateFunding => {
+                msg!("Merps: UpdateFunding");
+                Self::update_funding(program_id, accounts)?;
             }
         }
 

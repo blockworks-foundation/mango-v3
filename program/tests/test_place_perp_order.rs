@@ -225,7 +225,7 @@ async fn test_place_and_cancel_order() {
                     &program_id,
                     &merps_group_pk,
                     &merps_group.merps_cache,
-                    &[merps_group.perp_markets[perp_market_idx].perp_market],
+                    &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
@@ -544,7 +544,7 @@ async fn test_place_and_match_order() {
                     &program_id,
                     &merps_group_pk,
                     &merps_group.merps_cache,
-                    &[merps_group.perp_markets[perp_market_idx].perp_market],
+                    &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
@@ -638,13 +638,8 @@ async fn test_place_and_match_order() {
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
 
-        let mut perp_market = banks_client
-            .get_account(merps_group.perp_markets[perp_market_idx].perp_market)
-            .await
-            .unwrap()
-            .unwrap();
-        let account_info =
-            (&merps_group.perp_markets[perp_market_idx].perp_market, &mut perp_market).into();
+        let mut perp_market = banks_client.get_account(perp_market_pk).await.unwrap().unwrap();
+        let account_info = (&perp_market_pk, &mut perp_market).into();
         let perp_market =
             PerpMarket::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
 
@@ -689,6 +684,15 @@ async fn test_place_and_match_order() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
+                update_funding(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache,
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                )
+                .unwrap(),
                 // TODO: pay funding
                 cache_prices(
                     &program_id,
@@ -708,7 +712,7 @@ async fn test_place_and_match_order() {
                     &program_id,
                     &merps_group_pk,
                     &merps_group.merps_cache,
-                    &[merps_group.perp_markets[perp_market_idx].perp_market],
+                    &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
