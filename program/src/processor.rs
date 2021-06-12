@@ -662,6 +662,16 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
+    fn remove_from_basket(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        // TODO - verify deposits, borrows, open orders, perp account all zeroed out for this market index
+        unimplemented!()
+    }
+
     // TODO - add serum dex fee discount functionality
     fn place_spot_order(
         program_id: &Pubkey,
@@ -1218,11 +1228,43 @@ impl Processor {
 
     /// Liquidate an account similar to Mango
     #[allow(unused)]
-    fn liquidate() -> MerpsResult<()> {
-        // TODO - still need to figure out how liquidations for perps will work, but
+    fn liquidate_perp(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        // TODO - which market gets liquidated first?
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
-        unimplemented!()
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,         // read
+            merps_cache_ai,         // read
+            liqee_merps_account_ai, // write
+            liqor_merps_account_ai, // write    
+            liqor_ai,               // read, signer    
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+
+        let mut liqee_merps_account =
+            MerpsAccount::load_mut_checked(liqee_merps_account_ai, program_id, merps_group_ai.key)?;
+
+        let mut liqor_merps_account =
+            MerpsAccount::load_mut_checked(liqor_merps_account_ai, program_id, merps_group_ai.key)?;
+        check_eq!(liqor_ai.key, &liqor_merps_account.owner, MerpsErrorCode::InvalidOwner)?;
+        check!(liqor_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
+        check!(!merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
+
+        /*
+           1. first check if liqee health is below maint hf
+           2. second check if liqee health is above maint hf
+           3.
+        */
+
+        Ok(())
     }
 
     /// *** Keeper Related Instructions ***

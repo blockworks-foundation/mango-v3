@@ -792,6 +792,11 @@ impl PerpAccount {
     }
 }
 
+pub enum HealthFactorType {
+    Maint,
+    Init,
+}
+
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsAccount {
@@ -896,6 +901,102 @@ impl MerpsAccount {
         let liabs_val = self.borrows[market_index] * bank_cache.borrow_index * price * liab_weight;
 
         Ok((assets_val, liabs_val))
+    }
+
+    pub fn get_safety_factor(
+        &self,
+        merps_group: &MerpsGroup,
+        merps_cache: &MerpsCache,
+        spot_open_orders_ais: &[AccountInfo],
+        is_maint: bool, // used to decide which weights to use for calculation
+    ) -> MerpsResult<I80F48> {
+        let hf = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
+            * self.deposits[QUOTE_INDEX])
+            - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
+
+        for i in 0..merps_group.num_oracles {
+            if !self.in_basket[i] {
+                continue;
+            }
+
+            let spot_market_info = &merps_group.spot_markets[i];
+            let mut spot_assets_val_i = ZERO_I80F48;
+            let mut spot_liabs_val_i = ZERO_I80F48;
+            if !spot_market_info.is_empty() {
+                (spot_assets_val_i, spot_liabs_val_i) = self.get_spot_weighted_assets_liabs_val(
+                    merps_cache,
+                    i,
+                    &spot_open_orders_ais[i],
+                    spot_market_info.maint_asset_weight,
+                    spot_market_info.maint_liab_weight,
+                )?;
+            }
+        }
+
+        Ok(hf)
+    }
+
+    pub fn get_maint_health_factor(
+        &self,
+        merps_group: &MerpsGroup,
+        merps_cache: &MerpsCache,
+        spot_open_orders_ais: &[AccountInfo],
+    ) -> MerpsResult<I80F48> {
+        // Value of all assets and liabs in quote currency
+        let quote_i = QUOTE_INDEX;
+        let mut assets_val = merps_cache.root_bank_cache[quote_i]
+            .deposit_index
+            .checked_mul(self.deposits[quote_i])
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+        let mut liabs_val = merps_cache.root_bank_cache[quote_i]
+            .borrow_index
+            .checked_mul(self.borrows[quote_i])
+            .ok_or(throw_err!(MerpsErrorCode::MathError))?;
+
+        for i in 0..merps_group.num_oracles {
+            // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
+            if !self.in_basket[i] {
+                continue;
+            }
+
+            let spot_market_info = &merps_group.spot_markets[i];
+            let mut spot_assets_val_i = ZERO_I80F48;
+            let mut spot_liabs_val_i = ZERO_I80F48;
+            if !spot_market_info.is_empty() {
+                (spot_assets_val_i, spot_liabs_val_i) = self.get_spot_weighted_assets_liabs_val(
+                    merps_cache,
+                    i,
+                    &spot_open_orders_ais[i],
+                    spot_market_info.maint_asset_weight,
+                    spot_market_info.maint_liab_weight,
+                )?;
+            }
+
+            let perp_market_info = &merps_group.perp_markets[i];
+            let mut perp_assets_val_i = ZERO_I80F48;
+            let mut perp_liabs_val_i = ZERO_I80F48;
+            if !perp_market_info.is_empty() {
+                (perp_assets_val_i, perp_liabs_val_i) = self.perp_accounts[i]
+                    .get_weighted_assets_liabs_val(
+                        perp_market_info,
+                        merps_cache.price_cache[i].price,
+                        perp_market_info.maint_asset_weight,
+                        perp_market_info.maint_liab_weight,
+                        merps_cache.perp_market_cache[i].long_funding,
+                        merps_cache.perp_market_cache[i].short_funding,
+                    );
+            }
+
+            assets_val += spot_assets_val_i + perp_assets_val_i;
+            liabs_val += spot_liabs_val_i + perp_liabs_val_i;
+        }
+
+        if liabs_val == ZERO_I80F48 {
+            Ok(I80F48::MAX)
+        } else {
+            assets_val.checked_div(liabs_val).ok_or(throw!())
+        }
     }
 
     /// TODO change this to be additive function
@@ -1095,6 +1196,8 @@ impl PerpMarket {
 
         let index_price = price_cache.price;
         let diff: I80F48 = (book_price / index_price) - ONE_I80F48;
+
+        // TODO consider what happens if time_factor is very small. Can funding_delta == 0 when diff != 0?
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff
             * time_factor
