@@ -1061,25 +1061,34 @@ impl PerpMarket {
         market_index: usize,
         now_ts: u64,
     ) -> MerpsResult<()> {
+        let price_cache = &merps_cache.price_cache[market_index];
+        check!(
+            now_ts <= price_cache.last_update + (merps_group.valid_interval as u64),
+            MerpsErrorCode::InvalidCache
+        )?;
+        let index_price = price_cache.price;
+
         // Get current book price
         // compare it to index price using the merps cache
 
         // TODO handle case of one sided book
         // TODO get impact bid and impact ask if compute allows
         // TODO consider corner cases of funding being updated
-        let bid = book.get_best_bid_price().unwrap();
-        let ask = book.get_best_ask_price().unwrap();
+        let bid = book.get_best_bid_price();
+        let ask = book.get_best_ask_price();
+        check!(bid.is_some() || ask.is_some(), MerpsErrorCode::Default)?;
 
-        let book_price = self.lot_to_native_price((bid + ask) / 2);
+        const ONE_SIDED_FUNDING: I80F48 = I80F48!(1.05);
+        let book_price = match (bid, ask) {
+            (Some(bid), Some(ask)) => self.lot_to_native_price((bid + ask) / 2),
+            (Some(_bid), None) => index_price * ONE_SIDED_FUNDING,
+            (None, Some(_ask)) => index_price / ONE_SIDED_FUNDING,
+            (None, None) => index_price,
+        };
+
+        msg!("update_funding index={} book={}", index_price, book_price);
 
         // TODO make everything here checked
-        let price_cache = &merps_cache.price_cache[market_index];
-        check!(
-            now_ts <= price_cache.last_update + (merps_group.valid_interval as u64),
-            MerpsErrorCode::InvalidCache
-        )?;
-
-        let index_price = price_cache.price;
         let diff: I80F48 = (book_price / index_price) - ONE_I80F48;
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff

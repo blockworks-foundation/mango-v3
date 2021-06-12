@@ -519,6 +519,7 @@ async fn test_place_and_match_order() {
 
     let bid_id = 1337;
     let ask_id = 1338;
+    let min_bid_id = 1339;
     {
         let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
@@ -580,6 +581,24 @@ async fn test_place_and_match_order() {
                         / (tsla_unit as i64 * quote_lot),
                     (quantity as i64 * tsla_unit as i64) / tsla_lot,
                     ask_id,
+                    OrderType::Limit,
+                )
+                .unwrap(),
+                // place an absolue low-ball bid, just to make sure this
+                place_perp_order(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_bid_pk,
+                    &user_bid.pubkey(),
+                    &merps_group.merps_cache,
+                    &perp_market_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &event_queue_pk,
+                    Side::Bid,
+                    1,
+                    1,
+                    min_bid_id,
                     OrderType::Limit,
                 )
                 .unwrap(),
@@ -684,6 +703,13 @@ async fn test_place_and_match_order() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
+                cache_prices(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache,
+                    &[tsla_usd.pubkey],
+                )
+                .unwrap(),
                 update_funding(
                     &program_id,
                     &merps_group_pk,
@@ -691,14 +717,6 @@ async fn test_place_and_match_order() {
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
-                )
-                .unwrap(),
-                // TODO: pay funding
-                cache_prices(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[tsla_usd.pubkey],
                 )
                 .unwrap(),
                 cache_root_banks(
