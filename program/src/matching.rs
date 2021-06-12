@@ -611,7 +611,8 @@ impl<'a> Book<'a> {
                 let event = OutEvent::new(Side::Ask, best_ask.owner_slot, 0, best_ask.owner);
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
-                let _removed_node = self.asks.remove(best_ask_h).unwrap();
+                let key = best_ask.key;
+                let _removed_node = self.asks.remove_by_key(key).unwrap();
             }
         }
 
@@ -733,7 +734,8 @@ impl<'a> Book<'a> {
                 let event = OutEvent::new(Side::Bid, best_bid.owner_slot, 0, best_bid.owner);
                 event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
-                let _removed_node = self.bids.remove(best_bid_h).unwrap();
+                let key = best_bid.key;
+                let _removed_node = self.bids.remove_by_key(key).unwrap();
             }
         }
 
