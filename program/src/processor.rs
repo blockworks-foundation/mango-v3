@@ -1227,11 +1227,25 @@ impl Processor {
 
     /// *** Keeper Related Instructions ***
 
-    /// Update the deposit and borrow index on passed in RootBanks
-    #[allow(unused)]
-    fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO - just copy the interest functions from Mango v1 and v2
-        unimplemented!()
+    /// Update the deposit and borrow index on a passed in RootBank
+    fn update_root_bank(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 2;
+        let (fixed_accounts, node_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            merps_group_ai, // read
+            root_bank_ai,   // write
+        ] = fixed_accounts;
+
+        // TODO check root bank belongs to group in load functions
+        let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+        check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MerpsErrorCode::Default)?;
+        for node_bank_ai in node_bank_ais.iter() {
+            check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
+        }
+
+        root_bank.update_index(node_bank_ais, program_id)?;
+
+        Ok(())
     }
 
     /// similar to serum dex, but also need to do some extra magic with funding
@@ -1384,7 +1398,10 @@ impl Processor {
                 msg!("Merps: AddOracle");
                 Self::add_oracle(program_id, accounts)?
             }
-
+            MerpsInstruction::UpdateRootBank => {
+                msg!("Merps: UpdateRootBank");
+                Self::update_root_bank(program_id, accounts)?
+            }
             MerpsInstruction::AddPerpMarket {
                 market_index,
                 maint_asset_weight,
@@ -1442,7 +1459,6 @@ impl Processor {
         Ok(())
     }
 }
-
 fn init_root_bank(
     program_id: &Pubkey,
     merps_group: &MerpsGroup,
