@@ -18,6 +18,5 @@ async fn test_size() {
 async fn test_i80f48() {
     let one: I80F48 = I80F48!(1.25);
     let neg_one: I80F48 = I80F48!(-1.25);
-    println!("1.25 -> {:?} ", one.to_le_bytes());
-    println!("-1.25 -> {:?} ", neg_one.to_le_bytes());
+    println!("{:?}", neg_one.checked_ceil().unwrap())
 }

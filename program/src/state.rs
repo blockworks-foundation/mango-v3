@@ -695,7 +695,7 @@ impl PerpAccount {
             self.quote_position -=
                 (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position);
             self.short_settled_funding = short_funding;
-        };
+        }
     }
 
     /// Return the health factor if position changed by `base_change` at current prices

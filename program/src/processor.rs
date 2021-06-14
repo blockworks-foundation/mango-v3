@@ -1257,6 +1257,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
+        base_transfer: i64,
     ) -> MerpsResult<()> {
         // TODO - which market gets liquidated first?
         // liqor passes in his own account and the liqee merps account
@@ -1305,9 +1306,8 @@ impl Processor {
 
         // TODO - account for being_liquidated case where liquidation has to happen over many instructions
         // TODO - force cancel all orders that use margin first and check if account still liquidatable
+        // TODO - what happens if base position and quote position have same sign?
         check!(maint_health < ZERO_I80F48, MerpsErrorCode::Default)?;
-        let liqee_perp_account = &liqee_merps_account.perp_accounts[market_index];
-        let liqor_perp_account = &liqor_merps_account.perp_accounts[market_index];
 
         // Determine how much position can be taken from liqee to get him above init_health
         let init_health = liqee_merps_account.get_health(
@@ -1316,22 +1316,58 @@ impl Processor {
             open_orders_ais,
             HealthType::Init,
         )?;
+        let liqee_perp_account = &mut liqee_merps_account.perp_accounts[market_index];
+        let liqor_perp_account = &mut liqor_merps_account.perp_accounts[market_index];
 
-        // TODO -
-        // TODO -
+        // Move funding into quote position. Not necessary to adjust funding settled after funding is moved
+        let long_funding = merps_cache.perp_market_cache[market_index].long_funding;
+        let short_funding = merps_cache.perp_market_cache[market_index].short_funding;
+        liqee_perp_account.move_funding(long_funding, short_funding);
+        liqor_perp_account.move_funding(long_funding, short_funding);
+
         let price = merps_cache.price_cache[market_index].price;
         if liqee_perp_account.base_position > 0 {
-            let max_transfer = init_health
+            // TODO relax this check
+            check!(
+                base_transfer > 0 && base_transfer < liqee_perp_account.base_position,
+                MerpsErrorCode::Default
+            )?;
+
+            let max_transfer: I80F48 = init_health
                 / (price * (perp_market_info.init_asset_weight - perp_market_info.liquidation_fee));
+            let max_transfer = max_transfer.checked_ceil().unwrap();
+            // TODO check base_transfer less than max transfer
+
+            let quote_transfer = I80F48::from_num(-base_transfer * perp_market_info.base_lot_size)
+                * price
+                * perp_market_info.liquidation_fee;
+
+            liqee_perp_account.base_position -= base_transfer;
+            liqee_perp_account.quote_position -= quote_transfer;
+
+            // if liqor base pos crosses to long from short, make sure funding is correct
+            liqor_perp_account.long_settled_funding = long_funding;
+
+            liqor_perp_account.base_position += base_transfer;
+            liqor_perp_account.quote_position += quote_transfer;
         } else if liqee_perp_account.base_position < 0 {
+            check!(base_transfer < 0, MerpsErrorCode::Default)?;
         } else {
             return Err(throw!());
         }
+
+        let liqor_health = liqor_merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+        check!(liqor_health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
+
         /*
            1. first check if liqee health is below maint hf
            2. move funding if possible
            3. reduce position at this market_index
-           4.
         */
 
         Ok(())
