@@ -6,8 +6,10 @@ use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
+use solana_program::clock::Clock;
 use solana_program::msg;
 use solana_program::pubkey::Pubkey;
+use solana_program::sysvar::Sysvar;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
@@ -756,6 +758,13 @@ impl PerpAccount {
         // Pick the worse of the two simulated health
         let h = if bids_health < asks_health { bids_health } else { asks_health };
 
+        msg!(
+            "get_health h={:?} of={} bp={}",
+            h,
+            long_funding - self.long_settled_funding,
+            self.base_position
+        );
+
         // Account for unrealized funding payments
         // TODO make checked
         // TODO - consider force moving funding into the realized at start of every instruction
@@ -942,6 +951,7 @@ impl MerpsAccount {
                     merps_cache.perp_market_cache[i].short_funding,
                 );
             }
+            msg!("get_health {} => {:?}", i, health);
         }
 
         Ok(health)
@@ -1011,6 +1021,9 @@ impl PerpMarket {
         state.quote_lot_size = quote_lot_size;
         state.index_oracle = merps_group.oracles[market_index];
         state.contract_size = contract_size;
+
+        let clock = Clock::get()?;
+        state.last_updated = clock.unix_timestamp as u64;
 
         Ok(state)
     }
@@ -1085,8 +1098,8 @@ impl PerpMarket {
                 let book_price = self.lot_to_native_price((bid + ask) / 2);
                 (book_price / index_price) - ONE_I80F48
             }
-            (Some(_bid), None) => ONE_SIDED_FUNDING,
-            (None, Some(_ask)) => ONE_SIDED_FUNDING,
+            (Some(_bid), None) => ONE_SIDED_PENALTY_FUNDING,
+            (None, Some(_ask)) => ONE_SIDED_PENALTY_FUNDING,
             (None, None) => ZERO_I80F48, // checked already before for this case
         };
 
@@ -1096,6 +1109,15 @@ impl PerpMarket {
             * time_factor
             * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
             * index_price;
+
+        msg!(
+            "update_funding diff={:?} tf={:?} delta={:?} ds={}-{}",
+            diff,
+            funding_delta,
+            time_factor,
+            now_ts,
+            self.last_updated
+        );
 
         self.long_funding += funding_delta;
         self.short_funding += funding_delta;

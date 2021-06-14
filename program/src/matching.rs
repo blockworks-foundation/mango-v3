@@ -8,6 +8,7 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use std::cell::RefMut;
@@ -574,6 +575,9 @@ impl<'a> Book<'a> {
 
             let best_ask = self.asks.get_mut(best_ask_h).unwrap().as_leaf_mut().unwrap();
             let best_ask_price = best_ask.price();
+
+            msg!("new_ask p={} bap={}", price, best_ask_price);
+
             if price < best_ask_price {
                 break;
             }
@@ -643,6 +647,13 @@ impl<'a> Book<'a> {
             };
 
             let _result = self.bids.insert_leaf(&new_bid)?;
+
+            msg!(
+                "bid on book client_id={} quantity={} price={}",
+                client_order_id,
+                rem_quantity,
+                price
+            );
             oo.add_order(Side::Bid, &new_bid)?;
         }
 
@@ -655,6 +666,12 @@ impl<'a> Book<'a> {
                 market.long_funding,
                 market.short_funding,
             )?;
+
+            msg!(
+                "matched base={} quote={:?}",
+                base_change,
+                I80F48::from_num(-quote_used * market.quote_lot_size)
+            );
         }
 
         Ok(())
@@ -697,6 +714,8 @@ impl<'a> Book<'a> {
 
             let best_bid = self.bids.get_mut(best_bid_h).unwrap().as_leaf_mut().unwrap();
             let best_bid_price = best_bid.price();
+
+            msg!("new_ask p={} bbp={}", price, best_bid_price);
             if price > best_bid_price {
                 break;
             }
@@ -764,6 +783,13 @@ impl<'a> Book<'a> {
                 client_order_id,
             };
 
+            msg!(
+                "ask on book client_id={} quantity={} price={}",
+                client_order_id,
+                rem_quantity,
+                price
+            );
+
             let _result = self.asks.insert_leaf(&new_ask)?;
             oo.add_order(Side::Ask, &new_ask)?;
         }
@@ -777,6 +803,12 @@ impl<'a> Book<'a> {
                 market.long_funding,
                 market.short_funding,
             )?;
+
+            msg!(
+                "matched base={} quote={:?}",
+                base_change,
+                I80F48::from_num(-quote_used * market.quote_lot_size)
+            );
         }
 
         Ok(())

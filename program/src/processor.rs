@@ -976,7 +976,6 @@ impl Processor {
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
         let merps_account =
             MerpsAccount::load_checked(merps_account_ai, program_id, merps_group_ai.key)?;
-        let clock = Clock::get()?;
 
         check_eq!(dex_prog_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
