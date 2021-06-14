@@ -34,15 +34,7 @@ async fn test_init_perp_market() {
     let quote_index = 0;
     let quote_decimals = 6;
     let quote_unit = 10i64.pow(quote_decimals);
-    let quote_lot = 100;
-
-    let user_initial_amount = 200 * quote_unit;
-    let user_quote_account = add_token_account(
-        &mut test,
-        user.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
-        user_initial_amount as u64,
-    );
+    let quote_lot = 10;
 
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
@@ -50,7 +42,7 @@ async fn test_init_perp_market() {
     let tsla_decimals = 4;
     let tsla_price = 420;
     let tsla_unit = 10i64.pow(tsla_decimals);
-    let tsla_lot = 10;
+    let tsla_lot = 100;
     let oracle_price =
         I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
 
@@ -93,8 +85,8 @@ async fn test_init_perp_market() {
                     perp_market_idx,
                     maint_leverage,
                     init_leverage,
-                    100,
-                    10,
+                    tsla_lot,
+                    quote_lot,
                 )
                 .unwrap(),
                 add_to_basket(
@@ -135,9 +127,9 @@ async fn test_place_and_cancel_order() {
     let quote_index = 0;
     let quote_decimals = 6;
     let quote_unit = 10i64.pow(quote_decimals);
-    let quote_lot = 100;
+    let quote_lot = 10;
 
-    let user_initial_amount = 1000 * quote_unit;
+    let user_initial_amount = 100000 * quote_unit;
     let user_quote_account = add_token_account(
         &mut test,
         user.pubkey(),
@@ -148,10 +140,10 @@ async fn test_place_and_cancel_order() {
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
-    let tsla_decimals = 4;
-    let tsla_price = 420;
+    let tsla_decimals = 6;
+    let tsla_price = 40000;
     let tsla_unit = 10i64.pow(tsla_decimals);
-    let tsla_lot = 10;
+    let tsla_lot = 100;
     let oracle_price =
         I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
 
@@ -182,6 +174,18 @@ async fn test_place_and_cancel_order() {
                 merps_group.init_merps_group(&admin.pubkey()),
                 init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
                     .unwrap(),
+                deposit(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &merps_group.root_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &user_quote_account.pubkey,
+                    user_initial_amount as u64,
+                )
+                .unwrap(),
                 add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
                 set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
@@ -415,13 +419,13 @@ async fn test_place_and_match_order() {
     let quote_index = 0;
     let quote_decimals = 6;
     let quote_unit = 10i64.pow(quote_decimals);
-    let quote_lot = 100;
+    let quote_lot = 10;
 
     let user_bid = Keypair::new();
     test.add_account(user_bid.pubkey(), Account::new(u32::MAX as u64, 0, &user_bid.pubkey()));
 
     // TODO: this still needs to be deposited into the merps account and should be connected to leverage
-    let user_bid_initial_amount = 1 * quote_unit;
+    let user_bid_initial_amount = 100000 * quote_unit;
     let user_bid_quote_account = add_token_account(
         &mut test,
         user_bid.pubkey(),
@@ -435,7 +439,7 @@ async fn test_place_and_match_order() {
     test.add_account(user_ask.pubkey(), Account::new(u32::MAX as u64, 0, &user_ask.pubkey()));
 
     // TODO: this still needs to be deposited into the merps account and should be connected to leverage
-    let user_ask_initial_amount = 1 * quote_unit;
+    let user_ask_initial_amount = 100000 * quote_unit;
     let user_ask_quote_account = add_token_account(
         &mut test,
         user_ask.pubkey(),
@@ -446,10 +450,10 @@ async fn test_place_and_match_order() {
     let merps_account_ask_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
-    let tsla_decimals = 4;
-    let tsla_price = 420;
+    let tsla_decimals = 6;
+    let tsla_price = 40000;
     let tsla_unit = 10i64.pow(tsla_decimals);
-    let tsla_lot = 10;
+    let tsla_lot = 100;
     let oracle_price =
         I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
 
@@ -490,6 +494,30 @@ async fn test_place_and_match_order() {
                     &merps_group_pk,
                     &merps_account_ask_pk,
                     &user_ask.pubkey(),
+                )
+                .unwrap(),
+                deposit(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_bid_pk,
+                    &user_bid.pubkey(),
+                    &merps_group.root_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &user_bid_quote_account.pubkey,
+                    user_bid_initial_amount as u64,
+                )
+                .unwrap(),
+                deposit(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_ask_pk,
+                    &user_ask.pubkey(),
+                    &merps_group.root_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &user_ask_quote_account.pubkey,
+                    user_ask_initial_amount as u64,
                 )
                 .unwrap(),
                 add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
@@ -633,7 +661,7 @@ async fn test_place_and_match_order() {
     }
 
     let bid_base_position = quantity * tsla_unit / tsla_lot;
-    let bid_quote_position = -101 * (quantity * quote_unit);
+    let bid_quote_position = -40001 * (quantity * quote_unit);
     {
         let mut merps_account =
             banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
@@ -650,7 +678,7 @@ async fn test_place_and_match_order() {
     }
 
     let ask_base_position = -1 * quantity * tsla_unit / tsla_lot;
-    let ask_quote_position = (101 * quantity * quote_unit);
+    let ask_quote_position = (40001 * quantity * quote_unit);
     {
         let mut merps_account =
             banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();

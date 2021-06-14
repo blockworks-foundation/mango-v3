@@ -720,6 +720,8 @@ impl PerpAccount {
                 I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
         }
 
+        msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+
         health
     }
 
@@ -879,6 +881,8 @@ impl MerpsAccount {
             * price)
             + oo_quote;
 
+        msg!("get_spot_health {} price={:?} health={:?}", market_index, price, health,);
+
         Ok(health)
     }
 
@@ -892,6 +896,8 @@ impl MerpsAccount {
         let mut health = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
             * self.deposits[QUOTE_INDEX])
             - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
+
+        msg!("get_health quote={:?}", health);
 
         for i in 0..merps_group.num_oracles {
             if !self.in_basket[i] {
