@@ -722,9 +722,8 @@ impl Processor {
     ) -> MerpsResult<()> {
         // TODO use MerpsCache instead of RootBanks to get the deposit/borrow indexes
         const NUM_FIXED: usize = 22;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
 
-        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,         // read
             merps_account_ai,       // write
@@ -969,19 +968,19 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
-            merps_group_ai,
-            owner_ai,  // signer
-            merps_account_ai,
-            dex_prog_ai,
-            spot_market_ai,
-            bids_ai,
-            asks_ai,
-            open_orders_ai,
-            signer_ai,
-            dex_event_queue_ai,
+            merps_group_ai,     // read
+            owner_ai,           // signer
+            merps_account_ai,   // read
+            dex_prog_ai,        // read
+            spot_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+            open_orders_ai,     // write
+            signer_ai,          // read
+            dex_event_queue_ai, // write
         ] = accounts;
 
-        let merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
         let merps_account =
             MerpsAccount::load_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
