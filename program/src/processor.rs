@@ -157,8 +157,8 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-        maint_asset_weight: I80F48,
-        init_asset_weight: I80F48,
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -206,20 +206,19 @@ impl Processor {
             padding: [0u8; 7],
         };
 
-        // check that maint weight is lower than init asset weight
+        // check leverage is reasonable
+
         check!(
-            maint_asset_weight <= ONE_I80F48
-                && maint_asset_weight > init_asset_weight
-                && init_asset_weight > ZERO_I80F48,
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
             MerpsErrorCode::Default
         )?;
 
         merps_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
-            maint_asset_weight,
-            init_asset_weight,
-            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
-            init_liab_weight: ONE_I80F48 / init_asset_weight,
+            maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
         };
 
         // TODO needs to be moved into add_oracle
@@ -274,8 +273,8 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-        maint_asset_weight: I80F48,
-        init_asset_weight: I80F48,
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
@@ -308,18 +307,16 @@ impl Processor {
         check!(merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
         check!(
-            maint_asset_weight <= ONE_I80F48
-                && maint_asset_weight > init_asset_weight
-                && init_asset_weight > ZERO_I80F48,
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
             MerpsErrorCode::Default
         )?;
 
         merps_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
-            maint_asset_weight,
-            init_asset_weight,
-            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
-            init_liab_weight: ONE_I80F48 / init_asset_weight,
+            maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
             base_lot_size,
             quote_lot_size,
         };
@@ -1032,7 +1029,7 @@ impl Processor {
         )?;
 
         let health = merps_account.get_health(&merps_group, &merps_cache, &[], false)?;
-        check!(health >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
@@ -1398,18 +1395,14 @@ impl Processor {
                 msg!("Merps: Withdraw");
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)?;
             }
-            MerpsInstruction::AddSpotMarket {
-                market_index,
-                maint_asset_weight,
-                init_asset_weight,
-            } => {
+            MerpsInstruction::AddSpotMarket { market_index, maint_leverage, init_leverage } => {
                 msg!("Merps: AddSpotMarket");
                 Self::add_spot_market(
                     program_id,
                     accounts,
                     market_index,
-                    maint_asset_weight,
-                    init_asset_weight,
+                    maint_leverage,
+                    init_leverage,
                 )?;
             }
             MerpsInstruction::AddToBasket { market_index } => {
@@ -1439,8 +1432,8 @@ impl Processor {
 
             MerpsInstruction::AddPerpMarket {
                 market_index,
-                maint_asset_weight,
-                init_asset_weight,
+                maint_leverage,
+                init_leverage,
                 base_lot_size,
                 quote_lot_size,
             } => {
@@ -1449,8 +1442,8 @@ impl Processor {
                     program_id,
                     accounts,
                     market_index,
-                    maint_asset_weight,
-                    init_asset_weight,
+                    maint_leverage,
+                    init_leverage,
                     base_lot_size,
                     quote_lot_size,
                 )?;

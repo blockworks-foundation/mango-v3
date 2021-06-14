@@ -92,8 +92,8 @@ pub enum MerpsInstruction {
     /// 5. `[signer]` admin_ai - TODO
     AddSpotMarket {
         market_index: usize,
-        maint_asset_weight: I80F48,
-        init_asset_weight: I80F48,
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
     },
 
     /// Add a spot market to a merps account basket
@@ -166,8 +166,8 @@ pub enum MerpsInstruction {
     /// 5. `[signer]` admin_ai - TODO
     AddPerpMarket {
         market_index: usize,
-        maint_asset_weight: I80F48,
-        init_asset_weight: I80F48,
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
     },
@@ -246,12 +246,11 @@ impl MerpsInstruction {
             }
             4 => {
                 let data = array_ref![data, 0, 40];
-                let (market_index, maint_asset_weight, init_asset_weight) =
-                    array_refs![data, 8, 16, 16];
+                let (market_index, maint_leverage, init_leverage) = array_refs![data, 8, 16, 16];
                 MerpsInstruction::AddSpotMarket {
                     market_index: usize::from_le_bytes(*market_index),
-                    maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
-                    init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
+                    maint_leverage: I80F48::from_le_bytes(*maint_leverage),
+                    init_leverage: I80F48::from_le_bytes(*init_leverage),
                 }
             }
             5 => {
@@ -272,17 +271,12 @@ impl MerpsInstruction {
             10 => MerpsInstruction::AddOracle,
             11 => {
                 let data_arr = array_ref![data, 0, 56];
-                let (
-                    market_index,
-                    maint_asset_weight,
-                    init_asset_weight,
-                    base_lot_size,
-                    quote_lot_size,
-                ) = array_refs![data_arr, 8, 16, 16, 8, 8];
+                let (market_index, maint_leverage, init_leverage, base_lot_size, quote_lot_size) =
+                    array_refs![data_arr, 8, 16, 16, 8, 8];
                 MerpsInstruction::AddPerpMarket {
                     market_index: usize::from_le_bytes(*market_index),
-                    maint_asset_weight: I80F48::from_le_bytes(*maint_asset_weight),
-                    init_asset_weight: I80F48::from_le_bytes(*init_asset_weight),
+                    maint_leverage: I80F48::from_le_bytes(*maint_leverage),
+                    init_leverage: I80F48::from_le_bytes(*init_leverage),
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
                 }
@@ -464,8 +458,8 @@ pub fn add_spot_market(
     admin_pk: &Pubkey,
 
     market_index: usize,
-    maint_asset_weight: I80F48,
-    init_asset_weight: I80F48,
+    maint_leverage: I80F48,
+    init_leverage: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*merps_group_pk, false),
@@ -478,8 +472,7 @@ pub fn add_spot_market(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr =
-        MerpsInstruction::AddSpotMarket { market_index, maint_asset_weight, init_asset_weight };
+    let instr = MerpsInstruction::AddSpotMarket { market_index, maint_leverage, init_leverage };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -494,8 +487,8 @@ pub fn add_perp_market(
     admin_pk: &Pubkey,
 
     market_index: usize,
-    maint_asset_weight: I80F48,
-    init_asset_weight: I80F48,
+    maint_leverage: I80F48,
+    init_leverage: I80F48,
     base_lot_size: i64,
     quote_lot_size: i64,
 ) -> Result<Instruction, ProgramError> {
@@ -510,8 +503,8 @@ pub fn add_perp_market(
 
     let instr = MerpsInstruction::AddPerpMarket {
         market_index,
-        maint_asset_weight,
-        init_asset_weight,
+        maint_leverage,
+        init_leverage,
         base_lot_size,
         quote_lot_size,
     };
