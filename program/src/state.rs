@@ -783,6 +783,11 @@ pub struct MerpsAccount {
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 }
 
+pub enum HealthType {
+    Maint,
+    Init,
+}
+
 impl MerpsAccount {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -881,7 +886,7 @@ impl MerpsAccount {
         merps_group: &MerpsGroup,
         merps_cache: &MerpsCache,
         spot_open_orders_ais: &[AccountInfo],
-        use_maint_weights: bool, // used to decide which weights to use for calculation
+        health_type: HealthType,
     ) -> MerpsResult<I80F48> {
         let mut health = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
             * self.deposits[QUOTE_INDEX])
@@ -895,20 +900,19 @@ impl MerpsAccount {
             let perp_market_info = &merps_group.perp_markets[i];
 
             let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
-                if use_maint_weights {
-                    (
+                match health_type {
+                    HealthType::Maint => (
                         spot_market_info.maint_asset_weight,
                         spot_market_info.maint_liab_weight,
                         perp_market_info.maint_asset_weight,
                         perp_market_info.maint_liab_weight,
-                    )
-                } else {
-                    (
+                    ),
+                    HealthType::Init => (
                         spot_market_info.init_asset_weight,
                         spot_market_info.init_liab_weight,
                         perp_market_info.init_asset_weight,
                         perp_market_info.init_liab_weight,
-                    )
+                    ),
                 };
 
             if !spot_market_info.is_empty() {

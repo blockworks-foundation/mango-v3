@@ -26,8 +26,8 @@ use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
-    PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    load_market_state, DataType, HealthType, MerpsAccount, MerpsCache, MerpsGroup, MetaData,
+    NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
     SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
@@ -528,8 +528,12 @@ impl Processor {
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
-        let health =
-            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
 
         // TODO fix coll_ratio checks
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
@@ -617,8 +621,12 @@ impl Processor {
             )?;
         }
 
-        let health =
-            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         // invoke_transfer()
@@ -732,8 +740,12 @@ impl Processor {
             MerpsErrorCode::Default
         )?;
 
-        let health =
-            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
         let reduce_only = health < ZERO_I80F48;
 
         // Make sure the root bank is in the merps group
@@ -903,8 +915,12 @@ impl Processor {
             in_token_i,
         )?;
 
-        let health =
-            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
         check!(reduce_only || health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
         check!(out_node_bank.has_valid_deposits_borrows(&out_root_bank), MerpsErrorCode::Default)?;
 
@@ -1028,7 +1044,7 @@ impl Processor {
             client_order_id,
         )?;
 
-        let health = merps_account.get_health(&merps_group, &merps_cache, &[], false)?;
+        let health = merps_account.get_health(&merps_group, &merps_cache, &[], HealthType::Init)?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
@@ -1243,14 +1259,15 @@ impl Processor {
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
         const NUM_FIXED: usize = 5;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
         let [
             merps_group_ai,         // read
             merps_cache_ai,         // read
             liqee_merps_account_ai, // write
             liqor_merps_account_ai, // write    
             liqor_ai,               // read, signer    
-        ] = accounts;
+        ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
@@ -1264,10 +1281,22 @@ impl Processor {
         check!(liqor_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
         check!(!merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
+        let maint_health = liqee_merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Maint,
+        )?;
+
+        // TODO - account for being_liquidated case where liquidation has to happen over many instructions
+        // TODO - force cancel all orders that use margin first and check if account still liquidatable
+        check!(maint_health < ZERO_I80F48, MerpsErrorCode::Default)?;
+
         /*
            1. first check if liqee health is below maint hf
-           2.
-           3.
+           2. move funding if possible
+           3. reduce position at this market_index
+           4.
         */
 
         Ok(())
