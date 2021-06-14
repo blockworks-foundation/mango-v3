@@ -937,6 +937,15 @@ impl MerpsAccount {
                     );
             }
 
+            msg!(
+                "get_health_factor [{}] assets({:?},{:?}) liabs({:?},{:?})",
+                i,
+                spot_assets_val_i,
+                perp_assets_val_i,
+                spot_liabs_val_i,
+                perp_liabs_val_i
+            );
+
             assets_val += spot_assets_val_i + perp_assets_val_i;
             liabs_val += spot_liabs_val_i + perp_liabs_val_i;
         }
@@ -944,7 +953,9 @@ impl MerpsAccount {
         if liabs_val == ZERO_I80F48 {
             Ok(I80F48::MAX)
         } else {
-            assets_val.checked_div(liabs_val).ok_or(throw!())
+            let val = assets_val.checked_div(liabs_val).ok_or(throw!());
+            msg!("HF {:?}={:?}/{:?}", val, assets_val, liabs_val);
+            return val;
         }
     }
 }

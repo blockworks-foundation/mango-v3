@@ -212,6 +212,10 @@ pub enum MerpsInstruction {
     CachePerpMarkets,
 
     UpdateFunding,
+
+    SetOracle {
+        price: I80F48,
+    },
 }
 
 impl MerpsInstruction {
@@ -322,6 +326,10 @@ impl MerpsInstruction {
             }
             16 => MerpsInstruction::CachePerpMarkets,
             17 => MerpsInstruction::UpdateFunding,
+            18 => {
+                let data_arr = array_ref![data, 0, 16];
+                MerpsInstruction::SetOracle { price: I80F48::from_le_bytes(*data_arr) }
+            }
             _ => {
                 return None;
             }
@@ -790,6 +798,24 @@ pub fn add_oracle(
     ];
 
     let instr = MerpsInstruction::AddOracle;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn set_oracle(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    oracle_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    price: I80F48,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*oracle_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MerpsInstruction::SetOracle { price };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

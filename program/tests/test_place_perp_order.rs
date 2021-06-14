@@ -6,7 +6,10 @@ use fixed::types::I80F48;
 use helpers::*;
 use std::{mem::size_of, thread::sleep, time::Duration};
 
-use merps::{entrypoint::process_instruction, instruction::*, matching::*, queue::*, state::*};
+use merps::{
+    entrypoint::process_instruction, instruction::*, matching::*, oracle::StubOracle, queue::*,
+    state::*,
+};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey};
 use solana_program_test::*;
 use solana_sdk::{
@@ -29,7 +32,11 @@ async fn test_init_perp_market() {
     test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
 
     let quote_index = 0;
-    let user_initial_amount = 200;
+    let quote_decimals = 6;
+    let quote_unit = 10u64.pow(quote_decimals as u32);
+    let quote_lot = 100;
+
+    let user_initial_amount = 200 * quote_unit;
     let user_quote_account = add_token_account(
         &mut test,
         user.pubkey(),
@@ -39,11 +46,13 @@ async fn test_init_perp_market() {
 
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
+    let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let tsla_decimals: u8 = 4;
-    let tsla_price = 9000;
-    let unit = 10u64.pow(tsla_decimals as u32);
-    let tsla_usd =
-        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * unit, &program_id);
+    let tsla_price = 420;
+    let tsla_unit = 10u64.pow(tsla_decimals as u32);
+    let tsla_lot = 10;
+    let oracle_price =
+        I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -69,7 +78,8 @@ async fn test_init_perp_market() {
                 merps_group.init_merps_group(&admin.pubkey()),
                 init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
                     .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &tsla_usd.pubkey, &admin.pubkey())
+                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
@@ -121,7 +131,12 @@ async fn test_place_and_cancel_order() {
 
     // TODO: this still needs to be deposited into the merps account
     let quote_index = 0;
-    let user_initial_amount = 200;
+    let quote_index = 0;
+    let quote_decimals = 6;
+    let quote_unit = 10u64.pow(quote_decimals as u32);
+    let quote_lot = 100;
+
+    let user_initial_amount = 1000 * quote_unit;
     let user_quote_account = add_token_account(
         &mut test,
         user.pubkey(),
@@ -131,11 +146,13 @@ async fn test_place_and_cancel_order() {
 
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
+    let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let tsla_decimals: u8 = 4;
-    let tsla_price = 100;
-    let unit = 10u64.pow(tsla_decimals as u32);
-    let tsla_usd =
-        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * unit, &program_id);
+    let tsla_price = 420;
+    let tsla_unit = 10u64.pow(tsla_decimals as u32);
+    let tsla_lot = 10;
+    let oracle_price =
+        I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -153,6 +170,7 @@ async fn test_place_and_cancel_order() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
     let max_lev = 10;
+    let quantity = 1;
 
     // setup merps group, perp market & merps account
     {
@@ -161,7 +179,8 @@ async fn test_place_and_cancel_order() {
                 merps_group.init_merps_group(&admin.pubkey()),
                 init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
                     .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &tsla_usd.pubkey, &admin.pubkey())
+                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
@@ -174,8 +193,8 @@ async fn test_place_and_cancel_order() {
                     perp_market_idx,
                     I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
                     I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
-                    100,
-                    10,
+                    tsla_lot,
+                    quote_lot,
                 )
                 .unwrap(),
                 add_to_basket(
@@ -207,13 +226,8 @@ async fn test_place_and_cancel_order() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[tsla_usd.pubkey],
-                )
-                .unwrap(),
+                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                    .unwrap(),
                 cache_root_banks(
                     &program_id,
                     &merps_group_pk,
@@ -239,8 +253,9 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((tsla_price - 1) * unit) as i64,
-                    10,
+                    ((tsla_price as i64 - 1) * quote_unit as i64 * tsla_lot)
+                        / (tsla_unit as i64 * quote_lot),
+                    (quantity as i64 * tsla_unit as i64) / tsla_lot,
                     bid_id,
                     OrderType::Limit,
                 )
@@ -256,8 +271,9 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((tsla_price + 1) * unit) as i64,
-                    10,
+                    ((tsla_price as i64 + 1) * quote_unit as i64 * tsla_lot)
+                        / (tsla_unit as i64 * quote_lot),
+                    (quantity as i64 * tsla_unit as i64) / tsla_lot,
                     ask_id,
                     OrderType::Limit,
                 )
@@ -428,12 +444,13 @@ async fn test_place_and_match_order() {
 
     let merps_account_ask_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
+    let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let tsla_decimals: u8 = 4;
-    let tsla_price = 100;
+    let tsla_price = 420;
     let tsla_unit = 10u64.pow(tsla_decimals as u32);
     let tsla_lot = 10;
-    let tsla_usd =
-        add_aggregator(&mut test, "TSLA:USD", tsla_decimals, tsla_price * tsla_unit, &program_id);
+    let oracle_price =
+        I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -472,7 +489,8 @@ async fn test_place_and_match_order() {
                     &user_ask.pubkey(),
                 )
                 .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &tsla_usd.pubkey, &admin.pubkey())
+                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
@@ -527,13 +545,8 @@ async fn test_place_and_match_order() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[tsla_usd.pubkey],
-                )
-                .unwrap(),
+                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                    .unwrap(),
                 cache_root_banks(
                     &program_id,
                     &merps_group_pk,
@@ -703,13 +716,8 @@ async fn test_place_and_match_order() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[tsla_usd.pubkey],
-                )
-                .unwrap(),
+                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                    .unwrap(),
                 update_funding(
                     &program_id,
                     &merps_group_pk,

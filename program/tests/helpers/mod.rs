@@ -1,3 +1,4 @@
+use merps::oracle::StubOracle;
 use safe_transmute::{self, to_bytes::transmute_one_to_bytes};
 use std::any::type_name;
 use std::mem::size_of;

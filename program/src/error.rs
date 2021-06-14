@@ -13,7 +13,8 @@ pub enum SourceFileId {
     State = 1,
     Critbit = 2,
     Queue = 3,
-    Matching,
+    Matching = 4,
+    Oracle = 5,
 }
 
 impl std::fmt::Display for SourceFileId {
@@ -24,6 +25,7 @@ impl std::fmt::Display for SourceFileId {
             SourceFileId::Critbit => write!(f, "src/critbit"),
             SourceFileId::Queue => write!(f, "src/queue.rs"),
             SourceFileId::Matching => write!(f, "src/matching.rs"),
+            SourceFileId::Oracle => write!(f, "src/oracle.rs"),
         }
     }
 }
