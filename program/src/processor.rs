@@ -26,9 +26,10 @@ use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
-    load_market_state, DataType, HealthType, MerpsAccount, MerpsCache, MerpsGroup, MetaData,
-    NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
-    SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_market_state, load_open_orders, DataType, HealthType, MerpsAccount, MerpsCache,
+    MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache,
+    RootBank, RootBankCache, SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use bytemuck::cast_ref;
@@ -586,6 +587,11 @@ impl Processor {
         }
 
         // Safety checks
+        check_eq!(
+            &merps_group.tokens[token_index].root_bank,
+            root_bank_ai.key,
+            MerpsErrorCode::Default
+        )?;
         check_eq!(&node_bank.vault, vault_ai.key, MerpsErrorCode::InvalidVault)?;
         check_eq!(&spl_token::ID, token_prog_ai.key, MerpsErrorCode::InvalidProgramId)?;
 
@@ -977,6 +983,118 @@ impl Processor {
             data,
             &[&signer_seeds],
         )?;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 17;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,         // read
+            owner_ai,               // signer
+            merps_account_ai,       // write
+            dex_prog_ai,            // read
+            spot_market_ai,         // write
+            open_orders_ai,         // write
+            signer_ai,              // read
+            dex_base_ai,            // write
+            dex_quote_ai,           // write
+            base_root_bank_ai,      // read
+            base_node_bank_ai,      // write
+            quote_root_bank_ai,     // read
+            quote_node_bank_ai,     // write
+            base_vault_ai,          // write
+            quote_vault_ai,         // write
+            dex_signer_ai,          // read
+            token_prog_ai,          // read
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
+        let spot_market_index = merps_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MerpsErrorCode::InvalidMarket))?;
+
+        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+
+        check_eq!(token_prog_ai.key, &spl_token::id(), MerpsErrorCode::Default)?;
+        check_eq!(dex_prog_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MerpsErrorCode::Default)?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MerpsErrorCode::Default)?;
+        check_eq!(owner_ai.key, &merps_account.owner, MerpsErrorCode::Default)?;
+        check_eq!(
+            &merps_account.spot_open_orders[spot_market_index],
+            open_orders_ai.key,
+            MerpsErrorCode::Default
+        )?;
+        check_eq!(
+            &merps_group.tokens[QUOTE_INDEX].root_bank,
+            quote_root_bank_ai.key,
+            MerpsErrorCode::Default
+        )?;
+        check_eq!(
+            &merps_group.tokens[spot_market_index].root_bank,
+            base_root_bank_ai.key,
+            MerpsErrorCode::Default
+        )?;
+
+        if *open_orders_ai.key == Pubkey::default() {
+            return Ok(());
+        }
+
+        let (pre_base, pre_quote) = {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            (
+                open_orders.native_coin_free,
+                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+            )
+        };
+
+        let signer_seeds = gen_signer_seeds(&merps_group.signer_nonce, merps_group_ai.key);
+        invoke_settle_funds(
+            dex_prog_ai,
+            spot_market_ai,
+            open_orders_ai,
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            base_vault_ai,
+            quote_vault_ai,
+            dex_signer_ai,
+            token_prog_ai,
+            &[&signer_seeds],
+        )?;
+
+        let (post_base, post_quote) = {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            (
+                open_orders.native_coin_free,
+                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+            )
+        };
+
+        check!(post_base <= pre_base, MerpsErrorCode::Default)?;
+        check!(post_quote <= pre_quote, MerpsErrorCode::Default)?;
+
+        let base_change = I80F48::from_num(pre_base - post_base) / base_root_bank.deposit_index;
+        let quote_change = I80F48::from_num(pre_quote - post_quote) / quote_root_bank.deposit_index;
+
+        checked_add_deposit(
+            &mut base_node_bank,
+            &mut merps_account,
+            spot_market_index,
+            base_change,
+        )?;
+        checked_add_deposit(&mut quote_node_bank, &mut merps_account, QUOTE_INDEX, quote_change)?;
         Ok(())
     }
 
@@ -1458,6 +1576,10 @@ impl Processor {
                 msg!("Merps: AddOracle");
                 Self::add_oracle(program_id, accounts)?
             }
+            MerpsInstruction::SettleFunds => {
+                msg!("Merps: SettleFunds");
+                Self::settle_funds(program_id, accounts)?
+            }
 
             MerpsInstruction::AddPerpMarket {
                 market_index,
@@ -1566,6 +1688,7 @@ fn invoke_settle_funds<'a>(
             AccountMeta::new(*quote_vault_acc.key, false),
             AccountMeta::new_readonly(*dex_signer_acc.key, false),
             AccountMeta::new_readonly(*token_prog_acc.key, false),
+            AccountMeta::new(*quote_vault_acc.key, false),
         ],
     };
 
@@ -1580,6 +1703,7 @@ fn invoke_settle_funds<'a>(
         quote_vault_acc.clone(),
         dex_signer_acc.clone(),
         token_prog_acc.clone(),
+        quote_vault_acc.clone(),
     ];
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }

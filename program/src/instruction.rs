@@ -209,6 +209,29 @@ pub enum MerpsInstruction {
     /// 0. `[]` merps_group_ai
     /// 1. `[writable]` merps_cache_ai
     CachePerpMarkets,
+
+    /// Settle all funds from serum dex open orders
+    ///
+    /// Accounts expected by this instruction (14):
+    ///
+    /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
+    /// 1. `[signer]` owner_ai - MerpsAccount owner
+    /// 2. `[writable]` merps_account_ai - MerpsAccount
+    /// 3. `[]` dex_prog_ai - program id of serum dex
+    /// 4.  `[writable]` spot_market_ai - dex MarketState account
+    /// 5.  `[writable]` open_orders_ai - open orders for this market for this MerpsAccount
+    /// 6. `[]` signer_ai - MerpsGroup signer key
+    /// 7. `[writable]` dex_base_ai - base vault for dex MarketState
+    /// 8. `[writable]` dex_quote_ai - quote vault for dex MarketState
+    /// 9. `[]` base_root_bank_ai - MerpsGroup base vault acc
+    /// 10. `[writable]` base_node_bank_ai - MerpsGroup quote vault acc
+    /// 11. `[]` quote_root_bank_ai - MerpsGroup quote vault acc
+    /// 12. `[writable]` quote_node_bank_ai - MerpsGroup quote vault acc
+    /// 13. `[writable]` base_vault_ai - MerpsGroup base vault acc
+    /// 14. `[writable]` quote_vault_ai - MerpsGroup quote vault acc
+    /// 15. `[]` dex_signer_ai - dex Market signer account
+    /// 16. `[]` spl token program
+    SettleFunds,
 }
 
 impl MerpsInstruction {
@@ -312,6 +335,7 @@ impl MerpsInstruction {
                 MerpsInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
             }
             16 => MerpsInstruction::CachePerpMarkets,
+            17 => MerpsInstruction::SettleFunds,
             _ => {
                 return None;
             }
