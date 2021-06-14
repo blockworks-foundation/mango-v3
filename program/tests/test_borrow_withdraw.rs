@@ -2,7 +2,8 @@ mod helpers;
 
 use fixed::types::I80F48;
 use helpers::*;
-use merps::instruction::add_oracle;
+use merps::instruction::{add_oracle, set_oracle};
+use merps::oracle::StubOracle;
 use merps::{
     entrypoint::process_instruction,
     instruction::{
@@ -67,7 +68,7 @@ async fn test_borrow_succeeds() {
     let btc_root_bank = add_root_bank(&mut test, &program_id, btc_node_bank);
 
     let unit = 10u64.pow(6);
-    let btc_usdt = add_aggregator(&mut test, "BTC:USDT", 6, PRICE_BTC * unit, &program_id);
+    let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
 
     let dex_program_pk = Pubkey::new_unique();
     let btc_usdt_spot_mkt_idx = 0;
@@ -104,8 +105,16 @@ async fn test_borrow_succeeds() {
                     deposit_amount,
                 )
                 .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &btc_usdt.pubkey, &admin.pubkey())
-                    .unwrap(),
+                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(
+                    &program_id,
+                    &merps_group_pk,
+                    &oracle_pk,
+                    &admin.pubkey(),
+                    // TODO: set real price PRICE_BTC
+                    I80F48::from_num(0),
+                )
+                .unwrap(),
                 add_spot_market(
                     &program_id,
                     &merps_group_pk,
@@ -162,13 +171,8 @@ async fn test_borrow_succeeds() {
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[btc_usdt.pubkey],
-                )
-                .unwrap(),
+                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                    .unwrap(),
                 cache_root_banks(
                     &program_id,
                     &merps_group_pk,

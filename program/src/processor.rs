@@ -24,6 +24,7 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
+use crate::oracle::StubOracle;
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     load_market_state, load_open_orders, DataType, HealthType, MerpsAccount, MerpsCache,
@@ -245,7 +246,6 @@ impl Processor {
     /// Add an oracle to the MerpsGroup
     /// This must be called first before `add_spot_market` or `add_perp_market`
     /// There will never be a gap in the merps_group.oracles array
-    #[allow(unused)]
     fn add_oracle(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -260,10 +260,36 @@ impl Processor {
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
         // TODO allow more oracle types including purely on chain price feeds
-        let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
+        // TODO use first 4 bytes of oracle account to identify oracle type (pyth / stub)
+        let rent = Rent::get()?;
+        let _oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+
         let oracle_index = merps_group.num_oracles;
         merps_group.oracles[oracle_index] = *oracle_ai.key;
         merps_group.num_oracles += 1;
+
+        Ok(())
+    }
+
+    fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai, // write
+            oracle_ai,      // read
+            admin_ai        // read
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
+
+        // TODO only allow setting stub oracle and not other oracle types
+        // TODO verify oracle is really owned by this group (currently only checks program)
+        let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
+        oracle.price = price;
+        let clock = Clock::get()?;
+        oracle.last_update = clock.unix_timestamp as u64;
 
         Ok(())
     }
@@ -398,7 +424,6 @@ impl Processor {
     }
 
     /// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)    
-    #[allow(unused)]
     fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -957,7 +982,6 @@ impl Processor {
         let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
         let merps_account =
             MerpsAccount::load_checked(merps_account_ai, program_id, merps_group_ai.key)?;
-        let clock = Clock::get()?;
 
         check_eq!(dex_prog_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
@@ -1515,10 +1539,34 @@ impl Processor {
 
     /// Update the `funding_earned` of a `PerpMarket` using the current book price, spot index price
     /// and time since last update
-    #[allow(unused)]
     fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO - unpack accounts and call perp_market.update_funding()
-        unimplemented!()
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_cache_ai,     // read
+            perp_market_ai,     // write
+            bids_ai,            // read
+            asks_ai,            // read
+        ] = accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+
+        let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        perp_market.update_funding(&merps_group, &book, &merps_cache, market_index, now_ts)?;
+
+        Ok(())
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MerpsResult<()> {
@@ -1637,6 +1685,14 @@ impl Processor {
             MerpsInstruction::CachePerpMarkets => {
                 msg!("Merps: CachePerpMarkets");
                 Self::cache_perp_markets(program_id, accounts)?;
+            }
+            MerpsInstruction::UpdateFunding => {
+                msg!("Merps: UpdateFunding");
+                Self::update_funding(program_id, accounts)?;
+            }
+            MerpsInstruction::SetOracle { price } => {
+                msg!("Merps: SetOracle {}", price);
+                Self::set_oracle(program_id, accounts, price)?
             }
         }
 
@@ -1774,9 +1830,17 @@ fn invoke_transfer<'a>(
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
 }
 
-#[allow(unused)]
 fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
-    Ok(ZERO_I80F48) // TODO
+    /* TODO abstract different oracle programs
+    let aggregator = flux_aggregator::state::Aggregator::load_initialized(oracle_ai)?;
+    let answer = flux_aggregator::read_median(oracle_ai)?;
+    let median = I80F48::from(answer.median);
+    let units = I80F48::from(10u64.pow(aggregator.config.decimals));
+    let value = median.checked_div(units);
+    */
+
+    let oracle = StubOracle::load(oracle_ai)?;
+    Ok(oracle.price)
 }
 
 fn checked_add_deposit(
