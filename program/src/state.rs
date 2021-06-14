@@ -111,6 +111,7 @@ pub struct PerpMarketInfo {
     pub init_asset_weight: I80F48,
     pub maint_liab_weight: I80F48,
     pub init_liab_weight: I80F48,
+    pub liquidation_fee: I80F48,
     pub base_lot_size: i64,  // The lot size of the underlying
     pub quote_lot_size: i64, // min tick
 }

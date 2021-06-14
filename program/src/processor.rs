@@ -317,6 +317,9 @@ impl Processor {
             init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
             maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
+            liquidation_fee: (maint_leverage * 2 + ONE_I80F48)
+                .checked_div(maint_leverage * 2)
+                .unwrap(),
             base_lot_size,
             quote_lot_size,
         };
@@ -1279,7 +1282,19 @@ impl Processor {
             MerpsAccount::load_mut_checked(liqor_merps_account_ai, program_id, merps_group_ai.key)?;
         check_eq!(liqor_ai.key, &liqor_merps_account.owner, MerpsErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
-        check!(!merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
+        let perp_market_info = &merps_group.perp_markets[market_index];
+        check!(!perp_market_info.is_empty(), MerpsErrorCode::Default)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &liqee_merps_account, now_ts),
+            MerpsErrorCode::InvalidCache
+        )?;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &liqor_merps_account, now_ts), // TODO write more efficient
+            MerpsErrorCode::InvalidCache
+        )?;
+        check!(liqor_merps_account.in_basket[market_index], MerpsErrorCode::InvalidMarket)?;
 
         let maint_health = liqee_merps_account.get_health(
             &merps_group,
@@ -1291,7 +1306,27 @@ impl Processor {
         // TODO - account for being_liquidated case where liquidation has to happen over many instructions
         // TODO - force cancel all orders that use margin first and check if account still liquidatable
         check!(maint_health < ZERO_I80F48, MerpsErrorCode::Default)?;
+        let liqee_perp_account = &liqee_merps_account.perp_accounts[market_index];
+        let liqor_perp_account = &liqor_merps_account.perp_accounts[market_index];
 
+        // Determine how much position can be taken from liqee to get him above init_health
+        let init_health = liqee_merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+
+        // TODO -
+        // TODO -
+        let price = merps_cache.price_cache[market_index].price;
+        if liqee_perp_account.base_position > 0 {
+            let max_transfer = init_health
+                / (price * (perp_market_info.init_asset_weight - perp_market_info.liquidation_fee));
+        } else if liqee_perp_account.base_position < 0 {
+        } else {
+            return Err(throw!());
+        }
         /*
            1. first check if liqee health is below maint hf
            2. move funding if possible
