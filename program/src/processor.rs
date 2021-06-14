@@ -1422,7 +1422,6 @@ impl Processor {
 
     /// Update the `funding_earned` of a `PerpMarket` using the current book price, spot index price
     /// and time since last update
-    #[allow(unused)]
     fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 5;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
