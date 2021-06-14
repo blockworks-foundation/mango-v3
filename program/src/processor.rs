@@ -933,7 +933,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
     fn cancel_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1571,6 +1570,11 @@ impl Processor {
             MerpsInstruction::PlaceSpotOrder { order } => {
                 msg!("Merps: PlaceSpotOrder");
                 Self::place_spot_order(program_id, accounts, order)?;
+            }
+            MerpsInstruction::CancelSpotOrder { order } => {
+                msg!("Merps: CancelSpotOrder");
+                let data = serum_dex::instruction::MarketInstruction::CancelOrderV2(order).pack();
+                Self::cancel_spot_order(program_id, accounts, data)?;
             }
             MerpsInstruction::AddOracle => {
                 msg!("Merps: AddOracle");

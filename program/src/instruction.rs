@@ -232,6 +232,14 @@ pub enum MerpsInstruction {
     /// 15. `[]` dex_signer_ai - dex Market signer account
     /// 16. `[]` spl token program
     SettleFunds,
+
+    /// Cancel an order using dex instruction
+    ///
+    /// Accounts expected by this instruction ():
+    ///
+    CancelSpotOrder {
+        order: serum_dex::instruction::CancelOrderInstructionV2,
+    },
 }
 
 impl MerpsInstruction {
@@ -336,6 +344,18 @@ impl MerpsInstruction {
             }
             16 => MerpsInstruction::CachePerpMarkets,
             17 => MerpsInstruction::SettleFunds,
+            18 => {
+                let data_array = array_ref![data, 0, 20];
+                let fields = array_refs![data_array, 4, 16];
+                let side = match u32::from_le_bytes(*fields.0) {
+                    0 => serum_dex::matching::Side::Bid,
+                    1 => serum_dex::matching::Side::Ask,
+                    _ => return None,
+                };
+                let order_id = u128::from_le_bytes(*fields.1);
+                let order = serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
+                MerpsInstruction::CancelSpotOrder { order }
+            }
             _ => {
                 return None;
             }

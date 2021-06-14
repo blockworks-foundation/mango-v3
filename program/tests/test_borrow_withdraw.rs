@@ -1,6 +1,3 @@
-// Tests related to borrowing on a MerpsGroup
-#![cfg(feature = "test-bpf")]
-
 mod helpers;
 
 use fixed::types::I80F48;
