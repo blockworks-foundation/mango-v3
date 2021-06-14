@@ -39,12 +39,12 @@ async fn test_init_perp_market() {
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
-    let tsla_decimals = 4;
-    let tsla_price = 420;
-    let tsla_unit = 10i64.pow(tsla_decimals);
-    let tsla_lot = 100;
+    let base_decimals = 4;
+    let base_price = 420;
+    let base_unit = 10i64.pow(base_decimals);
+    let base_lot = 100;
     let oracle_price =
-        I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
+        I80F48::from_num(base_price) * I80F48::from_num(quote_unit) / I80F48::from_num(base_unit);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -85,7 +85,7 @@ async fn test_init_perp_market() {
                     perp_market_idx,
                     maint_leverage,
                     init_leverage,
-                    tsla_lot,
+                    base_lot,
                     quote_lot,
                 )
                 .unwrap(),
@@ -129,7 +129,7 @@ async fn test_place_and_cancel_order() {
     let quote_unit = 10i64.pow(quote_decimals);
     let quote_lot = 10;
 
-    let user_initial_amount = 100000 * quote_unit;
+    let user_initial_amount = 10000 * quote_unit;
     let user_quote_account = add_token_account(
         &mut test,
         user.pubkey(),
@@ -140,12 +140,12 @@ async fn test_place_and_cancel_order() {
     let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
-    let tsla_decimals = 6;
-    let tsla_price = 40000;
-    let tsla_unit = 10i64.pow(tsla_decimals);
-    let tsla_lot = 100;
+    let base_decimals = 6;
+    let base_price = 40000;
+    let base_unit = 10i64.pow(base_decimals);
+    let base_lot = 100;
     let oracle_price =
-        I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
+        I80F48::from_num(base_price) * I80F48::from_num(quote_unit) / I80F48::from_num(base_unit);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -163,7 +163,7 @@ async fn test_place_and_cancel_order() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
 
-    let init_leverage = I80F48::from_num(10);
+    let init_leverage = I80F48::from_num(4);
     let maint_leverage = init_leverage * 2;
     let quantity = 1;
 
@@ -200,7 +200,7 @@ async fn test_place_and_cancel_order() {
                     perp_market_idx,
                     maint_leverage,
                     init_leverage,
-                    tsla_lot,
+                    base_lot,
                     quote_lot,
                 )
                 .unwrap(),
@@ -260,8 +260,8 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((tsla_price - 1) * quote_unit * tsla_lot) / (tsla_unit * quote_lot),
-                    (quantity * tsla_unit) / tsla_lot,
+                    ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                    (quantity * base_unit) / base_lot,
                     bid_id,
                     OrderType::Limit,
                 )
@@ -277,8 +277,8 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((tsla_price + 1) * quote_unit * tsla_lot) / (tsla_unit * quote_lot),
-                    (quantity * tsla_unit) / tsla_lot,
+                    ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                    (quantity * base_unit) / base_lot,
                     ask_id,
                     OrderType::Limit,
                 )
@@ -450,12 +450,12 @@ async fn test_place_and_match_order() {
     let merps_account_ask_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
-    let tsla_decimals = 6;
-    let tsla_price = 40000;
-    let tsla_unit = 10i64.pow(tsla_decimals);
-    let tsla_lot = 100;
+    let base_decimals = 6;
+    let base_price = 40000;
+    let base_unit = 10i64.pow(base_decimals);
+    let base_lot = 100;
     let oracle_price =
-        I80F48::from_num(tsla_price) * I80F48::from_num(quote_unit) / I80F48::from_num(tsla_unit);
+        I80F48::from_num(base_price) * I80F48::from_num(quote_unit) / I80F48::from_num(base_unit);
 
     let perp_market_idx = 0;
     let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
@@ -534,7 +534,7 @@ async fn test_place_and_match_order() {
                     perp_market_idx,
                     maint_leverage,
                     init_leverage,
-                    tsla_lot,
+                    base_lot,
                     quote_lot,
                 )
                 .unwrap(),
@@ -603,8 +603,8 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((tsla_price + 1) * quote_unit * tsla_lot) / (tsla_unit * quote_lot),
-                    (quantity * tsla_unit) / tsla_lot,
+                    ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                    (quantity * base_unit) / base_lot,
                     bid_id,
                     OrderType::Limit,
                 )
@@ -620,8 +620,8 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((tsla_price - 1) * quote_unit * tsla_lot) / (tsla_unit * quote_lot),
-                    (quantity * tsla_unit) / tsla_lot,
+                    ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                    (quantity * base_unit) / base_lot,
                     ask_id,
                     OrderType::Limit,
                 )
@@ -660,7 +660,7 @@ async fn test_place_and_match_order() {
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
 
-    let bid_base_position = quantity * tsla_unit / tsla_lot;
+    let bid_base_position = quantity * base_unit / base_lot;
     let bid_quote_position = -40001 * (quantity * quote_unit);
     {
         let mut merps_account =
@@ -677,7 +677,7 @@ async fn test_place_and_match_order() {
         assert_eq!(quote_position, bid_quote_position);
     }
 
-    let ask_base_position = -1 * quantity * tsla_unit / tsla_lot;
+    let ask_base_position = -1 * quantity * base_unit / base_lot;
     let ask_quote_position = (40001 * quantity * quote_unit);
     {
         let mut merps_account =
@@ -781,8 +781,8 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Bid,
-                    ((tsla_price + 1) * quote_unit * tsla_lot) / (tsla_unit * quote_lot),
-                    (quantity * tsla_unit) / tsla_lot,
+                    ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                    (quantity * base_unit) / base_lot,
                     ask_id,
                     OrderType::Limit,
                 )
@@ -798,8 +798,8 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &event_queue_pk,
                     Side::Ask,
-                    ((tsla_price - 1) * quote_unit * tsla_lot) / (tsla_unit * quote_lot),
-                    (quantity * tsla_unit) / tsla_lot,
+                    ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                    (quantity * base_unit) / base_lot,
                     bid_id,
                     OrderType::Limit,
                 )
