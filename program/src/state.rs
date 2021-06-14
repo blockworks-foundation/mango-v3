@@ -1076,7 +1076,7 @@ impl PerpMarket {
         // Get the index price from cache, ensure it's not outdated
         let price_cache = &merps_cache.price_cache[market_index];
         check!(
-            now_ts <= price_cache.last_update + (merps_group.valid_interval as u64),
+            now_ts <= price_cache.last_update + merps_group.valid_interval,
             MerpsErrorCode::InvalidCache
         )?;
         let index_price = price_cache.price;

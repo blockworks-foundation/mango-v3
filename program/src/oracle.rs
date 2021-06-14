@@ -18,10 +18,12 @@ declare_check_assert_macros!(SourceFileId::Oracle);
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct StubOracle {
+    // TODO: magic: u32
     pub price: I80F48, // unit is interpreted as how many quote native tokens for 1 base native token
     pub last_update: u64,
 }
 
+// TODO move to separate program
 impl StubOracle {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
