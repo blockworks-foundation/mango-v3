@@ -653,7 +653,7 @@ async fn test_place_and_match_order() {
                     &merps_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
-                    &[merps_account_bid_pk, merps_account_ask_pk],
+                    &mut [merps_account_bid_pk, merps_account_ask_pk],
                     3,
                 )
                 .unwrap(),
@@ -820,7 +820,7 @@ async fn test_place_and_match_order() {
                     &merps_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
-                    &[merps_account_bid_pk, merps_account_ask_pk],
+                    &mut [merps_account_bid_pk, merps_account_ask_pk],
                     3,
                 )
                 .unwrap(),

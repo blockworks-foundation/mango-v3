@@ -652,10 +652,10 @@ pub fn cancel_perp_order(
 
 pub fn consume_events(
     program_id: &Pubkey,
-    merps_group_pk: &Pubkey,  // read
-    perp_market_pk: &Pubkey,  // read
-    event_queue_pk: &Pubkey,  // write
-    merps_acc_pks: &[Pubkey], // write
+    merps_group_pk: &Pubkey,      // read
+    perp_market_pk: &Pubkey,      // read
+    event_queue_pk: &Pubkey,      // write
+    merps_acc_pks: &mut [Pubkey], // write
     limit: usize,
 ) -> Result<Instruction, ProgramError> {
     let fixed_accounts = vec![
@@ -663,7 +663,7 @@ pub fn consume_events(
         AccountMeta::new_readonly(*perp_market_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
-    // todo: sort accounts
+    merps_acc_pks.sort();
     let merps_accounts = merps_acc_pks.into_iter().map(|pk| AccountMeta::new(*pk, false));
     let accounts = fixed_accounts.into_iter().chain(merps_accounts).collect();
     let instr = MerpsInstruction::ConsumeEvents { limit };

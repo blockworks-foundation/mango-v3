@@ -260,6 +260,7 @@ impl Processor {
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
         // TODO allow more oracle types including purely on chain price feeds
+        // TODO use first 4 bytes of oracle account to identify oracle type (pyth / stub)
         let rent = Rent::get()?;
         let _oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
 
