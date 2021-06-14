@@ -841,9 +841,9 @@ async fn test_place_and_match_order() {
         let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
         let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
 
-        // TODO: verify fees
-        // assert_eq!(base_position, 0);
-        // assert_eq!(quote_position, 0);
+        // TODO: add fees & funding
+        assert_eq!(base_position, 0);
+        assert_eq!(quote_position, 0);
         println!("u1: base={} quote={}", base_position, quote_position)
     }
 
@@ -857,9 +857,9 @@ async fn test_place_and_match_order() {
         let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
         let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
 
-        // TODO: add fees
-        // assert_eq!(base_position, 0);
-        // assert_eq!(quote_position, 0);
+        // TODO: add fees & funding
+        assert_eq!(base_position, 0);
+        assert_eq!(quote_position, 0);
         println!("u2: base={} quote={}", base_position, quote_position)
     }
 }
