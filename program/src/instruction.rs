@@ -215,6 +215,37 @@ pub enum MerpsInstruction {
     SetOracle {
         price: I80F48,
     },
+
+    /// Settle all funds from serum dex open orders
+    ///
+    /// Accounts expected by this instruction (14):
+    ///
+    /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
+    /// 1. `[signer]` owner_ai - MerpsAccount owner
+    /// 2. `[writable]` merps_account_ai - MerpsAccount
+    /// 3. `[]` dex_prog_ai - program id of serum dex
+    /// 4.  `[writable]` spot_market_ai - dex MarketState account
+    /// 5.  `[writable]` open_orders_ai - open orders for this market for this MerpsAccount
+    /// 6. `[]` signer_ai - MerpsGroup signer key
+    /// 7. `[writable]` dex_base_ai - base vault for dex MarketState
+    /// 8. `[writable]` dex_quote_ai - quote vault for dex MarketState
+    /// 9. `[]` base_root_bank_ai - MerpsGroup base vault acc
+    /// 10. `[writable]` base_node_bank_ai - MerpsGroup quote vault acc
+    /// 11. `[]` quote_root_bank_ai - MerpsGroup quote vault acc
+    /// 12. `[writable]` quote_node_bank_ai - MerpsGroup quote vault acc
+    /// 13. `[writable]` base_vault_ai - MerpsGroup base vault acc
+    /// 14. `[writable]` quote_vault_ai - MerpsGroup quote vault acc
+    /// 15. `[]` dex_signer_ai - dex Market signer account
+    /// 16. `[]` spl token program
+    SettleFunds,
+
+    /// Cancel an order using dex instruction
+    ///
+    /// Accounts expected by this instruction ():
+    ///
+    CancelSpotOrder {
+        order: serum_dex::instruction::CancelOrderInstructionV2,
+    },
 }
 
 impl MerpsInstruction {
@@ -322,6 +353,19 @@ impl MerpsInstruction {
             18 => {
                 let data_arr = array_ref![data, 0, 16];
                 MerpsInstruction::SetOracle { price: I80F48::from_le_bytes(*data_arr) }
+            }
+            19 => MerpsInstruction::SettleFunds,
+            20 => {
+                let data_array = array_ref![data, 0, 20];
+                let fields = array_refs![data_array, 4, 16];
+                let side = match u32::from_le_bytes(*fields.0) {
+                    0 => serum_dex::matching::Side::Bid,
+                    1 => serum_dex::matching::Side::Ask,
+                    _ => return None,
+                };
+                let order_id = u128::from_le_bytes(*fields.1);
+                let order = serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
+                MerpsInstruction::CancelSpotOrder { order }
             }
             _ => {
                 return None;
