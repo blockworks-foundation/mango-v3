@@ -85,6 +85,9 @@ async fn test_borrow_succeeds() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
 
+    let init_leverage = I80F48::from_num(5);
+    let maint_leverage = init_leverage * 2;
+
     // setup merps group and merps account, make a deposit, add market to basket
     {
         let mut transaction = Transaction::new_with_payer(
@@ -117,8 +120,8 @@ async fn test_borrow_succeeds() {
                     &btc_root_bank.pubkey,
                     &admin.pubkey(),
                     btc_usdt_spot_mkt_idx,
-                    I80F48::from_num(0.83),
-                    I80F48::from_num(1),
+                    maint_leverage,
+                    init_leverage,
                 )
                 .unwrap(),
                 add_to_basket(

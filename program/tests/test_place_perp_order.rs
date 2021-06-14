@@ -70,7 +70,8 @@ async fn test_init_perp_market() {
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
 
-    let max_lev = 10;
+    let init_leverage = I80F48::from_num(10);
+    let maint_leverage = init_leverage * 2;
     // setup merps group, perp market & merps account
     {
         let mut transaction = Transaction::new_with_payer(
@@ -90,8 +91,8 @@ async fn test_init_perp_market() {
                     &asks_pk,
                     &admin.pubkey(),
                     perp_market_idx,
-                    I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
-                    I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
+                    maint_leverage,
+                    init_leverage,
                     100,
                     10,
                 )
@@ -169,7 +170,9 @@ async fn test_place_and_cancel_order() {
     let admin = Keypair::new();
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
-    let max_lev = 10;
+
+    let init_leverage = I80F48::from_num(10);
+    let maint_leverage = init_leverage * 2;
     let quantity = 1;
 
     // setup merps group, perp market & merps account
@@ -191,8 +194,8 @@ async fn test_place_and_cancel_order() {
                     &asks_pk,
                     &admin.pubkey(),
                     perp_market_idx,
-                    I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
-                    I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
+                    maint_leverage,
+                    init_leverage,
                     tsla_lot,
                     quote_lot,
                 )
@@ -467,8 +470,10 @@ async fn test_place_and_match_order() {
     let admin = Keypair::new();
 
     let (mut banks_client, payer, recent_blockhash) = test.start().await;
-    let max_lev = 10;
-    let quantity = 3;
+
+    let init_leverage = I80F48::from_num(10);
+    let maint_leverage = init_leverage * 2;
+    let quantity = 1;
 
     // setup merps group, perp market & merps account
     {
@@ -501,8 +506,8 @@ async fn test_place_and_match_order() {
                     &asks_pk,
                     &admin.pubkey(),
                     perp_market_idx,
-                    I80F48::from_num(2 * max_lev) / I80F48::from_num(2 * max_lev + 1),
-                    I80F48::from_num(max_lev) / I80F48::from_num(max_lev + 1),
+                    maint_leverage,
+                    init_leverage,
                     tsla_lot,
                     quote_lot,
                 )

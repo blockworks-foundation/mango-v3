@@ -27,8 +27,8 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::StubOracle;
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
-    load_market_state, DataType, MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank,
-    PerpAccount, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    load_market_state, DataType, HealthType, MerpsAccount, MerpsCache, MerpsGroup, MetaData,
+    NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
     SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
@@ -45,7 +45,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         signer_nonce: u64,
-        valid_interval: u8,
+        valid_interval: u64,
     ) -> ProgramResult {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -158,8 +158,8 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-        maint_asset_weight: I80F48,
-        init_asset_weight: I80F48,
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -207,17 +207,19 @@ impl Processor {
             padding: [0u8; 7],
         };
 
-        // check that maint weight is lower than init asset weight
-        check!(maint_asset_weight < init_asset_weight, MerpsErrorCode::Default)?;
-        check!(maint_asset_weight > ZERO_I80F48, MerpsErrorCode::Default)?;
-        check!(maint_asset_weight <= 1, MerpsErrorCode::Default)?;
+        // check leverage is reasonable
+
+        check!(
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
+            MerpsErrorCode::Default
+        )?;
 
         merps_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
-            maint_asset_weight,
-            init_asset_weight,
-            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
-            init_liab_weight: ONE_I80F48 / init_asset_weight,
+            maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
         };
 
         // TODO needs to be moved into add_oracle
@@ -296,8 +298,8 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-        maint_asset_weight: I80F48,
-        init_asset_weight: I80F48,
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MerpsResult<()> {
@@ -330,18 +332,16 @@ impl Processor {
         check!(merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
 
         check!(
-            maint_asset_weight <= ONE_I80F48
-                && maint_asset_weight > init_asset_weight
-                && init_asset_weight > ZERO_I80F48,
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
             MerpsErrorCode::Default
         )?;
 
         merps_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
-            maint_asset_weight,
-            init_asset_weight,
-            maint_liab_weight: ONE_I80F48 / maint_asset_weight,
-            init_liab_weight: ONE_I80F48 / init_asset_weight,
+            maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
             base_lot_size,
             quote_lot_size,
         };
@@ -397,8 +397,10 @@ impl Processor {
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        // TODO does a token pair need to be in basket to deposit? what about USDC deposits?
-        // check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
+        check!(
+            token_index == QUOTE_INDEX || merps_account.in_basket[token_index],
+            MerpsErrorCode::InvalidToken
+        )?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
@@ -455,6 +457,7 @@ impl Processor {
             MerpsCache::load_mut_checked(merps_cache_ai, program_id, &merps_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
         for root_bank_ai in root_bank_ais.iter() {
             let index = merps_group.find_root_bank_index(root_bank_ai.key).unwrap();
             let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -532,8 +535,10 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts > root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(
+            now_ts > root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
 
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
         check!(
@@ -547,11 +552,15 @@ impl Processor {
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
 
         // TODO fix coll_ratio checks
-        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
         check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
 
         Ok(())
@@ -610,8 +619,10 @@ impl Processor {
             merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
             MerpsErrorCode::InvalidCache
         )?;
-        let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts > root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(
+            now_ts > root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
 
         // Borrow if withdrawing more than deposits
         let native_deposit = merps_account.get_native_deposit(&root_bank, token_index);
@@ -634,9 +645,13 @@ impl Processor {
             )?;
         }
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
-        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         // invoke_transfer()
         // TODO think about whether this is a security risk. This is basically one signer for all merps
@@ -678,6 +693,16 @@ impl Processor {
         merps_account.in_basket[market_index] = true;
 
         Ok(())
+    }
+
+    #[allow(unused)]
+    fn remove_from_basket(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        // TODO - verify deposits, borrows, open orders, perp account all zeroed out for this market index
+        unimplemented!()
     }
 
     // TODO - add serum dex fee discount functionality
@@ -739,9 +764,13 @@ impl Processor {
             MerpsErrorCode::Default
         )?;
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
-        let reduce_only = coll_ratio < ONE_I80F48;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+        let reduce_only = health < ZERO_I80F48;
 
         // Make sure the root bank is in the merps group
         let _token_index = merps_group
@@ -749,9 +778,14 @@ impl Processor {
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
         // Check that root banks have been updated by Keeper
-        let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts <= base_root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
-        check!(now_ts <= quote_root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(
+            now_ts <= base_root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
+        check!(
+            now_ts <= quote_root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
 
         let spot_market_index = merps_group
             .find_spot_market_index(spot_market_ai.key)
@@ -905,9 +939,13 @@ impl Processor {
             in_token_i,
         )?;
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
-        check!(reduce_only || coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+        check!(reduce_only || health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
         check!(out_node_bank.has_valid_deposits_borrows(&out_root_bank), MerpsErrorCode::Default)?;
 
         Ok(())
@@ -1030,8 +1068,8 @@ impl Processor {
             client_order_id,
         )?;
 
-        let coll_ratio = merps_account.get_health_factor(&merps_group, &merps_cache, &[])?;
-        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        let health = merps_account.get_health(&merps_group, &merps_cache, &[], HealthType::Init)?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
@@ -1143,22 +1181,152 @@ impl Processor {
 
     /// Take two MerpsAccount and settle quote currency pnl between them
     #[allow(unused)]
-    fn settle() -> MerpsResult<()> {
-        // TODO - take two accounts
-        unimplemented!()
+    fn settle_pnl(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        // TODO - what if someone has no collateral except other perps contracts
+        //  maybe you don't allow people to withdraw if they don't have enough
+        //  when liquidating, make sure you settle their pnl first?
+        // TODO consider doing this in batches of 32 accounts that are close to zero sum
+
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_account_a_ai, // write
+            merps_account_b_ai, // write
+            merps_cache_ai,     // read
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+        ] = accounts;
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+
+        let mut merps_account_a =
+            MerpsAccount::load_mut_checked(merps_account_a_ai, program_id, merps_group_ai.key)?;
+        let mut merps_account_b =
+            MerpsAccount::load_mut_checked(merps_account_b_ai, program_id, merps_group_ai.key)?;
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
+
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        let valid_last_update = now_ts - merps_group.valid_interval;
+        let perp_market_cache = &merps_cache.perp_market_cache[market_index];
+
+        check!(
+            valid_last_update <= merps_cache.price_cache[market_index].last_update,
+            MerpsErrorCode::InvalidCache
+        )?;
+        check!(
+            valid_last_update <= merps_cache.root_bank_cache[QUOTE_INDEX].last_update,
+            MerpsErrorCode::InvalidCache
+        )?;
+        check!(valid_last_update <= perp_market_cache.last_update, MerpsErrorCode::InvalidCache)?;
+
+        let price = merps_cache.price_cache[market_index].price;
+
+        // No need to check if market_index is in basket because if it's not, it will be zero and not possible to settle
+
+        let a = &mut merps_account_a.perp_accounts[market_index];
+        let b = &mut merps_account_b.perp_accounts[market_index];
+
+        // Account for unrealized funding payments before settling
+        a.move_funding(perp_market_cache.long_funding, perp_market_cache.short_funding);
+        b.move_funding(perp_market_cache.long_funding, perp_market_cache.short_funding);
+
+        let contract_size = merps_group.perp_markets[market_index].base_lot_size;
+        let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
+        let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
+        let a_pnl = a.quote_position - new_quote_pos_a;
+        let b_pnl = b.quote_position - new_quote_pos_b;
+
+        let deposit_index = merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index;
+        let borrow_index = merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index;
+
+        // pnl must be opposite signs for there to be a settlement
+        if a_pnl * b_pnl >= 0 {
+            return Ok(());
+        }
+
+        let settlement = a_pnl.abs().min(b_pnl.abs());
+        checked_add_deposit(
+            &mut node_bank,
+            if a_pnl > 0 { &mut merps_account_a } else { &mut merps_account_b },
+            QUOTE_INDEX,
+            settlement / deposit_index,
+        )?;
+
+        checked_add_borrow(
+            &mut node_bank,
+            if a_pnl > 0 { &mut merps_account_b } else { &mut merps_account_a },
+            QUOTE_INDEX,
+            settlement / borrow_index,
+        )?;
+        check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
+
+        Ok(())
     }
 
     /// Liquidate an account similar to Mango
     #[allow(unused)]
-    fn liquidate() -> MerpsResult<()> {
-        // TODO - still need to figure out how liquidations for perps will work, but
+    fn liquidate_perp(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        // TODO - which market gets liquidated first?
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
-        unimplemented!()
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let [
+            merps_group_ai,         // read
+            merps_cache_ai,         // read
+            liqee_merps_account_ai, // write
+            liqor_merps_account_ai, // write    
+            liqor_ai,               // read, signer    
+        ] = fixed_ais;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+
+        let mut liqee_merps_account =
+            MerpsAccount::load_mut_checked(liqee_merps_account_ai, program_id, merps_group_ai.key)?;
+
+        let mut liqor_merps_account =
+            MerpsAccount::load_mut_checked(liqor_merps_account_ai, program_id, merps_group_ai.key)?;
+        check_eq!(liqor_ai.key, &liqor_merps_account.owner, MerpsErrorCode::InvalidOwner)?;
+        check!(liqor_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
+        check!(!merps_group.perp_markets[market_index].is_empty(), MerpsErrorCode::Default)?;
+
+        let maint_health = liqee_merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Maint,
+        )?;
+
+        // TODO - account for being_liquidated case where liquidation has to happen over many instructions
+        // TODO - force cancel all orders that use margin first and check if account still liquidatable
+        check!(maint_health < ZERO_I80F48, MerpsErrorCode::Default)?;
+
+        /*
+           1. first check if liqee health is below maint hf
+           2. move funding if possible
+           3. reduce position at this market_index
+           4.
+        */
+
+        Ok(())
     }
 
     /// *** Keeper Related Instructions ***
-
     /// Update the deposit and borrow index on passed in RootBanks
     #[allow(unused)]
     fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
@@ -1237,7 +1405,7 @@ impl Processor {
                         )?,
                         Err(_) => return Ok(()), // If it's not found, stop consuming events
                     };
-                    let mut perp_account = &mut merps_account.perp_accounts[market_index];
+                    let perp_account = &mut merps_account.perp_accounts[market_index];
                     perp_account.open_orders.remove_order(
                         out_event.side,
                         out_event.slot,
@@ -1290,9 +1458,11 @@ impl Processor {
             MerpsInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         match instruction {
             MerpsInstruction::InitMerpsGroup { signer_nonce, valid_interval } => {
+                msg!("Merps: InitMerpsGroup");
                 Self::init_merps_group(program_id, accounts, signer_nonce, valid_interval)?;
             }
             MerpsInstruction::InitMerpsAccount => {
+                msg!("Merps: InitMerpsAccount");
                 Self::init_merps_account(program_id, accounts)?;
             }
             MerpsInstruction::Deposit { quantity } => {
@@ -1303,18 +1473,14 @@ impl Processor {
                 msg!("Merps: Withdraw");
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)?;
             }
-            MerpsInstruction::AddSpotMarket {
-                market_index,
-                maint_asset_weight,
-                init_asset_weight,
-            } => {
+            MerpsInstruction::AddSpotMarket { market_index, maint_leverage, init_leverage } => {
                 msg!("Merps: AddSpotMarket");
                 Self::add_spot_market(
                     program_id,
                     accounts,
                     market_index,
-                    maint_asset_weight,
-                    init_asset_weight,
+                    maint_leverage,
+                    init_leverage,
                 )?;
             }
             MerpsInstruction::AddToBasket { market_index } => {
@@ -1344,8 +1510,8 @@ impl Processor {
 
             MerpsInstruction::AddPerpMarket {
                 market_index,
-                maint_asset_weight,
-                init_asset_weight,
+                maint_leverage,
+                init_leverage,
                 base_lot_size,
                 quote_lot_size,
             } => {
@@ -1354,8 +1520,8 @@ impl Processor {
                     program_id,
                     accounts,
                     market_index,
-                    maint_asset_weight,
-                    init_asset_weight,
+                    maint_leverage,
+                    init_leverage,
                     base_lot_size,
                     quote_lot_size,
                 )?;
@@ -1383,6 +1549,7 @@ impl Processor {
                 Self::cancel_perp_order_by_client_id(program_id, accounts, client_order_id)?;
             }
             MerpsInstruction::CancelPerpOrder { order_id, side } => {
+                // TODO this log may cost too much compute
                 msg!("Merps: CancelPerpOrder order_id={} side={}", order_id, side as u8);
                 Self::cancel_perp_order(program_id, accounts, order_id, side)?;
             }
@@ -1406,34 +1573,6 @@ impl Processor {
 
         Ok(())
     }
-}
-
-/// Take two MerpsAccounts and settle unrealized trading pnl and funding pnl between them
-#[allow(unused)]
-fn settle_trading_pnl(
-    a: &mut PerpAccount,
-    b: &mut PerpAccount,
-    price: I80F48, // TODO price usually comes in I80F48
-    contract_size: i64,
-) -> MerpsResult<()> {
-    /*
-    TODO consider rule: Can only settle if both accounts remain above bankruptcy
-     */
-
-    let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
-    let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
-    let a_pnl = a.quote_position - new_quote_pos_a;
-    let b_pnl = b.quote_position - new_quote_pos_b;
-
-    // pnl must be opposite signs for there to be a settlement
-
-    if a_pnl > 0 && b_pnl < 0 {
-        let settlement = a_pnl.min(b_pnl.abs());
-    } else if a_pnl < 0 && b_pnl > 0 {
-    } else {
-        return Err(throw!());
-    }
-    Ok(())
 }
 
 fn init_root_bank(
