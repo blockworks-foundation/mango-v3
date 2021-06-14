@@ -44,7 +44,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         signer_nonce: u64,
-        valid_interval: u8,
+        valid_interval: u64,
     ) -> ProgramResult {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -514,8 +514,10 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts > root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(
+            now_ts > root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
 
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
         check!(
@@ -529,11 +531,11 @@ impl Processor {
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
+        let health =
+            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
 
         // TODO fix coll_ratio checks
-        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
         check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
 
         Ok(())
@@ -592,8 +594,10 @@ impl Processor {
             merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
             MerpsErrorCode::InvalidCache
         )?;
-        let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts > root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(
+            now_ts > root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
 
         // Borrow if withdrawing more than deposits
         let native_deposit = merps_account.get_native_deposit(&root_bank, token_index);
@@ -616,9 +620,9 @@ impl Processor {
             )?;
         }
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
-        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        let health =
+            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         // invoke_transfer()
         // TODO think about whether this is a security risk. This is basically one signer for all merps
@@ -731,9 +735,9 @@ impl Processor {
             MerpsErrorCode::Default
         )?;
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
-        let reduce_only = coll_ratio < ONE_I80F48;
+        let health =
+            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        let reduce_only = health < ZERO_I80F48;
 
         // Make sure the root bank is in the merps group
         let _token_index = merps_group
@@ -741,9 +745,14 @@ impl Processor {
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
         // Check that root banks have been updated by Keeper
-        let valid_interval = merps_group.valid_interval as u64;
-        check!(now_ts <= base_root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
-        check!(now_ts <= quote_root_bank.last_updated + valid_interval, MerpsErrorCode::Default)?;
+        check!(
+            now_ts <= base_root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
+        check!(
+            now_ts <= quote_root_bank.last_updated + merps_group.valid_interval,
+            MerpsErrorCode::Default
+        )?;
 
         let spot_market_index = merps_group
             .find_spot_market_index(spot_market_ai.key)
@@ -897,9 +906,9 @@ impl Processor {
             in_token_i,
         )?;
 
-        let coll_ratio =
-            merps_account.get_health_factor(&merps_group, &merps_cache, open_orders_ais)?;
-        check!(reduce_only || coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        let health =
+            merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, false)?;
+        check!(reduce_only || health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
         check!(out_node_bank.has_valid_deposits_borrows(&out_root_bank), MerpsErrorCode::Default)?;
 
         Ok(())
@@ -1022,8 +1031,8 @@ impl Processor {
             client_order_id,
         )?;
 
-        let coll_ratio = merps_account.get_health_factor(&merps_group, &merps_cache, &[])?;
-        check!(coll_ratio >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
+        let health = merps_account.get_health(&merps_group, &merps_cache, &[], false)?;
+        check!(health >= ONE_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
@@ -1169,7 +1178,7 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        let valid_last_update = now_ts - (merps_group.valid_interval as u64);
+        let valid_last_update = now_ts - merps_group.valid_interval;
         let perp_market_cache = &merps_cache.perp_market_cache[market_index];
 
         check!(
@@ -1236,7 +1245,7 @@ impl Processor {
         // TODO - which market gets liquidated first?
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
-        const NUM_FIXED: usize = 6;
+        const NUM_FIXED: usize = 5;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai,         // read
@@ -1260,7 +1269,7 @@ impl Processor {
 
         /*
            1. first check if liqee health is below maint hf
-           2. second check if liqee health is above maint hf
+           2.
            3.
         */
 
@@ -1268,7 +1277,6 @@ impl Processor {
     }
 
     /// *** Keeper Related Instructions ***
-
     /// Update the deposit and borrow index on passed in RootBanks
     #[allow(unused)]
     fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
@@ -1375,9 +1383,11 @@ impl Processor {
             MerpsInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         match instruction {
             MerpsInstruction::InitMerpsGroup { signer_nonce, valid_interval } => {
+                msg!("Merps: InitMerpsGroup");
                 Self::init_merps_group(program_id, accounts, signer_nonce, valid_interval)?;
             }
             MerpsInstruction::InitMerpsAccount => {
+                msg!("Merps: InitMerpsAccount");
                 Self::init_merps_account(program_id, accounts)?;
             }
             MerpsInstruction::Deposit { quantity } => {
@@ -1468,6 +1478,7 @@ impl Processor {
                 Self::cancel_perp_order_by_client_id(program_id, accounts, client_order_id)?;
             }
             MerpsInstruction::CancelPerpOrder { order_id, side } => {
+                // TODO this log may cost too much compute
                 msg!("Merps: CancelPerpOrder order_id={} side={}", order_id, side as u8);
                 Self::cancel_perp_order(program_id, accounts, order_id, side)?;
             }

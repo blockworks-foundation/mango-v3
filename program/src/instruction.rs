@@ -28,7 +28,7 @@ pub enum MerpsInstruction {
     /// 8. `[]` dex_prog_ai - TODO
     InitMerpsGroup {
         signer_nonce: u64,
-        valid_interval: u8,
+        valid_interval: u64,
     },
 
     /// Initialize a merps account for a user
@@ -217,12 +217,12 @@ impl MerpsInstruction {
         let discrim = u32::from_le_bytes(discrim);
         Some(match discrim {
             0 => {
-                let data = array_ref![data, 0, 9];
-                let (signer_nonce, valid_interval) = array_refs![data, 8, 1];
+                let data = array_ref![data, 0, 16];
+                let (signer_nonce, valid_interval) = array_refs![data, 8, 8];
 
                 MerpsInstruction::InitMerpsGroup {
                     signer_nonce: u64::from_le_bytes(*signer_nonce),
-                    valid_interval: u8::from_le_bytes(*valid_interval),
+                    valid_interval: u64::from_le_bytes(*valid_interval),
                 }
             }
             1 => MerpsInstruction::InitMerpsAccount,
@@ -386,7 +386,7 @@ pub fn init_merps_group(
     dex_program_pk: &Pubkey,
 
     signer_nonce: u64,
-    valid_interval: u8,
+    valid_interval: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*merps_group_pk, false),
