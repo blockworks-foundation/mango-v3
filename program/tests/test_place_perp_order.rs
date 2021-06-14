@@ -725,7 +725,7 @@ async fn test_place_and_match_order() {
         assert!(event_queue.empty());
         assert_eq!(event_queue.header.head(), 3);
 
-        let [e1, e2, e3] = array_ref![event_queue.debug_buf(), 0, 3];
+        let [e1, e2, e3] = array_ref![event_queue.buf, 0, 3];
         assert_eq!(e1.event_type, EventType::Fill as u8);
         assert_eq!(e2.event_type, EventType::Fill as u8);
         assert_eq!(e3.event_type, EventType::Out as u8);
