@@ -8,7 +8,7 @@ use merps::{
     entrypoint::process_instruction,
     instruction::{
         add_spot_market, add_to_basket, cache_prices, cache_root_banks, deposit,
-        init_merps_account, withdraw,
+        init_merps_account, update_root_bank, withdraw,
     },
     state::{MerpsAccount, MerpsGroup, NodeBank, QUOTE_INDEX},
 };
@@ -22,8 +22,6 @@ use solana_sdk::{
 };
 use std::mem::size_of;
 
-const PRICE_BTC: u64 = 100;
-
 #[tokio::test]
 async fn test_borrow_succeeds() {
     // Test that the borrow instruction succeeds and the expected side effects occurr
@@ -35,10 +33,9 @@ async fn test_borrow_succeeds() {
     test.set_bpf_compute_max_units(50_000);
 
     let quote_index = 0;
-    let initial_amount = 200;
-    let deposit_amount = 100;
-    // 5x leverage
-    let borrow_and_withdraw_amount = (deposit_amount * 5) / PRICE_BTC;
+    let quote_decimals = 6;
+    let quote_unit = 10u64.pow(quote_decimals);
+    let user_initial_amount = 100000 * quote_unit;
 
     let merps_group = add_merps_group_prodlike(&mut test, program_id);
     let merps_group_pk = merps_group.merps_group_pk;
@@ -51,7 +48,7 @@ async fn test_borrow_succeeds() {
         &mut test,
         user.pubkey(),
         merps_group.tokens[quote_index].pubkey,
-        initial_amount,
+        user_initial_amount,
     );
 
     let merps_account_pk = Pubkey::new_unique();
@@ -60,14 +57,16 @@ async fn test_borrow_succeeds() {
         Account::new(u32::MAX as u64, size_of::<MerpsAccount>(), &program_id),
     );
 
-    let btc_vault_init_amount = 600;
+    let btc_decimals = 6;
+    let btc_unit = 10u64.pow(btc_decimals);
+    let btc_vault_init_amount = 600000 * btc_unit;
+
     let btc_mint = add_mint(&mut test, 6);
     let btc_vault =
         add_token_account(&mut test, merps_group.signer_pk, btc_mint.pubkey, btc_vault_init_amount);
     let btc_node_bank = add_node_bank(&mut test, &program_id, btc_vault.pubkey);
     let btc_root_bank = add_root_bank(&mut test, &program_id, btc_node_bank);
 
-    let unit = 10u64.pow(6);
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
 
     let dex_program_pk = Pubkey::new_unique();
@@ -86,6 +85,14 @@ async fn test_borrow_succeeds() {
     let init_leverage = I80F48::from_num(5);
     let maint_leverage = init_leverage * 2;
 
+    let base_decimals = 6;
+    let base_price = 40000;
+    let base_unit = 10u64.pow(base_decimals);
+    let oracle_price =
+        I80F48::from_num(base_price) * I80F48::from_num(quote_unit) / I80F48::from_num(base_unit);
+
+    let borrow_and_withdraw_amount = 1 * base_unit;
+
     // setup merps group and merps account, make a deposit, add market to basket
     {
         let mut transaction = Transaction::new_with_payer(
@@ -102,19 +109,12 @@ async fn test_borrow_succeeds() {
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_quote_account.pubkey,
-                    deposit_amount,
+                    user_initial_amount,
                 )
                 .unwrap(),
                 add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
-                set_oracle(
-                    &program_id,
-                    &merps_group_pk,
-                    &oracle_pk,
-                    &admin.pubkey(),
-                    // TODO: set real price PRICE_BTC
-                    I80F48::from_num(0),
-                )
-                .unwrap(),
+                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                    .unwrap(),
                 add_spot_market(
                     &program_id,
                     &merps_group_pk,
@@ -152,8 +152,9 @@ async fn test_borrow_succeeds() {
         let node_bank = NodeBank::load_mut_checked(&account_info, &program_id).unwrap();
         assert_eq!(node_bank.borrows, 0);
 
-        let btc_vault_balance = get_token_balance(&mut banks_client, btc_vault.pubkey).await;
-        assert_eq!(btc_vault_balance, 600)
+        let user_quote_balance =
+            get_token_balance(&mut banks_client, user_quote_account.pubkey).await;
+        assert_eq!(user_quote_balance, 0);
     }
 
     // make a borrow and withdraw
@@ -178,6 +179,13 @@ async fn test_borrow_succeeds() {
                     &merps_group_pk,
                     &merps_group.merps_cache,
                     &[merps_group.tokens[QUOTE_INDEX].root_bank, btc_root_bank.pubkey],
+                )
+                .unwrap(),
+                update_root_bank(
+                    &program_id,
+                    &merps_group_pk,
+                    &btc_root_bank.pubkey,
+                    &[btc_root_bank.node_banks[0].pubkey],
                 )
                 .unwrap(),
                 withdraw(
@@ -221,8 +229,8 @@ async fn test_borrow_succeeds() {
         let node_bank = NodeBank::load_mut_checked(&account_info, &program_id).unwrap();
         assert_eq!(node_bank.borrows, borrow_and_withdraw_amount);
 
-        let btc_vault_balance = get_token_balance(&mut banks_client, btc_vault.pubkey).await;
-        assert_eq!(btc_vault_balance, 600 - borrow_and_withdraw_amount)
+        let post_btc_vault_balance = get_token_balance(&mut banks_client, btc_vault.pubkey).await;
+        assert_eq!(post_btc_vault_balance, btc_vault_init_amount - borrow_and_withdraw_amount)
     }
 }
 
