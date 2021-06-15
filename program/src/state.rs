@@ -299,6 +299,7 @@ impl RootBank {
                 .unwrap();
         }
 
+        // TODO - is this a good assumption?
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
