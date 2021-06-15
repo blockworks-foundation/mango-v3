@@ -300,6 +300,7 @@ impl RootBank {
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
+        // TODO: Review interest rate calculation
         let interest_rate: I80F48;
         if utilization > OPTIMAL_UTIL {
             let extra_util = utilization - OPTIMAL_UTIL;

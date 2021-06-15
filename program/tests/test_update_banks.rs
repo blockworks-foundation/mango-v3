@@ -126,4 +126,46 @@ async fn test_root_bank_update_succeeds() {
         assert_eq!(root_bank.deposit_index, 1);
         assert_eq!(root_bank.borrow_index, 1);
     }
+
+    {
+        let node_bank_pks: Vec<Pubkey> = vec![];
+        let mut transaction = Transaction::new_with_payer(
+            &[update_root_bank(
+                &program_id,
+                &merps_group.merps_group_pk,
+                &merps_group.root_banks[0].pubkey,
+                &node_bank_pks.as_slice(),
+            )
+            .unwrap()],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer], recent_blockhash);
+
+        let result = banks_client.process_transaction(transaction).await;
+
+        // Test transaction fails when no node bank accounts are passed in
+        assert!(result.is_err());
+    }
+
+    {
+        let node_bank_pks: Vec<Pubkey> = vec![Pubkey::new_unique()];
+        let mut transaction = Transaction::new_with_payer(
+            &[update_root_bank(
+                &program_id,
+                &merps_group.merps_group_pk,
+                &merps_group.root_banks[0].pubkey,
+                &node_bank_pks.as_slice(),
+            )
+            .unwrap()],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer], recent_blockhash);
+
+        let result = banks_client.process_transaction(transaction).await;
+
+        // Test transaction fails when invalid node bank accounts are passed in
+        assert!(result.is_err());
+    }
 }

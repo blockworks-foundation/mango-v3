@@ -1432,8 +1432,8 @@ impl Processor {
         // TODO check root bank belongs to group in load functions
         let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
         check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MerpsErrorCode::Default)?;
-        for node_bank_ai in node_bank_ais.iter() {
-            check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
+        for i in 0..root_bank.num_node_banks - 1 {
+            check!(node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]), MerpsErrorCode::Default)?;
         }
 
         root_bank.update_index(node_bank_ais, program_id)?;
