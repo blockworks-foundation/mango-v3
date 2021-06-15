@@ -286,15 +286,15 @@ impl RootBank {
     ) -> MerpsResult<()> {
         let clock = Clock::get()?;
         let curr_ts = clock.unix_timestamp as u64;
-        let native_deposits = ZERO_I80F48;
-        let native_borrows = ZERO_I80F48;
+        let mut native_deposits = ZERO_I80F48;
+        let mut native_borrows = ZERO_I80F48;
 
         for node_bank_ai in node_bank_ais.iter() {
             let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
-            native_deposits
+            native_deposits = native_deposits
                 .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
                 .unwrap();
-            native_borrows
+            native_borrows = native_borrows
                 .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
                 .unwrap();
         }
@@ -303,15 +303,14 @@ impl RootBank {
 
         // Calculate interest rate
         // TODO: Review interest rate calculation
-        let interest_rate: I80F48;
-        if utilization > OPTIMAL_UTIL {
+        let interest_rate = if utilization > OPTIMAL_UTIL {
             let extra_util = utilization - OPTIMAL_UTIL;
             let slope = (MAX_R - OPTIMAL_R) / (ONE_I80F48 - OPTIMAL_UTIL);
-            interest_rate = OPTIMAL_R + slope * extra_util;
+            OPTIMAL_R + slope * extra_util
         } else {
             let slope = OPTIMAL_R / OPTIMAL_UTIL;
-            interest_rate = slope * utilization;
-        }
+            slope * utilization
+        };
 
         let borrow_interest =
             interest_rate.checked_mul(I80F48::from_num(curr_ts - self.last_updated)).unwrap();
