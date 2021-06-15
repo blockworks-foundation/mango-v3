@@ -152,7 +152,7 @@ pub enum MerpsInstruction {
     /// 0. `[writable]` merps_group_ai - MerpsGroup
     /// 1. `[]` oracle_ai - oracle
     /// 2. `[signer]` admin_ai - admin
-    AddOracle,
+    AddOracle, // = 10
 
     /// Add a perp market to a merps group
     ///

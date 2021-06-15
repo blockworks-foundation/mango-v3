@@ -319,7 +319,7 @@ impl Processor {
 
         let rent = Rent::get()?; // dynamically load rent sysvar
 
-        let merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
 
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
@@ -339,7 +339,7 @@ impl Processor {
 
         let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
         let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
-        PerpMarketInfo {
+        merps_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
             maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
