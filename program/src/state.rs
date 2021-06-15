@@ -6,10 +6,8 @@ use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::clock::Clock;
 use solana_program::msg;
 use solana_program::pubkey::Pubkey;
-use solana_program::sysvar::Sysvar;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};

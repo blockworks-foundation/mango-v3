@@ -1,17 +1,11 @@
-use std::{
-    cell::{Ref, RefMut},
-    mem::size_of,
-};
+use std::{cell::RefMut, mem::size_of};
 
 use fixed::types::I80F48;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey, rent::Rent};
 
-use crate::{
-    error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId},
-    state::ZERO_I80F48,
-};
+use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
 
 declare_check_assert_macros!(SourceFileId::Oracle);
 
