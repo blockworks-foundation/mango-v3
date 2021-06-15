@@ -4,7 +4,6 @@ use std::vec;
 
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
-use flux_aggregator::borsh_state::InitBorshState;
 
 use serum_dex::matching::Side as SerumSide;
 use serum_dex::state::ToAlignedBytes;
@@ -979,7 +978,7 @@ impl Processor {
             dex_event_queue_ai,
         ] = accounts;
 
-        let mut merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
+        let merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
         let merps_account =
             MerpsAccount::load_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
@@ -1444,11 +1443,33 @@ impl Processor {
     }
 
     /// *** Keeper Related Instructions ***
-    /// Update the deposit and borrow index on passed in RootBanks
-    #[allow(unused)]
-    fn update_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        // TODO - just copy the interest functions from Mango v1 and v2
-        unimplemented!()
+    /// Update the deposit and borrow index on a passed in RootBank
+    fn update_root_bank(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 2;
+        let (fixed_accounts, node_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            merps_group_ai, // read
+            root_bank_ai,   // write
+        ] = fixed_accounts;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        check!(
+            merps_group.find_root_bank_index(root_bank_ai.key).is_some(),
+            MerpsErrorCode::Default
+        )?;
+        // TODO check root bank belongs to group in load functions
+        let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+        check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MerpsErrorCode::Default)?;
+        for i in 0..root_bank.num_node_banks - 1 {
+            check!(
+                node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
+                MerpsErrorCode::Default
+            )?;
+        }
+
+        root_bank.update_index(node_bank_ais, program_id)?;
+
+        Ok(())
     }
 
     /// similar to serum dex, but also need to do some extra magic with funding
@@ -1557,7 +1578,7 @@ impl Processor {
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
 
-        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
 
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
@@ -1632,6 +1653,10 @@ impl Processor {
                 msg!("Merps: SettleFunds");
                 Self::settle_funds(program_id, accounts)?
             }
+            MerpsInstruction::UpdateRootBank => {
+                msg!("Merps: UpdateRootBank");
+                Self::update_root_bank(program_id, accounts)?
+            }
 
             MerpsInstruction::AddPerpMarket {
                 market_index,
@@ -1699,7 +1724,6 @@ impl Processor {
         Ok(())
     }
 }
-
 fn init_root_bank(
     program_id: &Pubkey,
     merps_group: &MerpsGroup,

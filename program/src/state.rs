@@ -6,10 +6,8 @@ use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::clock::Clock;
 use solana_program::msg;
 use solana_program::pubkey::Pubkey;
-use solana_program::sysvar::Sysvar;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
@@ -19,7 +17,7 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::program_error::ProgramError;
-use solana_program::sysvar::rent::Rent;
+use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use std::convert::identity;
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -28,6 +26,10 @@ pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 pub const DAY: I80F48 = I80F48!(86400);
+
+const OPTIMAL_UTIL: I80F48 = I80F48!(0.7);
+const OPTIMAL_R: I80F48 = I80F48!(6.3419583967529173008625e-09); // 20% APY -> 0.1 / YEAR
+const MAX_R: I80F48 = I80F48!(9.5129375951293759512937e-08); // max 300% APY -> 1 / YEAR
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -276,13 +278,59 @@ impl RootBank {
         self.node_banks.iter().position(|pk| pk == node_bank_pk)
     }
 
-    #[allow(unused)]
-    pub fn update_index(&mut self, node_banks: &[NodeBank]) -> MerpsResult<()> {
-        unimplemented!() // TODO
-    }
-    #[allow(unused)]
-    pub fn get_interest_rate(&self) -> MerpsResult<()> {
-        unimplemented!() // TODO
+    pub fn update_index(
+        &mut self,
+        node_bank_ais: &[AccountInfo],
+        program_id: &Pubkey,
+    ) -> MerpsResult<()> {
+        let clock = Clock::get()?;
+        let curr_ts = clock.unix_timestamp as u64;
+        let native_deposits = ZERO_I80F48;
+        let native_borrows = ZERO_I80F48;
+
+        for node_bank_ai in node_bank_ais.iter() {
+            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
+            native_deposits
+                .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
+                .unwrap();
+            native_borrows
+                .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
+                .unwrap();
+        }
+
+        let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
+
+        // Calculate interest rate
+        // TODO: Review interest rate calculation
+        let interest_rate: I80F48;
+        if utilization > OPTIMAL_UTIL {
+            let extra_util = utilization - OPTIMAL_UTIL;
+            let slope = (MAX_R - OPTIMAL_R) / (ONE_I80F48 - OPTIMAL_UTIL);
+            interest_rate = OPTIMAL_R + slope * extra_util;
+        } else {
+            let slope = OPTIMAL_R / OPTIMAL_UTIL;
+            interest_rate = slope * utilization;
+        }
+
+        let borrow_interest =
+            interest_rate.checked_mul(I80F48::from_num(curr_ts - self.last_updated)).unwrap();
+        let deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
+
+        self.last_updated = curr_ts;
+        self.borrow_index = self
+            .borrow_index
+            .checked_mul(borrow_interest)
+            .unwrap()
+            .checked_add(self.borrow_index)
+            .unwrap();
+        self.deposit_index = self
+            .deposit_index
+            .checked_mul(deposit_interest)
+            .unwrap()
+            .checked_add(self.deposit_index)
+            .unwrap();
+
+        Ok(())
     }
 }
 

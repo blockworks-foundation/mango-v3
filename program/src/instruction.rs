@@ -212,6 +212,7 @@ pub enum MerpsInstruction {
 
     UpdateFunding,
 
+    // TODO - remove this instruction before mainnet
     SetOracle {
         price: I80F48,
     },
@@ -246,6 +247,14 @@ pub enum MerpsInstruction {
     CancelSpotOrder {
         order: serum_dex::instruction::CancelOrderInstructionV2,
     },
+
+    /// Update a root bank's indexes by providing all it's node banks
+    ///
+    /// Accounts expected: 2 + Node Banks
+    /// 0. `[]` merps_group_ai - MerpsGroup
+    /// 1. `[]` root_bank_ai - RootBank
+    /// 2+... `[]` node_bank_ais - NodeBanks
+    UpdateRootBank,
 }
 
 impl MerpsInstruction {
@@ -367,6 +376,7 @@ impl MerpsInstruction {
                 let order = serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
                 MerpsInstruction::CancelSpotOrder { order }
             }
+            21 => MerpsInstruction::UpdateRootBank,
             _ => {
                 return None;
             }
@@ -834,6 +844,24 @@ pub fn add_oracle(
     ];
 
     let instr = MerpsInstruction::AddOracle;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn update_root_bank(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pks: &[Pubkey],
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*root_bank_pk, false),
+    ];
+
+    accounts.extend(node_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MerpsInstruction::UpdateRootBank;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
