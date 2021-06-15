@@ -578,8 +578,7 @@ impl Processor {
         allow_borrow: bool, // TODO only borrow if true
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 10;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
@@ -629,7 +628,7 @@ impl Processor {
             MerpsErrorCode::InvalidCache
         )?;
         check!(
-            now_ts > root_bank.last_updated + merps_group.valid_interval,
+            now_ts <= root_bank.last_updated + merps_group.valid_interval,
             MerpsErrorCode::Default
         )?;
 
