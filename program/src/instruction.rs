@@ -209,6 +209,52 @@ pub enum MerpsInstruction {
     /// 0. `[]` merps_group_ai
     /// 1. `[writable]` merps_cache_ai
     CachePerpMarkets,
+
+    UpdateFunding,
+
+    // TODO - remove this instruction before mainnet
+    SetOracle {
+        price: I80F48,
+    },
+
+    /// Settle all funds from serum dex open orders
+    ///
+    /// Accounts expected by this instruction (14):
+    ///
+    /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
+    /// 1. `[signer]` owner_ai - MerpsAccount owner
+    /// 2. `[writable]` merps_account_ai - MerpsAccount
+    /// 3. `[]` dex_prog_ai - program id of serum dex
+    /// 4.  `[writable]` spot_market_ai - dex MarketState account
+    /// 5.  `[writable]` open_orders_ai - open orders for this market for this MerpsAccount
+    /// 6. `[]` signer_ai - MerpsGroup signer key
+    /// 7. `[writable]` dex_base_ai - base vault for dex MarketState
+    /// 8. `[writable]` dex_quote_ai - quote vault for dex MarketState
+    /// 9. `[]` base_root_bank_ai - MerpsGroup base vault acc
+    /// 10. `[writable]` base_node_bank_ai - MerpsGroup quote vault acc
+    /// 11. `[]` quote_root_bank_ai - MerpsGroup quote vault acc
+    /// 12. `[writable]` quote_node_bank_ai - MerpsGroup quote vault acc
+    /// 13. `[writable]` base_vault_ai - MerpsGroup base vault acc
+    /// 14. `[writable]` quote_vault_ai - MerpsGroup quote vault acc
+    /// 15. `[]` dex_signer_ai - dex Market signer account
+    /// 16. `[]` spl token program
+    SettleFunds,
+
+    /// Cancel an order using dex instruction
+    ///
+    /// Accounts expected by this instruction ():
+    ///
+    CancelSpotOrder {
+        order: serum_dex::instruction::CancelOrderInstructionV2,
+    },
+
+    /// Update a root bank's indexes by providing all it's node banks
+    ///
+    /// Accounts expected: 2 + Node Banks
+    /// 0. `[]` merps_group_ai - MerpsGroup
+    /// 1. `[]` root_bank_ai - RootBank
+    /// 2+... `[]` node_bank_ais - NodeBanks
+    UpdateRootBank,
 }
 
 impl MerpsInstruction {
@@ -312,6 +358,25 @@ impl MerpsInstruction {
                 MerpsInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
             }
             16 => MerpsInstruction::CachePerpMarkets,
+            17 => MerpsInstruction::UpdateFunding,
+            18 => {
+                let data_arr = array_ref![data, 0, 16];
+                MerpsInstruction::SetOracle { price: I80F48::from_le_bytes(*data_arr) }
+            }
+            19 => MerpsInstruction::SettleFunds,
+            20 => {
+                let data_array = array_ref![data, 0, 20];
+                let fields = array_refs![data_array, 4, 16];
+                let side = match u32::from_le_bytes(*fields.0) {
+                    0 => serum_dex::matching::Side::Bid,
+                    1 => serum_dex::matching::Side::Ask,
+                    _ => return None,
+                };
+                let order_id = u128::from_le_bytes(*fields.1);
+                let order = serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
+                MerpsInstruction::CancelSpotOrder { order }
+            }
+            21 => MerpsInstruction::UpdateRootBank,
             _ => {
                 return None;
             }
@@ -597,17 +662,41 @@ pub fn cancel_perp_order(
 
 pub fn consume_events(
     program_id: &Pubkey,
-    merps_group_pk: &Pubkey, // read
-    perp_market_pk: &Pubkey, // read
-    event_queue_pk: &Pubkey, // write
+    merps_group_pk: &Pubkey,      // read
+    perp_market_pk: &Pubkey,      // read
+    event_queue_pk: &Pubkey,      // write
+    merps_acc_pks: &mut [Pubkey], // write
     limit: usize,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let fixed_accounts = vec![
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new_readonly(*perp_market_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
+    merps_acc_pks.sort();
+    let merps_accounts = merps_acc_pks.into_iter().map(|pk| AccountMeta::new(*pk, false));
+    let accounts = fixed_accounts.into_iter().chain(merps_accounts).collect();
     let instr = MerpsInstruction::ConsumeEvents { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn update_funding(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey, // read
+    merps_cache_pk: &Pubkey, // read
+    perp_market_pk: &Pubkey, // write
+    bids_pk: &Pubkey,        // read
+    asks_pk: &Pubkey,        // read
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new_readonly(*merps_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new_readonly(*bids_pk, false),
+        AccountMeta::new_readonly(*asks_pk, false),
+    ];
+    let instr = MerpsInstruction::UpdateFunding {};
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -755,6 +844,42 @@ pub fn add_oracle(
     ];
 
     let instr = MerpsInstruction::AddOracle;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn update_root_bank(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pks: &[Pubkey],
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*root_bank_pk, false),
+    ];
+
+    accounts.extend(node_bank_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MerpsInstruction::UpdateRootBank;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn set_oracle(
+    program_id: &Pubkey,
+    merps_group_pk: &Pubkey,
+    oracle_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    price: I80F48,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*merps_group_pk, false),
+        AccountMeta::new(*oracle_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MerpsInstruction::SetOracle { price };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

@@ -36,7 +36,7 @@ pub trait QueueHeader: Pod {
 
 pub struct Queue<'a, H: QueueHeader> {
     pub header: RefMut<'a, H>,
-    buf: RefMut<'a, [H::Item]>,
+    pub buf: RefMut<'a, [H::Item]>,
 }
 
 impl<'a, H: QueueHeader> Queue<'a, H> {

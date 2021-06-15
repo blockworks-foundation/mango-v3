@@ -6,6 +6,7 @@ use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -16,7 +17,7 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::program_error::ProgramError;
-use solana_program::sysvar::rent::Rent;
+use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use std::convert::identity;
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -25,6 +26,10 @@ pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 pub const DAY: I80F48 = I80F48!(86400);
+
+const OPTIMAL_UTIL: I80F48 = I80F48!(0.7);
+const OPTIMAL_R: I80F48 = I80F48!(6.3419583967529173008625e-09); // 20% APY -> 0.1 / YEAR
+const MAX_R: I80F48 = I80F48!(9.5129375951293759512937e-08); // max 300% APY -> 1 / YEAR
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -274,13 +279,59 @@ impl RootBank {
         self.node_banks.iter().position(|pk| pk == node_bank_pk)
     }
 
-    #[allow(unused)]
-    pub fn update_index(&mut self, node_banks: &[NodeBank]) -> MerpsResult<()> {
-        unimplemented!() // TODO
-    }
-    #[allow(unused)]
-    pub fn get_interest_rate(&self) -> MerpsResult<()> {
-        unimplemented!() // TODO
+    pub fn update_index(
+        &mut self,
+        node_bank_ais: &[AccountInfo],
+        program_id: &Pubkey,
+    ) -> MerpsResult<()> {
+        let clock = Clock::get()?;
+        let curr_ts = clock.unix_timestamp as u64;
+        let native_deposits = ZERO_I80F48;
+        let native_borrows = ZERO_I80F48;
+
+        for node_bank_ai in node_bank_ais.iter() {
+            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
+            native_deposits
+                .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
+                .unwrap();
+            native_borrows
+                .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
+                .unwrap();
+        }
+
+        let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
+
+        // Calculate interest rate
+        // TODO: Review interest rate calculation
+        let interest_rate: I80F48;
+        if utilization > OPTIMAL_UTIL {
+            let extra_util = utilization - OPTIMAL_UTIL;
+            let slope = (MAX_R - OPTIMAL_R) / (ONE_I80F48 - OPTIMAL_UTIL);
+            interest_rate = OPTIMAL_R + slope * extra_util;
+        } else {
+            let slope = OPTIMAL_R / OPTIMAL_UTIL;
+            interest_rate = slope * utilization;
+        }
+
+        let borrow_interest =
+            interest_rate.checked_mul(I80F48::from_num(curr_ts - self.last_updated)).unwrap();
+        let deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
+
+        self.last_updated = curr_ts;
+        self.borrow_index = self
+            .borrow_index
+            .checked_mul(borrow_interest)
+            .unwrap()
+            .checked_add(self.borrow_index)
+            .unwrap();
+        self.deposit_index = self
+            .deposit_index
+            .checked_mul(deposit_interest)
+            .unwrap()
+            .checked_add(self.deposit_index)
+            .unwrap();
+
+        Ok(())
     }
 }
 
@@ -720,6 +771,8 @@ impl PerpAccount {
                 I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
         }
 
+        msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+
         health
     }
 
@@ -753,6 +806,13 @@ impl PerpAccount {
 
         // Pick the worse of the two simulated health
         let h = if bids_health < asks_health { bids_health } else { asks_health };
+
+        msg!(
+            "get_health h={:?} of={} bp={}",
+            h,
+            long_funding - self.long_settled_funding,
+            self.base_position
+        );
 
         // Account for unrealized funding payments
         // TODO make checked
@@ -879,6 +939,8 @@ impl MerpsAccount {
             * price)
             + oo_quote;
 
+        msg!("get_spot_health {} price={:?} health={:?}", market_index, price, health,);
+
         Ok(health)
     }
 
@@ -892,6 +954,8 @@ impl MerpsAccount {
         let mut health = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
             * self.deposits[QUOTE_INDEX])
             - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
+
+        msg!("get_health quote={:?}", health);
 
         for i in 0..merps_group.num_oracles {
             if !self.in_basket[i] {
@@ -936,6 +1000,7 @@ impl MerpsAccount {
                     merps_cache.perp_market_cache[i].short_funding,
                 );
             }
+            msg!("get_health {} => {:?}", i, health);
         }
 
         Ok(health)
@@ -1006,6 +1071,9 @@ impl PerpMarket {
         state.index_oracle = merps_group.oracles[market_index];
         state.contract_size = contract_size;
 
+        let clock = Clock::get()?;
+        state.last_updated = clock.unix_timestamp as u64;
+
         Ok(state)
     }
 
@@ -1054,26 +1122,35 @@ impl PerpMarket {
         market_index: usize,
         now_ts: u64,
     ) -> MerpsResult<()> {
-        // Get current book price
-        // compare it to index price using the merps cache
-
-        // TODO handle case of one sided book
-        // TODO get impact bid and impact ask if compute allows
-        // TODO consider corner cases of funding being updated
-        let bid = book.get_best_bid_price().unwrap();
-        let ask = book.get_best_ask_price().unwrap();
-
-        let book_price = self.lot_to_native_price((bid + ask) / 2);
-
-        // TODO make everything here checked
+        // Get the index price from cache, ensure it's not outdated
         let price_cache = &merps_cache.price_cache[market_index];
         check!(
-            now_ts <= price_cache.last_update + (merps_group.valid_interval),
+            now_ts <= price_cache.last_update + merps_group.valid_interval,
             MerpsErrorCode::InvalidCache
         )?;
-
         let index_price = price_cache.price;
-        let diff: I80F48 = (book_price / index_price) - ONE_I80F48;
+
+        // Get current book price & compare it to index price
+
+        // TODO get impact bid and impact ask if compute allows
+        // TODO consider corner cases of funding being updated
+        let bid = book.get_best_bid_price();
+        let ask = book.get_best_ask_price();
+
+        // verify that at least one order is on the book
+        check!(bid.is_some() || ask.is_some(), MerpsErrorCode::Default)?;
+
+        const ONE_SIDED_PENALTY_FUNDING: I80F48 = I80F48!(0.05);
+        let diff = match (bid, ask) {
+            (Some(bid), Some(ask)) => {
+                // calculate mid-market rate
+                let book_price = self.lot_to_native_price((bid + ask) / 2);
+                (book_price / index_price) - ONE_I80F48
+            }
+            (Some(_bid), None) => ONE_SIDED_PENALTY_FUNDING,
+            (None, Some(_ask)) => ONE_SIDED_PENALTY_FUNDING,
+            (None, None) => ZERO_I80F48, // checked already before for this case
+        };
 
         // TODO consider what happens if time_factor is very small. Can funding_delta == 0 when diff != 0?
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
@@ -1081,6 +1158,15 @@ impl PerpMarket {
             * time_factor
             * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
             * index_price;
+
+        msg!(
+            "update_funding diff={:?} tf={:?} delta={:?} ds={}-{}",
+            diff,
+            funding_delta,
+            time_factor,
+            now_ts,
+            self.last_updated
+        );
 
         self.long_funding += funding_delta;
         self.short_funding += funding_delta;
