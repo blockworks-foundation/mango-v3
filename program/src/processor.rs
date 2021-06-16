@@ -1344,13 +1344,17 @@ impl Processor {
             MerpsAccount::load_mut_checked(merps_account_a_ai, program_id, merps_group_ai.key)?;
         let mut merps_account_b =
             MerpsAccount::load_mut_checked(merps_account_b_ai, program_id, merps_group_ai.key)?;
+
+        match merps_group.find_root_bank_index(root_bank_ai.key) {
+            None => return Err(throw_err!(MerpsErrorCode::Default)),
+            Some(i) => check!(i == QUOTE_INDEX, MerpsErrorCode::Default)?,
+        }
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::Default)?;
 
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
-        let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
+        let now_ts = Clock::get()?.unix_timestamp as u64;
 
         let valid_last_update = now_ts - merps_group.valid_interval;
         let perp_market_cache = &merps_cache.perp_market_cache[market_index];
@@ -1386,11 +1390,19 @@ impl Processor {
         let borrow_index = merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index;
 
         // pnl must be opposite signs for there to be a settlement
-        if a_pnl * b_pnl >= 0 {
+        if a_pnl * b_pnl > 0 {
             return Ok(());
         }
 
         let settlement = a_pnl.abs().min(b_pnl.abs());
+        if a_pnl > 0 {
+            a.quote_position -= settlement;
+            b.quote_position += settlement;
+        } else {
+            a.quote_position += settlement;
+            b.quote_position -= settlement;
+        }
+
         checked_add_deposit(
             &mut node_bank,
             if a_pnl > 0 { &mut merps_account_a } else { &mut merps_account_b },
@@ -1404,6 +1416,7 @@ impl Processor {
             QUOTE_INDEX,
             settlement / borrow_index,
         )?;
+
         check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
 
         Ok(())
@@ -1548,6 +1561,7 @@ impl Processor {
         // TODO - if total assets val is less than dust, then insurance fund should pay liqor to take remaining positions
         // TODO - if insurance fund empty, ADL
         // TODO - ADL should invalidate the MerpsCache until it is updated again, then probably MerpsCache should be passed in as writable
+        //  - it might be better to put an ADL account on event queue to be processed by Keeper
 
         Ok(())
     }
@@ -1828,6 +1842,10 @@ impl Processor {
             MerpsInstruction::SetOracle { price } => {
                 msg!("Merps: SetOracle {}", price);
                 Self::set_oracle(program_id, accounts, price)?
+            }
+            MerpsInstruction::SettlePnl { market_index } => {
+                msg!("Merps: SettlePnl");
+                Self::settle_pnl(program_id, accounts, market_index)?;
             }
         }
 

@@ -255,6 +255,13 @@ pub enum MerpsInstruction {
     /// 1. `[]` root_bank_ai - RootBank
     /// 2+... `[]` node_bank_ais - NodeBanks
     UpdateRootBank,
+
+    /// Take two MerpsAccounts and settle profits and losses between them for a perp market
+    ///
+    /// Accounts expected: 6
+    SettlePnl {
+        market_index: usize,
+    },
 }
 
 impl MerpsInstruction {
@@ -377,6 +384,12 @@ impl MerpsInstruction {
                 MerpsInstruction::CancelSpotOrder { order }
             }
             21 => MerpsInstruction::UpdateRootBank,
+
+            22 => {
+                let data_arr = array_ref![data, 0, 8];
+
+                MerpsInstruction::SettlePnl { market_index: usize::from_le_bytes(*data_arr) }
+            }
             _ => {
                 return None;
             }
