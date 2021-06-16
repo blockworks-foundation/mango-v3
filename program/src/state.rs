@@ -929,7 +929,9 @@ impl MerpsAccount {
             let open_orders = load_open_orders(open_orders_ai)?;
             (
                 I80F48::from_num(open_orders.native_coin_total),
-                I80F48::from_num(open_orders.native_pc_total),
+                I80F48::from_num(
+                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                ),
             )
         };
 

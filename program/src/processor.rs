@@ -1547,6 +1547,7 @@ impl Processor {
 
         // TODO - if total assets val is less than dust, then insurance fund should pay liqor to take remaining positions
         // TODO - if insurance fund empty, ADL
+        // TODO - ADL should invalidate the MerpsCache until it is updated again, then probably MerpsCache should be passed in as writable
 
         Ok(())
     }
