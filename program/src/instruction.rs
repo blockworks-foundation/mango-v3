@@ -262,6 +262,15 @@ pub enum MerpsInstruction {
     SettlePnl {
         market_index: usize,
     },
+
+    /// Use this token's position and deposit to reduce borrows
+    ///
+    /// Accounts expected by this instruction: 5
+    ///
+    SettleBorrow {
+        token_index: usize,
+        quantity: u64,
+    },
 }
 
 impl MerpsInstruction {
@@ -389,6 +398,15 @@ impl MerpsInstruction {
                 let data_arr = array_ref![data, 0, 8];
 
                 MerpsInstruction::SettlePnl { market_index: usize::from_le_bytes(*data_arr) }
+            }
+            23 => {
+                let data = array_ref![data, 0, 16];
+                let (token_index, quantity) = array_refs![data, 8, 8];
+
+                MerpsInstruction::SettleBorrow {
+                    token_index: usize::from_le_bytes(*token_index),
+                    quantity: u64::from_le_bytes(*quantity),
+                }
             }
             _ => {
                 return None;
