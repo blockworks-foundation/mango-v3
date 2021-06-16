@@ -817,19 +817,31 @@ impl Processor {
             )
         };
 
-        // if this is first time using this open_orders_ai, check and save it
-        for open_orders_ai in open_orders_ais.iter() {
-            if merps_account.spot_open_orders[spot_market_index] == Pubkey::default() {
-                let open_orders = load_open_orders(open_orders_ai)?;
-                check_eq!(open_orders.account_flags, 0, MerpsErrorCode::Default)?;
-                merps_account.spot_open_orders[spot_market_index] = *open_orders_ai.key;
+        for i in 0..merps_group.num_oracles {
+            if !merps_account.in_basket[i] {
+                continue;
+            }
+            let open_orders_ai = &open_orders_ais[i];
+            if i == spot_market_index {
+                if merps_account.spot_open_orders[i] == Pubkey::default() {
+                    let open_orders = load_open_orders(open_orders_ai)?;
+                    check_eq!(open_orders.account_flags, 0, MerpsErrorCode::Default)?;
+                    merps_account.spot_open_orders[i] = *open_orders_ai.key;
+                } else {
+                    check_eq!(
+                        open_orders_ais[i].key,
+                        &merps_account.spot_open_orders[i],
+                        MerpsErrorCode::Default
+                    )?;
+                    check_open_orders(&open_orders_ais[i], &merps_group.signer_key)?;
+                }
             } else {
                 check_eq!(
-                    open_orders_ais[spot_market_index].key,
-                    &merps_account.spot_open_orders[spot_market_index],
+                    open_orders_ais[i].key,
+                    &merps_account.spot_open_orders[i],
                     MerpsErrorCode::Default
                 )?;
-                check_open_orders(&open_orders_ais[spot_market_index], &merps_group.signer_key)?;
+                check_open_orders(&open_orders_ais[i], &merps_group.signer_key)?;
             }
         }
 
