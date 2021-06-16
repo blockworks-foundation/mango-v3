@@ -144,6 +144,7 @@ impl Processor {
             .perp_accounts
             .iter_mut()
             .for_each(|pa| pa.open_orders.is_free_bits = u32::MAX);
+        merps_account.in_basket[QUOTE_INDEX] = true;
         merps_account.meta_data = MetaData::new(DataType::MerpsAccount, 0, true);
 
         Ok(())
@@ -401,10 +402,7 @@ impl Processor {
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        check!(
-            token_index == QUOTE_INDEX || merps_account.in_basket[token_index],
-            MerpsErrorCode::InvalidToken
-        )?;
+        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
@@ -530,10 +528,7 @@ impl Processor {
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        // TODO is this correct? skip check if token_index is quote currency
-        if token_index != QUOTE_INDEX {
-            check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
-        }
+        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
 
         // First check all caches to make sure valid
         let clock = Clock::get()?;
@@ -608,10 +603,7 @@ impl Processor {
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
         // Make sure the asset is in basket
-        // TODO is this necessary? skip check if token_index is quote currency
-        if token_index != QUOTE_INDEX {
-            check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
-        }
+        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
 
         // Safety checks
         check_eq!(
@@ -1309,6 +1301,7 @@ impl Processor {
         //  maybe you don't allow people to withdraw if they don't have enough
         //  when liquidating, make sure you settle their pnl first?
         // TODO consider doing this in batches of 32 accounts that are close to zero sum
+        // TODO write unit tests for this function
 
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -1527,11 +1520,8 @@ impl Processor {
 
         check!(liqor_health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
-        /*
-           1. first check if liqee health is below maint hf
-           2. move funding if possible
-           3. reduce position at this market_index
-        */
+        // TODO - if total assets val is less than dust, then insurance fund should pay liqor to take remaining positions
+        // TODO - if insurance fund empty, ADL
 
         Ok(())
     }

@@ -833,7 +833,7 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_PAIRS],
+    pub in_basket: [bool; MAX_TOKENS],
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
@@ -1023,10 +1023,11 @@ pub struct PerpMarket {
     pub long_funding: I80F48,
     pub short_funding: I80F48,
 
+    // TODO - remove open interest, not being used except maybe on stats?
     pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
     pub quote_lot_size: i64, // number of quote native that reresents min tick
-    pub index_oracle: Pubkey,
+    pub index_oracle: Pubkey, // TODO - remove, not being used
     pub last_updated: u64,
     pub seq_num: u64,
 
