@@ -26,10 +26,10 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::StubOracle;
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
-    load_market_state, load_open_orders, DataType, HealthType, MerpsAccount, MerpsCache,
-    MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache,
-    RootBank, RootBankCache, SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
-    ZERO_I80F48,
+    check_open_orders, load_market_state, load_open_orders, DataType, HealthType, MerpsAccount,
+    MerpsCache, MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
+    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48,
+    QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use bytemuck::cast_ref;
@@ -275,7 +275,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai, // write
-            oracle_ai,      // read
+            oracle_ai,      // write
             admin_ai        // read
         ] = accounts;
 
@@ -504,8 +504,7 @@ impl Processor {
     fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
         // TODO don't allow borrow of infinite amount of quote currency
         const NUM_FIXED: usize = 6;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read 
             merps_account_ai,   // write
@@ -817,6 +816,22 @@ impl Processor {
                 Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
             )
         };
+
+        // if this is first time using this open_orders_ai, check and save it
+        for open_orders_ai in open_orders_ais.iter() {
+            if merps_account.spot_open_orders[spot_market_index] == Pubkey::default() {
+                let open_orders = load_open_orders(open_orders_ai)?;
+                check_eq!(open_orders.account_flags, 0, MerpsErrorCode::Default)?;
+                merps_account.spot_open_orders[spot_market_index] = *open_orders_ai.key;
+            } else {
+                check_eq!(
+                    open_orders_ais[spot_market_index].key,
+                    &merps_account.spot_open_orders[spot_market_index],
+                    MerpsErrorCode::Default
+                )?;
+                check_open_orders(&open_orders_ais[spot_market_index], &merps_group.signer_key)?;
+            }
+        }
 
         let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
         let instruction = Instruction {
