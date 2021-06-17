@@ -8,6 +8,7 @@ use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::convert::TryInto;
 use std::num::NonZeroU64;
+use solana_program::msg;
 
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -179,9 +180,9 @@ pub enum MerpsInstruction {
     /// 2. `[signer]` owner_ai - TODO
     /// 3. `[]` merps_cache_ai - TODO
     /// 4. `[writable]` perp_market_ai - TODO
-    /// 5. `[writable]` bids_ai - TODO  
-    /// 6. `[writable]` asks_ai - TODO  
-    /// 7. `[writable]` event_queue_ai - TODO  
+    /// 5. `[writable]` bids_ai - TODO
+    /// 6. `[writable]` asks_ai - TODO
+    /// 7. `[writable]` event_queue_ai - TODO
     PlacePerpOrder {
         price: i64,
         quantity: i64,
@@ -262,12 +263,16 @@ pub enum MerpsInstruction {
     SettlePnl {
         market_index: usize,
     },
+
+    TestRalfs,
 }
 
 impl MerpsInstruction {
     pub fn unpack(input: &[u8]) -> Option<Self> {
+        msg!("Merps: Unpacking");
         let (&discrim, data) = array_refs![input, 4; ..;];
         let discrim = u32::from_le_bytes(discrim);
+        msg!("Discrim: {}", discrim);
         Some(match discrim {
             0 => {
                 let data = array_ref![data, 0, 16];
@@ -389,7 +394,8 @@ impl MerpsInstruction {
                 let data_arr = array_ref![data, 0, 8];
 
                 MerpsInstruction::SettlePnl { market_index: usize::from_le_bytes(*data_arr) }
-            }
+            },
+            23 => MerpsInstruction::TestRalfs,
             _ => {
                 return None;
             }

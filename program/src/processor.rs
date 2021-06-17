@@ -23,7 +23,20 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::StubOracle;
+use crate::oracle::{
+    StubOracle,
+    AccountType,
+    Mapping,
+    Product,
+    Price,
+    PriceType,
+    PriceStatus,
+    CorpAction,
+    cast,
+    MAGIC,
+    VERSION_2,
+    PROD_HDR_SIZE
+};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_market_state, load_open_orders, DataType, HealthType, MerpsAccount,
@@ -120,7 +133,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
-            merps_group_ai,     // read 
+            merps_group_ai,     // read
             merps_account_ai,   // write
             owner_ai            // read, signer
         ] = accounts;
@@ -423,7 +436,7 @@ impl Processor {
         Ok(())
     }
 
-    /// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)    
+    /// Write oracle prices onto MerpsAccount before calling a value-dep instruction (e.g. Withdraw)
     fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -504,12 +517,12 @@ impl Processor {
         const NUM_FIXED: usize = 6;
         let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
-            merps_group_ai,     // read 
+            merps_group_ai,     // read
             merps_account_ai,   // write
             owner_ai,           // read
-            merps_cache_ai,     // read 
-            root_bank_ai,       // read 
-            node_bank_ai,       // write  
+            merps_cache_ai,     // read
+            root_bank_ai,       // read
+            node_bank_ai,       // write
         ] = fixed_accs;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -1422,6 +1435,27 @@ impl Processor {
         Ok(())
     }
 
+    fn test_ralfs(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
+        msg!("Executing test ralfs");
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            product_ai,      // read
+            price_ai,      // read
+            admin_ai        // write
+        ] = accounts;
+
+        msg!("Wow we are executing this!");
+        let mut product = Product::get_product(product_ai).unwrap();
+        msg!("Wow we got product!");
+        msg!("Oracle MAGIC: {}", product.magic);
+
+        // let mut price = Price::get_price(price_ai).unwrap();
+        // msg!( "price ........ {}", price.agg.price );
+
+        Ok(())
+    }
+
     /// Liquidate an account similar to Mango
     #[allow(unused)]
     fn liquidate_perp(
@@ -1440,8 +1474,8 @@ impl Processor {
             merps_group_ai,         // read
             merps_cache_ai,         // read
             liqee_merps_account_ai, // write
-            liqor_merps_account_ai, // write    
-            liqor_ai,               // read, signer    
+            liqor_merps_account_ai, // write
+            liqor_ai,               // read, signer
         ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
@@ -1846,6 +1880,10 @@ impl Processor {
             MerpsInstruction::SettlePnl { market_index } => {
                 msg!("Merps: SettlePnl");
                 Self::settle_pnl(program_id, accounts, market_index)?;
+            }
+            MerpsInstruction::TestRalfs => {
+                msg!("Merps: TestRalfs");
+                Self::test_ralfs(program_id, accounts)?;
             }
         }
 
