@@ -890,11 +890,11 @@ impl MerpsAccount {
 
         Ok(merps_account)
     }
-    pub fn get_native_deposit(&self, root_bank: &RootBank, token_i: usize) -> u64 {
-        (self.deposits[token_i] * root_bank.deposit_index).to_num()
+    pub fn get_native_deposit(&self, root_bank: &RootBank, token_i: usize) -> MerpsResult<I80F48> {
+        self.deposits[token_i].checked_mul(root_bank.deposit_index).ok_or(throw!())
     }
-    pub fn get_native_borrow(&self, root_bank: &RootBank, token_i: usize) -> u64 {
-        (self.borrows[token_i] * root_bank.borrow_index).to_num()
+    pub fn get_native_borrow(&self, root_bank: &RootBank, token_i: usize) -> MerpsResult<I80F48> {
+        self.borrows[token_i].checked_mul(root_bank.borrow_index).ok_or(throw!())
     }
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
