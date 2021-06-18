@@ -504,7 +504,7 @@ impl MerpsCache {
     ) -> bool {
         let valid_interval = merps_group.valid_interval;
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            msg!("root_bank_cache {} invalid", QUOTE_INDEX);
+            msg!("root_bank_cache {} invalid: {}", QUOTE_INDEX, self.root_bank_cache[QUOTE_INDEX].last_update);
             return false;
         }
 
@@ -515,20 +515,20 @@ impl MerpsCache {
             }
 
             if now_ts > self.price_cache[i].last_update + valid_interval {
-                msg!("price_cache {} invalid", i);
+                msg!("price_cache {} invalid: {}", i, self.price_cache[i].last_update);
                 return false;
             }
 
             if !merps_group.spot_markets[i].is_empty() {
                 if now_ts > self.root_bank_cache[i].last_update + valid_interval {
-                    msg!("root_bank_cache {} invalid", i);
+                    msg!("root_bank_cache {} invalid: {}", i, self.root_bank_cache[i].last_update);
                     return false;
                 }
             }
 
             if !merps_group.perp_markets[i].is_empty() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    msg!("perp_market_cache {} invalid", i);
+                    msg!("perp_market_cache {} invalid: {}", i), self.perp_market_cache[i].last_update;
                     return false;
                 }
             }
