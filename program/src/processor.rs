@@ -28,8 +28,8 @@ use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_market_state, load_open_orders, DataType, HealthType, MerpsAccount,
     MerpsCache, MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, MAX_PAIRS, ONE_I80F48,
-    QUOTE_INDEX, ZERO_I80F48,
+    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, DUST_THRESHOLD, MAX_PAIRS,
+    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use bytemuck::cast_ref;
@@ -215,12 +215,15 @@ impl Processor {
             MerpsErrorCode::Default
         )?;
 
+        let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
+        let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
         merps_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
             maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
-            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
+            maint_liab_weight,
             init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
+            liquidation_fee,
         };
 
         // TODO needs to be moved into add_oracle
@@ -1463,8 +1466,10 @@ impl Processor {
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
         const NUM_FIXED: usize = 5;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+
         let [
             merps_group_ai,         // read
             merps_cache_ai,         // read
@@ -1500,7 +1505,7 @@ impl Processor {
         let maint_health = liqee_merps_account.get_health(
             &merps_group,
             &merps_cache,
-            open_orders_ais,
+            liqee_open_orders_ais,
             HealthType::Maint,
         )?;
 
@@ -1514,7 +1519,7 @@ impl Processor {
         let init_health = liqee_merps_account.get_health(
             &merps_group,
             &merps_cache,
-            open_orders_ais,
+            liqee_open_orders_ais,
             HealthType::Init,
         )?;
         let liqee_perp_account = &mut liqee_merps_account.perp_accounts[market_index];
@@ -1581,13 +1586,33 @@ impl Processor {
         let liqor_health = liqor_merps_account.get_health(
             &merps_group,
             &merps_cache,
-            open_orders_ais,
+            liqor_open_orders_ais,
             HealthType::Init,
         )?;
 
         check!(liqor_health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
-        // TODO - if total assets val is less than dust, then insurance fund should pay liqor to take remaining positions
+        let liqee_health = liqee_merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            liqee_open_orders_ais,
+            HealthType::Maint,
+        )?;
+
+        if liqee_health < ZERO_I80F48 {
+            // To start liquidating, make sure all orders that increase position are canceled
+            let assets_val = liqee_merps_account.get_assets_val(
+                &merps_group,
+                &merps_cache,
+                liqee_open_orders_ais,
+                HealthType::Maint,
+            )?;
+
+            if assets_val < DUST_THRESHOLD {}
+        } else {
+        }
+
+        // TODO - if total assets val is less than dust, then insurance fund should pay into this account
         // TODO - if insurance fund empty, ADL
         // TODO - ADL should invalidate the MerpsCache until it is updated again, then probably MerpsCache should be passed in as writable
         //  - it might be better to put an ADL account on event queue to be processed by Keeper
@@ -1739,6 +1764,51 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         perp_market.update_funding(&merps_group, &book, &merps_cache, market_index, now_ts)?;
+
+        Ok(())
+    }
+
+    #[allow(unused)]
+    fn liquidate_spot(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        token_index: usize,
+        transfer_request: i64,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let [
+            merps_group_ai,         // read
+            merps_cache_ai,         // read
+            liqee_merps_account_ai, // write
+            liqor_merps_account_ai, // write    
+            liqor_ai,               // read, signer    
+        ] = fixed_ais;
+
+        // Let liqor take some of the out token
+        // Liqor must deposit some of the liab token at reduced rate
+        // If there are still some liabs after all assets are taken, insurance fund pays quote currency to liqor to take remaining liabs
+
+        Ok(())
+    }
+
+    #[allow(unused)]
+    fn force_cancel_perp_orders(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MerpsResult<()> {
+        /*
+        Only cancel orders if account is being liquidated
+        Only cancel orders that reduce the health of the account
+            an order reduces health of the account if it increases the absolute value of base_position for that market
+            => only cancel orders up to the abs value of the opposite side of the position
+            e.g. if +10 base positions then only allow up to 10 asks_quantity and 0 in bids_quantity
+
+        All expansionary orders must be cancelled before liquidaton can continue
+
+         */
 
         Ok(())
     }

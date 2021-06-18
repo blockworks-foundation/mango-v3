@@ -30,6 +30,7 @@ pub const DAY: I80F48 = I80F48!(86400);
 const OPTIMAL_UTIL: I80F48 = I80F48!(0.7);
 const OPTIMAL_R: I80F48 = I80F48!(6.3419583967529173008625e-09); // 20% APY -> 0.1 / YEAR
 const MAX_R: I80F48 = I80F48!(9.5129375951293759512937e-08); // max 300% APY -> 1 / YEAR
+pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -100,6 +101,7 @@ pub struct SpotMarketInfo {
     pub init_asset_weight: I80F48,
     pub maint_liab_weight: I80F48,
     pub init_liab_weight: I80F48,
+    pub liquidation_fee: I80F48,
 }
 
 impl SpotMarketInfo {
@@ -144,8 +146,6 @@ pub struct MerpsGroup {
     pub admin: Pubkey,          // Used to add new markets and adjust risk params
     pub dex_program_id: Pubkey, // Consider allowing more
     pub merps_cache: Pubkey,
-    // TODO determine liquidation incentives for each token
-    // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
     pub valid_interval: u64,
 }
 
@@ -823,6 +823,36 @@ impl PerpAccount {
             h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
         }
     }
+
+    /// Returns value of assets, excludes open orders
+    pub fn get_assets_val(
+        &self,
+        price: I80F48,
+        asset_weight: I80F48,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> I80F48 {
+        let base_position = I80F48::from_num(self.base_position);
+        if self.base_position > ZERO_I80F48 {
+            let quote_position =
+                self.quote_position - (long_funding - self.long_settled_funding) * base_position;
+
+            if quote_position > ZERO_I80F48 {
+                base_position * asset_weight * price + quote_position
+            } else {
+                base_position * asset_weight * price
+            }
+        } else {
+            let quote_position =
+                self.quote_position + (short_funding - self.short_settled_funding) * base_position;
+
+            if quote_position > ZERO_I80F48 {
+                quote_position
+            } else {
+                ZERO_I80F48
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Pod, Loadable)]
@@ -842,6 +872,9 @@ pub struct MerpsAccount {
 
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
+
+    pub being_liquidated: bool,
+    pub padding: [u8; 7],
 }
 
 pub enum HealthType {
@@ -909,6 +942,113 @@ impl MerpsAccount {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
     }
 
+    pub fn get_token_assets_liabs(
+        &self,
+        merps_group: &MerpsGroup,
+        merps_cache: &MerpsCache,
+        open_orders_ais: &[AccountInfo],
+    ) -> MerpsResult<([I80F48; MAX_TOKENS], [I80F48; MAX_TOKENS])> {
+        let mut assets = [ZERO_I80F48; MAX_TOKENS];
+        let mut liabs = [ZERO_I80F48; MAX_TOKENS];
+
+        assets[QUOTE_INDEX] =
+            merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
+        liabs[QUOTE_INDEX] =
+            merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
+
+        for i in 0..merps_group.num_oracles {
+            if !self.in_basket[i] {
+                continue;
+            }
+
+            if self.spot_open_orders[i] == Pubkey::default() {
+                assets[i] = merps_cache.root_bank_cache[i].deposit_index * self.deposits[i];
+            } else {
+                // TODO make sure open orders account is checked for validity before passing in here
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                assets[i] = merps_cache.root_bank_cache[i].deposit_index * self.deposits[i]
+                    + I80F48::from_num(open_orders.native_coin_total);
+                assets[QUOTE_INDEX] += I80F48::from_num(
+                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                );
+            }
+
+            liabs[i] = merps_cache.root_bank_cache[i].borrow_index * self.borrows[i];
+        }
+
+        Ok((assets, liabs))
+    }
+
+    pub fn get_spot_val(
+        &self,
+        merps_cache: &MerpsCache,
+        market_index: usize,
+        open_orders_ai: &AccountInfo,
+        asset_weight: I80F48,
+    ) -> MerpsResult<I80F48> {
+        // TODO make checked
+        let bank_cache = &merps_cache.root_bank_cache[market_index];
+        let price = merps_cache.price_cache[market_index].price;
+
+        Ok(if self.spot_open_orders[market_index] == Pubkey::default() {
+            self.deposits[market_index] * bank_cache.deposit_index * asset_weight * price
+        } else {
+            // TODO - confirm only checked open orders are sent in here
+            let open_orders = load_open_orders(open_orders_ai)?;
+
+            ((self.deposits[market_index] * bank_cache.deposit_index
+                + I80F48::from_num(open_orders.native_coin_total))
+                * asset_weight
+                * price)
+                + I80F48::from_num(
+                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                )
+        })
+    }
+
+    pub fn get_assets_val(
+        &self,
+        merps_group: &MerpsGroup,
+        merps_cache: &MerpsCache,
+        open_orders_ais: &[AccountInfo],
+        health_type: HealthType,
+    ) -> MerpsResult<I80F48> {
+        let mut assets_val =
+            merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
+
+        for i in 0..merps_group.num_oracles {
+            if !self.in_basket[i] {
+                continue;
+            }
+            let spot_market_info = &merps_group.spot_markets[i];
+            let perp_market_info = &merps_group.perp_markets[i];
+
+            let (spot_weight, perp_weight) = match health_type {
+                HealthType::Maint => {
+                    (spot_market_info.maint_asset_weight, perp_market_info.maint_asset_weight)
+                }
+                HealthType::Init => {
+                    (spot_market_info.init_asset_weight, perp_market_info.init_asset_weight)
+                }
+            };
+
+            if !spot_market_info.is_empty() {
+                assets_val +=
+                    self.get_spot_val(merps_cache, i, &open_orders_ais[i], spot_weight)?;
+            }
+
+            if !perp_market_info.is_empty() {
+                assets_val += self.perp_accounts[i].get_assets_val(
+                    merps_cache.price_cache[i].price,
+                    perp_weight,
+                    merps_cache.perp_market_cache[i].long_funding,
+                    merps_cache.perp_market_cache[i].short_funding,
+                );
+            }
+        }
+
+        Ok(assets_val)
+    }
     fn get_spot_health(
         &self,
         merps_cache: &MerpsCache,
@@ -924,7 +1064,6 @@ impl MerpsAccount {
         let (oo_base, oo_quote) = if self.spot_open_orders[market_index] == Pubkey::default() {
             (ZERO_I80F48, ZERO_I80F48)
         } else {
-            // TODO make sure open orders account is checked for validity before passing in here
             // TODO add in support for GUI hoster fee
             let open_orders = load_open_orders(open_orders_ai)?;
             (
@@ -956,8 +1095,6 @@ impl MerpsAccount {
         let mut health = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
             * self.deposits[QUOTE_INDEX])
             - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
-
-        msg!("get_health quote={:?}", health);
 
         for i in 0..merps_group.num_oracles {
             if !self.in_basket[i] {
