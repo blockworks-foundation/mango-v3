@@ -700,6 +700,8 @@ impl Processor {
     }
 
     // TODO - add serum dex fee discount functionality
+
+    #[inline(never)]
     fn place_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
