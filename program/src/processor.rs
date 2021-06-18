@@ -630,17 +630,12 @@ impl Processor {
         )?;
 
         // Borrow if withdrawing more than deposits
-        let native_deposit = merps_account.get_native_deposit(&root_bank, token_index);
-        let rem_to_borrow = quantity - native_deposit;
+        let native_deposit = merps_account.get_native_deposit(&root_bank, token_index).unwrap();
+        let rem_to_borrow = I80F48::from_num(quantity) - native_deposit;
         if allow_borrow && rem_to_borrow > 0 {
             let avail_deposit = merps_account.deposits[token_index];
             checked_sub_deposit(&mut node_bank, &mut merps_account, token_index, avail_deposit)?;
-            checked_add_borrow(
-                &mut node_bank,
-                &mut merps_account,
-                token_index,
-                I80F48::from_num(rem_to_borrow),
-            )?;
+            checked_add_borrow(&mut node_bank, &mut merps_account, token_index, rem_to_borrow)?;
         } else {
             checked_sub_deposit(
                 &mut node_bank,
@@ -916,8 +911,9 @@ impl Processor {
         // if out token was net negative, then you may need to borrow more
         if post_out < pre_out {
             let total_out = pre_out.checked_sub(post_out).unwrap();
-            let native_deposit = merps_account.get_native_deposit(&out_root_bank, out_token_i);
-            if native_deposit < total_out {
+            let native_deposit =
+                merps_account.get_native_deposit(&out_root_bank, out_token_i).unwrap();
+            if native_deposit < I80F48::from_num(total_out) {
                 // need to borrow
                 let avail_deposit = merps_account.deposits[out_token_i];
                 checked_sub_deposit(
@@ -926,7 +922,7 @@ impl Processor {
                     out_token_i,
                     avail_deposit,
                 )?;
-                let rem_spend = I80F48::from_num(total_out - native_deposit);
+                let rem_spend = I80F48::from_num(total_out) - native_deposit;
 
                 check!(!reduce_only, MerpsErrorCode::Default)?; // Cannot borrow more in reduce only mode
                 checked_add_borrow(
@@ -1034,7 +1030,40 @@ impl Processor {
         Ok(())
     }
 
-    #[inline(never)]
+    fn settle_borrow(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        token_index: usize,
+        quantity: u64,
+    ) -> MerpsResult<()> {
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            merps_group_ai,     // read
+            merps_account_ai,   // write
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+            owner_ai            // read
+        ] = accounts;
+
+        let mut merps_account =
+            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+
+        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
+
+        settle_borrow_unchecked(
+            &root_bank,
+            &mut node_bank,
+            &mut merps_account,
+            token_index,
+            I80F48::from_num(quantity),
+        )?;
+        Ok(())
+    }
+
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
         const NUM_FIXED: usize = 17;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -1853,6 +1882,10 @@ impl Processor {
                 msg!("Merps: SettlePnl");
                 Self::settle_pnl(program_id, accounts, market_index)?;
             }
+            MerpsInstruction::SettleBorrow { token_index, quantity } => {
+                msg!("Merps: SettleBorrow");
+                Self::settle_borrow(program_id, accounts, token_index, quantity)?;
+            }
         }
 
         Ok(())
@@ -2056,19 +2089,53 @@ fn checked_sub_borrow(
     node_bank.checked_sub_borrow(quantity)
 }
 
+fn settle_borrow_unchecked(
+    root_bank: &RootBank,
+    node_bank: &mut NodeBank,
+    merps_account: &mut MerpsAccount,
+    token_index: usize,
+    quantity: I80F48,
+) -> MerpsResult<()> {
+    let native_borrow = merps_account.get_native_borrow(root_bank, token_index).unwrap();
+    let native_deposit = merps_account.get_native_deposit(root_bank, token_index).unwrap();
+
+    let quantity = cmp::min(quantity, native_deposit);
+    let borr_settle = quantity.checked_div(root_bank.borrow_index).unwrap();
+    let dep_settle = quantity.checked_div(root_bank.deposit_index).unwrap();
+
+    if quantity >= native_borrow {
+        checked_sub_deposit(
+            node_bank,
+            merps_account,
+            token_index,
+            native_borrow.checked_div(root_bank.deposit_index).unwrap(),
+        )?;
+        checked_sub_borrow(
+            node_bank,
+            merps_account,
+            token_index,
+            merps_account.borrows[token_index],
+        )?;
+    } else {
+        checked_sub_deposit(node_bank, merps_account, token_index, dep_settle)?;
+        checked_sub_borrow(node_bank, merps_account, token_index, borr_settle)?;
+    }
+    Ok(())
+}
+
 fn settle_borrow_full_unchecked(
     root_bank: &RootBank,
     node_bank: &mut NodeBank,
     merps_account: &mut MerpsAccount,
     token_index: usize,
 ) -> MerpsResult<()> {
-    let native_borrow = merps_account.get_native_borrow(root_bank, token_index);
-    let native_deposit = merps_account.get_native_deposit(root_bank, token_index);
+    let native_borrow = merps_account.get_native_borrow(root_bank, token_index).unwrap();
+    let native_deposit = merps_account.get_native_deposit(root_bank, token_index).unwrap();
 
     let quantity = cmp::min(native_borrow, native_deposit);
 
-    let borr_settle = I80F48::from_num(quantity) / root_bank.borrow_index;
-    let dep_settle = I80F48::from_num(quantity) / root_bank.deposit_index;
+    let borr_settle = quantity / root_bank.borrow_index;
+    let dep_settle = quantity / root_bank.deposit_index;
 
     checked_sub_deposit(node_bank, merps_account, token_index, dep_settle)?;
     checked_sub_borrow(node_bank, merps_account, token_index, borr_settle)?;
