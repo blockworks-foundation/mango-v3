@@ -770,6 +770,7 @@ impl Processor {
             .find_root_bank_index(base_root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
+        /* TODO: think about risks here, maybe we want the valid interval to be still checked, but larger
         // Check that root banks have been updated by Keeper
         check!(
             now_ts <= base_root_bank.last_updated + merps_group.valid_interval,
@@ -779,6 +780,7 @@ impl Processor {
             now_ts <= quote_root_bank.last_updated + merps_group.valid_interval,
             MerpsErrorCode::Default
         )?;
+        */
 
         let spot_market_index = merps_group
             .find_spot_market_index(spot_market_ai.key)
