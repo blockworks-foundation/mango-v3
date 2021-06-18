@@ -396,6 +396,8 @@ impl NodeBank {
         // TODO
         Ok(Self::load(account)?)
     }
+
+    // TODO - Add checks to these math methods to prevent result from being < 0
     pub fn checked_add_borrow(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows = self.borrows.checked_add(v).ok_or(throw!())?)
     }
@@ -408,15 +410,16 @@ impl NodeBank {
     pub fn checked_sub_deposit(&mut self, v: I80F48) -> MerpsResult<()> {
         Ok(self.deposits = self.deposits.checked_sub(v).ok_or(throw!())?)
     }
-    pub fn has_valid_deposits_borrows(&self, root_bank: &RootBank) -> bool {
-        self.get_total_native_deposit(root_bank) >= self.get_total_native_borrow(root_bank)
+    pub fn has_valid_deposits_borrows(&self, root_bank_cache: &RootBankCache) -> bool {
+        self.get_total_native_deposit(root_bank_cache)
+            >= self.get_total_native_borrow(root_bank_cache)
     }
-    pub fn get_total_native_borrow(&self, root_bank: &RootBank) -> u64 {
-        let native: I80F48 = self.borrows * root_bank.borrow_index;
+    pub fn get_total_native_borrow(&self, root_bank_cache: &RootBankCache) -> u64 {
+        let native: I80F48 = self.borrows * root_bank_cache.borrow_index;
         native.checked_ceil().unwrap().to_num() // rounds toward +inf
     }
-    pub fn get_total_native_deposit(&self, root_bank: &RootBank) -> u64 {
-        let native: I80F48 = self.deposits * root_bank.deposit_index;
+    pub fn get_total_native_deposit(&self, root_bank_cache: &RootBankCache) -> u64 {
+        let native: I80F48 = self.deposits * root_bank_cache.deposit_index;
         native.checked_floor().unwrap().to_num() // rounds toward -inf
     }
 }
@@ -496,21 +499,26 @@ impl MerpsCache {
         Ok(merps_cache)
     }
 
+    // TODO - only check caches are valid if balances are non-zero
     pub fn check_caches_valid(
         &self,
         merps_group: &MerpsGroup,
-        merps_account: &MerpsAccount,
+        active_assets: &[bool; MAX_PAIRS],
         now_ts: u64,
     ) -> bool {
         let valid_interval = merps_group.valid_interval;
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            msg!("root_bank_cache {} invalid: {}", QUOTE_INDEX, self.root_bank_cache[QUOTE_INDEX].last_update);
+            msg!(
+                "root_bank_cache {} invalid: {}",
+                QUOTE_INDEX,
+                self.root_bank_cache[QUOTE_INDEX].last_update
+            );
             return false;
         }
 
         for i in 0..merps_group.num_oracles {
             // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
-            if !merps_account.in_basket[i] {
+            if !active_assets[i] {
                 continue;
             }
 
@@ -528,7 +536,11 @@ impl MerpsCache {
 
             if !merps_group.perp_markets[i].is_empty() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    msg!("perp_market_cache {} invalid: {}", i, self.perp_market_cache[i].last_update);
+                    msg!(
+                        "perp_market_cache {} invalid: {}",
+                        i,
+                        self.perp_market_cache[i].last_update
+                    );
                     return false;
                 }
             }
@@ -857,8 +869,18 @@ impl PerpAccount {
             }
         }
     }
+
+    pub fn is_active(&self) -> bool {
+        self.base_position != 0
+            || !self.quote_position.is_zero()
+            || self.open_orders.bids_quantity != 0
+            || self.open_orders.asks_quantity != 0
+
+        // Note funding only applies if base position not 0
+    }
 }
 
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MerpsAccount {
@@ -867,7 +889,9 @@ pub struct MerpsAccount {
     pub merps_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_TOKENS],
+    // pub in_basket: [bool; MAX_TOKENS],
+    pub in_margin_basket: [bool; MAX_PAIRS],
+    pub num_in_margin_basket: u8,
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
@@ -927,12 +951,23 @@ impl MerpsAccount {
 
         Ok(merps_account)
     }
-    pub fn get_native_deposit(&self, root_bank: &RootBank, token_i: usize) -> MerpsResult<I80F48> {
-        self.deposits[token_i].checked_mul(root_bank.deposit_index).ok_or(throw!())
+    pub fn get_native_deposit(
+        &self,
+        root_bank_cache: &RootBankCache,
+        token_i: usize,
+    ) -> MerpsResult<I80F48> {
+        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(throw!())
     }
-    pub fn get_native_borrow(&self, root_bank: &RootBank, token_i: usize) -> MerpsResult<I80F48> {
-        self.borrows[token_i].checked_mul(root_bank.borrow_index).ok_or(throw!())
+    pub fn get_native_borrow(
+        &self,
+        root_bank_cache: &RootBankCache,
+        token_i: usize,
+    ) -> MerpsResult<I80F48> {
+        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(throw!())
     }
+
+    // TODO - Add checks to these math methods to prevent result from being < 0
+    // TOOD - Add unchecked versions to be used when we're confident
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
     }
@@ -961,11 +996,7 @@ impl MerpsAccount {
             merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
 
         for i in 0..merps_group.num_oracles {
-            if !self.in_basket[i] {
-                continue;
-            }
-
-            if self.spot_open_orders[i] == Pubkey::default() {
+            if !self.in_margin_basket[i] || self.spot_open_orders[i] == Pubkey::default() {
                 assets[i] = merps_cache.root_bank_cache[i].deposit_index * self.deposits[i];
             } else {
                 // TODO make sure open orders account is checked for validity before passing in here
@@ -994,20 +1025,24 @@ impl MerpsAccount {
         let bank_cache = &merps_cache.root_bank_cache[market_index];
         let price = merps_cache.price_cache[market_index].price;
 
-        Ok(if self.spot_open_orders[market_index] == Pubkey::default() {
-            self.deposits[market_index] * bank_cache.deposit_index * asset_weight * price
-        } else {
-            // TODO - confirm only checked open orders are sent in here
-            let open_orders = load_open_orders(open_orders_ai)?;
+        Ok(
+            if !self.in_margin_basket[market_index]
+                || self.spot_open_orders[market_index] == Pubkey::default()
+            {
+                self.deposits[market_index] * bank_cache.deposit_index * asset_weight * price
+            } else {
+                // TODO - confirm only checked open orders are sent in here
+                let open_orders = load_open_orders(open_orders_ai)?;
 
-            ((self.deposits[market_index] * bank_cache.deposit_index
-                + I80F48::from_num(open_orders.native_coin_total))
-                * asset_weight
-                * price)
-                + I80F48::from_num(
-                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                )
-        })
+                ((self.deposits[market_index] * bank_cache.deposit_index
+                    + I80F48::from_num(open_orders.native_coin_total))
+                    * asset_weight
+                    * price)
+                    + I80F48::from_num(
+                        open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                    )
+            },
+        )
     }
 
     pub fn get_assets_val(
@@ -1021,9 +1056,6 @@ impl MerpsAccount {
             merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
 
         for i in 0..merps_group.num_oracles {
-            if !self.in_basket[i] {
-                continue;
-            }
             let spot_market_info = &merps_group.spot_markets[i];
             let perp_market_info = &merps_group.perp_markets[i];
 
@@ -1065,7 +1097,9 @@ impl MerpsAccount {
         let bank_cache = &merps_cache.root_bank_cache[market_index];
         let price = merps_cache.price_cache[market_index].price;
 
-        let (oo_base, oo_quote) = if self.spot_open_orders[market_index] == Pubkey::default() {
+        let (oo_base, oo_quote) = if !self.in_margin_basket[market_index]
+            || self.spot_open_orders[market_index] == Pubkey::default()
+        {
             (ZERO_I80F48, ZERO_I80F48)
         } else {
             // TODO add in support for GUI hoster fee
@@ -1084,8 +1118,6 @@ impl MerpsAccount {
             * price)
             + oo_quote;
 
-        msg!("get_spot_health {} price={:?} health={:?}", market_index, price, health,);
-
         Ok(health)
     }
 
@@ -1101,9 +1133,6 @@ impl MerpsAccount {
             - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
 
         for i in 0..merps_group.num_oracles {
-            if !self.in_basket[i] {
-                continue;
-            }
             let spot_market_info = &merps_group.spot_markets[i];
             let perp_market_info = &merps_group.perp_markets[i];
 
@@ -1147,6 +1176,18 @@ impl MerpsAccount {
         }
 
         Ok(health)
+    }
+
+    /// Return an array of bools that are true if any part of token, spot or perps for that index are nonzero
+    pub fn get_active_assets(&self, merps_group: &MerpsGroup) -> [bool; MAX_PAIRS] {
+        let mut active_assets = [false; MAX_PAIRS];
+        for i in 0..merps_group.num_oracles {
+            active_assets[i] = self.in_margin_basket[i]
+                || !self.deposits[i].is_zero()
+                || !self.borrows[i].is_zero()
+                || self.perp_accounts[i].is_active();
+        }
+        active_assets
     }
 }
 

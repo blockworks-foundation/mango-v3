@@ -28,8 +28,8 @@ use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_market_state, load_open_orders, DataType, HealthType, MerpsAccount,
     MerpsCache, MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, DUST_THRESHOLD, MAX_PAIRS,
-    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, DUST_THRESHOLD,
+    MAX_NUM_IN_MARGIN_BASKET, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use bytemuck::cast_ref;
@@ -144,7 +144,6 @@ impl Processor {
             .perp_accounts
             .iter_mut()
             .for_each(|pa| pa.open_orders.is_free_bits = u32::MAX);
-        merps_account.in_basket[QUOTE_INDEX] = true;
         merps_account.meta_data = MetaData::new(DataType::MerpsAccount, 0, true);
 
         Ok(())
@@ -383,13 +382,15 @@ impl Processor {
     }
 
     /// Deposit instruction
+    /// TODO - fix instruction.rs and intruction.ts
     fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> ProgramResult {
-        const NUM_FIXED: usize = 8;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             merps_group_ai,         // read
             merps_account_ai,       // write
             owner_ai,               // read
+            merps_cache_ai,         // read
             root_bank_ai,           // read
             node_bank_ai,           // write
             vault_ai,               // write
@@ -399,13 +400,14 @@ impl Processor {
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
         let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+
+        // TODO - Probably not necessary for deposit to be from owner
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
 
         let token_index = merps_group
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
-
-        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
@@ -419,8 +421,16 @@ impl Processor {
 
         invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
 
+        // Check validity of
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let root_bank_cache = &merps_cache.root_bank_cache[token_index];
+        check!(
+            now_ts <= root_bank_cache.last_update + merps_group.valid_interval,
+            MerpsErrorCode::InvalidCache
+        )?;
+
         // increment merps account
-        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank.deposit_index;
+        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank_cache.deposit_index;
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
 
         Ok(())
@@ -504,6 +514,7 @@ impl Processor {
     #[allow(unused_variables)]
     fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MerpsResult<()> {
         // TODO don't allow borrow of infinite amount of quote currency
+        // TODO only allow borrow and withdraw or borrow and trade, not borrow by itself
         const NUM_FIXED: usize = 6;
         let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -530,29 +541,24 @@ impl Processor {
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
-
         // First check all caches to make sure valid
-        let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
-
-        check!(
-            now_ts > root_bank.last_updated + merps_group.valid_interval,
-            MerpsErrorCode::Default
-        )?;
 
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
-        check!(
-            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
-            MerpsErrorCode::InvalidCache
-        )?;
+        let root_bank_cache = &merps_cache.root_bank_cache[token_index];
 
-        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank.deposit_index;
-        let borrow: I80F48 = I80F48::from_num(quantity) / root_bank.borrow_index;
+        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank_cache.deposit_index;
+        let borrow: I80F48 = I80F48::from_num(quantity) / root_bank_cache.borrow_index;
 
         checked_add_deposit(&mut node_bank, &mut merps_account, token_index, deposit)?;
         checked_add_borrow(&mut node_bank, &mut merps_account, token_index, borrow)?;
 
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        let active_assets = merps_account.get_active_assets(&merps_group);
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
+            MerpsErrorCode::InvalidCache
+        )?;
         let health = merps_account.get_health(
             &merps_group,
             &merps_cache,
@@ -562,7 +568,7 @@ impl Processor {
 
         // TODO fix coll_ratio checks
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
-        check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
+        check!(node_bank.has_valid_deposits_borrows(&root_bank_cache), MerpsErrorCode::Default)?;
 
         Ok(())
     }
@@ -603,9 +609,6 @@ impl Processor {
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
-        // Make sure the asset is in basket
-        check!(merps_account.in_basket[token_index], MerpsErrorCode::InvalidToken)?;
-
         // Safety checks
         check_eq!(
             &merps_group.tokens[token_index].root_bank,
@@ -617,44 +620,37 @@ impl Processor {
 
         // First check all caches to make sure valid
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        let mut active_assets = merps_account.get_active_assets(&merps_group);
+        active_assets[token_index] = true; // Make sure token index is always checked
         check!(
-            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
+            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
             MerpsErrorCode::InvalidCache
         )?;
-        check!(
-            now_ts <= root_bank.last_updated + merps_group.valid_interval,
-            MerpsErrorCode::Default
-        )?;
+        let root_bank_cache = &merps_cache.root_bank_cache[token_index];
 
         // Borrow if withdrawing more than deposits
-        let native_deposit = merps_account.get_native_deposit(&root_bank, token_index).unwrap();
+        let native_deposit = merps_account.get_native_deposit(root_bank_cache, token_index)?;
         let rem_to_borrow = I80F48::from_num(quantity) - native_deposit;
-        if allow_borrow && rem_to_borrow > 0 {
+        if rem_to_borrow.is_positive() {
+            check!(allow_borrow, MerpsErrorCode::InsufficientFunds)?;
             let avail_deposit = merps_account.deposits[token_index];
             checked_sub_deposit(&mut node_bank, &mut merps_account, token_index, avail_deposit)?;
-            checked_add_borrow(&mut node_bank, &mut merps_account, token_index, rem_to_borrow)?;
+            checked_add_borrow(
+                &mut node_bank,
+                &mut merps_account,
+                token_index,
+                rem_to_borrow / root_bank_cache.borrow_index,
+            )?;
         } else {
             checked_sub_deposit(
                 &mut node_bank,
                 &mut merps_account,
                 token_index,
-                I80F48::from_num(quantity) / root_bank.deposit_index,
+                I80F48::from_num(quantity) / root_bank_cache.deposit_index,
             )?;
         }
 
-        let health = merps_account.get_health(
-            &merps_group,
-            &merps_cache,
-            open_orders_ais,
-            HealthType::Init,
-        )?;
-        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
-
-        // invoke_transfer()
-        // TODO think about whether this is a security risk. This is basically one signer for all merps
-        // let signers_seeds = [bytes_of(&merps_group.signer_nonce)];
         let signers_seeds = gen_signer_seeds(&merps_group.signer_nonce, merps_group_ai.key);
-
         invoke_transfer(
             token_prog_ai,
             vault_ai,
@@ -663,6 +659,14 @@ impl Processor {
             &[&signers_seeds],
             quantity,
         )?;
+
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+        check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
@@ -687,8 +691,7 @@ impl Processor {
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
 
         check!(market_index < merps_group.num_oracles, MerpsErrorCode::Default)?;
-        merps_account.in_basket[market_index] = true;
-
+        merps_account.in_margin_basket[market_index] = true;
         Ok(())
     }
 
@@ -712,8 +715,9 @@ impl Processor {
     ) -> MerpsResult<()> {
         // TODO use MerpsCache instead of RootBanks to get the deposit/borrow indexes
         const NUM_FIXED: usize = 22;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
-        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,         // read
             merps_account_ai,       // write
@@ -737,7 +741,7 @@ impl Processor {
             signer_ai,              // read
             rent_ai,                // read
             dex_signer_ai,          // read
-        ] = fixed_accs;
+        ] = fixed_ais;
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
         let mut merps_account =
@@ -749,74 +753,51 @@ impl Processor {
         check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
 
+        // TODO - put node bank pubkeys inside MerpsGroup so we don't have to send in root bank here
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
         let base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MerpsErrorCode::InvalidNodeBank
+        )?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-        let quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-
-        // First check all caches to make sure valid
-        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
         check!(
-            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
-            MerpsErrorCode::Default
+            quote_root_bank_ai.key == &merps_group.tokens[QUOTE_INDEX].root_bank,
+            MerpsErrorCode::InvalidRootBank
         )?;
-
-        let health = merps_account.get_health(
-            &merps_group,
-            &merps_cache,
-            open_orders_ais,
-            HealthType::Init,
+        let quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MerpsErrorCode::InvalidNodeBank
         )?;
-        let reduce_only = health < ZERO_I80F48;
 
         // Make sure the root bank is in the merps group
-        let _token_index = merps_group
+        let token_index = merps_group
             .find_root_bank_index(base_root_bank_ai.key)
-            .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
-
-        /* TODO: think about risks here, maybe we want the valid interval to be still checked, but larger
-        // Check that root banks have been updated by Keeper
+            .ok_or(throw_err!(MerpsErrorCode::InvalidRootBank))?;
         check!(
-            now_ts <= base_root_bank.last_updated + merps_group.valid_interval,
-            MerpsErrorCode::Default
+            &merps_group.spot_markets[token_index].spot_market == spot_market_ai.key,
+            MerpsErrorCode::InvalidMarket
         )?;
-        check!(
-            now_ts <= quote_root_bank.last_updated + merps_group.valid_interval,
-            MerpsErrorCode::Default
-        )?;
-        */
 
-        let spot_market_index = merps_group
-            .find_spot_market_index(spot_market_ai.key)
-            .ok_or(throw_err!(MerpsErrorCode::InvalidMarket))?;
-
-        let side = order.side;
-        // TODO maybe merge this with match on banks below
-        let (in_token_i, out_token_i, vault_ai) = match side {
-            SerumSide::Bid => (spot_market_index, QUOTE_INDEX, quote_vault_ai),
-            SerumSide::Ask => (QUOTE_INDEX, spot_market_index, base_vault_ai),
-        };
-
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MerpsErrorCode::Default)?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MerpsErrorCode::Default)?;
-        check_eq!(token_program_ai.key, &spl_token::id(), MerpsErrorCode::Default)?;
-        check_eq!(dex_program_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
-
-        // this is to keep track of the amount of funds transferred
-        let (pre_base, pre_quote) = {
-            (
-                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
-                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
-            )
-        };
+        // Adjust margin basket
+        if merps_account.num_in_margin_basket == MAX_NUM_IN_MARGIN_BASKET {
+            check!(merps_account.in_margin_basket[token_index], MerpsErrorCode::MarginBasketFull)?;
+        } else {
+            if !merps_account.in_margin_basket[token_index] {
+                merps_account.in_margin_basket[token_index] = true;
+                merps_account.num_in_margin_basket += 1;
+            }
+        }
 
         for i in 0..merps_group.num_oracles {
-            if !merps_account.in_basket[i] {
+            if !merps_account.in_margin_basket[i] {
                 continue;
             }
+
             let open_orders_ai = &open_orders_ais[i];
-            if i == spot_market_index {
+            if i == token_index {
                 if merps_account.spot_open_orders[i] == Pubkey::default() {
                     let open_orders = load_open_orders(open_orders_ai)?;
                     check_eq!(open_orders.account_flags, 0, MerpsErrorCode::Default)?;
@@ -839,13 +820,51 @@ impl Processor {
             }
         }
 
+        // First check all caches to make sure valid
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        let mut active_assets = merps_account.get_active_assets(&merps_group);
+
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
+            MerpsErrorCode::Default
+        )?;
+
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
+        let reduce_only = health < ZERO_I80F48;
+
+        // TODO maybe check that root bank was updated recently
+
+        let side = order.side;
+        let (in_token_i, out_token_i, vault_ai) = match side {
+            SerumSide::Bid => (token_index, QUOTE_INDEX, quote_vault_ai),
+            SerumSide::Ask => (QUOTE_INDEX, token_index, base_vault_ai),
+        };
+
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MerpsErrorCode::Default)?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MerpsErrorCode::Default)?;
+        check_eq!(token_program_ai.key, &spl_token::ID, MerpsErrorCode::Default)?;
+        check_eq!(dex_program_ai.key, &merps_group.dex_program_id, MerpsErrorCode::Default)?;
+
+        // this is to keep track of the amount of funds transferred
+        let (pre_base, pre_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )
+        };
+
         let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
         let instruction = Instruction {
             program_id: *dex_program_ai.key,
             data,
             accounts: vec![
                 AccountMeta::new(*spot_market_ai.key, false),
-                AccountMeta::new(*open_orders_ais[spot_market_index].key, false),
+                AccountMeta::new(*open_orders_ais[token_index].key, false),
                 AccountMeta::new(*dex_request_queue_ai.key, false),
                 AccountMeta::new(*dex_event_queue_ai.key, false),
                 AccountMeta::new(*bids_ai.key, false),
@@ -861,7 +880,7 @@ impl Processor {
         let account_infos = [
             dex_program_ai.clone(), // Have to add account of the program id
             spot_market_ai.clone(),
-            open_orders_ais[spot_market_index].clone(),
+            open_orders_ais[token_index].clone(),
             dex_request_queue_ai.clone(),
             dex_event_queue_ai.clone(),
             bids_ai.clone(),
@@ -881,7 +900,7 @@ impl Processor {
         invoke_settle_funds(
             dex_program_ai,
             spot_market_ai,
-            &open_orders_ais[spot_market_index],
+            &open_orders_ais[token_index],
             signer_ai,
             dex_base_ai,
             dex_quote_ai,
@@ -891,7 +910,20 @@ impl Processor {
             token_program_ai,
             &[&signer_seeds],
         )?;
+        // See if we can remove this token from margin
+        {
+            let open_orders = load_open_orders(&open_orders_ais[token_index])?;
+            if open_orders.native_pc_total == 0
+                && open_orders.native_coin_total == 0
+                && open_orders.referrer_rebates_accrued == 0
+            {
+                // TODO - no need to check referrer_rebates_accrued 0 because necessarily
+                merps_account.in_margin_basket[token_index] = false;
+                merps_account.num_in_margin_basket -= 1;
+            }
+        }
 
+        // TODO - write a zero copy way to deserialize Account to reduce compute
         let (post_base, post_quote) = {
             (
                 Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
@@ -899,21 +931,22 @@ impl Processor {
             )
         };
 
-        let (pre_in, pre_out, post_in, post_out) = match side {
-            SerumSide::Bid => (pre_base, pre_quote, post_base, post_quote),
-            SerumSide::Ask => (pre_quote, pre_base, post_quote, post_base),
+        let (pre_in, pre_out, post_in, post_out, mut out_node_bank, mut in_node_bank) = match side {
+            SerumSide::Bid => {
+                (pre_base, pre_quote, post_base, post_quote, quote_node_bank, base_node_bank)
+            }
+            SerumSide::Ask => {
+                (pre_quote, pre_base, post_quote, post_base, base_node_bank, quote_node_bank)
+            }
         };
-
-        let (out_root_bank, mut out_node_bank, in_root_bank, mut in_node_bank) = match side {
-            SerumSide::Bid => (quote_root_bank, quote_node_bank, base_root_bank, base_node_bank),
-            SerumSide::Ask => (base_root_bank, base_node_bank, quote_root_bank, quote_node_bank),
-        };
+        let (out_root_bank_cache, in_root_bank_cache) =
+            (&merps_cache.root_bank_cache[out_token_i], &merps_cache.root_bank_cache[in_token_i]);
 
         // if out token was net negative, then you may need to borrow more
         if post_out < pre_out {
             let total_out = pre_out.checked_sub(post_out).unwrap();
             let native_deposit =
-                merps_account.get_native_deposit(&out_root_bank, out_token_i).unwrap();
+                merps_account.get_native_deposit(out_root_bank_cache, out_token_i).unwrap();
             if native_deposit < I80F48::from_num(total_out) {
                 // need to borrow
                 let avail_deposit = merps_account.deposits[out_token_i];
@@ -930,11 +963,11 @@ impl Processor {
                     &mut out_node_bank,
                     &mut merps_account,
                     out_token_i,
-                    rem_spend / out_root_bank.borrow_index,
+                    rem_spend / out_root_bank_cache.borrow_index,
                 )?;
             } else {
                 // just spend user deposits
-                let merps_spent = I80F48::from_num(total_out) / out_root_bank.deposit_index;
+                let merps_spent = I80F48::from_num(total_out) / out_root_bank_cache.deposit_index;
                 checked_sub_deposit(
                     &mut out_node_bank,
                     &mut merps_account,
@@ -944,25 +977,26 @@ impl Processor {
             }
         } else {
             // Add out token deposit
+            // TODO - make sure deposit doesn't go negative. checked sub will no longer error in that case
             let deposit = I80F48::from_num(post_out.checked_sub(pre_out).unwrap())
-                / out_root_bank.deposit_index;
+                / out_root_bank_cache.deposit_index;
             checked_add_deposit(&mut out_node_bank, &mut merps_account, out_token_i, deposit)?;
         }
 
-        let total_in =
-            I80F48::from_num(post_in.checked_sub(pre_in).unwrap()) / in_root_bank.deposit_index;
+        let total_in = I80F48::from_num(post_in.checked_sub(pre_in).unwrap())
+            / in_root_bank_cache.deposit_index;
         checked_add_deposit(&mut in_node_bank, &mut merps_account, in_token_i, total_in)?;
 
         // Settle borrow
         // TODO only do ops on tokens that have borrows and deposits
         settle_borrow_full_unchecked(
-            &out_root_bank,
+            &out_root_bank_cache,
             &mut out_node_bank,
             &mut merps_account,
             out_token_i,
         )?;
         settle_borrow_full_unchecked(
-            &in_root_bank,
+            &in_root_bank_cache,
             &mut in_node_bank,
             &mut merps_account,
             in_token_i,
@@ -975,7 +1009,10 @@ impl Processor {
             HealthType::Init,
         )?;
         check!(reduce_only || health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
-        check!(out_node_bank.has_valid_deposits_borrows(&out_root_bank), MerpsErrorCode::Default)?;
+        check!(
+            out_node_bank.has_valid_deposits_borrows(&out_root_bank_cache),
+            MerpsErrorCode::Default
+        )?;
 
         Ok(())
     }
@@ -1037,32 +1074,34 @@ impl Processor {
         token_index: usize,
         quantity: u64,
     ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 5;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [
-            merps_group_ai,     // read
-            merps_account_ai,   // write
-            root_bank_ai,       // read
-            node_bank_ai,       // write
-            owner_ai            // read
-        ] = accounts;
-
-        let mut merps_account =
-            MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
-        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-
-        check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
-        check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
-
-        settle_borrow_unchecked(
-            &root_bank,
-            &mut node_bank,
-            &mut merps_account,
-            token_index,
-            I80F48::from_num(quantity),
-        )?;
-        Ok(())
+        // TODO - basically this should never occur because deposits and borrows should never both be >0
+        unimplemented!();
+        // const NUM_FIXED: usize = 5;
+        // let accounts = array_ref![accounts, 0, NUM_FIXED];
+        // let [
+        //     merps_group_ai,     // read
+        //     merps_account_ai,   // write
+        //     root_bank_ai,       // read
+        //     node_bank_ai,       // write
+        //     owner_ai            // read
+        // ] = accounts;
+        //
+        // let mut merps_account =
+        //     MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
+        // let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        // let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        //
+        // check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
+        // check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::Default)?;
+        //
+        // settle_borrow_unchecked(
+        //     &root_bank,
+        //     &mut node_bank,
+        //     &mut merps_account,
+        //     token_index,
+        //     I80F48::from_num(quantity),
+        // )?;
+        // Ok(())
     }
 
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
@@ -1186,7 +1225,8 @@ impl Processor {
         order_type: OrderType,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 8;
-        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
@@ -1196,7 +1236,7 @@ impl Processor {
             bids_ai,            // write
             asks_ai,            // write
             event_queue_ai,     // write
-        ] = fixed_accs;
+        ] = fixed_ais;
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
         let mut merps_account =
@@ -1208,9 +1248,8 @@ impl Processor {
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
-
         for i in 0..merps_group.num_oracles {
-            if !merps_account.in_basket[i] || merps_group.spot_markets[i].is_empty() {
+            if !merps_account.in_margin_basket[i] || merps_group.spot_markets[i].is_empty() {
                 continue;
             }
             check_eq!(
@@ -1225,18 +1264,16 @@ impl Processor {
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
 
-        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
-
-        check!(
-            merps_cache.check_caches_valid(&merps_group, &merps_account, now_ts),
-            MerpsErrorCode::Default
-        )?;
-
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        check!(merps_account.in_basket[market_index], MerpsErrorCode::Default)?;
-
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+        let mut active_assets = merps_account.get_active_assets(&merps_group);
+        active_assets[market_index] = true;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
+            MerpsErrorCode::Default
+        )?;
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
@@ -1254,7 +1291,12 @@ impl Processor {
             client_order_id,
         )?;
 
-        let health = merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, HealthType::Init)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
@@ -1467,7 +1509,10 @@ impl Processor {
             settlement / borrow_index,
         )?;
 
-        check!(node_bank.has_valid_deposits_borrows(&root_bank), MerpsErrorCode::Default)?;
+        check!(
+            node_bank.has_valid_deposits_borrows(&merps_cache.root_bank_cache[market_index]),
+            MerpsErrorCode::Default
+        )?;
 
         Ok(())
     }
@@ -1510,15 +1555,20 @@ impl Processor {
         check!(!perp_market_info.is_empty(), MerpsErrorCode::Default)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
+
+        let mut active_assets = liqee_merps_account.get_active_assets(&merps_group);
+        active_assets[market_index] = true;
         check!(
-            merps_cache.check_caches_valid(&merps_group, &liqee_merps_account, now_ts),
+            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
+            MerpsErrorCode::Default
+        )?;
+
+        let mut active_assets = liqor_merps_account.get_active_assets(&merps_group);
+        active_assets[market_index] = true;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts), // TODO write more efficient
             MerpsErrorCode::InvalidCache
         )?;
-        check!(
-            merps_cache.check_caches_valid(&merps_group, &liqor_merps_account, now_ts), // TODO write more efficient
-            MerpsErrorCode::InvalidCache
-        )?;
-        check!(liqor_merps_account.in_basket[market_index], MerpsErrorCode::InvalidMarket)?;
 
         let maint_health = liqee_merps_account.get_health(
             &merps_group,
@@ -1626,7 +1676,12 @@ impl Processor {
                 HealthType::Maint,
             )?;
 
-            if assets_val < DUST_THRESHOLD {}
+            if assets_val < DUST_THRESHOLD {
+                // quote token can't pay off not quote liabs
+                // hence the liabs should be transferred to the liqor
+                // If insurance fund is depleted, ADL on every perp market that still has open positions
+                // Perhaps bankrupt accounts get put on event queue to be handled separately
+            }
         } else {
         }
 
@@ -2116,6 +2171,7 @@ fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
     Ok(oracle.price)
 }
 
+/// TODO - although these values are I8048, they must never be less than zero
 fn checked_add_deposit(
     node_bank: &mut NodeBank,
     merps_account: &mut MerpsAccount,
@@ -2157,25 +2213,25 @@ fn checked_sub_borrow(
 }
 
 fn settle_borrow_unchecked(
-    root_bank: &RootBank,
+    root_bank_cache: &RootBankCache,
     node_bank: &mut NodeBank,
     merps_account: &mut MerpsAccount,
     token_index: usize,
     quantity: I80F48,
 ) -> MerpsResult<()> {
-    let native_borrow = merps_account.get_native_borrow(root_bank, token_index).unwrap();
-    let native_deposit = merps_account.get_native_deposit(root_bank, token_index).unwrap();
+    let native_borrow = merps_account.get_native_borrow(root_bank_cache, token_index).unwrap();
+    let native_deposit = merps_account.get_native_deposit(root_bank_cache, token_index).unwrap();
 
     let quantity = cmp::min(quantity, native_deposit);
-    let borr_settle = quantity.checked_div(root_bank.borrow_index).unwrap();
-    let dep_settle = quantity.checked_div(root_bank.deposit_index).unwrap();
+    let borr_settle = quantity.checked_div(root_bank_cache.borrow_index).unwrap();
+    let dep_settle = quantity.checked_div(root_bank_cache.deposit_index).unwrap();
 
     if quantity >= native_borrow {
         checked_sub_deposit(
             node_bank,
             merps_account,
             token_index,
-            native_borrow.checked_div(root_bank.deposit_index).unwrap(),
+            native_borrow.checked_div(root_bank_cache.deposit_index).unwrap(),
         )?;
         checked_sub_borrow(
             node_bank,
@@ -2191,18 +2247,18 @@ fn settle_borrow_unchecked(
 }
 
 fn settle_borrow_full_unchecked(
-    root_bank: &RootBank,
+    root_bank_cache: &RootBankCache,
     node_bank: &mut NodeBank,
     merps_account: &mut MerpsAccount,
     token_index: usize,
 ) -> MerpsResult<()> {
-    let native_borrow = merps_account.get_native_borrow(root_bank, token_index).unwrap();
-    let native_deposit = merps_account.get_native_deposit(root_bank, token_index).unwrap();
+    let native_borrow = merps_account.get_native_borrow(root_bank_cache, token_index).unwrap();
+    let native_deposit = merps_account.get_native_deposit(root_bank_cache, token_index).unwrap();
 
     let quantity = cmp::min(native_borrow, native_deposit);
 
-    let borr_settle = quantity / root_bank.borrow_index;
-    let dep_settle = quantity / root_bank.deposit_index;
+    let borr_settle = quantity / root_bank_cache.borrow_index;
+    let dep_settle = quantity / root_bank_cache.deposit_index;
 
     checked_sub_deposit(node_bank, merps_account, token_index, dep_settle)?;
     checked_sub_borrow(node_bank, merps_account, token_index, borr_settle)?;

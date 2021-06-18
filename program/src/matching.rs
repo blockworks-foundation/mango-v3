@@ -171,6 +171,7 @@ pub enum Side {
 pub const MAX_BOOK_NODES: usize = 1024; // NOTE: this cannot be larger than u32::MAX
 
 #[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
 pub struct BookSide {
     pub meta_data: MetaData,
 
