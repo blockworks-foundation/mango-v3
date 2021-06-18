@@ -703,6 +703,8 @@ impl Processor {
     }
 
     // TODO - add serum dex fee discount functionality
+
+    #[inline(never)]
     fn place_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -773,6 +775,7 @@ impl Processor {
             .find_root_bank_index(base_root_bank_ai.key)
             .ok_or(throw_err!(MerpsErrorCode::InvalidToken))?;
 
+        /* TODO: think about risks here, maybe we want the valid interval to be still checked, but larger
         // Check that root banks have been updated by Keeper
         check!(
             now_ts <= base_root_bank.last_updated + merps_group.valid_interval,
@@ -782,6 +785,7 @@ impl Processor {
             now_ts <= quote_root_bank.last_updated + merps_group.valid_interval,
             MerpsErrorCode::Default
         )?;
+        */
 
         let spot_market_index = merps_group
             .find_spot_market_index(spot_market_ai.key)
@@ -1182,7 +1186,7 @@ impl Processor {
         order_type: OrderType,
     ) -> MerpsResult<()> {
         const NUM_FIXED: usize = 8;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             merps_group_ai,     // read
             merps_account_ai,   // write
@@ -1192,7 +1196,7 @@ impl Processor {
             bids_ai,            // write
             asks_ai,            // write
             event_queue_ai,     // write
-        ] = accounts;
+        ] = fixed_accs;
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
         let mut merps_account =
@@ -1203,6 +1207,20 @@ impl Processor {
 
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+
+
+        for i in 0..merps_group.num_oracles {
+            if !merps_account.in_basket[i] || merps_group.spot_markets[i].is_empty() {
+                continue;
+            }
+            check_eq!(
+                open_orders_ais[i].key,
+                &merps_account.spot_open_orders[i],
+                MerpsErrorCode::Default
+            )?;
+            check_open_orders(&open_orders_ais[i], &merps_group.signer_key)?;
+        }
+
         // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
         check!(price > 0, MerpsErrorCode::Default)?;
         check!(quantity > 0, MerpsErrorCode::Default)?;
@@ -1236,7 +1254,7 @@ impl Processor {
             client_order_id,
         )?;
 
-        let health = merps_account.get_health(&merps_group, &merps_cache, &[], HealthType::Init)?;
+        let health = merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, HealthType::Init)?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
