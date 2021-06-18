@@ -263,8 +263,6 @@ pub enum MerpsInstruction {
     SettlePnl {
         market_index: usize,
     },
-
-    TestRalfs,
 }
 
 impl MerpsInstruction {
@@ -395,7 +393,6 @@ impl MerpsInstruction {
 
                 MerpsInstruction::SettlePnl { market_index: usize::from_le_bytes(*data_arr) }
             },
-            23 => MerpsInstruction::TestRalfs,
             _ => {
                 return None;
             }

@@ -23,20 +23,7 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::instruction::MerpsInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::{
-    StubOracle,
-    AccountType,
-    Mapping,
-    Product,
-    Price,
-    PriceType,
-    PriceStatus,
-    CorpAction,
-    cast,
-    MAGIC,
-    VERSION_2,
-    PROD_HDR_SIZE
-};
+use crate::oracle::{determine_oracle_type, StubOracle, Price, OracleType};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_market_state, load_open_orders, DataType, HealthType, MerpsAccount,
@@ -272,10 +259,17 @@ impl Processor {
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
 
-        // TODO allow more oracle types including purely on chain price feeds
-        // TODO use first 4 bytes of oracle account to identify oracle type (pyth / stub)
-        let rent = Rent::get()?;
-        let _oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+        let oracle_type = determine_oracle_type(oracle_ai);
+        match oracle_type {
+            OracleType::Pyth => {
+                msg!("got pyth"); // Do nothing really cause all that's needed is storing the pkey
+            }
+            OracleType::Stub => {
+                msg!("got stub");
+                let rent = Rent::get()?;
+                let _oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+            }
+        }
 
         let oracle_index = merps_group.num_oracles;
         merps_group.oracles[oracle_index] = *oracle_ai.key;
@@ -296,14 +290,13 @@ impl Processor {
         let merps_group = MerpsGroup::load_mut_checked(merps_group_ai, program_id)?;
         check!(admin_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(admin_ai.key, &merps_group.admin, MerpsErrorCode::Default)?;
-
-        // TODO only allow setting stub oracle and not other oracle types
-        // TODO verify oracle is really owned by this group (currently only checks program)
+        let oracle_type = determine_oracle_type(oracle_ai);
+        check_eq!(oracle_type, OracleType::Stub, MerpsErrorCode::Default)?;
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
         let clock = Clock::get()?;
         oracle.last_update = clock.unix_timestamp as u64;
-
+        // TODO verify oracle is really owned by this group (currently only checks program)
         Ok(())
     }
 
@@ -450,11 +443,11 @@ impl Processor {
             MerpsCache::load_mut_checked(merps_cache_ai, program_id, &merps_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
         for oracle_ai in oracle_ais.iter() {
             let i = merps_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-
             merps_cache.price_cache[i] =
-                PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
+                PriceCache { price: read_oracle(&merps_group, i, oracle_ai)?, last_update: now_ts };
         }
         Ok(())
     }
@@ -1435,27 +1428,6 @@ impl Processor {
         Ok(())
     }
 
-    fn test_ralfs(program_id: &Pubkey, accounts: &[AccountInfo]) -> MerpsResult<()> {
-        msg!("Executing test ralfs");
-        const NUM_FIXED: usize = 3;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [
-            product_ai,      // read
-            price_ai,      // read
-            admin_ai        // write
-        ] = accounts;
-
-        msg!("Wow we are executing this!");
-        let mut product = Product::get_product(product_ai).unwrap();
-        msg!("Wow we got product!");
-        msg!("Oracle MAGIC: {}", product.magic);
-
-        // let mut price = Price::get_price(price_ai).unwrap();
-        // msg!( "price ........ {}", price.agg.price );
-
-        Ok(())
-    }
-
     /// Liquidate an account similar to Mango
     #[allow(unused)]
     fn liquidate_perp(
@@ -1881,10 +1853,6 @@ impl Processor {
                 msg!("Merps: SettlePnl");
                 Self::settle_pnl(program_id, accounts, market_index)?;
             }
-            MerpsInstruction::TestRalfs => {
-                msg!("Merps: TestRalfs");
-                Self::test_ralfs(program_id, accounts)?;
-            }
         }
 
         Ok(())
@@ -2020,17 +1988,32 @@ fn invoke_transfer<'a>(
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
 }
 
-fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
-    /* TODO abstract different oracle programs
+#[inline(never)]
+fn read_oracle(merps_group: &MerpsGroup, token_index: usize, oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
+    /* TODO abstract different oracle programs (Partially done)
     let aggregator = flux_aggregator::state::Aggregator::load_initialized(oracle_ai)?;
     let answer = flux_aggregator::read_median(oracle_ai)?;
     let median = I80F48::from(answer.median);
     let units = I80F48::from(10u64.pow(aggregator.config.decimals));
     let value = median.checked_div(units);
     */
-
-    let oracle = StubOracle::load(oracle_ai)?;
-    Ok(oracle.price)
+    let quote_decimals: u8 = merps_group.tokens[QUOTE_INDEX].decimals;
+    let price: I80F48;
+    let oracle_type = determine_oracle_type(oracle_ai);
+    match oracle_type {
+        OracleType::Pyth => {
+            let price_account = Price::get_price(oracle_ai).unwrap();
+            let value = I80F48::from_num(price_account.agg.price);
+            let quote_adj = I80F48::from_num(10u64.pow(quote_decimals.checked_sub(price_account.expo.abs() as u8).unwrap() as u32));
+            let base_adj = I80F48::from_num(10u64.pow(merps_group.tokens[token_index].decimals as u32));
+            price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
+        }
+        OracleType::Stub => {
+            let oracle = StubOracle::load(oracle_ai)?;
+            price = I80F48::from_num(oracle.price);
+        }
+    }
+    Ok(price)
 }
 
 fn checked_add_deposit(

@@ -1,10 +1,8 @@
-use std::{cell::RefMut, mem::size_of, mem:: size_of_val};
-
+use std::{cell::RefMut, mem::size_of};
 use fixed::types::I80F48;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey, rent::Rent};
-use solana_program::msg;
 
 
 use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
@@ -59,6 +57,15 @@ pub const MAP_TABLE_SIZE : usize = 640;
 pub const PROD_ACCT_SIZE : usize = 512;
 pub const PROD_HDR_SIZE  : usize = 48;
 pub const PROD_ATTR_SIZE : usize = PROD_ACCT_SIZE - PROD_HDR_SIZE;
+
+// oracle can be of different types
+#[derive(PartialEq)]
+#[repr(C)]
+pub enum OracleType
+{
+  Stub,
+  Pyth
+}
 
 // each account has its own type
 #[repr(C)]
@@ -145,26 +152,6 @@ impl Product {
         assert_eq!( product.ver, VERSION_2, "unexpected pyth product account version" );
         Ok(*product)
     }
-
-    pub fn load_mut_checked<'a>(
-        account: &'a AccountInfo,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        // msg!("Account len: {}", account.data_len());
-        // msg!("size_of SELF: {}", size_of::<Self>());
-        // let borrowed = &account.data.borrow();
-        // msg!("size_of BORROWED: {}", size_of_val(borrowed));
-        // let (_, pxa, _) = borrowed.align_to::<Product>();
-        // let casted = pxa[0] as u8[];
-        // msg!("size_of Mapped Product: {}", size_of_val(&casted));
-        // // let unwrapped = borrowed.unwrap();
-        // let map_acct = cast::<Product>( &borrowed );
-        //
-        // msg!("size_of Mapped Product: {}", size_of_val(map_acct));
-        // msg!("Mapping MAGIC!!!!!!: {}", &map_acct.magic);
-        // check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
-        let oracle = Self::load_mut(account)?;
-        Ok(oracle)
-    }
 }
 
 // contributing or aggregate price component
@@ -248,4 +235,15 @@ impl AccKey
     let k8 = cast::<AccKeyU64>( &self.val );
     return k8.val[0]!=0 || k8.val[1]!=0 || k8.val[2]!=0 || k8.val[3]!=0;
   }
+}
+
+pub fn determine_oracle_type<'a>(
+    account: &'a AccountInfo,
+) -> OracleType {
+    let borrowed = &account.data.borrow();
+    if borrowed[0] == 212 &&  borrowed[1] == 195 &&  borrowed[2] == 178 && borrowed[3] == 161 {
+        return OracleType::Pyth;
+    } else {
+        return OracleType::Stub;
+    }
 }
