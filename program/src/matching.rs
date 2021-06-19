@@ -39,7 +39,7 @@ pub struct InnerNode {
 
 impl InnerNode {
     fn walk_down(&self, search_key: i128) -> (NodeHandle, bool) {
-        let crit_bit_mask = (1i128 << 127) >> self.prefix_len;
+        let crit_bit_mask = 1i128 << (127 - self.prefix_len);
         let crit_bit = (search_key & crit_bit_mask) != 0;
         (self.children[crit_bit as usize], crit_bit)
     }
@@ -432,7 +432,7 @@ impl BookSide {
             // implies root is a Leaf or Inner where shared_prefix_len < prefix_len
 
             // change the root in place to represent the LCA of [new_leaf] and [root]
-            let crit_bit_mask: i128 = (1i128 << 127) >> shared_prefix_len;
+            let crit_bit_mask: i128 = 1i128 << (127 - shared_prefix_len);
             let new_leaf_crit_bit = (crit_bit_mask & new_leaf.key) != 0;
             let old_root_crit_bit = !new_leaf_crit_bit;
 
