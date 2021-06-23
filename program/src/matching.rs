@@ -1,6 +1,6 @@
-use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::queue::{EventQueue, FillEvent, OutEvent};
-use crate::state::{DataType, MerpsAccount, MetaData, PerpMarket, PerpOpenOrders};
+use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
 use fixed::types::I80F48;
 use mango_common::Loadable;
@@ -188,14 +188,14 @@ impl BookSide {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         perp_market: &PerpMarket,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
         let state = Self::load_mut(account)?;
-        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::Default)?;
 
         match DataType::try_from(state.meta_data.data_type).unwrap() {
-            DataType::Bids => check!(account.key == &perp_market.bids, MerpsErrorCode::Default)?,
-            DataType::Asks => check!(account.key == &perp_market.asks, MerpsErrorCode::Default)?,
+            DataType::Bids => check!(account.key == &perp_market.bids, MangoErrorCode::Default)?,
+            DataType::Asks => check!(account.key == &perp_market.asks, MangoErrorCode::Default)?,
             _ => return Err(throw!()),
         }
 
@@ -207,16 +207,16 @@ impl BookSide {
         program_id: &Pubkey,
         data_type: DataType,
         rent: &Rent,
-    ) -> MerpsResult<RefMut<'a, Self>> {
+    ) -> MangoResult<RefMut<'a, Self>> {
         // NOTE: check this first so we can borrow account later
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),
-            MerpsErrorCode::AccountNotRentExempt
+            MangoErrorCode::AccountNotRentExempt
         )?;
 
         let mut state = Self::load_mut(account)?;
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
-        check!(!state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::Default)?;
         state.meta_data = MetaData::new(data_type, 0, true);
         Ok(state)
     }
@@ -353,7 +353,7 @@ impl BookSide {
         Some(val)
     }
 
-    fn insert(&mut self, val: &AnyNode) -> MerpsResult<u32> {
+    fn insert(&mut self, val: &AnyNode) -> MangoResult<u32> {
         match NodeTag::try_from(val.tag) {
             Ok(NodeTag::InnerNode) | Ok(NodeTag::LeafNode) => (),
             _ => unreachable!(),
@@ -362,7 +362,7 @@ impl BookSide {
         if self.free_list_len == 0 {
             check!(
                 self.bump_index < self.nodes.len() && self.bump_index < (u32::MAX as usize),
-                MerpsErrorCode::OutOfSpace
+                MangoErrorCode::OutOfSpace
             )?;
 
             self.nodes[self.bump_index] = *val;
@@ -394,7 +394,7 @@ impl BookSide {
     pub fn insert_leaf(
         &mut self,
         new_leaf: &LeafNode,
-    ) -> MerpsResult<(NodeHandle, Option<LeafNode>)> {
+    ) -> MangoResult<(NodeHandle, Option<LeafNode>)> {
         let mut root: NodeHandle = match self.root() {
             Some(h) => h,
             None => {
@@ -477,7 +477,7 @@ impl<'a> Book<'a> {
         bids_ai: &'a AccountInfo,
         asks_ai: &'a AccountInfo,
         perp_market: &PerpMarket,
-    ) -> MerpsResult<Self> {
+    ) -> MangoResult<Self> {
         Ok(Self {
             bids: BookSide::load_mut_checked(bids_ai, program_id, perp_market)?,
             asks: BookSide::load_mut_checked(asks_ai, program_id, perp_market)?,
@@ -504,21 +504,21 @@ impl<'a> Book<'a> {
         &mut self,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
-        merps_account: &mut MerpsAccount,
-        merps_account_pk: &Pubkey,
+        mango_account: &mut MangoAccount,
+        mango_account_pk: &Pubkey,
         market_index: usize,
         side: Side,
         price: i64,
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         match side {
             Side::Bid => self.new_bid(
                 event_queue,
                 market,
-                merps_account,
-                merps_account_pk,
+                mango_account,
+                mango_account_pk,
                 market_index,
                 price,
                 quantity,
@@ -528,8 +528,8 @@ impl<'a> Book<'a> {
             Side::Ask => self.new_ask(
                 event_queue,
                 market,
-                merps_account,
-                merps_account_pk,
+                mango_account,
+                mango_account_pk,
                 market_index,
                 price,
                 quantity,
@@ -543,14 +543,14 @@ impl<'a> Book<'a> {
         &mut self,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
-        merps_account: &mut MerpsAccount,
-        merps_account_pk: &Pubkey,
+        mango_account: &mut MangoAccount,
+        mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         // TODO make use of the order options
         // TODO proper error handling
         // TODO handle the case where we run out of compute
@@ -602,7 +602,7 @@ impl<'a> Book<'a> {
             // This fill is not necessary, purely for stats purposes
             let taker_fill = FillEvent::new(
                 false,
-                *merps_account_pk,
+                *mango_account_pk,
                 match_quantity,
                 -quote_change,
                 market.long_funding,
@@ -627,7 +627,7 @@ impl<'a> Book<'a> {
                 // If this bid is higher than lowest bid, boot that bid and insert this one
                 let min_bid_handle = self.bids.find_min().unwrap();
                 let min_bid = self.bids.get(min_bid_handle).unwrap().as_leaf().unwrap();
-                check!(price > min_bid.price(), MerpsErrorCode::OutOfSpace)?;
+                check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
                 let event =
                     OutEvent::new(Side::Bid, min_bid.owner_slot, min_bid.quantity, min_bid.owner);
                 event_queue.push_back(cast(event)).unwrap();
@@ -635,14 +635,14 @@ impl<'a> Book<'a> {
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
-            let oo = &mut merps_account.perp_accounts[market_index].open_orders;
+            let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
             let new_bid = LeafNode {
                 tag: NodeTag::LeafNode as u32,
                 owner_slot: oo.next_order_slot(),
                 padding: [0; 3],
                 key: order_id,
-                owner: *merps_account_pk,
+                owner: *mango_account_pk,
                 quantity: rem_quantity,
                 client_order_id,
             };
@@ -658,10 +658,10 @@ impl<'a> Book<'a> {
             oo.add_order(Side::Bid, &new_bid)?;
         }
 
-        // Edit merps_account if some contracts were matched
+        // Edit mango_account if some contracts were matched
         if rem_quantity < quantity {
             let base_change = quantity - rem_quantity;
-            merps_account.perp_accounts[market_index].change_position(
+            mango_account.perp_accounts[market_index].change_position(
                 base_change,
                 I80F48::from_num(-quote_used * market.quote_lot_size),
                 market.long_funding,
@@ -683,14 +683,14 @@ impl<'a> Book<'a> {
         &mut self,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
-        merps_account: &mut MerpsAccount,
-        merps_account_pk: &Pubkey,
+        mango_account: &mut MangoAccount,
+        mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         // TODO make use of the order options
         // TODO proper error handling
         #[allow(unused_variables)]
@@ -740,7 +740,7 @@ impl<'a> Book<'a> {
             // This fill is not necessary, purely for stats purposes
             let taker_fill = FillEvent::new(
                 false,
-                *merps_account_pk,
+                *mango_account_pk,
                 -match_quantity,
                 quote_change,
                 market.long_funding,
@@ -765,21 +765,21 @@ impl<'a> Book<'a> {
                 // If this asks is lower than highest ask, boot that ask and insert this one
                 let max_ask_handle = self.asks.find_min().unwrap();
                 let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
-                check!(price < max_ask.price(), MerpsErrorCode::OutOfSpace)?;
+                check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
                 let event =
                     OutEvent::new(Side::Ask, max_ask.owner_slot, max_ask.quantity, max_ask.owner);
                 event_queue.push_back(cast(event)).unwrap();
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
 
-            let oo = &mut merps_account.perp_accounts[market_index].open_orders;
+            let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
             let new_ask = LeafNode {
                 tag: NodeTag::LeafNode as u32,
                 owner_slot: oo.next_order_slot(),
                 padding: [0; 3],
                 key: order_id,
-                owner: *merps_account_pk,
+                owner: *mango_account_pk,
                 quantity: rem_quantity,
                 client_order_id,
             };
@@ -795,10 +795,10 @@ impl<'a> Book<'a> {
             oo.add_order(Side::Ask, &new_ask)?;
         }
 
-        // Edit merps_account if some contracts were matched
+        // Edit mango_account if some contracts were matched
         if rem_quantity < quantity {
             let base_change = -(quantity - rem_quantity); // negative because short
-            merps_account.perp_accounts[market_index].change_position(
+            mango_account.perp_accounts[market_index].change_position(
                 base_change,
                 I80F48::from_num(quote_used * market.quote_lot_size),
                 market.long_funding,
@@ -819,18 +819,18 @@ impl<'a> Book<'a> {
         &mut self,
         _event_queue: &mut EventQueue, // TODO remove
         oo: &mut PerpOpenOrders,
-        merps_account_pk: &Pubkey,
+        mango_account_pk: &Pubkey,
         _market_index: usize, // TODO remove
         order_id: i128,
         side: Side,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         let book_side = match side {
             Side::Bid => self.bids.deref_mut(),
             Side::Ask => self.asks.deref_mut(),
         };
 
-        let order = book_side.remove_by_key(order_id).ok_or(throw_err!(MerpsErrorCode::Default))?;
-        check_eq!(order.owner, *merps_account_pk, MerpsErrorCode::Default)?;
+        let order = book_side.remove_by_key(order_id).ok_or(throw_err!(MangoErrorCode::Default))?;
+        check_eq!(order.owner, *mango_account_pk, MangoErrorCode::Default)?;
 
         oo.cancel_order(&order, order_id, side)?;
 

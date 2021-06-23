@@ -5,7 +5,7 @@ use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey, rent::Rent};
 
-use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 
 declare_check_assert_macros!(SourceFileId::Oracle);
 
@@ -22,9 +22,9 @@ impl StubOracle {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let oracle = Self::load_mut(account)?;
 
@@ -35,11 +35,11 @@ impl StubOracle {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         rent: &Rent,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),
-            MerpsErrorCode::AccountNotRentExempt
+            MangoErrorCode::AccountNotRentExempt
         )?;
 
         let oracle = Self::load_mut(account)?;

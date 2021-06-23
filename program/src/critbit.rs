@@ -1,10 +1,10 @@
 // use arrayref::{array_refs, mut_array_refs};
 // use bytemuck::{cast, cast_mut, cast_ref, cast_slice, cast_slice_mut, Pod, Zeroable};
 //
-// use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+// use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 // use crate::matching::{OrderType, Side};
 // use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
-// use crate::state::{MerpsAccount, MetaData, PerpMarket};
+// use crate::state::{MangoAccount, MetaData, PerpMarket};
 // use fixed::types::I80F48;
 // use mango_common::Loadable;
 // use mango_macro::{Loadable, Pod};
@@ -208,8 +208,8 @@
 //     }
 //
 //     #[inline]
-//     pub fn assert_minimum_capacity(&self, capacity: u32) -> MerpsResult<()> {
-//         check!(self.nodes().len() <= (capacity as usize) * 2, MerpsErrorCode::Default)
+//     pub fn assert_minimum_capacity(&self, capacity: u32) -> MangoResult<()> {
+//         check!(self.nodes().len() <= (capacity as usize) * 2, MangoErrorCode::Default)
 //     }
 //
 //     fn check_size_align(&self) {
