@@ -1205,7 +1205,6 @@ impl Processor {
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
         check_eq!(&merps_account.owner, owner_ai.key, MerpsErrorCode::InvalidOwner)?;
 
-
         for i in 0..merps_group.num_oracles {
             if !merps_account.in_basket[i] || merps_group.spot_markets[i].is_empty() {
                 continue;
@@ -1251,7 +1250,12 @@ impl Processor {
             client_order_id,
         )?;
 
-        let health = merps_account.get_health(&merps_group, &merps_cache, open_orders_ais, HealthType::Init)?;
+        let health = merps_account.get_health(
+            &merps_group,
+            &merps_cache,
+            open_orders_ais,
+            HealthType::Init,
+        )?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
 
         Ok(())
@@ -1665,15 +1669,25 @@ impl Processor {
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
-        for _ in 0..limit {
+        for i in 0..limit {
             let event = match event_queue.peek_front() {
                 None => break,
                 Some(e) => e,
             };
 
+            msg!("consume event {} type={}", i, event.event_type);
+
             match EventType::try_from(event.event_type).map_err(|_| throw!())? {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
+                    msg!(
+                        "  | FillEvent maker={} base={} quote={} owner={:02X?} {}",
+                        fill_event.maker,
+                        fill_event.base_change,
+                        fill_event.quote_change,
+                        fill_event.owner.to_bytes(),
+                        0
+                    );
 
                     if fill_event.maker {
                         let mut merps_account = match merps_account_ais
@@ -1684,7 +1698,10 @@ impl Processor {
                                 program_id,
                                 merps_group_ai.key,
                             )?,
-                            Err(_) => return Ok(()), // If it's not found, stop consuming events
+                            Err(_) => {
+                                msg!("could not load owner, stop consuming events");
+                                return Ok(()); // If it's not found, stop consuming events
+                            }
                         };
 
                         let perp_account = &mut merps_account.perp_accounts[market_index];
@@ -1704,6 +1721,15 @@ impl Processor {
                 }
                 EventType::Out => {
                     let out_event: &OutEvent = cast_ref(event);
+                    msg!(
+                        "  | OutEvent side={} slot={} quantity={} owner={:02X?} {}",
+                        out_event.side as u8,
+                        out_event.slot,
+                        out_event.quantity,
+                        out_event.owner.to_bytes(),
+                        0
+                    );
+
                     let mut merps_account = match merps_account_ais
                         .binary_search_by_key(&out_event.owner, |ai| *ai.key)
                     {
@@ -1712,7 +1738,10 @@ impl Processor {
                             program_id,
                             merps_group_ai.key,
                         )?,
-                        Err(_) => return Ok(()), // If it's not found, stop consuming events
+                        Err(_) => {
+                            msg!("could not load owner, stop consuming events");
+                            return Ok(()); // If it's not found, stop consuming events
+                        }
                     };
                     let perp_account = &mut merps_account.perp_accounts[market_index];
                     perp_account.open_orders.remove_order(
