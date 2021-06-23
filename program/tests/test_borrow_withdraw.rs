@@ -7,8 +7,8 @@ use merps::oracle::StubOracle;
 use merps::{
     entrypoint::process_instruction,
     instruction::{
-        add_spot_market, add_to_basket, cache_prices, cache_root_banks, deposit,
-        init_merps_account, update_root_bank, withdraw,
+        add_spot_market, cache_prices, cache_root_banks, deposit, init_merps_account,
+        update_root_bank, withdraw,
     },
     state::{MerpsAccount, MerpsGroup, NodeBank, QUOTE_INDEX},
 };
@@ -100,11 +100,19 @@ async fn test_borrow_succeeds() {
                 merps_group.init_merps_group(&admin.pubkey()),
                 init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
                     .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache_pk,
+                    &[merps_group.root_banks[quote_index].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
                     &merps_group_pk,
                     &merps_account_pk,
                     &user.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -128,14 +136,6 @@ async fn test_borrow_succeeds() {
                     btc_usdt_spot_mkt_idx,
                     maint_leverage,
                     init_leverage,
-                )
-                .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
-                    btc_usdt_spot_mkt_idx,
                 )
                 .unwrap(),
             ],

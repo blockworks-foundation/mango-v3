@@ -73,6 +73,14 @@ pub enum MerpsErrorCode {
 
     #[error("MerpsErrorCode::ClientIdNotFound")]
     ClientIdNotFound,
+    #[error("MerpsErrorCode::InvalidNodeBank")]
+    InvalidNodeBank,
+    #[error("MerpsErrorCode::InvalidRootBank")]
+    InvalidRootBank,
+    #[error("MerpsErrorCode::MarginBasketFull")]
+    MarginBasketFull,
+    #[error("MerpsErrorCode::NotLiquidatable")]
+    NotLiquidatable,
 
     #[error("MerpsErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

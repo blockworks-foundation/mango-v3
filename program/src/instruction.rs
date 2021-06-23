@@ -1,4 +1,5 @@
 use crate::matching::{OrderType, Side};
+use crate::state::MAX_PAIRS;
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -48,11 +49,12 @@ pub enum MerpsInstruction {
     /// 0. `[]` merps_group_ai - MerpsGroup that this merps account is for
     /// 1. `[writable]` merps_account_ai - the merps account for this user
     /// 2. `[signer]` owner_ai - Solana account of owner of the merps account
-    /// 3. `[]` root_bank_ai - RootBank owned by MerpsGroup
-    /// 4. `[writable]` node_bank_ai - NodeBank owned by RootBank
-    /// 5. `[writable]` vault_ai - TokenAccount owned by MerpsGroup
-    /// 6. `[]` token_prog_ai - acc pointed to by SPL token program id
-    /// 7. `[writable]` owner_token_account_ai - TokenAccount owned by user which will be sending the funds
+    /// 3. `[]` merps_cache_ai - MerpsCache
+    /// 4. `[]` root_bank_ai - RootBank owned by MerpsGroup
+    /// 5. `[writable]` node_bank_ai - NodeBank owned by RootBank
+    /// 6. `[writable]` vault_ai - TokenAccount owned by MerpsGroup
+    /// 7. `[]` token_prog_ai - acc pointed to by SPL token program id
+    /// 8. `[writable]` owner_token_account_ai - TokenAccount owned by user which will be sending the funds
     Deposit {
         quantity: u64,
     },
@@ -266,7 +268,6 @@ pub enum MerpsInstruction {
     /// Use this token's position and deposit to reduce borrows
     ///
     /// Accounts expected by this instruction: 5
-    ///
     SettleBorrow {
         token_index: usize,
         quantity: u64,
@@ -519,6 +520,7 @@ pub fn deposit(
     merps_group_pk: &Pubkey,
     merps_account_pk: &Pubkey,
     owner_pk: &Pubkey,
+    merps_cache_pk: &Pubkey,
     root_bank_pk: &Pubkey,
     node_bank_pk: &Pubkey,
     vault_pk: &Pubkey,
@@ -530,6 +532,7 @@ pub fn deposit(
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*merps_cache_pk, false),
         AccountMeta::new_readonly(*root_bank_pk, false),
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new(*vault_pk, false),
@@ -618,13 +621,14 @@ pub fn place_perp_order(
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
     event_queue_pk: &Pubkey,
+    open_orders_pks: &[Pubkey; MAX_PAIRS],
     side: Side,
     price: i64,
     quantity: i64,
     client_order_id: u64,
     order_type: OrderType,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(*merps_group_pk, false),
         AccountMeta::new(*merps_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
@@ -634,9 +638,12 @@ pub fn place_perp_order(
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
     let instr =
         MerpsInstruction::PlacePerpOrder { side, price, quantity, client_order_id, order_type };
     let data = instr.pack();
+
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
@@ -728,24 +735,6 @@ pub fn update_funding(
         AccountMeta::new_readonly(*asks_pk, false),
     ];
     let instr = MerpsInstruction::UpdateFunding {};
-    let data = instr.pack();
-    Ok(Instruction { program_id: *program_id, accounts, data })
-}
-
-pub fn add_to_basket(
-    program_id: &Pubkey,
-    merps_group_pk: &Pubkey,
-    merps_account_pk: &Pubkey,
-    owner_pk: &Pubkey,
-    market_index: usize,
-) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
-        AccountMeta::new_readonly(*merps_group_pk, false),
-        AccountMeta::new(*merps_account_pk, false),
-        AccountMeta::new_readonly(*owner_pk, true),
-    ];
-
-    let instr = MerpsInstruction::AddToBasket { market_index };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

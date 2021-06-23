@@ -4,6 +4,7 @@ use arrayref::array_ref;
 use bytemuck::cast_ref;
 use fixed::types::I80F48;
 use helpers::*;
+use mango_common::Loadable;
 use std::{mem::size_of, thread::sleep, time::Duration};
 
 use merps::{
@@ -12,6 +13,7 @@ use merps::{
 };
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey};
 use solana_program_test::*;
+use solana_sdk::account::ReadableAccount;
 use solana_sdk::{
     account::Account, commitment_config::CommitmentLevel, signature::Keypair, signer::Signer,
     transaction::Transaction,
@@ -87,14 +89,6 @@ async fn test_init_perp_market() {
                     init_leverage,
                     base_lot,
                     quote_lot,
-                )
-                .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
-                    perp_market_idx,
                 )
                 .unwrap(),
             ],
@@ -174,11 +168,19 @@ async fn test_place_and_cancel_order() {
                 merps_group.init_merps_group(&admin.pubkey()),
                 init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
                     .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group.merps_group_pk,
+                    &merps_group.merps_cache_pk,
+                    &[merps_group.root_banks[quote_index].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
                     &merps_group_pk,
                     &merps_account_pk,
                     &user.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -204,14 +206,6 @@ async fn test_place_and_cancel_order() {
                     quote_lot,
                 )
                 .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
             ],
             Some(&payer.pubkey()),
         );
@@ -228,6 +222,10 @@ async fn test_place_and_cancel_order() {
     let ask_id = 1338;
     {
         let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
+        let merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
+        let merps_account: &MerpsAccount =
+            MerpsAccount::load_from_bytes(merps_account.data()).unwrap();
+
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
 
@@ -259,6 +257,7 @@ async fn test_place_and_cancel_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &merps_account.spot_open_orders,
                     Side::Bid,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -276,6 +275,7 @@ async fn test_place_and_cancel_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &merps_account.spot_open_orders,
                     Side::Ask,
                     ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -472,7 +472,6 @@ async fn test_place_and_match_order() {
     let admin = Keypair::new();
 
     let mut test_context = test.start_with_context().await;
-
     let init_leverage = I80F48::from_num(10);
     let maint_leverage = init_leverage * 2;
     let quantity = 1;
@@ -496,11 +495,19 @@ async fn test_place_and_match_order() {
                     &user_ask.pubkey(),
                 )
                 .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group.merps_group_pk,
+                    &merps_group.merps_cache_pk,
+                    &[merps_group.root_banks[0].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
                     &merps_group_pk,
                     &merps_account_bid_pk,
                     &user_bid.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -513,6 +520,7 @@ async fn test_place_and_match_order() {
                     &merps_group_pk,
                     &merps_account_ask_pk,
                     &user_ask.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -538,22 +546,6 @@ async fn test_place_and_match_order() {
                     quote_lot,
                 )
                 .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
-                    &user_bid.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
-                    &user_ask.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
             ],
             Some(&test_context.payer.pubkey()),
         );
@@ -577,6 +569,16 @@ async fn test_place_and_match_order() {
             test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+
+        let user_ask_ma_account =
+            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+
+        let user_bid_ma_account =
+            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
@@ -606,6 +608,7 @@ async fn test_place_and_match_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -623,6 +626,7 @@ async fn test_place_and_match_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -641,6 +645,7 @@ async fn test_place_and_match_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     1,
                     1,
@@ -753,6 +758,15 @@ async fn test_place_and_match_order() {
             test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let user_ask_ma_account =
+            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+
+        let user_bid_ma_account =
+            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
@@ -791,6 +805,7 @@ async fn test_place_and_match_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -808,6 +823,7 @@ async fn test_place_and_match_order() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -863,7 +879,6 @@ async fn test_place_and_match_order() {
         println!("u2: base={} quote={}", base_position, quote_position)
     }
 }
-
 
 #[tokio::test]
 async fn test_place_and_match_multiple_orders() {
@@ -956,11 +971,19 @@ async fn test_place_and_match_multiple_orders() {
                     &user_ask.pubkey(),
                 )
                 .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache_pk,
+                    &[merps_group.root_banks[quote_index].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
                     &merps_group_pk,
                     &merps_account_bid_pk,
                     &user_bid.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -973,6 +996,7 @@ async fn test_place_and_match_multiple_orders() {
                     &merps_group_pk,
                     &merps_account_ask_pk,
                     &user_ask.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -998,22 +1022,6 @@ async fn test_place_and_match_multiple_orders() {
                     quote_lot,
                 )
                 .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
-                    &user_bid.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
-                    &user_ask.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
             ],
             Some(&test_context.payer.pubkey()),
         );
@@ -1037,6 +1045,15 @@ async fn test_place_and_match_multiple_orders() {
             test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let user_ask_ma_account =
+            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+
+        let user_bid_ma_account =
+            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
@@ -1066,6 +1083,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1083,6 +1101,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price - 10) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1100,6 +1119,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1117,6 +1137,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price + 10) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1135,6 +1156,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     1,
                     1,
@@ -1152,6 +1174,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1169,6 +1192,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price - 10) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,

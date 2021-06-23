@@ -13,6 +13,7 @@ use solana_sdk::{
 };
 use std::mem::size_of;
 
+use merps::instruction::cache_root_banks;
 use merps::{
     entrypoint::process_instruction,
     instruction::{deposit, init_merps_account},
@@ -61,11 +62,19 @@ async fn test_deposit_succeeds() {
                     &user.pubkey(),
                 )
                 .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group.merps_group_pk,
+                    &merps_group.merps_cache_pk,
+                    &[merps_group.root_banks[0].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
                     &merps_group.merps_group_pk,
                     &merps_account_pk,
                     &user.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[0].pubkey,
                     &merps_group.root_banks[0].node_banks[0].pubkey,
                     &merps_group.root_banks[0].node_banks[0].vault,
