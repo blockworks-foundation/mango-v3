@@ -1555,6 +1555,7 @@ version = "0.0.1"
 dependencies = [
  "arrayref",
  "bincode",
+ "bs58",
  "bytemuck",
  "enumflags2",
  "fixed",

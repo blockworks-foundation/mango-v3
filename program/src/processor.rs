@@ -8,6 +8,7 @@ use fixed::types::I80F48;
 use serum_dex::matching::Side as SerumSide;
 use serum_dex::state::ToAlignedBytes;
 
+use bs58;
 use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
@@ -1681,11 +1682,11 @@ impl Processor {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
                     msg!(
-                        "  | FillEvent maker={} base={} quote={} owner={:02X?} {}",
+                        "  | FillEvent maker={} base={} quote={} owner={} {}",
                         fill_event.maker,
                         fill_event.base_change,
                         fill_event.quote_change,
-                        fill_event.owner.to_bytes(),
+                        bs58::encode(fill_event.owner).into_string(),
                         0
                     );
 
@@ -1722,11 +1723,11 @@ impl Processor {
                 EventType::Out => {
                     let out_event: &OutEvent = cast_ref(event);
                     msg!(
-                        "  | OutEvent side={} slot={} quantity={} owner={:02X?} {}",
+                        "  | OutEvent side={} slot={} quantity={} owner={} {}",
                         out_event.side as u8,
                         out_event.slot,
                         out_event.quantity,
-                        out_event.owner.to_bytes(),
+                        bs58::encode(out_event.owner).into_string(),
                         0
                     );
 
