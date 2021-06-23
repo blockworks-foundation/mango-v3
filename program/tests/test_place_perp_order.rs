@@ -576,7 +576,7 @@ async fn test_place_and_match_order() {
             MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
 
         let user_bid_ma_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
         let user_bid_ma: &MerpsAccount =
             MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
@@ -764,7 +764,7 @@ async fn test_place_and_match_order() {
             MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
 
         let user_bid_ma_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
         let user_bid_ma: &MerpsAccount =
             MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
@@ -880,7 +880,6 @@ async fn test_place_and_match_order() {
     }
 }
 
-
 #[tokio::test]
 async fn test_place_and_match_multiple_orders() {
     let program_id = Pubkey::new_unique();
@@ -972,11 +971,19 @@ async fn test_place_and_match_multiple_orders() {
                     &user_ask.pubkey(),
                 )
                 .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_group.merps_cache_pk,
+                    &[merps_group.root_banks[quote_index].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
                     &merps_group_pk,
                     &merps_account_bid_pk,
                     &user_bid.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -989,6 +996,7 @@ async fn test_place_and_match_multiple_orders() {
                     &merps_group_pk,
                     &merps_account_ask_pk,
                     &user_ask.pubkey(),
+                    &merps_group.merps_cache_pk,
                     &merps_group.root_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
                     &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
@@ -1014,22 +1022,6 @@ async fn test_place_and_match_multiple_orders() {
                     quote_lot,
                 )
                 .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
-                    &user_bid.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
-                    &user_ask.pubkey(),
-                    perp_market_idx,
-                )
-                .unwrap(),
             ],
             Some(&test_context.payer.pubkey()),
         );
@@ -1053,6 +1045,15 @@ async fn test_place_and_match_multiple_orders() {
             test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
         let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
         let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let user_ask_ma_account =
+            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+
+        let user_bid_ma_account =
+            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MerpsAccount =
+            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
@@ -1082,6 +1083,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1099,6 +1101,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price - 10) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1116,6 +1119,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1133,6 +1137,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price + 10) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1151,6 +1156,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Bid,
                     1,
                     1,
@@ -1168,6 +1174,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_ask_ma.spot_open_orders,
                     Side::Bid,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -1185,6 +1192,7 @@ async fn test_place_and_match_multiple_orders() {
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
+                    &user_bid_ma.spot_open_orders,
                     Side::Ask,
                     ((base_price - 10) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
