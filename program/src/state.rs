@@ -504,7 +504,11 @@ impl MerpsCache {
     ) -> bool {
         let valid_interval = merps_group.valid_interval;
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            msg!("root_bank_cache {} invalid: {}", QUOTE_INDEX, self.root_bank_cache[QUOTE_INDEX].last_update);
+            msg!(
+                "root_bank_cache {} invalid: {}",
+                QUOTE_INDEX,
+                self.root_bank_cache[QUOTE_INDEX].last_update
+            );
             return false;
         }
 
@@ -528,7 +532,11 @@ impl MerpsCache {
 
             if !merps_group.perp_markets[i].is_empty() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    msg!("perp_market_cache {} invalid: {}", i, self.perp_market_cache[i].last_update);
+                    msg!(
+                        "perp_market_cache {} invalid: {}",
+                        i,
+                        self.perp_market_cache[i].last_update
+                    );
                     return false;
                 }
             }
@@ -578,7 +586,7 @@ impl PerpOpenOrders {
         check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
         let slot = self.next_order_slot();
         let slot_mask = 1u32 << slot;
-        self.is_free_bits &= !slot_mask;
+
         match side {
             Side::Bid => {
                 // TODO make checked
@@ -591,6 +599,7 @@ impl PerpOpenOrders {
             }
         };
 
+        self.is_free_bits &= !slot_mask;
         self.orders[slot as usize] = order.key;
         self.client_order_ids[slot as usize] = order.client_order_id;
         Ok(())

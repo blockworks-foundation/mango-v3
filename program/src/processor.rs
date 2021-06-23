@@ -1281,7 +1281,7 @@ impl Processor {
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
-        let merps_account =
+        let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
@@ -1292,7 +1292,7 @@ impl Processor {
 
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
-        let mut oo = merps_account.perp_accounts[market_index].open_orders;
+        let oo = &mut merps_account.perp_accounts[market_index].open_orders;
 
         // we should consider not throwing an error but to silently ignore cancel_order when it passes an unknown
         // client_order_id, this would allow batching multiple cancel instructions with place instructions for
@@ -1309,7 +1309,7 @@ impl Processor {
 
         book.cancel_order(
             &mut event_queue,
-            &mut oo,
+            oo,
             merps_account_ai.key,
             market_index,
             order_id,

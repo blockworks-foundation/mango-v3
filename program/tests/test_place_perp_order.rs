@@ -406,7 +406,7 @@ async fn test_place_and_cancel_order() {
 }
 
 #[tokio::test]
-async fn test_place_and_cancel_order_100x() {
+async fn test_place_and_cancel_order_32x() {
     let program_id = Pubkey::new_unique();
     let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
 
@@ -519,10 +519,10 @@ async fn test_place_and_cancel_order_100x() {
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
 
-    // place two orders on both sides of the book and cancel them for 100 times
+    // place two orders on both sides of the book and cancel them for 32 times
     let bid_id = 1000;
     let ask_id = 2000;
-    for n in 1..100 {
+    for n in 1..32 {
         {
             let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
             let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
