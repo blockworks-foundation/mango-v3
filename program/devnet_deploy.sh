@@ -10,12 +10,13 @@ fi
 source ~/mango/cli/devnet.env $KEYPAIR
 solana config set --url $CLUSTER_URL
 
-cd ~/blockworks-foundation/mango/program
+cd ~/blockworks-foundation/mango-v3/program
 
 cargo build-bpf
 
-MERPS_PROGRAM_ID="viQTKtBmaGvx3nugHcvijedy9ApbDowqiGYq35qAJqq"
-solana program deploy target/deploy/mango.so --keypair $KEYPAIR --program-id $MERPS_PROGRAM_ID --output json-compact
+
+#MERPS_PROGRAM_ID="viQTKtBmaGvx3nugHcvijedy9ApbDowqiGYq35qAJqq"
+#solana program deploy target/deploy/mango.so --keypair $KEYPAIR --program-id $MERPS_PROGRAM_ID --output json-compact
 
 # serum dex
 VERSION=v1.6.9

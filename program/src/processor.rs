@@ -674,42 +674,7 @@ impl Processor {
         Ok(())
     }
 
-    fn add_to_basket(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        market_index: usize,
-    ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 3;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [
-            mango_group_ai,     // read
-            mango_account_ai,   // write
-            owner_ai,           // read
-        ] = accounts;
-
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-
-        let mut mango_account =
-            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::Default)?;
-
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::Default)?;
-        mango_account.in_margin_basket[market_index] = true;
-        Ok(())
-    }
-
-    #[allow(unused)]
-    fn remove_from_basket(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        market_index: usize,
-    ) -> MangoResult<()> {
-        // TODO - verify deposits, borrows, open orders, perp account all zeroed out for this market index
-        unimplemented!()
-    }
-
     // TODO - add serum dex fee discount functionality
-
     #[inline(never)]
     fn place_spot_order(
         program_id: &Pubkey,
@@ -1204,6 +1169,16 @@ impl Processor {
 
         let (post_base, post_quote) = {
             let open_orders = load_open_orders(open_orders_ai)?;
+
+            // remove from margin basket if it's empty
+            if open_orders.native_pc_total == 0
+                && open_orders.native_coin_total == 0
+                && open_orders.referrer_rebates_accrued == 0
+            {
+                mango_account.in_margin_basket[spot_market_index] = false;
+                mango_account.num_in_margin_basket -= 1;
+            }
+
             (
                 open_orders.native_coin_free,
                 open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
@@ -1223,6 +1198,7 @@ impl Processor {
             base_change,
         )?;
         checked_add_deposit(&mut quote_node_bank, &mut mango_account, QUOTE_INDEX, quote_change)?;
+
         Ok(())
     }
 
@@ -2207,9 +2183,9 @@ impl Processor {
                     init_leverage,
                 )?;
             }
-            MangoInstruction::AddToBasket { market_index } => {
-                msg!("Mango: AddToBasket");
-                Self::add_to_basket(program_id, accounts, market_index)?;
+            MangoInstruction::AddToBasket { .. } => {
+                msg!("Mango: AddToBasket Deprecated");
+                unimplemented!() // TODO remove
             }
             MangoInstruction::Borrow { quantity } => {
                 msg!("Mango: Borrow");
