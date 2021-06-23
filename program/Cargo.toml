@@ -1,5 +1,5 @@
 [package]
-name = "merps"
+name = "mango"
 version = "0.0.1"
 authors = ["blockworks"]
 edition = "2018"
@@ -42,5 +42,5 @@ lto = true
 #opt-level = 2
 
 [lib]
-name = "merps"
+name = "mango"
 crate-type = ["cdylib", "lib"]

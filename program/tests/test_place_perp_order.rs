@@ -7,7 +7,7 @@ use helpers::*;
 use mango_common::Loadable;
 use std::{mem::size_of, thread::sleep, time::Duration};
 
-use merps::{
+use mango::{
     entrypoint::process_instruction, instruction::*, matching::*, oracle::StubOracle, queue::*,
     state::*,
 };
@@ -22,13 +22,13 @@ use solana_sdk::{
 #[tokio::test]
 async fn test_init_perp_market() {
     let program_id = Pubkey::new_unique();
-    let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
+    let mut test = ProgramTest::new("mango", program_id, processor!(process_instruction));
 
     // limit to track compute unit increase
     test.set_bpf_compute_max_units(50_000);
 
-    let merps_group = add_merps_group_prodlike(&mut test, program_id);
-    let merps_group_pk = merps_group.merps_group_pk;
+    let mango_group = add_mango_group_prodlike(&mut test, program_id);
+    let mango_group_pk = mango_group.mango_group_pk;
 
     let user = Keypair::new();
     test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
@@ -38,7 +38,7 @@ async fn test_init_perp_market() {
     let quote_unit = 10i64.pow(quote_decimals);
     let quote_lot = 10;
 
-    let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let mango_account_pk = add_test_account_with_owner::<MangoAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let base_decimals = 4;
@@ -66,19 +66,19 @@ async fn test_init_perp_market() {
 
     let init_leverage = I80F48::from_num(10);
     let maint_leverage = init_leverage * 2;
-    // setup merps group, perp market & merps account
+    // setup mango group, perp market & mango account
     {
         let mut transaction = Transaction::new_with_payer(
             &[
-                merps_group.init_merps_group(&admin.pubkey()),
-                init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
+                mango_group.init_mango_group(&admin.pubkey()),
+                init_mango_account(&program_id, &mango_group_pk, &mango_account_pk, &user.pubkey())
                     .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
-                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                add_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
                     &bids_pk,
@@ -105,18 +105,18 @@ async fn test_init_perp_market() {
 #[tokio::test]
 async fn test_place_and_cancel_order() {
     let program_id = Pubkey::new_unique();
-    let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
+    let mut test = ProgramTest::new("mango", program_id, processor!(process_instruction));
 
     // limit to track compute unit increase
     test.set_bpf_compute_max_units(50_000);
 
-    let merps_group = add_merps_group_prodlike(&mut test, program_id);
-    let merps_group_pk = merps_group.merps_group_pk;
+    let mango_group = add_mango_group_prodlike(&mut test, program_id);
+    let mango_group_pk = mango_group.mango_group_pk;
 
     let user = Keypair::new();
     test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
 
-    // TODO: this still needs to be deposited into the merps account
+    // TODO: this still needs to be deposited into the mango account
     let quote_index = 0;
     let quote_index = 0;
     let quote_decimals = 6;
@@ -127,11 +127,11 @@ async fn test_place_and_cancel_order() {
     let user_quote_account = add_token_account(
         &mut test,
         user.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         user_initial_amount as u64,
     );
 
-    let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let mango_account_pk = add_test_account_with_owner::<MangoAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let base_decimals = 6;
@@ -161,39 +161,39 @@ async fn test_place_and_cancel_order() {
     let maint_leverage = init_leverage * 2;
     let quantity = 1;
 
-    // setup merps group, perp market & merps account
+    // setup mango group, perp market & mango account
     {
         let mut transaction = Transaction::new_with_payer(
             &[
-                merps_group.init_merps_group(&admin.pubkey()),
-                init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
+                mango_group.init_mango_group(&admin.pubkey()),
+                init_mango_account(&program_id, &mango_group_pk, &mango_account_pk, &user.pubkey())
                     .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group.merps_group_pk,
-                    &merps_group.merps_cache_pk,
-                    &[merps_group.root_banks[quote_index].pubkey],
+                    &mango_group.mango_group_pk,
+                    &mango_group.mango_cache_pk,
+                    &[mango_group.root_banks[quote_index].pubkey],
                 )
                 .unwrap(),
                 deposit(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
+                    &mango_group_pk,
+                    &mango_account_pk,
                     &user.pubkey(),
-                    &merps_group.merps_cache_pk,
-                    &merps_group.root_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &mango_group.mango_cache_pk,
+                    &mango_group.root_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_quote_account.pubkey,
                     user_initial_amount as u64,
                 )
                 .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
-                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                add_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
                     &bids_pk,
@@ -221,43 +221,43 @@ async fn test_place_and_cancel_order() {
     let bid_id = 1337;
     let ask_id = 1338;
     {
-        let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
-        let merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let merps_account: &MerpsAccount =
-            MerpsAccount::load_from_bytes(merps_account.data()).unwrap();
+        let mut mango_group = banks_client.get_account(mango_group_pk).await.unwrap().unwrap();
+        let mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
+        let mango_account: &MangoAccount =
+            MangoAccount::load_from_bytes(mango_account.data()).unwrap();
 
-        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
-        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let account_info: AccountInfo = (&mango_group_pk, &mut mango_group).into();
+        let mango_group = MangoGroup::load_mut_checked(&account_info, &program_id).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                cache_prices(&program_id, &mango_group_pk, &mango_group.mango_cache, &[oracle_pk])
                     .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[merps_group.tokens[QUOTE_INDEX].root_bank],
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
+                    &[mango_group.tokens[QUOTE_INDEX].root_bank],
                 )
                 .unwrap(),
                 cache_perp_markets(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
                     &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
+                    &mango_group_pk,
+                    &mango_account_pk,
                     &user.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
-                    &merps_account.spot_open_orders,
+                    &mango_account.spot_open_orders,
                     Side::Bid,
                     ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -267,15 +267,15 @@ async fn test_place_and_cancel_order() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
+                    &mango_group_pk,
+                    &mango_account_pk,
                     &user.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
                     &event_queue_pk,
-                    &merps_account.spot_open_orders,
+                    &mango_account.spot_open_orders,
                     Side::Ask,
                     ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
                     (quantity * base_unit) / base_lot,
@@ -295,8 +295,8 @@ async fn test_place_and_cancel_order() {
         let mut transaction = Transaction::new_with_payer(
             &[cancel_perp_order_by_client_id(
                 &program_id,
-                &merps_group_pk,
-                &merps_account_pk,
+                &mango_group_pk,
+                &mango_account_pk,
                 &user.pubkey(),
                 &perp_market_pk,
                 &bids_pk,
@@ -313,21 +313,21 @@ async fn test_place_and_cancel_order() {
 
     // cancel ask directly
     {
-        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
         let (client_order_id, order_id, side) =
-            merps_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
+            mango_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
         assert_eq!(u64::from(client_order_id), ask_id);
         assert_eq!(side, Side::Ask);
 
         let mut transaction = Transaction::new_with_payer(
             &[cancel_perp_order(
                 &program_id,
-                &merps_group_pk,
-                &merps_account_pk,
+                &mango_group_pk,
+                &mango_account_pk,
                 &user.pubkey(),
                 &perp_market_pk,
                 &bids_pk,
@@ -355,8 +355,8 @@ async fn test_place_and_cancel_order() {
         let mut transaction = Transaction::new_with_payer(
             &[cancel_perp_order_by_client_id(
                 &program_id,
-                &merps_group_pk,
-                &merps_account_pk,
+                &mango_group_pk,
+                &mango_account_pk,
                 &user.pubkey(),
                 &perp_market_pk,
                 &bids_pk,
@@ -373,21 +373,21 @@ async fn test_place_and_cancel_order() {
 
     // error when cancelling ask twice
     {
-        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
         let (client_order_id, order_id, side) =
-            merps_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
+            mango_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
         assert_eq!(u64::from(client_order_id), ask_id);
         assert_eq!(side, Side::Ask);
 
         let mut transaction = Transaction::new_with_payer(
             &[cancel_perp_order(
                 &program_id,
-                &merps_group_pk,
-                &merps_account_pk,
+                &mango_group_pk,
+                &mango_account_pk,
                 &user.pubkey(),
                 &perp_market_pk,
                 &bids_pk,
@@ -408,13 +408,13 @@ async fn test_place_and_cancel_order() {
 #[tokio::test]
 async fn test_place_and_match_order() {
     let program_id = Pubkey::new_unique();
-    let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
+    let mut test = ProgramTest::new("mango", program_id, processor!(process_instruction));
 
     // limit to track compute unit increase
     test.set_bpf_compute_max_units(50_000);
 
-    let merps_group = add_merps_group_prodlike(&mut test, program_id);
-    let merps_group_pk = merps_group.merps_group_pk;
+    let mango_group = add_mango_group_prodlike(&mut test, program_id);
+    let mango_group_pk = mango_group.mango_group_pk;
 
     let quote_index = 0;
     let quote_decimals = 6;
@@ -424,30 +424,30 @@ async fn test_place_and_match_order() {
     let user_bid = Keypair::new();
     test.add_account(user_bid.pubkey(), Account::new(u32::MAX as u64, 0, &user_bid.pubkey()));
 
-    // TODO: this still needs to be deposited into the merps account and should be connected to leverage
+    // TODO: this still needs to be deposited into the mango account and should be connected to leverage
     let user_bid_initial_amount = 100000 * quote_unit;
     let user_bid_quote_account = add_token_account(
         &mut test,
         user_bid.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         user_bid_initial_amount as u64,
     );
 
-    let merps_account_bid_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let mango_account_bid_pk = add_test_account_with_owner::<MangoAccount>(&mut test, &program_id);
 
     let user_ask = Keypair::new();
     test.add_account(user_ask.pubkey(), Account::new(u32::MAX as u64, 0, &user_ask.pubkey()));
 
-    // TODO: this still needs to be deposited into the merps account and should be connected to leverage
+    // TODO: this still needs to be deposited into the mango account and should be connected to leverage
     let user_ask_initial_amount = 100000 * quote_unit;
     let user_ask_quote_account = add_token_account(
         &mut test,
         user_ask.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         user_ask_initial_amount as u64,
     );
 
-    let merps_account_ask_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let mango_account_ask_pk = add_test_account_with_owner::<MangoAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let base_decimals = 6;
@@ -476,64 +476,64 @@ async fn test_place_and_match_order() {
     let maint_leverage = init_leverage * 2;
     let quantity = 1;
 
-    // setup merps group, perp market & merps account
+    // setup mango group, perp market & mango account
     {
         let mut transaction = Transaction::new_with_payer(
             &[
-                merps_group.init_merps_group(&admin.pubkey()),
-                init_merps_account(
+                mango_group.init_mango_group(&admin.pubkey()),
+                init_mango_account(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
                 )
                 .unwrap(),
-                init_merps_account(
+                init_mango_account(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
                 )
                 .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group.merps_group_pk,
-                    &merps_group.merps_cache_pk,
-                    &[merps_group.root_banks[0].pubkey],
+                    &mango_group.mango_group_pk,
+                    &mango_group.mango_cache_pk,
+                    &[mango_group.root_banks[0].pubkey],
                 )
                 .unwrap(),
                 deposit(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache_pk,
-                    &merps_group.root_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &mango_group.mango_cache_pk,
+                    &mango_group.root_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_bid_quote_account.pubkey,
                     user_bid_initial_amount as u64,
                 )
                 .unwrap(),
                 deposit(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache_pk,
-                    &merps_group.root_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &mango_group.mango_cache_pk,
+                    &mango_group.root_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_ask_quote_account.pubkey,
                     user_ask_initial_amount as u64,
                 )
                 .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
-                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                add_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
                     &bids_pk,
@@ -565,45 +565,45 @@ async fn test_place_and_match_order() {
     let ask_id = 1338;
     let min_bid_id = 1339;
     {
-        let mut merps_group =
-            test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
-        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let mut mango_group =
+            test_context.banks_client.get_account(mango_group_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_group_pk, &mut mango_group).into();
+        let mango_group = MangoGroup::load_mut_checked(&account_info, &program_id).unwrap();
 
         let user_ask_ma_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
-        let user_ask_ma: &MerpsAccount =
-            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+            test_context.banks_client.get_account(mango_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MangoAccount =
+            MangoAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
 
         let user_bid_ma_account =
-            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
-        let user_bid_ma: &MerpsAccount =
-            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
+            test_context.banks_client.get_account(mango_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MangoAccount =
+            MangoAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                cache_prices(&program_id, &mango_group_pk, &mango_group.mango_cache, &[oracle_pk])
                     .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[merps_group.tokens[QUOTE_INDEX].root_bank],
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
+                    &[mango_group.tokens[QUOTE_INDEX].root_bank],
                 )
                 .unwrap(),
                 cache_perp_markets(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
                     &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -618,10 +618,10 @@ async fn test_place_and_match_order() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -637,10 +637,10 @@ async fn test_place_and_match_order() {
                 // place an absolue low-ball bid, just to make sure this
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -655,10 +655,10 @@ async fn test_place_and_match_order() {
                 .unwrap(),
                 consume_events(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
-                    &mut [merps_account_bid_pk, merps_account_ask_pk],
+                    &mut [mango_account_bid_pk, mango_account_ask_pk],
                     3,
                 )
                 .unwrap(),
@@ -672,14 +672,14 @@ async fn test_place_and_match_order() {
     let bid_base_position = quantity * base_unit / base_lot;
     let bid_quote_position = -40001 * (quantity * quote_unit);
     {
-        let mut merps_account =
-            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_bid_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account =
+            test_context.banks_client.get_account(mango_account_bid_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_bid_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
-        let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
-        let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
+        let base_position = mango_account.perp_accounts[perp_market_idx].base_position;
+        let quote_position = mango_account.perp_accounts[perp_market_idx].quote_position;
 
         // TODO: verify fees
         assert_eq!(base_position, bid_base_position);
@@ -690,14 +690,14 @@ async fn test_place_and_match_order() {
     let ask_base_position = -1 * quantity * base_unit / base_lot;
     let ask_quote_position = (40001 * quantity * quote_unit);
     {
-        let mut merps_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_ask_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account =
+            test_context.banks_client.get_account(mango_account_ask_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_ask_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
-        let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
-        let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
+        let base_position = mango_account.perp_accounts[perp_market_idx].base_position;
+        let quote_position = mango_account.perp_accounts[perp_market_idx].quote_position;
 
         // TODO: add fees
         assert_eq!(base_position, ask_base_position);
@@ -706,16 +706,16 @@ async fn test_place_and_match_order() {
     println!("u2 base={} quoute={}", ask_base_position, ask_quote_position);
 
     {
-        let mut merps_group =
-            test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
-        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let mut mango_group =
+            test_context.banks_client.get_account(mango_group_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_group_pk, &mut mango_group).into();
+        let mango_group = MangoGroup::load_mut_checked(&account_info, &program_id).unwrap();
 
         let mut perp_market =
             test_context.banks_client.get_account(perp_market_pk).await.unwrap().unwrap();
         let account_info = (&perp_market_pk, &mut perp_market).into();
         let perp_market =
-            PerpMarket::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+            PerpMarket::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
         let mut event_queue = test_context
             .banks_client
@@ -754,28 +754,28 @@ async fn test_place_and_match_order() {
     test_context.warp_to_slot(10).unwrap();
 
     {
-        let mut merps_group =
-            test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
-        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let mut mango_group =
+            test_context.banks_client.get_account(mango_group_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_group_pk, &mut mango_group).into();
+        let mango_group = MangoGroup::load_mut_checked(&account_info, &program_id).unwrap();
         let user_ask_ma_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
-        let user_ask_ma: &MerpsAccount =
-            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+            test_context.banks_client.get_account(mango_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MangoAccount =
+            MangoAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
 
         let user_bid_ma_account =
-            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
-        let user_bid_ma: &MerpsAccount =
-            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
+            test_context.banks_client.get_account(mango_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MangoAccount =
+            MangoAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                cache_prices(&program_id, &mango_group_pk, &mango_group.mango_cache, &[oracle_pk])
                     .unwrap(),
                 update_funding(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -783,24 +783,24 @@ async fn test_place_and_match_order() {
                 .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[merps_group.tokens[QUOTE_INDEX].root_bank],
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
+                    &[mango_group.tokens[QUOTE_INDEX].root_bank],
                 )
                 .unwrap(),
                 cache_perp_markets(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
                     &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -815,10 +815,10 @@ async fn test_place_and_match_order() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -833,10 +833,10 @@ async fn test_place_and_match_order() {
                 .unwrap(),
                 consume_events(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
-                    &mut [merps_account_bid_pk, merps_account_ask_pk],
+                    &mut [mango_account_bid_pk, mango_account_ask_pk],
                     3,
                 )
                 .unwrap(),
@@ -848,14 +848,14 @@ async fn test_place_and_match_order() {
     }
 
     {
-        let mut merps_account =
-            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_bid_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account =
+            test_context.banks_client.get_account(mango_account_bid_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_bid_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
-        let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
-        let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
+        let base_position = mango_account.perp_accounts[perp_market_idx].base_position;
+        let quote_position = mango_account.perp_accounts[perp_market_idx].quote_position;
 
         // TODO: add fees & funding
         assert_eq!(base_position, 0);
@@ -864,14 +864,14 @@ async fn test_place_and_match_order() {
     }
 
     {
-        let mut merps_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_ask_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account =
+            test_context.banks_client.get_account(mango_account_ask_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_ask_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
-        let base_position = merps_account.perp_accounts[perp_market_idx].base_position;
-        let quote_position = merps_account.perp_accounts[perp_market_idx].quote_position;
+        let base_position = mango_account.perp_accounts[perp_market_idx].base_position;
+        let quote_position = mango_account.perp_accounts[perp_market_idx].quote_position;
 
         // TODO: add fees & funding
         assert_eq!(base_position, 0);
@@ -883,13 +883,13 @@ async fn test_place_and_match_order() {
 #[tokio::test]
 async fn test_place_and_match_multiple_orders() {
     let program_id = Pubkey::new_unique();
-    let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
+    let mut test = ProgramTest::new("mango", program_id, processor!(process_instruction));
 
     // limit to track compute unit increase
     test.set_bpf_compute_max_units(50_000);
 
-    let merps_group = add_merps_group_prodlike(&mut test, program_id);
-    let merps_group_pk = merps_group.merps_group_pk;
+    let mango_group = add_mango_group_prodlike(&mut test, program_id);
+    let mango_group_pk = mango_group.mango_group_pk;
 
     let quote_index = 0;
     let quote_decimals = 6;
@@ -899,30 +899,30 @@ async fn test_place_and_match_multiple_orders() {
     let user_bid = Keypair::new();
     test.add_account(user_bid.pubkey(), Account::new(u32::MAX as u64, 0, &user_bid.pubkey()));
 
-    // TODO: this still needs to be deposited into the merps account and should be connected to leverage
+    // TODO: this still needs to be deposited into the mango account and should be connected to leverage
     let user_bid_initial_amount = 100000 * quote_unit;
     let user_bid_quote_account = add_token_account(
         &mut test,
         user_bid.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         user_bid_initial_amount as u64,
     );
 
-    let merps_account_bid_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let mango_account_bid_pk = add_test_account_with_owner::<MangoAccount>(&mut test, &program_id);
 
     let user_ask = Keypair::new();
     test.add_account(user_ask.pubkey(), Account::new(u32::MAX as u64, 0, &user_ask.pubkey()));
 
-    // TODO: this still needs to be deposited into the merps account and should be connected to leverage
+    // TODO: this still needs to be deposited into the mango account and should be connected to leverage
     let user_ask_initial_amount = 100000 * quote_unit;
     let user_ask_quote_account = add_token_account(
         &mut test,
         user_ask.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         user_ask_initial_amount as u64,
     );
 
-    let merps_account_ask_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+    let mango_account_ask_pk = add_test_account_with_owner::<MangoAccount>(&mut test, &program_id);
 
     let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
     let base_decimals = 6;
@@ -952,64 +952,64 @@ async fn test_place_and_match_multiple_orders() {
     let maint_leverage = init_leverage * 2;
     let quantity = 1;
 
-    // setup merps group, perp market & merps account
+    // setup mango group, perp market & mango account
     {
         let mut transaction = Transaction::new_with_payer(
             &[
-                merps_group.init_merps_group(&admin.pubkey()),
-                init_merps_account(
+                mango_group.init_mango_group(&admin.pubkey()),
+                init_mango_account(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
                 )
                 .unwrap(),
-                init_merps_account(
+                init_mango_account(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
                 )
                 .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache_pk,
-                    &[merps_group.root_banks[quote_index].pubkey],
+                    &mango_group_pk,
+                    &mango_group.mango_cache_pk,
+                    &[mango_group.root_banks[quote_index].pubkey],
                 )
                 .unwrap(),
                 deposit(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache_pk,
-                    &merps_group.root_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &mango_group.mango_cache_pk,
+                    &mango_group.root_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_bid_quote_account.pubkey,
                     user_bid_initial_amount as u64,
                 )
                 .unwrap(),
                 deposit(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache_pk,
-                    &merps_group.root_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &mango_group.mango_cache_pk,
+                    &mango_group.root_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_ask_quote_account.pubkey,
                     user_ask_initial_amount as u64,
                 )
                 .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
-                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                add_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_perp_market(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
                     &bids_pk,
@@ -1041,44 +1041,44 @@ async fn test_place_and_match_multiple_orders() {
     let ask_id = 1438;
     let min_bid_id = 1539;
     {
-        let mut merps_group =
-            test_context.banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
-        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let mut mango_group =
+            test_context.banks_client.get_account(mango_group_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_group_pk, &mut mango_group).into();
+        let mango_group = MangoGroup::load_mut_checked(&account_info, &program_id).unwrap();
         let user_ask_ma_account =
-            test_context.banks_client.get_account(merps_account_ask_pk).await.unwrap().unwrap();
-        let user_ask_ma: &MerpsAccount =
-            MerpsAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
+            test_context.banks_client.get_account(mango_account_ask_pk).await.unwrap().unwrap();
+        let user_ask_ma: &MangoAccount =
+            MangoAccount::load_from_bytes(user_ask_ma_account.data()).unwrap();
 
         let user_bid_ma_account =
-            test_context.banks_client.get_account(merps_account_bid_pk).await.unwrap().unwrap();
-        let user_bid_ma: &MerpsAccount =
-            MerpsAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
+            test_context.banks_client.get_account(mango_account_bid_pk).await.unwrap().unwrap();
+        let user_bid_ma: &MangoAccount =
+            MangoAccount::load_from_bytes(user_bid_ma_account.data()).unwrap();
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                cache_prices(&program_id, &mango_group_pk, &mango_group.mango_cache, &[oracle_pk])
                     .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[merps_group.tokens[QUOTE_INDEX].root_bank],
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
+                    &[mango_group.tokens[QUOTE_INDEX].root_bank],
                 )
                 .unwrap(),
                 cache_perp_markets(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
                     &[perp_market_pk],
                 )
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1093,10 +1093,10 @@ async fn test_place_and_match_multiple_orders() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1111,10 +1111,10 @@ async fn test_place_and_match_multiple_orders() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1129,10 +1129,10 @@ async fn test_place_and_match_multiple_orders() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1148,10 +1148,10 @@ async fn test_place_and_match_multiple_orders() {
                 // place an absolue low-ball bid, just to make sure this
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1166,10 +1166,10 @@ async fn test_place_and_match_multiple_orders() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_ask_pk,
+                    &mango_group_pk,
+                    &mango_account_ask_pk,
                     &user_ask.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1184,10 +1184,10 @@ async fn test_place_and_match_multiple_orders() {
                 .unwrap(),
                 place_perp_order(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_bid_pk,
+                    &mango_group_pk,
+                    &mango_account_bid_pk,
                     &user_bid.pubkey(),
-                    &merps_group.merps_cache,
+                    &mango_group.mango_cache,
                     &perp_market_pk,
                     &bids_pk,
                     &asks_pk,
@@ -1202,10 +1202,10 @@ async fn test_place_and_match_multiple_orders() {
                 .unwrap(),
                 consume_events(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &perp_market_pk,
                     &event_queue_pk,
-                    &mut [merps_account_bid_pk, merps_account_ask_pk],
+                    &mut [mango_account_bid_pk, mango_account_ask_pk],
                     3,
                 )
                 .unwrap(),
