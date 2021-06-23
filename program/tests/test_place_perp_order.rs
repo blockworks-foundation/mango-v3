@@ -406,6 +406,230 @@ async fn test_place_and_cancel_order() {
 }
 
 #[tokio::test]
+async fn test_place_and_cancel_order_100x() {
+    let program_id = Pubkey::new_unique();
+    let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
+
+    // limit to track compute unit increase
+    test.set_bpf_compute_max_units(50_000);
+
+    let merps_group = add_merps_group_prodlike(&mut test, program_id);
+    let merps_group_pk = merps_group.merps_group_pk;
+
+    let user = Keypair::new();
+    test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
+
+    // TODO: this still needs to be deposited into the merps account
+    let quote_index = 0;
+    let quote_index = 0;
+    let quote_decimals = 6;
+    let quote_unit = 10i64.pow(quote_decimals);
+    let quote_lot = 10;
+
+    let user_initial_amount = 10000 * quote_unit;
+    let user_quote_account = add_token_account(
+        &mut test,
+        user.pubkey(),
+        merps_group.tokens[quote_index].pubkey,
+        user_initial_amount as u64,
+    );
+
+    let merps_account_pk = add_test_account_with_owner::<MerpsAccount>(&mut test, &program_id);
+
+    let oracle_pk = add_test_account_with_owner::<StubOracle>(&mut test, &program_id);
+    let base_decimals = 6;
+    let base_price = 40000;
+    let base_unit = 10i64.pow(base_decimals);
+    let base_lot = 100;
+    let oracle_price =
+        I80F48::from_num(base_price) * I80F48::from_num(quote_unit) / I80F48::from_num(base_unit);
+
+    let perp_market_idx = 0;
+    let perp_market_pk = add_test_account_with_owner::<PerpMarket>(&mut test, &program_id);
+
+    let event_queue_pk = add_test_account_with_owner_and_extra_size::<EventQueue>(
+        &mut test,
+        &program_id,
+        size_of::<AnyEvent>() * 32,
+    );
+
+    let bids_pk = add_test_account_with_owner::<BookSide>(&mut test, &program_id);
+    let asks_pk = add_test_account_with_owner::<BookSide>(&mut test, &program_id);
+
+    let admin = Keypair::new();
+
+    let (mut banks_client, payer, recent_blockhash) = test.start().await;
+
+    let init_leverage = I80F48::from_num(100);
+    let maint_leverage = init_leverage * 2;
+    let quantity = 1;
+
+    // setup merps group, perp market & merps account
+    {
+        let mut transaction = Transaction::new_with_payer(
+            &[
+                merps_group.init_merps_group(&admin.pubkey()),
+                init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
+                    .unwrap(),
+                deposit(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    &merps_group.root_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &user_quote_account.pubkey,
+                    user_initial_amount as u64,
+                )
+                .unwrap(),
+                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                    .unwrap(),
+                add_perp_market(
+                    &program_id,
+                    &merps_group_pk,
+                    &perp_market_pk,
+                    &event_queue_pk,
+                    &bids_pk,
+                    &asks_pk,
+                    &admin.pubkey(),
+                    perp_market_idx,
+                    maint_leverage,
+                    init_leverage,
+                    base_lot,
+                    quote_lot,
+                )
+                .unwrap(),
+                add_to_basket(
+                    &program_id,
+                    &merps_group_pk,
+                    &merps_account_pk,
+                    &user.pubkey(),
+                    perp_market_idx,
+                )
+                .unwrap(),
+            ],
+            Some(&payer.pubkey()),
+        );
+
+        transaction.sign(&[&payer, &admin, &user], recent_blockhash);
+
+        // Setup transaction succeeded
+        assert!(banks_client.process_transaction(transaction).await.is_ok());
+    }
+
+    // place two orders on both sides of the book and cancel them for 100 times
+    let bid_id = 1000;
+    let ask_id = 2000;
+    for n in 1..100 {
+        {
+            let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
+            let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
+            let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+
+            let mut transaction = Transaction::new_with_payer(
+                &[
+                    cache_prices(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_group.merps_cache,
+                        &[oracle_pk],
+                    )
+                    .unwrap(),
+                    cache_root_banks(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_group.merps_cache,
+                        &[merps_group.tokens[QUOTE_INDEX].root_bank],
+                    )
+                    .unwrap(),
+                    cache_perp_markets(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_group.merps_cache,
+                        &[perp_market_pk],
+                    )
+                    .unwrap(),
+                    place_perp_order(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_account_pk,
+                        &user.pubkey(),
+                        &merps_group.merps_cache,
+                        &perp_market_pk,
+                        &bids_pk,
+                        &asks_pk,
+                        &event_queue_pk,
+                        Side::Bid,
+                        ((base_price - 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                        (quantity * base_unit) / base_lot,
+                        bid_id + n,
+                        OrderType::Limit,
+                    )
+                    .unwrap(),
+                    place_perp_order(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_account_pk,
+                        &user.pubkey(),
+                        &merps_group.merps_cache,
+                        &perp_market_pk,
+                        &bids_pk,
+                        &asks_pk,
+                        &event_queue_pk,
+                        Side::Ask,
+                        ((base_price + 1) * quote_unit * base_lot) / (base_unit * quote_lot),
+                        (quantity * base_unit) / base_lot,
+                        ask_id + n,
+                        OrderType::Limit,
+                    )
+                    .unwrap(),
+                ],
+                Some(&payer.pubkey()),
+            );
+            transaction.sign(&[&payer, &user], recent_blockhash);
+            assert!(banks_client.process_transaction(transaction).await.is_ok());
+        }
+
+        // cancel orders by client_id
+        {
+            let mut transaction = Transaction::new_with_payer(
+                &[
+                    cancel_perp_order_by_client_id(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_account_pk,
+                        &user.pubkey(),
+                        &perp_market_pk,
+                        &bids_pk,
+                        &asks_pk,
+                        &event_queue_pk,
+                        bid_id + n,
+                    )
+                    .unwrap(),
+                    cancel_perp_order_by_client_id(
+                        &program_id,
+                        &merps_group_pk,
+                        &merps_account_pk,
+                        &user.pubkey(),
+                        &perp_market_pk,
+                        &bids_pk,
+                        &asks_pk,
+                        &event_queue_pk,
+                        ask_id + n,
+                    )
+                    .unwrap(),
+                ],
+                Some(&payer.pubkey()),
+            );
+            transaction.sign(&[&payer, &user], recent_blockhash);
+            assert!(banks_client.process_transaction(transaction).await.is_ok());
+        }
+    }
+}
+
+#[tokio::test]
 async fn test_place_and_match_order() {
     let program_id = Pubkey::new_unique();
     let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
@@ -863,7 +1087,6 @@ async fn test_place_and_match_order() {
         println!("u2: base={} quote={}", base_position, quote_position)
     }
 }
-
 
 #[tokio::test]
 async fn test_place_and_match_multiple_orders() {
