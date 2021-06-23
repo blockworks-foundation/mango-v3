@@ -1,13 +1,15 @@
 use std::cmp;
+use std::cmp::min;
+use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
+use bytemuck::cast_ref;
 use fixed::types::I80F48;
-
+use mango_common::Loadable;
 use serum_dex::matching::Side as SerumSide;
 use serum_dex::state::ToAlignedBytes;
-
 use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
@@ -26,15 +28,12 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::StubOracle;
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
-    check_open_orders, load_market_state, load_open_orders, DataType, HealthType, MerpsAccount,
-    MerpsCache, MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, DUST_THRESHOLD,
+    check_open_orders, load_market_state, load_open_orders, AssetType, DataType, HealthType,
+    MerpsAccount, MerpsCache, MerpsGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache,
+    PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, DUST_THRESHOLD,
     MAX_NUM_IN_MARGIN_BASKET, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
-use bytemuck::cast_ref;
-use mango_common::Loadable;
-use std::convert::{identity, TryFrom};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -563,6 +562,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             open_orders_ais,
+            &active_assets,
             HealthType::Init,
         )?;
 
@@ -599,9 +599,11 @@ impl Processor {
         let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
         check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MerpsErrorCode::InvalidNodeBank)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
@@ -664,6 +666,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             open_orders_ais,
+            &active_assets,
             HealthType::Init,
         )?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
@@ -753,6 +756,10 @@ impl Processor {
         check!(&merps_account.owner == owner_ai.key, MerpsErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
 
+        if merps_account.being_liquidated {
+            // TODO - transfer over proper checks from mango v2
+        }
+
         // TODO - put node bank pubkeys inside MerpsGroup so we don't have to send in root bank here
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
         let base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
@@ -823,7 +830,7 @@ impl Processor {
         // First check all caches to make sure valid
         let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
         let mut active_assets = merps_account.get_active_assets(&merps_group);
-
+        active_assets[token_index] = true;
         check!(
             merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
             MerpsErrorCode::Default
@@ -833,6 +840,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             open_orders_ais,
+            &active_assets,
             HealthType::Init,
         )?;
         let reduce_only = health < ZERO_I80F48;
@@ -1006,6 +1014,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             open_orders_ais,
+            &active_assets,
             HealthType::Init,
         )?;
         check!(reduce_only || health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
@@ -1068,6 +1077,7 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
     fn settle_borrow(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1075,6 +1085,7 @@ impl Processor {
         quantity: u64,
     ) -> MerpsResult<()> {
         // TODO - basically this should never occur because deposits and borrows should never both be >0
+        // TODO - basically, this offsetting should happen automatically whenever deposits and borrows change
         unimplemented!();
         // const NUM_FIXED: usize = 5;
         // let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -1295,6 +1306,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             open_orders_ais,
+            &active_assets,
             HealthType::Init,
         )?;
         check!(health >= ZERO_I80F48, MerpsErrorCode::InsufficientFunds)?;
@@ -1517,6 +1529,308 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
+    /// Liquidator specifies the liability and maximum amount he wants to transfer and
+    /// the asset (collateral) he wants in return
+    /// There is no guarantee the liquidator can get all of max_liab_transfer
+    fn liquidate(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        max_liab_transfer: I80F48,
+        asset_type: AssetType,
+        asset_index: u8,
+        liab_type: AssetType,
+        liab_index: u8,
+    ) -> MerpsResult<()> {
+        let asset_index = asset_index as usize;
+        let liab_index = liab_index as usize;
+
+        const NUM_FIXED: usize = 9;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+
+        let [
+            merps_group_ai,         // read
+            merps_cache_ai,         // read
+            liqee_merps_account_ai, // write
+            liqor_merps_account_ai, // write    
+            liqor_ai,               // read, signer
+            asset_node_bank_ai,     // write    
+            asset_root_bank_ai,     // write
+            liab_node_bank_ai,      // write
+            liab_root_bank_ai,      // write
+        ] = fixed_ais;
+
+        let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
+        let merps_cache = MerpsCache::load_checked(merps_cache_ai, program_id, &merps_group)?;
+
+        let mut liqee_ma =
+            MerpsAccount::load_mut_checked(liqee_merps_account_ai, program_id, merps_group_ai.key)?;
+        let mut liqor_ma =
+            MerpsAccount::load_mut_checked(liqor_merps_account_ai, program_id, merps_group_ai.key)?;
+        check_eq!(liqor_ai.key, &liqor_ma.owner, MerpsErrorCode::InvalidOwner)?;
+        check!(liqor_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
+
+        let asset_root_bank = RootBank::load_checked(asset_root_bank_ai, program_id)?;
+        let mut asset_node_bank = NodeBank::load_mut_checked(asset_node_bank_ai, program_id)?;
+        check!(
+            asset_root_bank.node_banks.contains(asset_node_bank_ai.key),
+            MerpsErrorCode::Default
+        )?;
+
+        let liab_root_bank = RootBank::load_checked(liab_root_bank_ai, program_id)?;
+        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
+        check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MerpsErrorCode::Default)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
+        // Make sure caches are valid
+        let mut liqee_active_assets = liqee_ma.get_active_assets(&merps_group);
+        liqee_active_assets[asset_index] = true;
+        liqee_active_assets[liab_index] = true;
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &liqee_active_assets, now_ts),
+            MerpsErrorCode::Default
+        )?;
+
+        let mut liqor_active_assets = liqor_ma.get_active_assets(&merps_group);
+        liqor_active_assets[liab_index] = true;
+        liqor_active_assets[asset_index] = true; // TODO - see if we can remove this
+        check!(
+            merps_cache.check_caches_valid(&merps_group, &liqor_active_assets, now_ts), // TODO write more efficient
+            MerpsErrorCode::InvalidCache
+        )?;
+
+        // Make sure orders are cancelled for perps
+        for i in 0..merps_group.num_oracles {
+            if liqee_active_assets[i] {
+                let oo = &liqee_ma.perp_accounts[i].open_orders;
+                check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MerpsErrorCode::Default)?;
+            }
+        }
+
+        let maint_health = liqee_ma.get_health(
+            &merps_group,
+            &merps_cache,
+            liqee_open_orders_ais,
+            &liqee_active_assets,
+            HealthType::Maint,
+        )?;
+
+        // TODO - optimization: consider calculating both healths at same time
+        let init_health = liqee_ma.get_health(
+            &merps_group,
+            &merps_cache,
+            liqee_open_orders_ais,
+            &liqee_active_assets,
+            HealthType::Init,
+        )?;
+
+        if liqee_ma.being_liquidated {
+            if init_health > ZERO_I80F48 {
+                liqee_ma.being_liquidated = false;
+                msg!("Account init_health above zero.");
+                return Ok(());
+            }
+        } else if maint_health >= ZERO_I80F48 {
+            return Err(throw_err!(MerpsErrorCode::NotLiquidatable));
+        }
+
+        let liab_price = merps_cache.price_cache[liab_index].price;
+        let asset_price = merps_cache.price_cache[asset_index].price;
+        match asset_type {
+            AssetType::Token => {
+                let asset_info = &merps_group.spot_markets[asset_index];
+
+                check!(liqee_ma.deposits[asset_index].is_positive(), MerpsErrorCode::Default)?;
+                check!(!asset_info.is_empty(), MerpsErrorCode::InvalidMarket)?;
+
+                let asset_fee = ONE_I80F48 + asset_info.liquidation_fee;
+                let asset_bank = &merps_cache.root_bank_cache[asset_index];
+                let native_deposits = liqee_ma.get_native_deposit(asset_bank, asset_index)?;
+
+                match liab_type {
+                    AssetType::Token => {
+                        // Token to Token
+                        check!(
+                            liqee_ma.borrows[liab_index].is_positive(),
+                            MerpsErrorCode::Default
+                        )?;
+                        check!(asset_index != liab_index, MerpsErrorCode::Default)?;
+                        let liab_info = &merps_group.spot_markets[liab_index];
+                        check!(!liab_info.is_empty(), MerpsErrorCode::InvalidMarket)?;
+
+                        let liab_fee = ONE_I80F48 - liab_info.liquidation_fee;
+                        let liab_bank = &merps_cache.root_bank_cache[liab_index];
+
+                        // This must be greater than zero
+                        let deficit_max_liab: I80F48 = -init_health
+                            / (liab_price
+                                * (liab_info.init_liab_weight
+                                    - asset_info.init_asset_weight * asset_fee / liab_fee));
+
+                        let native_borrows = liqee_ma.get_native_borrow(liab_bank, liab_index)?;
+
+                        let asset_implied_liab_transfer =
+                            native_deposits * asset_price * liab_fee / (liab_price * asset_fee);
+                        let actual_liab_transfer = min(
+                            min(min(deficit_max_liab, native_borrows), max_liab_transfer),
+                            asset_implied_liab_transfer,
+                        );
+
+                        // Transfer into liqee to reduce liabilities
+                        checked_add_net(
+                            &liab_bank,
+                            &mut liab_node_bank,
+                            &mut liqee_ma,
+                            liab_index,
+                            actual_liab_transfer,
+                        )?; // TODO make sure deposits for this index is == 0
+
+                        // Transfer from liqor
+                        checked_sub_net(
+                            &liab_bank,
+                            &mut liab_node_bank,
+                            &mut liqor_ma,
+                            liab_index,
+                            actual_liab_transfer,
+                        )?;
+
+                        let asset_transfer = actual_liab_transfer * liab_price * asset_fee
+                            / (liab_fee * asset_price);
+
+                        // Transfer collater into liqor
+                        checked_add_net(
+                            &asset_bank,
+                            &mut asset_node_bank,
+                            &mut liqor_ma,
+                            asset_index,
+                            asset_transfer,
+                        )?;
+
+                        // Transfer collateral out of liqee
+                        checked_sub_net(
+                            &asset_bank,
+                            &mut asset_node_bank,
+                            &mut liqee_ma,
+                            asset_index,
+                            asset_transfer,
+                        )?;
+
+                        // TODO - do node bank checks
+                        // TODO - if assets are zero, put insurance claim onto the event queue
+                    }
+                    AssetType::PerpBase => {
+                        // Token asset, perp liab
+                        check!(
+                            liqee_ma.perp_accounts[liab_index].base_position.is_negative(),
+                            MerpsErrorCode::Default
+                        )?;
+
+                        let liab_info = &merps_group.perp_markets[liab_index];
+                        check!(!liab_info.is_empty(), MerpsErrorCode::InvalidMarket)?;
+                        let liab_fee = ONE_I80F48 - liab_info.liquidation_fee;
+                        let liab_price = merps_cache.price_cache[liab_index].price;
+
+                        // This must be greater than zero
+                        let deficit_max_liab: I80F48 = -init_health
+                            / (liab_price
+                                * (liab_info.init_liab_weight
+                                    - asset_info.init_asset_weight * asset_fee / liab_fee));
+
+                        // This is the only difference with liab: AssetType::Token
+                        let native_borrows = I80F48::from_num(
+                            -liqee_ma.perp_accounts[liab_index].base_position
+                                * liab_info.base_lot_size,
+                        );
+
+                        let asset_implied_liab_transfer =
+                            native_deposits * asset_price * liab_fee / (liab_price * asset_fee);
+
+                        let actual_liab_transfer = min(
+                            min(min(deficit_max_liab, native_borrows), max_liab_transfer),
+                            asset_implied_liab_transfer,
+                        );
+                        let base_transfer: i64 = (actual_liab_transfer
+                            / I80F48::from_num(liab_info.base_lot_size))
+                        .checked_ceil()
+                        .unwrap()
+                        .to_num();
+
+                        liqee_ma.perp_accounts[liab_index].base_position += base_transfer;
+                        liqor_ma.perp_accounts[liab_index].base_position -= base_transfer;
+
+                        let asset_transfer =
+                            I80F48::from_num(base_transfer * liab_info.base_lot_size)
+                                * liab_price
+                                * asset_fee
+                                / (liab_fee * asset_price);
+
+                        // Transfer collater into liqor
+                        checked_add_net(
+                            &asset_bank,
+                            &mut asset_node_bank,
+                            &mut liqor_ma,
+                            asset_index,
+                            asset_transfer,
+                        )?;
+                        // Transfer collateral out of liqee
+                        checked_sub_net(
+                            &asset_bank,
+                            &mut asset_node_bank,
+                            &mut liqee_ma,
+                            asset_index,
+                            asset_transfer,
+                        )?;
+                    }
+                    AssetType::PerpQuote => {
+                        // Token asset, perp quote liab
+                        check!(
+                            liqee_ma.perp_accounts[liab_index].quote_position.is_negative(),
+                            MerpsErrorCode::Default
+                        )?;
+
+                        let liab_info = &merps_group.perp_markets[liab_index];
+                        check!(!liab_info.is_empty(), MerpsErrorCode::InvalidMarket)?;
+                        let liab_fee = ONE_I80F48; // no liq fee for quote currency
+                        let liab_price = merps_cache.price_cache[liab_index].price;
+
+                        // This must be greater than zero
+                        let deficit_max_liab: I80F48 = -init_health
+                            / (liab_price
+                                * (liab_info.init_liab_weight
+                                    - asset_info.init_asset_weight * asset_fee / liab_fee));
+                    }
+                }
+            }
+            AssetType::PerpBase => {}
+            AssetType::PerpQuote => {}
+        }
+
+        // Determine max amount you can transfer as liabs
+        // Transfer liabs and assets
+        // See if value of the account is zero
+        // If zero, then pay out to insurance fund
+
+        // TODO - account for being_liquidated case where liquidation has to happen over many instructions
+        // TODO - force cancel all orders that use margin first and check if account still liquidatable
+        // TODO - what happens if base position and quote position have same sign?
+        // TODO - what if base position is 0 but quote is negative. Perhaps settle that pnl first?
+        check!(maint_health < ZERO_I80F48, MerpsErrorCode::Default)?;
+
+        // Determine how much position can be taken from liqee to get him above init_health
+        let init_health = liqee_ma.get_health(
+            &merps_group,
+            &merps_cache,
+            liqee_open_orders_ais,
+            &liqee_active_assets,
+            HealthType::Init,
+        )?;
+
+        Ok(())
+    }
+
     /// Liquidate an account similar to Mango
     #[allow(unused)]
     fn liquidate_perp(
@@ -1525,6 +1839,7 @@ impl Processor {
         market_index: usize,
         base_transfer_request: i64,
     ) -> MerpsResult<()> {
+        // TODO - make sure sum of all quote positions + funding in system == 0
         // TODO - which market gets liquidated first?
         // liqor passes in his own account and the liqee merps account
         // position is transfered to the liqor at favorable rate
@@ -1552,21 +1867,19 @@ impl Processor {
         check_eq!(liqor_ai.key, &liqor_merps_account.owner, MerpsErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MerpsErrorCode::InvalidSignerKey)?;
         let perp_market_info = &merps_group.perp_markets[market_index];
-        check!(!perp_market_info.is_empty(), MerpsErrorCode::Default)?;
-
+        check!(!perp_market_info.is_empty(), MerpsErrorCode::InvalidMarket)?;
         let now_ts = Clock::get()?.unix_timestamp as u64;
 
-        let mut active_assets = liqee_merps_account.get_active_assets(&merps_group);
-        active_assets[market_index] = true;
+        let mut liqee_active_assets = liqee_merps_account.get_active_assets(&merps_group);
+        liqee_active_assets[market_index] = true;
+        let mut liqor_active_assets = liqor_merps_account.get_active_assets(&merps_group);
+        liqor_active_assets[market_index] = true;
         check!(
-            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts),
+            merps_cache.check_caches_valid(&merps_group, &liqee_active_assets, now_ts),
             MerpsErrorCode::Default
         )?;
-
-        let mut active_assets = liqor_merps_account.get_active_assets(&merps_group);
-        active_assets[market_index] = true;
         check!(
-            merps_cache.check_caches_valid(&merps_group, &active_assets, now_ts), // TODO write more efficient
+            merps_cache.check_caches_valid(&merps_group, &liqor_active_assets, now_ts), // TODO write more efficient
             MerpsErrorCode::InvalidCache
         )?;
 
@@ -1574,6 +1887,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             liqee_open_orders_ais,
+            &liqee_active_assets,
             HealthType::Maint,
         )?;
 
@@ -1588,6 +1902,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             liqee_open_orders_ais,
+            &liqee_active_assets,
             HealthType::Init,
         )?;
         let liqee_perp_account = &mut liqee_merps_account.perp_accounts[market_index];
@@ -1655,6 +1970,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             liqor_open_orders_ais,
+            &liqor_active_assets,
             HealthType::Init,
         )?;
 
@@ -1664,6 +1980,7 @@ impl Processor {
             &merps_group,
             &merps_cache,
             liqee_open_orders_ais,
+            &liqee_active_assets,
             HealthType::Maint,
         )?;
 
@@ -1673,9 +1990,9 @@ impl Processor {
                 &merps_group,
                 &merps_cache,
                 liqee_open_orders_ais,
+                &liqee_active_assets,
                 HealthType::Maint,
             )?;
-
             if assets_val < DUST_THRESHOLD {
                 // quote token can't pay off not quote liabs
                 // hence the liabs should be transferred to the liqor
@@ -1684,7 +2001,6 @@ impl Processor {
             }
         } else {
         }
-
         // TODO - if total assets val is less than dust, then insurance fund should pay into this account
         // TODO - if insurance fund empty, ADL
         // TODO - ADL should invalidate the MerpsCache until it is updated again, then probably MerpsCache should be passed in as writable
@@ -1842,31 +2158,6 @@ impl Processor {
     }
 
     #[allow(unused)]
-    fn liquidate_spot(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        token_index: usize,
-        transfer_request: i64,
-    ) -> MerpsResult<()> {
-        const NUM_FIXED: usize = 5;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
-        let [
-            merps_group_ai,         // read
-            merps_cache_ai,         // read
-            liqee_merps_account_ai, // write
-            liqor_merps_account_ai, // write    
-            liqor_ai,               // read, signer    
-        ] = fixed_ais;
-
-        // Let liqor take some of the out token
-        // Liqor must deposit some of the liab token at reduced rate
-        // If there are still some liabs after all assets are taken, insurance fund pays quote currency to liqor to take remaining liabs
-
-        Ok(())
-    }
-
-    #[allow(unused)]
     fn force_cancel_perp_orders(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -2012,7 +2303,8 @@ impl Processor {
                 Self::update_funding(program_id, accounts)?;
             }
             MerpsInstruction::SetOracle { price } => {
-                msg!("Merps: SetOracle {}", price);
+                // msg!("Merps: SetOracle {:?}", price);
+                msg!("Merps: SetOracle");
                 Self::set_oracle(program_id, accounts, price)?
             }
             MerpsInstruction::SettlePnl { market_index } => {
@@ -2171,6 +2463,74 @@ fn read_oracle(oracle_ai: &AccountInfo) -> MerpsResult<I80F48> {
     Ok(oracle.price)
 }
 
+/// If there are borrows, pay down borrows first then increase deposits
+/// WARNING: won't work if native_quantity is less than zero
+fn checked_add_net(
+    root_bank_cache: &RootBankCache,
+    node_bank: &mut NodeBank,
+    merps_account: &mut MerpsAccount,
+    token_index: usize,
+    mut native_quantity: I80F48,
+) -> MerpsResult<()> {
+    if merps_account.borrows[token_index].is_positive() {
+        let native_borrows = merps_account.get_native_borrow(root_bank_cache, token_index)?;
+
+        if native_quantity < native_borrows {
+            return checked_sub_borrow(
+                node_bank,
+                merps_account,
+                token_index,
+                native_quantity / root_bank_cache.borrow_index,
+            );
+        } else {
+            let borrows = merps_account.borrows[token_index];
+            checked_sub_borrow(node_bank, merps_account, token_index, borrows)?;
+            native_quantity -= native_borrows;
+        }
+    }
+
+    checked_add_deposit(
+        node_bank,
+        merps_account,
+        token_index,
+        native_quantity / root_bank_cache.deposit_index,
+    )
+}
+
+/// If there are deposits, draw down deposits first then increase borrows
+/// WARNING: won't work if native_quantity is less than zero
+fn checked_sub_net(
+    root_bank_cache: &RootBankCache,
+    node_bank: &mut NodeBank,
+    merps_account: &mut MerpsAccount,
+    token_index: usize,
+    mut native_quantity: I80F48,
+) -> MerpsResult<()> {
+    if merps_account.deposits[token_index].is_positive() {
+        let native_deposits = merps_account.get_native_deposit(root_bank_cache, token_index)?;
+
+        if native_quantity < native_deposits {
+            return checked_sub_deposit(
+                node_bank,
+                merps_account,
+                token_index,
+                native_quantity / root_bank_cache.deposit_index,
+            );
+        } else {
+            let deposits = merps_account.deposits[token_index];
+            checked_sub_deposit(node_bank, merps_account, token_index, deposits)?;
+            native_quantity -= native_deposits;
+        }
+    }
+
+    checked_add_borrow(
+        node_bank,
+        merps_account,
+        token_index,
+        native_quantity / root_bank_cache.borrow_index,
+    )
+}
+
 /// TODO - although these values are I8048, they must never be less than zero
 fn checked_add_deposit(
     node_bank: &mut NodeBank,
@@ -2212,6 +2572,7 @@ fn checked_sub_borrow(
     node_bank.checked_sub_borrow(quantity)
 }
 
+#[allow(unused)]
 fn settle_borrow_unchecked(
     root_bank_cache: &RootBankCache,
     node_bank: &mut NodeBank,
@@ -2267,41 +2628,3 @@ fn settle_borrow_full_unchecked(
 
     Ok(())
 }
-
-/*
-TODO list
-1. mark price
-2. oracle
-3. liquidator
-4. order book
-5. crank
-6. market makers
-7. insurance fund
-8. Basic DAO
-9. Token Sale
-
-Crank keeps the oracle prices updated
-Make adding perp markets very easy
-
-Designs
-Single Margin-Perp Cross
-A perp market crossed with the equivalent serum dex spot market with lending pools for margin
-
-find a way to combine multiple of these into one cross margined group
-
-Write an arbitrageur to transfer USDC between different markets based on interest rate
-
-
-
-Multi Perp Cross
-Multiple perp markets cross margined with each other
-Pros:
-
-Cons:
-1. Have to get liquidity across all markets at once (maybe doable if limited to 6 markets)
-2. Can't do the carry trade easily
-3.
-
-
-NOTE: inform users the more tokens they use with cross margin, worse performance
- */

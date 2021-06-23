@@ -1,24 +1,25 @@
 use std::cell::{Ref, RefMut};
+use std::convert::identity;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use mango_common::Loadable;
+use mango_macro::{Loadable, Pod};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use serde::{Deserialize, Serialize};
+use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::msg;
+use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
+use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
 
-use mango_common::Loadable;
-use mango_macro::{Loadable, Pod};
-use num_enum::{IntoPrimitive, TryFromPrimitive};
-use serum_dex::state::ToAlignedBytes;
-use solana_program::program_error::ProgramError;
-use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
-use std::convert::identity;
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
@@ -78,6 +79,7 @@ impl MetaData {
     }
 }
 
+// TODO - move all the weights from SpotMarketInfo to TokenInfo
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {
@@ -787,7 +789,7 @@ impl PerpAccount {
                 I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
         }
 
-        msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
 
         health
     }
@@ -823,12 +825,12 @@ impl PerpAccount {
         // Pick the worse of the two simulated health
         let h = if bids_health < asks_health { bids_health } else { asks_health };
 
-        msg!(
-            "get_health h={:?} of={} bp={}",
-            h,
-            long_funding - self.long_settled_funding,
-            self.base_position
-        );
+        // msg!(
+        //     "get_health h={:?} of={} bp={}",
+        //     h,
+        //     long_funding - self.long_settled_funding,
+        //     self.base_position
+        // );
 
         // Account for unrealized funding payments
         // TODO make checked
@@ -908,6 +910,16 @@ pub struct MerpsAccount {
 pub enum HealthType {
     Maint,
     Init,
+}
+
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
+)]
+#[repr(u8)]
+pub enum AssetType {
+    Token = 0,
+    PerpBase = 1,
+    PerpQuote = 2,
 }
 
 impl MerpsAccount {
@@ -1050,12 +1062,16 @@ impl MerpsAccount {
         merps_group: &MerpsGroup,
         merps_cache: &MerpsCache,
         open_orders_ais: &[AccountInfo],
+        active_assets: &[bool; MAX_PAIRS],
         health_type: HealthType,
     ) -> MerpsResult<I80F48> {
         let mut assets_val =
             merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
 
         for i in 0..merps_group.num_oracles {
+            if !active_assets[i] {
+                continue;
+            }
             let spot_market_info = &merps_group.spot_markets[i];
             let perp_market_info = &merps_group.perp_markets[i];
 
@@ -1121,11 +1137,13 @@ impl MerpsAccount {
         Ok(health)
     }
 
+    /// Must validate the caches before
     pub fn get_health(
         &self,
         merps_group: &MerpsGroup,
         merps_cache: &MerpsCache,
         spot_open_orders_ais: &[AccountInfo],
+        active_assets: &[bool; MAX_PAIRS],
         health_type: HealthType,
     ) -> MerpsResult<I80F48> {
         let mut health = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
@@ -1133,6 +1151,10 @@ impl MerpsAccount {
             - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
 
         for i in 0..merps_group.num_oracles {
+            if !active_assets[i] {
+                continue;
+            }
+
             let spot_market_info = &merps_group.spot_markets[i];
             let perp_market_info = &merps_group.perp_markets[i];
 
@@ -1343,15 +1365,6 @@ impl PerpMarket {
             * time_factor
             * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
             * index_price;
-
-        msg!(
-            "update_funding diff={:?} tf={:?} delta={:?} ds={}-{}",
-            diff,
-            funding_delta,
-            time_factor,
-            now_ts,
-            self.last_updated
-        );
 
         self.long_funding += funding_delta;
         self.short_funding += funding_delta;

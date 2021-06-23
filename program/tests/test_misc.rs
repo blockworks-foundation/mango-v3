@@ -16,7 +16,12 @@ async fn test_size() {
 
 #[tokio::test]
 async fn test_i80f48() {
-    let one: I80F48 = I80F48!(1.25);
     let neg_one: I80F48 = I80F48!(-1.25);
     println!("{:?}", neg_one.checked_ceil().unwrap())
+}
+
+#[tokio::test]
+async fn test_bit_shift() {
+    let n = 126;
+    println!("{}", 1i128 << (127 - n) != (1i128 << 127) >> n);
 }

@@ -25,6 +25,8 @@ use spl_token::state::{Account as Token, AccountState, Mint};
 use merps::instruction::init_merps_group;
 use merps::state::{MerpsCache, MerpsGroup, NodeBank, RootBank, ONE_I80F48, ZERO_I80F48};
 use merps::utils::create_signer_key_and_nonce;
+use solana_program::hash::Hash;
+use solana_sdk::transaction::Transaction;
 
 trait AddPacked {
     fn add_packable_account<T: Pack>(
@@ -140,8 +142,8 @@ pub fn add_token_account(
         pubkey,
         u32::MAX as u64,
         &Token {
-            mint: mint,
-            owner: owner,
+            mint,
+            owner,
             amount: initial_balance,
             state: AccountState::Initialized,
             ..Token::default()
@@ -321,6 +323,50 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
         num_oracles: 0,
         valid_interval: 5,
     }
+}
+
+pub async fn add_merps_group(
+    test: &mut ProgramTest,
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    program_id: &Pubkey,
+    admin: &Keypair,
+) -> Pubkey {
+    let merps_group_pk = add_test_account_with_owner::<MerpsGroup>(test, program_id);
+    let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&program_id, &merps_group_pk);
+
+    let dex_program_pk = Pubkey::new_unique();
+    let merps_cache_pk = add_test_account_with_owner::<MerpsCache>(test, program_id);
+
+    let quote_mint = add_mint(test, 6);
+    let quote_vault = add_token_account(test, signer_pk, quote_mint.pubkey, 0);
+    let quote_node_bank = add_node_bank(test, &program_id, quote_vault.pubkey);
+    let quote_root_bank = add_root_bank(test, &program_id, quote_node_bank);
+
+    let mut transaction = Transaction::new_with_payer(
+        &[init_merps_group(
+            program_id,
+            &merps_group_pk,
+            &signer_pk,
+            &admin.pubkey(),
+            &quote_mint.pubkey,
+            &quote_vault.pubkey,
+            &quote_node_bank.pubkey,
+            &quote_root_bank.pubkey,
+            &merps_cache_pk,
+            &dex_program_pk,
+            signer_nonce,
+            5,
+        )
+        .unwrap()],
+        Some(&payer.pubkey()),
+    );
+
+    transaction.sign(&[payer, admin], *recent_blockhash);
+    assert!(banks_client.process_transaction(transaction).await.is_ok());
+
+    merps_group_pk
 }
 
 #[allow(dead_code)] // Compiler complains about this even tho it is used
