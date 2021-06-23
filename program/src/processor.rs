@@ -1339,7 +1339,7 @@ impl Processor {
 
         let merps_group = MerpsGroup::load_checked(merps_group_ai, program_id)?;
 
-        let merps_account =
+        let mut merps_account =
             MerpsAccount::load_mut_checked(merps_account_ai, program_id, merps_group_ai.key)?;
 
         check!(owner_ai.is_signer, MerpsErrorCode::Default)?;
@@ -1349,7 +1349,7 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, merps_group_ai.key)?;
 
         let market_index = merps_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        let mut oo = merps_account.perp_accounts[market_index].open_orders;
+        let oo = &mut merps_account.perp_accounts[market_index].open_orders;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
@@ -1357,7 +1357,7 @@ impl Processor {
 
         book.cancel_order(
             &mut event_queue,
-            &mut oo,
+            oo,
             merps_account_ai.key,
             market_index,
             order_id,
