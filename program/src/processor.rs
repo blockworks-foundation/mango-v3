@@ -461,7 +461,7 @@ impl Processor {
             let i = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
             mango_cache.price_cache[i] =
-                PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
+                PriceCache { price: read_oracle(&mango_group, i, oracle_ai)?, last_update: now_ts };
         }
         Ok(())
     }
@@ -2434,7 +2434,7 @@ fn invoke_transfer<'a>(
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
 }
 
-fn read_oracle(oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
+fn read_oracle(mango_group: &MangoGroup, token_index: usize, oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
     /* TODO abstract different oracle programs
     let aggregator = flux_aggregator::state::Aggregator::load_initialized(oracle_ai)?;
     let answer = flux_aggregator::read_median(oracle_ai)?;
@@ -2442,7 +2442,7 @@ fn read_oracle(oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
     let units = I80F48::from(10u64.pow(aggregator.config.decimals));
     let value = median.checked_div(units);
     */
-    let quote_decimals: u8 = merps_group.tokens[QUOTE_INDEX].decimals;
+    let quote_decimals: u8 = mango_group.tokens[QUOTE_INDEX].decimals;
     let price: I80F48;
     let oracle_type = determine_oracle_type(oracle_ai);
     match oracle_type {
@@ -2450,7 +2450,7 @@ fn read_oracle(oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
             let price_account = Price::get_price(oracle_ai).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
             let quote_adj = I80F48::from_num(10u64.pow(quote_decimals.checked_sub(price_account.expo.abs() as u8).unwrap() as u32));
-            let base_adj = I80F48::from_num(10u64.pow(merps_group.tokens[token_index].decimals as u32));
+            let base_adj = I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
             price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
         }
         OracleType::Stub => {

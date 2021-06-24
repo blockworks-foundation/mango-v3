@@ -12,6 +12,7 @@ declare_check_assert_macros!(SourceFileId::Oracle);
 #[repr(C)]
 pub struct StubOracle {
     // TODO: magic: u32
+    pub magic: u32, // Magic byte
     pub price: I80F48, // unit is interpreted as how many quote native tokens for 1 base native token
     pub last_update: u64,
 }
@@ -143,7 +144,7 @@ pub struct Product
 impl Product {
     pub fn get_product<'a>(
         account: &'a AccountInfo,
-    ) -> MerpsResult<Product> {
+    ) -> MangoResult<Product> {
         let borrowed = &account.data.borrow();
         let product = cast::<Product>( &borrowed );
         assert_eq!( product.magic, MAGIC, "not a valid pyth account" );
@@ -208,7 +209,7 @@ pub struct Price
 impl Price {
     pub fn get_price<'a>(
         account: &'a AccountInfo,
-    ) -> MerpsResult<Price> {
+    ) -> MangoResult<Price> {
         let borrowed = &account.data.borrow();
         let price = cast::<Price>( &borrowed );
         assert_eq!( price.magic, MAGIC, "not a valid pyth account" );
@@ -242,7 +243,9 @@ pub fn determine_oracle_type<'a>(
     let borrowed = &account.data.borrow();
     if borrowed[0] == 212 &&  borrowed[1] == 195 &&  borrowed[2] == 178 && borrowed[3] == 161 {
         return OracleType::Pyth;
-    } else {
+    } else if borrowed[0] == 77 && borrowed[1] == 110 && borrowed[2] == 103 && borrowed[3] == 111 {
         return OracleType::Stub;
+    } else {
+        panic!("Invalid oracle");
     }
 }

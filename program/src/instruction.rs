@@ -9,7 +9,6 @@ use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::convert::TryInto;
 use std::num::NonZeroU64;
-use solana_program::msg;
 
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -277,10 +276,8 @@ pub enum MangoInstruction {
 
 impl MangoInstruction {
     pub fn unpack(input: &[u8]) -> Option<Self> {
-        msg!("Merps: Unpacking");
         let (&discrim, data) = array_refs![input, 4; ..;];
         let discrim = u32::from_le_bytes(discrim);
-        msg!("Discrim: {}", discrim);
         Some(match discrim {
             0 => {
                 let data = array_ref![data, 0, 16];
