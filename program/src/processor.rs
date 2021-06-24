@@ -389,7 +389,7 @@ impl Processor {
 
     /// Deposit instruction
     /// TODO - fix instruction.rs and intruction.ts
-    fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> ProgramResult {
+    fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1375,7 +1375,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
-        let mango_account =
+        let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
@@ -1385,7 +1385,7 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        let mut oo = mango_account.perp_accounts[market_index].open_orders;
+        let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
@@ -1393,7 +1393,7 @@ impl Processor {
 
         book.cancel_order(
             &mut event_queue,
-            &mut oo,
+            oo,
             mango_account_ai.key,
             market_index,
             order_id,
@@ -2137,6 +2137,12 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         perp_market.update_funding(&mango_group, &book, &mango_cache, market_index, now_ts)?;
+
+        msg!(
+            "{{\"long_funding\":{}, \"short_funding\":{}}}",
+            perp_market.long_funding.to_num::<f64>(),
+            perp_market.short_funding.to_num::<f64>()
+        );
 
         Ok(())
     }

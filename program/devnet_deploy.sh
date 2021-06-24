@@ -15,8 +15,9 @@ cd ~/blockworks-foundation/mango-v3/program
 cargo build-bpf
 
 
-#MERPS_PROGRAM_ID="viQTKtBmaGvx3nugHcvijedy9ApbDowqiGYq35qAJqq"
-#solana program deploy target/deploy/mango.so --keypair $KEYPAIR --program-id $MERPS_PROGRAM_ID --output json-compact
+#MANGO_PROGRAM_ID="viQTKtBmaGvx3nugHcvijedy9ApbDowqiGYq35qAJqq"
+MANGO_PROGRAM_ID="32WeJ46tuY6QEkgydqzHYU5j85UT9m1cPJwFxPjuSVCt"
+solana program deploy target/deploy/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
 
 # serum dex
 VERSION=v1.6.9

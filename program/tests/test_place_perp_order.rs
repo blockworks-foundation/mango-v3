@@ -311,15 +311,16 @@ async fn test_place_and_cancel_order() {
         assert!(banks_client.process_transaction(transaction).await.is_ok());
     }
 
+    let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
+    let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
+    let mango_account =
+        MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
+
+    let (client_order_id, order_id, side) =
+        mango_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
+
     // cancel ask directly
     {
-        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
-        let mango_account =
-            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
-
-        let (client_order_id, order_id, side) =
-            mango_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
         assert_eq!(u64::from(client_order_id), ask_id);
         assert_eq!(side, Side::Ask);
 
@@ -373,16 +374,6 @@ async fn test_place_and_cancel_order() {
 
     // error when cancelling ask twice
     {
-        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
-        let mango_account =
-            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
-
-        let (client_order_id, order_id, side) =
-            mango_account.perp_accounts[0].open_orders.orders_with_client_ids().last().unwrap();
-        assert_eq!(u64::from(client_order_id), ask_id);
-        assert_eq!(side, Side::Ask);
-
         let mut transaction = Transaction::new_with_payer(
             &[cancel_perp_order(
                 &program_id,
