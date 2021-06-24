@@ -4,7 +4,7 @@ use solana_program::program_error::ProgramError;
 use num_enum::IntoPrimitive;
 use thiserror::Error;
 
-pub type MerpsResult<T = ()> = Result<T, MerpsError>;
+pub type MangoResult<T = ()> = Result<T, MangoError>;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Eq, PartialEq, Copy)]
@@ -31,65 +31,73 @@ impl std::fmt::Display for SourceFileId {
 }
 
 #[derive(Error, Debug, PartialEq, Eq)]
-pub enum MerpsError {
+pub enum MangoError {
     #[error(transparent)]
     ProgramError(#[from] ProgramError),
-    #[error("{merps_error_code}; {source_file_id}:{line}")]
-    MerpsErrorCode { merps_error_code: MerpsErrorCode, line: u32, source_file_id: SourceFileId },
+    #[error("{mango_error_code}; {source_file_id}:{line}")]
+    MangoErrorCode { mango_error_code: MangoErrorCode, line: u32, source_file_id: SourceFileId },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, IntoPrimitive)]
 #[repr(u32)]
-pub enum MerpsErrorCode {
-    #[error("MerpsErrorCode::InvalidCache")]
+pub enum MangoErrorCode {
+    #[error("MangoErrorCode::InvalidCache")]
     InvalidCache,
-    #[error("MerpsErrorCode::InvalidOwner")]
+    #[error("MangoErrorCode::InvalidOwner")]
     InvalidOwner,
-    #[error("MerpsErrorCode::InvalidGroupOwner")]
+    #[error("MangoErrorCode::InvalidGroupOwner")]
     InvalidGroupOwner,
-    #[error("MerpsErrorCode::InvalidSignerKey")]
+    #[error("MangoErrorCode::InvalidSignerKey")]
     InvalidSignerKey,
-    #[error("MerpsErrorCode::InvalidVault")]
+    #[error("MangoErrorCode::InvalidVault")]
     InvalidVault,
-    #[error("MerpsErrorCode::MathError")]
+    #[error("MangoErrorCode::MathError")]
     MathError,
-    #[error("MerpsErrorCode::InsufficientFunds")]
+    #[error("MangoErrorCode::InsufficientFunds")]
     InsufficientFunds,
-    #[error("MerpsErrorCode::InvalidToken")]
+    #[error("MangoErrorCode::InvalidToken")]
     InvalidToken,
-    #[error("MerpsErrorCode::InvalidMarket")]
+    #[error("MangoErrorCode::InvalidMarket")]
     InvalidMarket,
-    #[error("MerpsErrorCode::InvalidProgramId")]
+    #[error("MangoErrorCode::InvalidProgramId")]
     InvalidProgramId,
-    #[error("MerpsErrorCode::NotRentExempt")]
+    #[error("MangoErrorCode::NotRentExempt")]
     GroupNotRentExempt,
-    #[error("MerpsErrorCode::OutOfSpace")]
+    #[error("MangoErrorCode::OutOfSpace")]
     OutOfSpace,
-    #[error("MerpsErrorCode::TooManyOpenOrders Reached the maximum number of open orders for this market")]
+    #[error("MangoErrorCode::TooManyOpenOrders Reached the maximum number of open orders for this market")]
     TooManyOpenOrders,
 
-    #[error("MerpsErrorCode::AccountNotRentExempt")]
+    #[error("MangoErrorCode::AccountNotRentExempt")]
     AccountNotRentExempt,
 
-    #[error("MerpsErrorCode::ClientIdNotFound")]
+    #[error("MangoErrorCode::ClientIdNotFound")]
     ClientIdNotFound,
+    #[error("MangoErrorCode::InvalidNodeBank")]
+    InvalidNodeBank,
+    #[error("MangoErrorCode::InvalidRootBank")]
+    InvalidRootBank,
+    #[error("MangoErrorCode::MarginBasketFull")]
+    MarginBasketFull,
+    #[error("MangoErrorCode::NotLiquidatable")]
+    NotLiquidatable,
 
-    #[error("MerpsErrorCode::Default Check the source code for more info")]
+    #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }
 
-impl From<MerpsError> for ProgramError {
-    fn from(e: MerpsError) -> ProgramError {
+impl From<MangoError> for ProgramError {
+    fn from(e: MangoError) -> ProgramError {
         match e {
-            MerpsError::ProgramError(pe) => pe,
-            MerpsError::MerpsErrorCode { merps_error_code, line: _, source_file_id: _ } => {
-                ProgramError::Custom(merps_error_code.into())
+            MangoError::ProgramError(pe) => pe,
+            MangoError::MangoErrorCode { mango_error_code, line: _, source_file_id: _ } => {
+                ProgramError::Custom(mango_error_code.into())
             }
         }
     }
 }
 
-impl From<serum_dex::error::DexError> for MerpsError {
+impl From<serum_dex::error::DexError> for MangoError {
     fn from(de: serum_dex::error::DexError) -> Self {
         let pe: ProgramError = de.into();
         pe.into()
@@ -99,14 +107,14 @@ impl From<serum_dex::error::DexError> for MerpsError {
 #[inline]
 pub fn check_assert(
     cond: bool,
-    merps_error_code: MerpsErrorCode,
+    mango_error_code: MangoErrorCode,
     line: u32,
     source_file_id: SourceFileId,
-) -> MerpsResult<()> {
+) -> MangoResult<()> {
     if cond {
         Ok(())
     } else {
-        Err(MerpsError::MerpsErrorCode { merps_error_code, line, source_file_id })
+        Err(MangoError::MangoErrorCode { mango_error_code, line, source_file_id })
     }
 }
 
@@ -130,8 +138,8 @@ macro_rules! declare_check_assert_macros {
         #[allow(unused_macros)]
         macro_rules! throw {
             () => {
-                MerpsError::MerpsErrorCode {
-                    merps_error_code: MerpsErrorCode::Default,
+                MangoError::MangoErrorCode {
+                    mango_error_code: MangoErrorCode::Default,
                     line: line!(),
                     source_file_id: $source_file_id,
                 }
@@ -141,8 +149,8 @@ macro_rules! declare_check_assert_macros {
         #[allow(unused_macros)]
         macro_rules! throw_err {
             ($err:expr) => {
-                MerpsError::MerpsErrorCode {
-                    merps_error_code: $err,
+                MangoError::MangoErrorCode {
+                    mango_error_code: $err,
                     line: line!(),
                     source_file_id: $source_file_id,
                 }
@@ -152,8 +160,8 @@ macro_rules! declare_check_assert_macros {
         #[allow(unused_macros)]
         macro_rules! math_err {
             () => {
-                MerpsError::MerpsErrorCode {
-                    merps_error_code: MerpsErrorCode::MathError,
+                MangoError::MangoErrorCode {
+                    mango_error_code: MangoErrorCode::MathError,
                     line: line!(),
                     source_file_id: $source_file_id,
                 }

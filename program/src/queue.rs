@@ -1,4 +1,4 @@
-use crate::error::{check_assert, MerpsErrorCode, MerpsResult, SourceFileId};
+use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
@@ -44,7 +44,7 @@ impl<'a, H: QueueHeader> Queue<'a, H> {
         Self { header, buf }
     }
 
-    pub fn load_mut(account: &'a AccountInfo) -> MerpsResult<Self> {
+    pub fn load_mut(account: &'a AccountInfo) -> MangoResult<Self> {
         // TODO
         let (header, buf) = strip_header_mut::<H, H::Item>(account)?;
         Ok(Self { header, buf })
@@ -105,8 +105,8 @@ impl<'a, H: QueueHeader> Queue<'a, H> {
         Ok(value)
     }
 
-    pub fn revert_pushes(&mut self, desired_len: usize) -> MerpsResult<()> {
-        check!(desired_len <= self.header.count(), MerpsErrorCode::Default)?;
+    pub fn revert_pushes(&mut self, desired_len: usize) -> MangoResult<()> {
+        check!(desired_len <= self.header.count(), MangoErrorCode::Default)?;
         let len_diff = self.header.count() - desired_len;
         self.header.set_count(desired_len);
         self.header.decr_event_id(len_diff);
@@ -177,9 +177,9 @@ impl<'a> EventQueue<'a> {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         perp_market: &PerpMarket,
-    ) -> MerpsResult<Self> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
-        check_eq!(&perp_market.event_queue, account.key, MerpsErrorCode::Default)?;
+    ) -> MangoResult<Self> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(&perp_market.event_queue, account.key, MangoErrorCode::Default)?;
         Self::load_mut(account)
     }
 
@@ -187,19 +187,19 @@ impl<'a> EventQueue<'a> {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         rent: &Rent,
-    ) -> MerpsResult<Self> {
+    ) -> MangoResult<Self> {
         // TODO: check for size
 
         // NOTE: check this first so we can borrow account later
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),
-            MerpsErrorCode::AccountNotRentExempt
+            MangoErrorCode::AccountNotRentExempt
         )?;
 
         let mut state = Self::load_mut(account)?;
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
 
-        check!(!state.header.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(!state.header.meta_data.is_initialized, MangoErrorCode::Default)?;
         state.header.meta_data = MetaData::new(DataType::EventQueue, 0, true);
         Ok(state)
     }

@@ -1,24 +1,25 @@
 use std::cell::{Ref, RefMut};
+use std::convert::identity;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use solana_program::account_info::AccountInfo;
-use solana_program::msg;
-use solana_program::pubkey::Pubkey;
-
-use crate::error::{check_assert, MerpsError, MerpsErrorCode, MerpsResult, SourceFileId};
-use crate::matching::{Book, LeafNode, Side};
-
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
+use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::program_error::ProgramError;
+use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
-use std::convert::identity;
+
+use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
+use crate::matching::{Book, LeafNode, Side};
+
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
@@ -30,6 +31,7 @@ pub const DAY: I80F48 = I80F48!(86400);
 const OPTIMAL_UTIL: I80F48 = I80F48!(0.7);
 const OPTIMAL_R: I80F48 = I80F48!(6.3419583967529173008625e-09); // 20% APY -> 0.1 / YEAR
 const MAX_R: I80F48 = I80F48!(9.5129375951293759512937e-08); // max 300% APY -> 1 / YEAR
+pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -51,14 +53,14 @@ declare_check_assert_macros!(SourceFileId::State);
 #[repr(u8)]
 #[derive(IntoPrimitive, TryFromPrimitive)]
 pub enum DataType {
-    MerpsGroup = 0,
-    MerpsAccount,
+    MangoGroup = 0,
+    MangoAccount,
     RootBank,
     NodeBank,
     PerpMarket,
     Bids,
     Asks,
-    MerpsCache,
+    MangoCache,
     EventQueue,
 }
 
@@ -77,6 +79,7 @@ impl MetaData {
     }
 }
 
+// TODO - move all the weights from SpotMarketInfo to TokenInfo
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {
@@ -100,6 +103,7 @@ pub struct SpotMarketInfo {
     pub init_asset_weight: I80F48,
     pub maint_liab_weight: I80F48,
     pub init_liab_weight: I80F48,
+    pub liquidation_fee: I80F48,
 }
 
 impl SpotMarketInfo {
@@ -129,7 +133,7 @@ impl PerpMarketInfo {
 
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
-pub struct MerpsGroup {
+pub struct MangoGroup {
     pub meta_data: MetaData,
     pub num_oracles: usize, // incremented every time add_oracle is called
 
@@ -143,44 +147,42 @@ pub struct MerpsGroup {
     pub signer_key: Pubkey,
     pub admin: Pubkey,          // Used to add new markets and adjust risk params
     pub dex_program_id: Pubkey, // Consider allowing more
-    pub merps_cache: Pubkey,
-    // TODO determine liquidation incentives for each token
-    // TODO store risk params (collateral weighting, liability weighting, perp weighting, liq weighting (?))
+    pub mango_cache: Pubkey,
     pub valid_interval: u64,
 }
 
-impl MerpsGroup {
+impl MangoGroup {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let merps_group = Self::load_mut(account)?;
+        let mango_group = Self::load_mut(account)?;
         check_eq!(
-            merps_group.meta_data.data_type,
-            DataType::MerpsGroup as u8,
-            MerpsErrorCode::Default
+            mango_group.meta_data.data_type,
+            DataType::MangoGroup as u8,
+            MangoErrorCode::Default
         )?;
 
-        Ok(merps_group)
+        Ok(mango_group)
     }
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<Ref<'a, Self>> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let merps_group = Self::load(account)?;
-        check!(merps_group.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        let mango_group = Self::load(account)?;
+        check!(mango_group.meta_data.is_initialized, MangoErrorCode::Default)?;
         check_eq!(
-            merps_group.meta_data.data_type,
-            DataType::MerpsGroup as u8,
-            MerpsErrorCode::Default
+            mango_group.meta_data.data_type,
+            DataType::MangoGroup as u8,
+            MangoErrorCode::Default
         )?;
 
-        Ok(merps_group)
+        Ok(mango_group)
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
@@ -222,14 +224,14 @@ impl RootBank {
         node_bank_ai: &'a AccountInfo,
 
         rent: &Rent,
-    ) -> MerpsResult<RefMut<'a, Self>> {
+    ) -> MangoResult<RefMut<'a, Self>> {
         let mut root_bank = Self::load_mut(account)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         check!(
             rent.is_exempt(account.lamports(), size_of::<Self>()),
-            MerpsErrorCode::AccountNotRentExempt
+            MangoErrorCode::AccountNotRentExempt
         )?;
-        check!(!root_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(!root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
 
         root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
         root_bank.node_banks[0] = *node_bank_ai.key;
@@ -242,17 +244,17 @@ impl RootBank {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::Default)?;
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::Default)?;
 
         let root_bank = Self::load_mut(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
-            MerpsErrorCode::Default
+            MangoErrorCode::Default
         )?;
 
         Ok(root_bank)
@@ -260,17 +262,17 @@ impl RootBank {
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<Ref<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
-            MerpsErrorCode::Default
+            MangoErrorCode::Default
         )?;
 
         Ok(root_bank)
@@ -283,7 +285,7 @@ impl RootBank {
         &mut self,
         node_bank_ais: &[AccountInfo],
         program_id: &Pubkey,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         let clock = Clock::get()?;
         let curr_ts = clock.unix_timestamp as u64;
         let mut native_deposits = ZERO_I80F48;
@@ -352,14 +354,14 @@ impl NodeBank {
         vault_ai: &'a AccountInfo,
 
         rent: &Rent,
-    ) -> MerpsResult<RefMut<'a, Self>> {
+    ) -> MangoResult<RefMut<'a, Self>> {
         let mut node_bank = Self::load_mut(account)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         check!(
             rent.is_exempt(account.lamports(), size_of::<Self>()),
-            MerpsErrorCode::AccountNotRentExempt
+            MangoErrorCode::AccountNotRentExempt
         )?;
-        check!(!node_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(!node_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
 
         node_bank.meta_data = MetaData::new(DataType::NodeBank, 0, true);
         node_bank.deposits = ZERO_I80F48;
@@ -371,19 +373,19 @@ impl NodeBank {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         // TODO verify if size check necessary. We know load_mut fails if account size is too small for struct,
         //  does it also fail if it's too big?
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
         let node_bank = Self::load_mut(account)?;
 
-        check!(node_bank.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
         check_eq!(
             node_bank.meta_data.data_type,
             DataType::NodeBank as u8,
-            MerpsErrorCode::Default
+            MangoErrorCode::Default
         )?;
 
         Ok(node_bank)
@@ -392,31 +394,34 @@ impl NodeBank {
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-    ) -> MerpsResult<Ref<'a, Self>> {
+    ) -> MangoResult<Ref<'a, Self>> {
         // TODO
         Ok(Self::load(account)?)
     }
-    pub fn checked_add_borrow(&mut self, v: I80F48) -> MerpsResult<()> {
+
+    // TODO - Add checks to these math methods to prevent result from being < 0
+    pub fn checked_add_borrow(&mut self, v: I80F48) -> MangoResult<()> {
         Ok(self.borrows = self.borrows.checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_borrow(&mut self, v: I80F48) -> MerpsResult<()> {
+    pub fn checked_sub_borrow(&mut self, v: I80F48) -> MangoResult<()> {
         Ok(self.borrows = self.borrows.checked_sub(v).ok_or(throw!())?)
     }
-    pub fn checked_add_deposit(&mut self, v: I80F48) -> MerpsResult<()> {
+    pub fn checked_add_deposit(&mut self, v: I80F48) -> MangoResult<()> {
         Ok(self.deposits = self.deposits.checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_deposit(&mut self, v: I80F48) -> MerpsResult<()> {
+    pub fn checked_sub_deposit(&mut self, v: I80F48) -> MangoResult<()> {
         Ok(self.deposits = self.deposits.checked_sub(v).ok_or(throw!())?)
     }
-    pub fn has_valid_deposits_borrows(&self, root_bank: &RootBank) -> bool {
-        self.get_total_native_deposit(root_bank) >= self.get_total_native_borrow(root_bank)
+    pub fn has_valid_deposits_borrows(&self, root_bank_cache: &RootBankCache) -> bool {
+        self.get_total_native_deposit(root_bank_cache)
+            >= self.get_total_native_borrow(root_bank_cache)
     }
-    pub fn get_total_native_borrow(&self, root_bank: &RootBank) -> u64 {
-        let native: I80F48 = self.borrows * root_bank.borrow_index;
+    pub fn get_total_native_borrow(&self, root_bank_cache: &RootBankCache) -> u64 {
+        let native: I80F48 = self.borrows * root_bank_cache.borrow_index;
         native.checked_ceil().unwrap().to_num() // rounds toward +inf
     }
-    pub fn get_total_native_deposit(&self, root_bank: &RootBank) -> u64 {
-        let native: I80F48 = self.deposits * root_bank.deposit_index;
+    pub fn get_total_native_deposit(&self, root_bank_cache: &RootBankCache) -> u64 {
+        let native: I80F48 = self.deposits * root_bank_cache.deposit_index;
         native.checked_floor().unwrap().to_num() // rounds toward -inf
     }
 }
@@ -446,7 +451,7 @@ pub struct PerpMarketCache {
 
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
-pub struct MerpsCache {
+pub struct MangoCache {
     pub meta_data: MetaData,
 
     pub price_cache: [PriceCache; MAX_PAIRS],
@@ -454,63 +459,68 @@ pub struct MerpsCache {
     pub perp_market_cache: [PerpMarketCache; MAX_PAIRS],
 }
 
-impl MerpsCache {
+impl MangoCache {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group: &MerpsGroup,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        // merps account must be rent exempt to even be initialized
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
-        let merps_cache = Self::load_mut(account)?;
+        mango_group: &MangoGroup,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        // mango account must be rent exempt to even be initialized
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        let mango_cache = Self::load_mut(account)?;
 
         check_eq!(
-            merps_cache.meta_data.data_type,
-            DataType::MerpsCache as u8,
-            MerpsErrorCode::Default
+            mango_cache.meta_data.data_type,
+            DataType::MangoCache as u8,
+            MangoErrorCode::Default
         )?;
-        check!(merps_cache.meta_data.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(&merps_group.merps_cache, account.key, MerpsErrorCode::Default)?;
+        check!(mango_cache.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check_eq!(&mango_group.mango_cache, account.key, MangoErrorCode::Default)?;
 
-        Ok(merps_cache)
+        Ok(mango_cache)
     }
 
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group: &MerpsGroup,
-    ) -> MerpsResult<Ref<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MerpsErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        mango_group: &MangoGroup,
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let merps_cache = Self::load(account)?;
+        let mango_cache = Self::load(account)?;
 
         check_eq!(
-            merps_cache.meta_data.data_type,
-            DataType::MerpsCache as u8,
-            MerpsErrorCode::Default
+            mango_cache.meta_data.data_type,
+            DataType::MangoCache as u8,
+            MangoErrorCode::Default
         )?;
-        check!(merps_cache.meta_data.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(&merps_group.merps_cache, account.key, MerpsErrorCode::Default)?;
+        check!(mango_cache.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check_eq!(&mango_group.mango_cache, account.key, MangoErrorCode::Default)?;
 
-        Ok(merps_cache)
+        Ok(mango_cache)
     }
 
+    // TODO - only check caches are valid if balances are non-zero
     pub fn check_caches_valid(
         &self,
-        merps_group: &MerpsGroup,
-        merps_account: &MerpsAccount,
+        mango_group: &MangoGroup,
+        active_assets: &[bool; MAX_PAIRS],
         now_ts: u64,
     ) -> bool {
-        let valid_interval = merps_group.valid_interval;
+        let valid_interval = mango_group.valid_interval;
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            msg!("root_bank_cache {} invalid: {}", QUOTE_INDEX, self.root_bank_cache[QUOTE_INDEX].last_update);
+            msg!(
+                "root_bank_cache {} invalid: {}",
+                QUOTE_INDEX,
+                self.root_bank_cache[QUOTE_INDEX].last_update
+            );
             return false;
         }
 
-        for i in 0..merps_group.num_oracles {
+        for i in 0..mango_group.num_oracles {
             // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
-            if !merps_account.in_basket[i] {
+            if !active_assets[i] {
                 continue;
             }
 
@@ -519,16 +529,20 @@ impl MerpsCache {
                 return false;
             }
 
-            if !merps_group.spot_markets[i].is_empty() {
+            if !mango_group.spot_markets[i].is_empty() {
                 if now_ts > self.root_bank_cache[i].last_update + valid_interval {
                     msg!("root_bank_cache {} invalid: {}", i, self.root_bank_cache[i].last_update);
                     return false;
                 }
             }
 
-            if !merps_group.perp_markets[i].is_empty() {
+            if !mango_group.perp_markets[i].is_empty() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    msg!("perp_market_cache {} invalid: {}", i, self.perp_market_cache[i].last_update);
+                    msg!(
+                        "perp_market_cache {} invalid: {}",
+                        i,
+                        self.perp_market_cache[i].last_update
+                    );
                     return false;
                 }
             }
@@ -554,9 +568,9 @@ impl PerpOpenOrders {
         self.is_free_bits.trailing_zeros() as u8
     }
 
-    pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MerpsResult<()> {
+    pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MangoResult<()> {
         let slot_mask = 1u32 << slot;
-        check_eq!(Some(side), self.slot_side(slot), MerpsErrorCode::Default)?;
+        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
 
         // accounting
         match side {
@@ -574,8 +588,8 @@ impl PerpOpenOrders {
         self.client_order_ids[slot as usize] = 0u64;
         Ok(())
     }
-    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MerpsResult<()> {
-        check!(self.is_free_bits != 0, MerpsErrorCode::TooManyOpenOrders)?;
+    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MangoResult<()> {
+        check!(self.is_free_bits != 0, MangoErrorCode::TooManyOpenOrders)?;
         let slot = self.next_order_slot();
         let slot_mask = 1u32 << slot;
         self.is_free_bits &= !slot_mask;
@@ -601,13 +615,13 @@ impl PerpOpenOrders {
         order: &LeafNode,
         order_id: i128,
         side: Side,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         // input verification
         let slot = order.owner_slot;
         let slot_mask = 1u32 << slot;
-        check_eq!(0u32, slot_mask & self.is_free_bits, MerpsErrorCode::Default)?;
-        check_eq!(Some(side), self.slot_side(slot), MerpsErrorCode::Default)?;
-        check_eq!(order_id, self.orders[slot as usize], MerpsErrorCode::Default)?;
+        check_eq!(0u32, slot_mask & self.is_free_bits, MangoErrorCode::Default)?;
+        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
+        check_eq!(order_id, self.orders[slot as usize], MangoErrorCode::Default)?;
 
         // accounting
         match side {
@@ -689,7 +703,7 @@ impl PerpAccount {
         quote_change: I80F48, // this is in native units
         long_funding: I80F48,
         short_funding: I80F48,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         /*
             How to adjust the funding settled
             FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
@@ -699,7 +713,7 @@ impl PerpAccount {
         */
 
         // TODO this check unnecessary if callers are smart
-        check!(base_change != 0, MerpsErrorCode::Default)?;
+        check!(base_change != 0, MangoErrorCode::Default)?;
 
         let bp0 = self.base_position;
         self.base_position += base_change;
@@ -775,7 +789,7 @@ impl PerpAccount {
                 I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
         }
 
-        msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
 
         health
     }
@@ -811,12 +825,12 @@ impl PerpAccount {
         // Pick the worse of the two simulated health
         let h = if bids_health < asks_health { bids_health } else { asks_health };
 
-        msg!(
-            "get_health h={:?} of={} bp={}",
-            h,
-            long_funding - self.long_settled_funding,
-            self.base_position
-        );
+        // msg!(
+        //     "get_health h={:?} of={} bp={}",
+        //     h,
+        //     long_funding - self.long_settled_funding,
+        //     self.base_position
+        // );
 
         // Account for unrealized funding payments
         // TODO make checked
@@ -827,17 +841,59 @@ impl PerpAccount {
             h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
         }
     }
+
+    /// Returns value of assets, excludes open orders
+    pub fn get_assets_val(
+        &self,
+        price: I80F48,
+        asset_weight: I80F48,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> I80F48 {
+        let base_position = I80F48::from_num(self.base_position);
+        if self.base_position > ZERO_I80F48 {
+            let quote_position =
+                self.quote_position - (long_funding - self.long_settled_funding) * base_position;
+
+            if quote_position > ZERO_I80F48 {
+                base_position * asset_weight * price + quote_position
+            } else {
+                base_position * asset_weight * price
+            }
+        } else {
+            let quote_position =
+                self.quote_position + (short_funding - self.short_settled_funding) * base_position;
+
+            if quote_position > ZERO_I80F48 {
+                quote_position
+            } else {
+                ZERO_I80F48
+            }
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.base_position != 0
+            || !self.quote_position.is_zero()
+            || self.open_orders.bids_quantity != 0
+            || self.open_orders.asks_quantity != 0
+
+        // Note funding only applies if base position not 0
+    }
 }
 
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
-pub struct MerpsAccount {
+pub struct MangoAccount {
     pub meta_data: MetaData,
 
-    pub merps_group: Pubkey,
+    pub mango_group: Pubkey,
     pub owner: Pubkey,
 
-    pub in_basket: [bool; MAX_TOKENS],
+    // pub in_basket: [bool; MAX_TOKENS],
+    pub in_margin_basket: [bool; MAX_PAIRS],
+    pub num_in_margin_basket: u8,
 
     // Spot and Margin related data
     pub deposits: [I80F48; MAX_TOKENS],
@@ -846,6 +902,9 @@ pub struct MerpsAccount {
 
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
+
+    pub being_liquidated: bool,
+    pub padding: [u8; 7],
 }
 
 pub enum HealthType {
@@ -853,82 +912,212 @@ pub enum HealthType {
     Init,
 }
 
-impl MerpsAccount {
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
+)]
+#[repr(u8)]
+pub enum AssetType {
+    Token = 0,
+    PerpBase = 1,
+    PerpQuote = 2,
+}
+
+impl MangoAccount {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group_pk: &Pubkey,
-    ) -> MerpsResult<RefMut<'a, Self>> {
+        mango_group_pk: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
         // load_mut checks for size already
-        // merps account must be rent exempt to even be initialized
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
-        let merps_account = Self::load_mut(account)?;
+        // mango account must be rent exempt to even be initialized
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        let mango_account = Self::load_mut(account)?;
 
         check_eq!(
-            merps_account.meta_data.data_type,
-            DataType::MerpsAccount as u8,
-            MerpsErrorCode::Default
+            mango_account.meta_data.data_type,
+            DataType::MangoAccount as u8,
+            MangoErrorCode::Default
         )?;
-        check!(merps_account.meta_data.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
+        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
 
-        Ok(merps_account)
+        Ok(mango_account)
     }
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group_pk: &Pubkey,
-    ) -> MerpsResult<Ref<'a, Self>> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
-        check_eq!(account.data_len(), size_of::<MerpsAccount>(), MerpsErrorCode::Default)?;
+        mango_group_pk: &Pubkey,
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<MangoAccount>(), MangoErrorCode::Default)?;
 
-        let merps_account = Self::load(account)?;
+        let mango_account = Self::load(account)?;
 
         check_eq!(
-            merps_account.meta_data.data_type,
-            DataType::MerpsAccount as u8,
-            MerpsErrorCode::Default
+            mango_account.meta_data.data_type,
+            DataType::MangoAccount as u8,
+            MangoErrorCode::Default
         )?;
-        check!(merps_account.meta_data.is_initialized, MerpsErrorCode::Default)?;
-        check_eq!(&merps_account.merps_group, merps_group_pk, MerpsErrorCode::Default)?;
+        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
 
-        Ok(merps_account)
+        Ok(mango_account)
     }
-    pub fn get_native_deposit(&self, root_bank: &RootBank, token_i: usize) -> MerpsResult<I80F48> {
-        self.deposits[token_i].checked_mul(root_bank.deposit_index).ok_or(throw!())
+    pub fn get_native_deposit(
+        &self,
+        root_bank_cache: &RootBankCache,
+        token_i: usize,
+    ) -> MangoResult<I80F48> {
+        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(throw!())
     }
-    pub fn get_native_borrow(&self, root_bank: &RootBank, token_i: usize) -> MerpsResult<I80F48> {
-        self.borrows[token_i].checked_mul(root_bank.borrow_index).ok_or(throw!())
+    pub fn get_native_borrow(
+        &self,
+        root_bank_cache: &RootBankCache,
+        token_i: usize,
+    ) -> MangoResult<I80F48> {
+        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(throw!())
     }
-    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
+
+    // TODO - Add checks to these math methods to prevent result from being < 0
+    // TOOD - Add unchecked versions to be used when we're confident
+    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
+    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         Ok(self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(throw!())?)
     }
-    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
+    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MerpsResult<()> {
+    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
     }
 
+    pub fn get_token_assets_liabs(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        open_orders_ais: &[AccountInfo],
+    ) -> MangoResult<([I80F48; MAX_TOKENS], [I80F48; MAX_TOKENS])> {
+        let mut assets = [ZERO_I80F48; MAX_TOKENS];
+        let mut liabs = [ZERO_I80F48; MAX_TOKENS];
+
+        assets[QUOTE_INDEX] =
+            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
+        liabs[QUOTE_INDEX] =
+            mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
+
+        for i in 0..mango_group.num_oracles {
+            if !self.in_margin_basket[i] || self.spot_open_orders[i] == Pubkey::default() {
+                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i];
+            } else {
+                // TODO make sure open orders account is checked for validity before passing in here
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i]
+                    + I80F48::from_num(open_orders.native_coin_total);
+                assets[QUOTE_INDEX] += I80F48::from_num(
+                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                );
+            }
+
+            liabs[i] = mango_cache.root_bank_cache[i].borrow_index * self.borrows[i];
+        }
+
+        Ok((assets, liabs))
+    }
+
+    pub fn get_spot_val(
+        &self,
+        mango_cache: &MangoCache,
+        market_index: usize,
+        open_orders_ai: &AccountInfo,
+        asset_weight: I80F48,
+    ) -> MangoResult<I80F48> {
+        // TODO make checked
+        let bank_cache = &mango_cache.root_bank_cache[market_index];
+        let price = mango_cache.price_cache[market_index].price;
+
+        Ok(
+            if !self.in_margin_basket[market_index]
+                || self.spot_open_orders[market_index] == Pubkey::default()
+            {
+                self.deposits[market_index] * bank_cache.deposit_index * asset_weight * price
+            } else {
+                // TODO - confirm only checked open orders are sent in here
+                let open_orders = load_open_orders(open_orders_ai)?;
+
+                ((self.deposits[market_index] * bank_cache.deposit_index
+                    + I80F48::from_num(open_orders.native_coin_total))
+                    * asset_weight
+                    * price)
+                    + I80F48::from_num(
+                        open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                    )
+            },
+        )
+    }
+
+    pub fn get_assets_val(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        open_orders_ais: &[AccountInfo],
+        active_assets: &[bool; MAX_PAIRS],
+        health_type: HealthType,
+    ) -> MangoResult<I80F48> {
+        let mut assets_val =
+            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
+
+        for i in 0..mango_group.num_oracles {
+            if !active_assets[i] {
+                continue;
+            }
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+
+            let (spot_weight, perp_weight) = match health_type {
+                HealthType::Maint => {
+                    (spot_market_info.maint_asset_weight, perp_market_info.maint_asset_weight)
+                }
+                HealthType::Init => {
+                    (spot_market_info.init_asset_weight, perp_market_info.init_asset_weight)
+                }
+            };
+
+            if !spot_market_info.is_empty() {
+                assets_val +=
+                    self.get_spot_val(mango_cache, i, &open_orders_ais[i], spot_weight)?;
+            }
+
+            if !perp_market_info.is_empty() {
+                assets_val += self.perp_accounts[i].get_assets_val(
+                    mango_cache.price_cache[i].price,
+                    perp_weight,
+                    mango_cache.perp_market_cache[i].long_funding,
+                    mango_cache.perp_market_cache[i].short_funding,
+                );
+            }
+        }
+
+        Ok(assets_val)
+    }
     fn get_spot_health(
         &self,
-        merps_cache: &MerpsCache,
+        mango_cache: &MangoCache,
         market_index: usize,
         open_orders_ai: &AccountInfo,
         asset_weight: I80F48,
         liab_weight: I80F48,
-    ) -> MerpsResult<I80F48> {
+    ) -> MangoResult<I80F48> {
         // TODO make checked
-        let bank_cache = &merps_cache.root_bank_cache[market_index];
-        let price = merps_cache.price_cache[market_index].price;
+        let bank_cache = &mango_cache.root_bank_cache[market_index];
+        let price = mango_cache.price_cache[market_index].price;
 
-        let (oo_base, oo_quote) = if self.spot_open_orders[market_index] == Pubkey::default() {
+        let (oo_base, oo_quote) = if !self.in_margin_basket[market_index]
+            || self.spot_open_orders[market_index] == Pubkey::default()
+        {
             (ZERO_I80F48, ZERO_I80F48)
         } else {
-            // TODO make sure open orders account is checked for validity before passing in here
             // TODO add in support for GUI hoster fee
             let open_orders = load_open_orders(open_orders_ai)?;
             (
@@ -945,30 +1134,29 @@ impl MerpsAccount {
             * price)
             + oo_quote;
 
-        msg!("get_spot_health {} price={:?} health={:?}", market_index, price, health,);
-
         Ok(health)
     }
 
+    /// Must validate the caches before
     pub fn get_health(
         &self,
-        merps_group: &MerpsGroup,
-        merps_cache: &MerpsCache,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
         spot_open_orders_ais: &[AccountInfo],
+        active_assets: &[bool; MAX_PAIRS],
         health_type: HealthType,
-    ) -> MerpsResult<I80F48> {
-        let mut health = (merps_cache.root_bank_cache[QUOTE_INDEX].deposit_index
+    ) -> MangoResult<I80F48> {
+        let mut health = (mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index
             * self.deposits[QUOTE_INDEX])
-            - (merps_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
+            - (mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
 
-        msg!("get_health quote={:?}", health);
-
-        for i in 0..merps_group.num_oracles {
-            if !self.in_basket[i] {
+        for i in 0..mango_group.num_oracles {
+            if !active_assets[i] {
                 continue;
             }
-            let spot_market_info = &merps_group.spot_markets[i];
-            let perp_market_info = &merps_group.perp_markets[i];
+
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
 
             let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
                 match health_type {
@@ -988,7 +1176,7 @@ impl MerpsAccount {
 
             if !spot_market_info.is_empty() {
                 health += self.get_spot_health(
-                    merps_cache,
+                    mango_cache,
                     i,
                     &spot_open_orders_ais[i],
                     spot_asset_weight,
@@ -999,17 +1187,29 @@ impl MerpsAccount {
             if !perp_market_info.is_empty() {
                 health += self.perp_accounts[i].get_health(
                     perp_market_info,
-                    merps_cache.price_cache[i].price,
+                    mango_cache.price_cache[i].price,
                     perp_asset_weight,
                     perp_liab_weight,
-                    merps_cache.perp_market_cache[i].long_funding,
-                    merps_cache.perp_market_cache[i].short_funding,
+                    mango_cache.perp_market_cache[i].long_funding,
+                    mango_cache.perp_market_cache[i].short_funding,
                 );
             }
             msg!("get_health {} => {:?}", i, health);
         }
 
         Ok(health)
+    }
+
+    /// Return an array of bools that are true if any part of token, spot or perps for that index are nonzero
+    pub fn get_active_assets(&self, mango_group: &MangoGroup) -> [bool; MAX_PAIRS] {
+        let mut active_assets = [false; MAX_PAIRS];
+        for i in 0..mango_group.num_oracles {
+            active_assets[i] = self.in_margin_basket[i]
+                || !self.deposits[i].is_zero()
+                || !self.borrows[i].is_zero()
+                || self.perp_accounts[i].is_active();
+        }
+        active_assets
     }
 }
 
@@ -1021,7 +1221,7 @@ pub struct PerpMarket {
     // TODO consider adding the market_index here for easy lookup
     pub meta_data: MetaData,
 
-    pub merps_group: Pubkey,
+    pub mango_group: Pubkey,
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
@@ -1049,33 +1249,33 @@ impl PerpMarket {
     pub fn load_and_init<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group_ai: &'a AccountInfo,
+        mango_group_ai: &'a AccountInfo,
         bids_ai: &'a AccountInfo,
         asks_ai: &'a AccountInfo,
         event_queue_ai: &'a AccountInfo,
 
-        merps_group: &MerpsGroup,
+        mango_group: &MangoGroup,
         rent: &Rent,
 
         market_index: usize,
         contract_size: i64,
         quote_lot_size: i64,
-    ) -> MerpsResult<RefMut<'a, Self>> {
+    ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
-        check!(account.owner == program_id, MerpsErrorCode::InvalidOwner)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
         check!(
             rent.is_exempt(account.lamports(), size_of::<Self>()),
-            MerpsErrorCode::AccountNotRentExempt
+            MangoErrorCode::AccountNotRentExempt
         )?;
-        check!(!state.meta_data.is_initialized, MerpsErrorCode::Default)?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::Default)?;
 
         state.meta_data = MetaData::new(DataType::PerpMarket, 0, true);
-        state.merps_group = *merps_group_ai.key;
+        state.mango_group = *mango_group_ai.key;
         state.bids = *bids_ai.key;
         state.asks = *asks_ai.key;
         state.event_queue = *event_queue_ai.key;
         state.quote_lot_size = quote_lot_size;
-        state.index_oracle = merps_group.oracles[market_index];
+        state.index_oracle = mango_group.oracles[market_index];
         state.contract_size = contract_size;
 
         let clock = Clock::get()?;
@@ -1087,26 +1287,26 @@ impl PerpMarket {
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group_pk: &Pubkey,
-    ) -> MerpsResult<Ref<'a, Self>> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        mango_group_pk: &Pubkey,
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         let state = Self::load(account)?;
-        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
-        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MerpsErrorCode::Default)?;
-        check!(merps_group_pk == &state.merps_group, MerpsErrorCode::Default)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MangoErrorCode::Default)?;
+        check!(mango_group_pk == &state.mango_group, MangoErrorCode::Default)?;
         Ok(state)
     }
 
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        merps_group_pk: &Pubkey,
-    ) -> MerpsResult<RefMut<'a, Self>> {
-        check_eq!(account.owner, program_id, MerpsErrorCode::InvalidOwner)?;
+        mango_group_pk: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         let state = Self::load_mut(account)?;
-        check!(state.meta_data.is_initialized, MerpsErrorCode::Default)?;
-        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MerpsErrorCode::Default)?;
-        check!(merps_group_pk == &state.merps_group, MerpsErrorCode::Default)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MangoErrorCode::Default)?;
+        check!(mango_group_pk == &state.mango_group, MangoErrorCode::Default)?;
         Ok(state)
     }
 
@@ -1123,17 +1323,17 @@ impl PerpMarket {
     /// Use current order book price
     pub fn update_funding(
         &mut self,
-        merps_group: &MerpsGroup,
+        mango_group: &MangoGroup,
         book: &Book,
-        merps_cache: &MerpsCache,
+        mango_cache: &MangoCache,
         market_index: usize,
         now_ts: u64,
-    ) -> MerpsResult<()> {
+    ) -> MangoResult<()> {
         // Get the index price from cache, ensure it's not outdated
-        let price_cache = &merps_cache.price_cache[market_index];
+        let price_cache = &mango_cache.price_cache[market_index];
         check!(
-            now_ts <= price_cache.last_update + merps_group.valid_interval,
-            MerpsErrorCode::InvalidCache
+            now_ts <= price_cache.last_update + mango_group.valid_interval,
+            MangoErrorCode::InvalidCache
         )?;
         let index_price = price_cache.price;
 
@@ -1145,7 +1345,7 @@ impl PerpMarket {
         let ask = book.get_best_ask_price();
 
         // verify that at least one order is on the book
-        check!(bid.is_some() || ask.is_some(), MerpsErrorCode::Default)?;
+        check!(bid.is_some() || ask.is_some(), MangoErrorCode::Default)?;
 
         const ONE_SIDED_PENALTY_FUNDING: I80F48 = I80F48!(0.05);
         let diff = match (bid, ask) {
@@ -1165,15 +1365,6 @@ impl PerpMarket {
             * time_factor
             * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
             * index_price;
-
-        msg!(
-            "update_funding diff={:?} tf={:?} delta={:?} ds={}-{}",
-            diff,
-            funding_delta,
-            time_factor,
-            now_ts,
-            self.last_updated
-        );
 
         self.long_funding += funding_delta;
         self.short_funding += funding_delta;
@@ -1195,8 +1386,8 @@ impl PerpMarket {
 pub fn load_market_state<'a>(
     market_account: &'a AccountInfo,
     program_id: &Pubkey,
-) -> MerpsResult<RefMut<'a, serum_dex::state::MarketState>> {
-    check_eq!(market_account.owner, program_id, MerpsErrorCode::Default)?;
+) -> MangoResult<RefMut<'a, serum_dex::state::MarketState>> {
+    check_eq!(market_account.owner, program_id, MangoErrorCode::Default)?;
 
     let state: RefMut<'a, serum_dex::state::MarketState>;
     state = RefMut::map(market_account.try_borrow_mut_data()?, |data| {
@@ -1210,8 +1401,8 @@ pub fn load_market_state<'a>(
     Ok(state)
 }
 
-fn strip_dex_padding<'a>(acc: &'a AccountInfo) -> MerpsResult<Ref<'a, [u8]>> {
-    check!(acc.data_len() >= 12, MerpsErrorCode::Default)?;
+fn strip_dex_padding<'a>(acc: &'a AccountInfo) -> MangoResult<Ref<'a, [u8]>> {
+    check!(acc.data_len() >= 12, MangoErrorCode::Default)?;
     let unpadded_data: Ref<[u8]> = Ref::map(acc.try_borrow_data()?, |data| {
         let data_len = data.len() - 12;
         let (_, rest) = data.split_at(5);
@@ -1227,7 +1418,7 @@ pub fn load_open_orders<'a>(
     Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
 }
 
-pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MerpsResult<()> {
+pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MangoResult<()> {
     if *acc.key == Pubkey::default() {
         return Ok(());
     }
@@ -1236,8 +1427,8 @@ pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MerpsResult<()> {
     let valid_flags = (serum_dex::state::AccountFlag::Initialized
         | serum_dex::state::AccountFlag::OpenOrders)
         .bits();
-    check_eq!(open_orders.account_flags, valid_flags, MerpsErrorCode::Default)?;
-    check_eq!(identity(open_orders.owner), owner.to_aligned_bytes(), MerpsErrorCode::Default)?;
+    check_eq!(open_orders.account_flags, valid_flags, MangoErrorCode::Default)?;
+    check_eq!(identity(open_orders.owner), owner.to_aligned_bytes(), MangoErrorCode::Default)?;
 
     Ok(())
 }

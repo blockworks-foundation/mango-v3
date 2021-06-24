@@ -2,15 +2,15 @@ mod helpers;
 
 use fixed::types::I80F48;
 use helpers::*;
-use merps::instruction::{add_oracle, set_oracle};
-use merps::oracle::StubOracle;
-use merps::{
+use mango::instruction::{add_oracle, set_oracle};
+use mango::oracle::StubOracle;
+use mango::{
     entrypoint::process_instruction,
     instruction::{
-        add_spot_market, add_to_basket, cache_prices, cache_root_banks, deposit,
-        init_merps_account, update_root_bank, withdraw,
+        add_spot_market, cache_prices, cache_root_banks, deposit, init_mango_account,
+        update_root_bank, withdraw,
     },
-    state::{MerpsAccount, MerpsGroup, NodeBank, QUOTE_INDEX},
+    state::{MangoAccount, MangoGroup, NodeBank, QUOTE_INDEX},
 };
 use solana_program::account_info::AccountInfo;
 use solana_program_test::*;
@@ -27,7 +27,7 @@ async fn test_borrow_succeeds() {
     // Test that the borrow instruction succeeds and the expected side effects occurr
     let program_id = Pubkey::new_unique();
 
-    let mut test = ProgramTest::new("merps", program_id, processor!(process_instruction));
+    let mut test = ProgramTest::new("mango", program_id, processor!(process_instruction));
 
     // limit to track compute unit increase
     test.set_bpf_compute_max_units(50_000);
@@ -37,8 +37,8 @@ async fn test_borrow_succeeds() {
     let quote_unit = 10u64.pow(quote_decimals);
     let user_initial_amount = 100000 * quote_unit;
 
-    let merps_group = add_merps_group_prodlike(&mut test, program_id);
-    let merps_group_pk = merps_group.merps_group_pk;
+    let mango_group = add_mango_group_prodlike(&mut test, program_id);
+    let mango_group_pk = mango_group.mango_group_pk;
 
     let user = Keypair::new();
     let admin = Keypair::new();
@@ -47,14 +47,14 @@ async fn test_borrow_succeeds() {
     let user_quote_account = add_token_account(
         &mut test,
         user.pubkey(),
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         user_initial_amount,
     );
 
-    let merps_account_pk = Pubkey::new_unique();
+    let mango_account_pk = Pubkey::new_unique();
     test.add_account(
-        merps_account_pk,
-        Account::new(u32::MAX as u64, size_of::<MerpsAccount>(), &program_id),
+        mango_account_pk,
+        Account::new(u32::MAX as u64, size_of::<MangoAccount>(), &program_id),
     );
 
     let btc_decimals = 6;
@@ -63,7 +63,7 @@ async fn test_borrow_succeeds() {
 
     let btc_mint = add_mint(&mut test, 6);
     let btc_vault =
-        add_token_account(&mut test, merps_group.signer_pk, btc_mint.pubkey, btc_vault_init_amount);
+        add_token_account(&mut test, mango_group.signer_pk, btc_mint.pubkey, btc_vault_init_amount);
     let btc_node_bank = add_node_bank(&mut test, &program_id, btc_vault.pubkey);
     let btc_root_bank = add_root_bank(&mut test, &program_id, btc_node_bank);
 
@@ -74,7 +74,7 @@ async fn test_borrow_succeeds() {
     let btc_usdt_spot_mkt = add_dex_empty(
         &mut test,
         btc_mint.pubkey,
-        merps_group.tokens[quote_index].pubkey,
+        mango_group.tokens[quote_index].pubkey,
         dex_program_pk,
     );
 
@@ -93,31 +93,39 @@ async fn test_borrow_succeeds() {
 
     let borrow_and_withdraw_amount = 1 * base_unit;
 
-    // setup merps group and merps account, make a deposit, add market to basket
+    // setup mango group and mango account, make a deposit, add market to basket
     {
         let mut transaction = Transaction::new_with_payer(
             &[
-                merps_group.init_merps_group(&admin.pubkey()),
-                init_merps_account(&program_id, &merps_group_pk, &merps_account_pk, &user.pubkey())
+                mango_group.init_mango_group(&admin.pubkey()),
+                init_mango_account(&program_id, &mango_group_pk, &mango_account_pk, &user.pubkey())
                     .unwrap(),
+                cache_root_banks(
+                    &program_id,
+                    &mango_group_pk,
+                    &mango_group.mango_cache_pk,
+                    &[mango_group.root_banks[quote_index].pubkey],
+                )
+                .unwrap(),
                 deposit(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
+                    &mango_group_pk,
+                    &mango_account_pk,
                     &user.pubkey(),
-                    &merps_group.root_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].pubkey,
-                    &merps_group.root_banks[quote_index].node_banks[quote_index].vault,
+                    &mango_group.mango_cache_pk,
+                    &mango_group.root_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].pubkey,
+                    &mango_group.root_banks[quote_index].node_banks[quote_index].vault,
                     &user_quote_account.pubkey,
                     user_initial_amount,
                 )
                 .unwrap(),
-                add_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
-                set_oracle(&program_id, &merps_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
+                add_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey()).unwrap(),
+                set_oracle(&program_id, &mango_group_pk, &oracle_pk, &admin.pubkey(), oracle_price)
                     .unwrap(),
                 add_spot_market(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &btc_usdt_spot_mkt.pubkey,
                     &dex_program_pk,
                     &btc_mint.pubkey,
@@ -128,14 +136,6 @@ async fn test_borrow_succeeds() {
                     btc_usdt_spot_mkt_idx,
                     maint_leverage,
                     init_leverage,
-                )
-                .unwrap(),
-                add_to_basket(
-                    &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
-                    &user.pubkey(),
-                    btc_usdt_spot_mkt_idx,
                 )
                 .unwrap(),
             ],
@@ -159,47 +159,47 @@ async fn test_borrow_succeeds() {
 
     // make a borrow and withdraw
     {
-        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
-        let mut merps_group = banks_client.get_account(merps_group_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_group_pk, &mut merps_group).into();
-        let merps_group = MerpsGroup::load_mut_checked(&account_info, &program_id).unwrap();
+        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
+        let mut mango_group = banks_client.get_account(mango_group_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_group_pk, &mut mango_group).into();
+        let mango_group = MangoGroup::load_mut_checked(&account_info, &program_id).unwrap();
         let borrow_token_index = 0;
 
         println!("borrow amount: {}", borrow_and_withdraw_amount);
 
         let mut transaction = Transaction::new_with_payer(
             &[
-                cache_prices(&program_id, &merps_group_pk, &merps_group.merps_cache, &[oracle_pk])
+                cache_prices(&program_id, &mango_group_pk, &mango_group.mango_cache, &[oracle_pk])
                     .unwrap(),
                 cache_root_banks(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_group.merps_cache,
-                    &[merps_group.tokens[QUOTE_INDEX].root_bank, btc_root_bank.pubkey],
+                    &mango_group_pk,
+                    &mango_group.mango_cache,
+                    &[mango_group.tokens[QUOTE_INDEX].root_bank, btc_root_bank.pubkey],
                 )
                 .unwrap(),
                 update_root_bank(
                     &program_id,
-                    &merps_group_pk,
+                    &mango_group_pk,
                     &btc_root_bank.pubkey,
                     &[btc_root_bank.node_banks[0].pubkey],
                 )
                 .unwrap(),
                 withdraw(
                     &program_id,
-                    &merps_group_pk,
-                    &merps_account_pk,
+                    &mango_group_pk,
+                    &mango_account_pk,
                     &user.pubkey(),
-                    &merps_group.merps_cache,
-                    &merps_group.tokens[borrow_token_index].root_bank,
+                    &mango_group.mango_cache,
+                    &mango_group.tokens[borrow_token_index].root_bank,
                     &btc_root_bank.node_banks[0].pubkey,
                     &btc_vault.pubkey,
                     &user_btc_account.pubkey,
-                    &merps_group.signer_key,
-                    &merps_account.spot_open_orders,
+                    &mango_group.signer_key,
+                    &mango_account.spot_open_orders,
                     borrow_and_withdraw_amount,
                     true, // allow_borrow
                 )
@@ -215,13 +215,13 @@ async fn test_borrow_succeeds() {
         // Test transaction succeeded
         assert!(result.is_ok());
 
-        let mut merps_account = banks_client.get_account(merps_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&merps_account_pk, &mut merps_account).into();
-        let merps_account =
-            MerpsAccount::load_mut_checked(&account_info, &program_id, &merps_group_pk).unwrap();
+        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
+        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
+        let mango_account =
+            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group_pk).unwrap();
 
-        // Test expected borrow is in merps account
-        assert_eq!(merps_account.borrows[borrow_token_index], borrow_and_withdraw_amount);
+        // Test expected borrow is in mango account
+        assert_eq!(mango_account.borrows[borrow_token_index], borrow_and_withdraw_amount);
 
         // Test expected borrow is added to total in node bank
         let mut node_bank = banks_client.get_account(btc_node_bank.pubkey).await.unwrap().unwrap();

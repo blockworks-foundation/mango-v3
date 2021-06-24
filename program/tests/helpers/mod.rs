@@ -1,4 +1,4 @@
-use merps::oracle::StubOracle;
+use mango::oracle::StubOracle;
 use safe_transmute::{self, to_bytes::transmute_one_to_bytes};
 use std::any::type_name;
 use std::mem::size_of;
@@ -22,9 +22,11 @@ use solana_sdk::{
 use serum_dex::state::{AccountFlag, MarketState, ToAlignedBytes};
 use spl_token::state::{Account as Token, AccountState, Mint};
 
-use merps::instruction::init_merps_group;
-use merps::state::{MerpsCache, MerpsGroup, NodeBank, RootBank, ONE_I80F48, ZERO_I80F48};
-use merps::utils::create_signer_key_and_nonce;
+use mango::instruction::init_mango_group;
+use mango::state::{MangoCache, MangoGroup, NodeBank, RootBank, ONE_I80F48, ZERO_I80F48};
+use mango::utils::create_signer_key_and_nonce;
+use solana_program::hash::Hash;
+use solana_sdk::transaction::Transaction;
 
 trait AddPacked {
     fn add_packable_account<T: Pack>(
@@ -140,8 +142,8 @@ pub fn add_token_account(
         pubkey,
         u32::MAX as u64,
         &Token {
-            mint: mint,
-            owner: owner,
+            mint,
+            owner,
             amount: initial_balance,
             state: AccountState::Initialized,
             ..Token::default()
@@ -238,15 +240,15 @@ pub fn add_root_bank(
     }
 }
 
-// Holds all of the dependencies for a MerpsGroup
-pub struct TestMerpsGroup {
+// Holds all of the dependencies for a MangoGroup
+pub struct TestMangoGroup {
     pub program_id: Pubkey,
-    pub merps_group_pk: Pubkey,
+    pub mango_group_pk: Pubkey,
     pub signer_pk: Pubkey,
     pub signer_nonce: u64,
     pub admin_pk: Pubkey,
     pub dex_program_pk: Pubkey,
-    pub merps_cache_pk: Pubkey,
+    pub mango_cache_pk: Pubkey,
 
     pub num_tokens: usize,
     pub num_oracles: usize, // Note: does not increase if there is a spot and perp market for same base token
@@ -262,18 +264,18 @@ pub struct TestMerpsGroup {
     pub valid_interval: u8,
 }
 
-impl TestMerpsGroup {
-    pub fn init_merps_group(&self, payer: &Pubkey) -> Instruction {
-        init_merps_group(
+impl TestMangoGroup {
+    pub fn init_mango_group(&self, payer: &Pubkey) -> Instruction {
+        init_mango_group(
             &self.program_id,
-            &self.merps_group_pk,
+            &self.mango_group_pk,
             &self.signer_pk,
             payer,
             &self.tokens[0].pubkey,
             &self.root_banks[0].node_banks[0].vault,
             &self.root_banks[0].node_banks[0].pubkey,
             &self.root_banks[0].pubkey,
-            &self.merps_cache_pk,
+            &self.mango_cache_pk,
             &self.dex_program_pk,
             self.signer_nonce,
             5, // valid_interval
@@ -282,21 +284,21 @@ impl TestMerpsGroup {
     }
 }
 
-pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> TestMerpsGroup {
-    let merps_group_pk = Pubkey::new_unique();
-    let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&program_id, &merps_group_pk);
+pub fn add_mango_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> TestMangoGroup {
+    let mango_group_pk = Pubkey::new_unique();
+    let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&program_id, &mango_group_pk);
     test.add_account(
-        merps_group_pk,
-        Account::new(u32::MAX as u64, size_of::<MerpsGroup>(), &program_id),
+        mango_group_pk,
+        Account::new(u32::MAX as u64, size_of::<MangoGroup>(), &program_id),
     );
 
     let admin = Keypair::new();
     let dex_program_pk = Pubkey::new_unique();
 
-    let merps_cache_pk = Pubkey::new_unique();
+    let mango_cache_pk = Pubkey::new_unique();
     test.add_account(
-        merps_cache_pk,
-        Account::new(u32::MAX as u64, size_of::<MerpsCache>(), &program_id),
+        mango_cache_pk,
+        Account::new(u32::MAX as u64, size_of::<MangoCache>(), &program_id),
     );
 
     let quote_mint = add_mint(test, 6);
@@ -307,20 +309,64 @@ pub fn add_merps_group_prodlike(test: &mut ProgramTest, program_id: Pubkey) -> T
     let tokens = vec![quote_mint];
     let root_banks = vec![quote_root_bank];
 
-    TestMerpsGroup {
+    TestMangoGroup {
         program_id,
-        merps_group_pk,
+        mango_group_pk,
         signer_pk,
         signer_nonce,
         admin_pk: admin.pubkey(),
         dex_program_pk,
-        merps_cache_pk,
+        mango_cache_pk,
         tokens,
         root_banks,
         num_tokens: 1,
         num_oracles: 0,
         valid_interval: 5,
     }
+}
+
+pub async fn add_mango_group(
+    test: &mut ProgramTest,
+    banks_client: &mut BanksClient,
+    payer: &Keypair,
+    recent_blockhash: &Hash,
+    program_id: &Pubkey,
+    admin: &Keypair,
+) -> Pubkey {
+    let mango_group_pk = add_test_account_with_owner::<MangoGroup>(test, program_id);
+    let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&program_id, &mango_group_pk);
+
+    let dex_program_pk = Pubkey::new_unique();
+    let mango_cache_pk = add_test_account_with_owner::<MangoCache>(test, program_id);
+
+    let quote_mint = add_mint(test, 6);
+    let quote_vault = add_token_account(test, signer_pk, quote_mint.pubkey, 0);
+    let quote_node_bank = add_node_bank(test, &program_id, quote_vault.pubkey);
+    let quote_root_bank = add_root_bank(test, &program_id, quote_node_bank);
+
+    let mut transaction = Transaction::new_with_payer(
+        &[init_mango_group(
+            program_id,
+            &mango_group_pk,
+            &signer_pk,
+            &admin.pubkey(),
+            &quote_mint.pubkey,
+            &quote_vault.pubkey,
+            &quote_node_bank.pubkey,
+            &quote_root_bank.pubkey,
+            &mango_cache_pk,
+            &dex_program_pk,
+            signer_nonce,
+            5,
+        )
+        .unwrap()],
+        Some(&payer.pubkey()),
+    );
+
+    transaction.sign(&[payer, admin], *recent_blockhash);
+    assert!(banks_client.process_transaction(transaction).await.is_ok());
+
+    mango_group_pk
 }
 
 #[allow(dead_code)] // Compiler complains about this even tho it is used

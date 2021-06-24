@@ -11,6 +11,6 @@ pub fn process_instruction(
 ) -> ProgramResult {
     Processor::process(program_id, accounts, instruction_data).map_err(|e| {
         msg!("{}", e); // log the error
-        e.into() // convert MerpsError to generic ProgramError
+        e.into() // convert MangoError to generic ProgramError
     })
 }
