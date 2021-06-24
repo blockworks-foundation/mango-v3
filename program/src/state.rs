@@ -592,7 +592,6 @@ impl PerpOpenOrders {
         check!(self.is_free_bits != 0, MangoErrorCode::TooManyOpenOrders)?;
         let slot = self.next_order_slot();
         let slot_mask = 1u32 << slot;
-        self.is_free_bits &= !slot_mask;
         match side {
             Side::Bid => {
                 // TODO make checked
@@ -605,6 +604,7 @@ impl PerpOpenOrders {
             }
         };
 
+        self.is_free_bits &= !slot_mask;
         self.orders[slot as usize] = order.key;
         self.client_order_ids[slot as usize] = order.client_order_id;
         Ok(())
