@@ -1344,9 +1344,6 @@ impl PerpMarket {
         let bid = book.get_best_bid_price();
         let ask = book.get_best_ask_price();
 
-        // verify that at least one order is on the book
-        check!(bid.is_some() || ask.is_some(), MangoErrorCode::Default)?;
-
         const ONE_SIDED_PENALTY_FUNDING: I80F48 = I80F48!(0.05);
         let diff = match (bid, ask) {
             (Some(bid), Some(ask)) => {
@@ -1355,8 +1352,8 @@ impl PerpMarket {
                 (book_price / index_price) - ONE_I80F48
             }
             (Some(_bid), None) => ONE_SIDED_PENALTY_FUNDING,
-            (None, Some(_ask)) => ONE_SIDED_PENALTY_FUNDING,
-            (None, None) => ZERO_I80F48, // checked already before for this case
+            (None, Some(_ask)) => -ONE_SIDED_PENALTY_FUNDING,
+            (None, None) => ZERO_I80F48,
         };
 
         // TODO consider what happens if time_factor is very small. Can funding_delta == 0 when diff != 0?

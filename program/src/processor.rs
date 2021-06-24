@@ -382,7 +382,7 @@ impl Processor {
 
     /// Deposit instruction
     /// TODO - fix instruction.rs and intruction.ts
-    fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> ProgramResult {
+    fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -2129,6 +2129,12 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         perp_market.update_funding(&mango_group, &book, &mango_cache, market_index, now_ts)?;
+
+        msg!(
+            "{{\"long_funding\":{}, \"short_funding\":{}}}",
+            perp_market.long_funding.to_num::<f64>(),
+            perp_market.short_funding.to_num::<f64>()
+        );
 
         Ok(())
     }
