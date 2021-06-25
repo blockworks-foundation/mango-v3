@@ -25,7 +25,7 @@ use spl_token::state::{Account, Mint};
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::StubOracle;
+use crate::oracle::{determine_oracle_type, StubOracle, Price, OracleType};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_market_state, load_open_orders, AssetType, DataType, HealthType,
@@ -119,7 +119,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
-            mango_group_ai,     // read 
+            mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai            // read, signer
         ] = accounts;
@@ -260,10 +260,18 @@ impl Processor {
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
 
-        // TODO allow more oracle types including purely on chain price feeds
-        // TODO use first 4 bytes of oracle account to identify oracle type (pyth / stub)
-        let rent = Rent::get()?;
-        let _oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+        let oracle_type = determine_oracle_type(oracle_ai);
+        match oracle_type {
+            OracleType::Pyth => {
+                msg!("OracleType: got pyth"); // Do nothing really cause all that's needed is storing the pkey
+            }
+            OracleType::Stub | OracleType::Unknown => {
+                msg!("OracleType: got unknown or stub");
+                let rent = Rent::get()?;
+                let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+                oracle.magic = 0x6F676E4D;
+            }
+        }
 
         let oracle_index = mango_group.num_oracles;
         mango_group.oracles[oracle_index] = *oracle_ai.key;
@@ -284,14 +292,14 @@ impl Processor {
         let mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
-
-        // TODO only allow setting stub oracle and not other oracle types
+        let oracle_type = determine_oracle_type(oracle_ai);
+        check_eq!(oracle_type, OracleType::Stub, MangoErrorCode::Default)?;
         // TODO verify oracle is really owned by this group (currently only checks program)
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
         let clock = Clock::get()?;
         oracle.last_update = clock.unix_timestamp as u64;
-
+        // TODO verify oracle is really owned by this group (currently only checks program)
         Ok(())
     }
 
@@ -435,7 +443,7 @@ impl Processor {
         Ok(())
     }
 
-    /// Write oracle prices onto MangoAccount before calling a value-dep instruction (e.g. Withdraw)    
+    /// Write oracle prices onto MangoAccount before calling a value-dep instruction (e.g. Withdraw)
     fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -449,11 +457,12 @@ impl Processor {
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
         for oracle_ai in oracle_ais.iter() {
             let i = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
             mango_cache.price_cache[i] =
-                PriceCache { price: read_oracle(oracle_ai)?, last_update: now_ts };
+                PriceCache { price: read_oracle(&mango_group, i, oracle_ai)?, last_update: now_ts };
         }
         Ok(())
     }
@@ -517,12 +526,12 @@ impl Processor {
         const NUM_FIXED: usize = 6;
         let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
-            mango_group_ai,     // read 
+            mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read
-            mango_cache_ai,     // read 
-            root_bank_ai,       // read 
-            node_bank_ai,       // write  
+            mango_cache_ai,     // read
+            root_bank_ai,       // read
+            node_bank_ai,       // write
         ] = fixed_accs;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -1080,6 +1089,7 @@ impl Processor {
         // Ok(())
     }
 
+
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 17;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -1530,9 +1540,9 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            asset_node_bank_ai,     // write    
+            asset_node_bank_ai,     // write
             asset_root_bank_ai,     // write
             liab_node_bank_ai,      // write
             liab_root_bank_ai,      // write
@@ -1828,8 +1838,8 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
-            liqor_ai,               // read, signer    
+            liqor_mango_account_ai, // write
+            liqor_ai,               // read, signer
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -2432,7 +2442,8 @@ fn invoke_transfer<'a>(
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
 }
 
-fn read_oracle(oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
+#[inline(never)]
+fn read_oracle(mango_group: &MangoGroup, token_index: usize, oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
     /* TODO abstract different oracle programs
     let aggregator = flux_aggregator::state::Aggregator::load_initialized(oracle_ai)?;
     let answer = flux_aggregator::read_median(oracle_ai)?;
@@ -2440,9 +2451,26 @@ fn read_oracle(oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
     let units = I80F48::from(10u64.pow(aggregator.config.decimals));
     let value = median.checked_div(units);
     */
-
-    let oracle = StubOracle::load(oracle_ai)?;
-    Ok(oracle.price)
+    let quote_decimals: u8 = mango_group.tokens[QUOTE_INDEX].decimals;
+    let price: I80F48;
+    let oracle_type = determine_oracle_type(oracle_ai);
+    match oracle_type {
+        OracleType::Pyth => {
+            let price_account = Price::get_price(oracle_ai).unwrap();
+            let value = I80F48::from_num(price_account.agg.price);
+            let quote_adj = I80F48::from_num(10u64.pow(quote_decimals.checked_sub(price_account.expo.abs() as u8).unwrap() as u32));
+            let base_adj = I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
+            price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
+        }
+        OracleType::Stub => {
+            let oracle = StubOracle::load(oracle_ai)?;
+            price = I80F48::from_num(oracle.price);
+        }
+        OracleType::Unknown => {
+            panic!("Unknown oracle");
+        }
+    }
+    Ok(price)
 }
 
 /// If there are borrows, pay down borrows first then increase deposits
