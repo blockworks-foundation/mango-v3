@@ -8,10 +8,10 @@ use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 
 declare_check_assert_macros!(SourceFileId::Oracle);
 
+
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct StubOracle {
-    // TODO: magic: u32
     pub magic: u32, // Magic byte
     pub price: I80F48, // unit is interpreted as how many quote native tokens for 1 base native token
     pub last_update: u64,
@@ -64,7 +64,8 @@ pub const PROD_ATTR_SIZE : usize = PROD_ACCT_SIZE - PROD_HDR_SIZE;
 pub enum OracleType
 {
   Stub,
-  Pyth
+  Pyth,
+  Unknown
 }
 
 // each account has its own type
@@ -246,6 +247,6 @@ pub fn determine_oracle_type<'a>(
     } else if borrowed[0] == 77 && borrowed[1] == 110 && borrowed[2] == 103 && borrowed[3] == 111 {
         return OracleType::Stub;
     } else {
-        panic!("Invalid oracle");
+        return OracleType::Unknown;
     }
 }

@@ -263,12 +263,13 @@ impl Processor {
         let oracle_type = determine_oracle_type(oracle_ai);
         match oracle_type {
             OracleType::Pyth => {
-                msg!("got pyth"); // Do nothing really cause all that's needed is storing the pkey
+                msg!("OracleType: got pyth"); // Do nothing really cause all that's needed is storing the pkey
             }
-            OracleType::Stub => {
-                msg!("got stub");
+            OracleType::Stub | OracleType::Unknown => {
+                msg!("OracleType: got unknown or stub");
                 let rent = Rent::get()?;
-                let _oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+                let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+                oracle.magic = 0x6F676E4D;
             }
         }
 
@@ -291,8 +292,8 @@ impl Processor {
         let mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
-
-        // TODO only allow setting stub oracle and not other oracle types
+        let oracle_type = determine_oracle_type(oracle_ai);
+        check_eq!(oracle_type, OracleType::Stub, MangoErrorCode::Default)?;
         // TODO verify oracle is really owned by this group (currently only checks program)
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
@@ -1087,6 +1088,7 @@ impl Processor {
         // )?;
         // Ok(())
     }
+
 
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 17;
@@ -2440,6 +2442,7 @@ fn invoke_transfer<'a>(
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
 }
 
+#[inline(never)]
 fn read_oracle(mango_group: &MangoGroup, token_index: usize, oracle_ai: &AccountInfo) -> MangoResult<I80F48> {
     /* TODO abstract different oracle programs
     let aggregator = flux_aggregator::state::Aggregator::load_initialized(oracle_ai)?;
@@ -2462,6 +2465,9 @@ fn read_oracle(mango_group: &MangoGroup, token_index: usize, oracle_ai: &Account
         OracleType::Stub => {
             let oracle = StubOracle::load(oracle_ai)?;
             price = I80F48::from_num(oracle.price);
+        }
+        OracleType::Unknown => {
+            panic!("Unknown oracle");
         }
     }
     Ok(price)
