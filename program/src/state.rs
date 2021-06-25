@@ -19,6 +19,7 @@ use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
+use std::cmp::{max, min};
 
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -549,6 +550,14 @@ impl MangoCache {
         }
 
         true
+    }
+
+    pub fn get_price(&self, i: usize) -> I80F48 {
+        if i == QUOTE_INDEX {
+            ONE_I80F48
+        } else {
+            self.price_cache[i].price // Just panic if index out of bounds
+        }
     }
 }
 
@@ -1344,15 +1353,17 @@ impl PerpMarket {
         let bid = book.get_best_bid_price();
         let ask = book.get_best_ask_price();
 
-        const ONE_SIDED_PENALTY_FUNDING: I80F48 = I80F48!(0.05);
+        const MAX_FUNDING: I80F48 = I80F48!(0.05);
+        const MIN_FUNDING: I80F48 = I80F48!(-0.05);
+
         let diff = match (bid, ask) {
             (Some(bid), Some(ask)) => {
                 // calculate mid-market rate
                 let book_price = self.lot_to_native_price((bid + ask) / 2);
-                (book_price / index_price) - ONE_I80F48
+                min(max((book_price / index_price) - ONE_I80F48, MIN_FUNDING), MAX_FUNDING)
             }
-            (Some(_bid), None) => ONE_SIDED_PENALTY_FUNDING,
-            (None, Some(_ask)) => -ONE_SIDED_PENALTY_FUNDING,
+            (Some(_bid), None) => MAX_FUNDING,
+            (None, Some(_ask)) => MIN_FUNDING,
             (None, None) => ZERO_I80F48,
         };
 
