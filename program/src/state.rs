@@ -150,6 +150,8 @@ pub struct MangoGroup {
     pub dex_program_id: Pubkey, // Consider allowing more
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
+
+    pub insurance_vault: Pubkey, // ***
 }
 
 impl MangoGroup {
@@ -889,6 +891,12 @@ impl PerpAccount {
 
         // Note funding only applies if base position not 0
     }
+
+    /// Decrement self and increment other
+    pub fn transfer_quote_position(&mut self, other: &mut PerpAccount, quantity: I80F48) {
+        self.quote_position -= quantity;
+        other.quote_position += quantity;
+    }
 }
 
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
@@ -913,7 +921,8 @@ pub struct MangoAccount {
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 
     pub being_liquidated: bool,
-    pub padding: [u8; 7],
+    pub is_bankrupt: bool, // TODO - add to client
+    pub padding: [u8; 6],
 }
 
 pub enum HealthType {
@@ -927,8 +936,7 @@ pub enum HealthType {
 #[repr(u8)]
 pub enum AssetType {
     Token = 0,
-    PerpBase = 1,
-    PerpQuote = 2,
+    Perp = 1,
 }
 
 impl MangoAccount {
