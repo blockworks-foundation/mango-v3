@@ -2321,8 +2321,7 @@ impl Processor {
             checked_add_net(bank_cache, &mut node_bank, &mut liqor_ma, QUOTE_INDEX, liab_transfer)?;
         }
 
-        let perp_account = &mut liqee_ma.perp_accounts[liab_index];
-        let quote_position = perp_account.quote_position;
+        let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
         if liab_transfer_u64 == insurance_vault.amount && quote_position.is_negative() {
             // insurance fund empty so socialize loss
             let mut perp_market =
@@ -2332,8 +2331,22 @@ impl Processor {
                 MangoErrorCode::Default
             )?;
 
-            perp_market.socialize_loss(perp_account, &mut mango_cache)?;
+            perp_market
+                .socialize_loss(&mut liqee_ma.perp_accounts[liab_index], &mut mango_cache)?;
         }
+
+        let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
+        for i in 0..mango_group.num_oracles {
+            if liqee_active_assets[i]
+                && (liqee_ma.perp_accounts[i].quote_position.is_negative()
+                    || liqee_ma.borrows[i].is_positive())
+            {
+                is_bankrupt = true;
+                break;
+            }
+        }
+
+        liqee_ma.is_bankrupt = is_bankrupt;
 
         Ok(())
     }
