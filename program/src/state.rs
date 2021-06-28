@@ -67,6 +67,7 @@ pub enum DataType {
 
 #[derive(Copy, Clone, Pod, Default)]
 #[repr(C)]
+/// Stores meta information about the `Account` on chain
 pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
@@ -920,8 +921,11 @@ pub struct MangoAccount {
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 
+    /// This account cannot open new positions or borrow until `init_health >= 0`
     pub being_liquidated: bool,
-    pub is_bankrupt: bool, // TODO - add to client
+
+    /// This account cannot do anything except go through `resolve_bankruptcy`
+    pub is_bankrupt: bool, // ***
     pub padding: [u8; 6],
 }
 
@@ -1396,6 +1400,15 @@ impl PerpMarket {
             .unwrap()
             .checked_div(I80F48::from_num(self.contract_size))
             .unwrap()
+    }
+
+    /// Socialize the loss in this account across all longs and shorts
+    pub fn socialize_loss(
+        &mut self,
+        _account: &mut PerpAccount,
+        _cache: &mut MangoCache,
+    ) -> MangoResult<()> {
+        unimplemented!() // TODO
     }
 }
 
