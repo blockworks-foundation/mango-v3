@@ -504,7 +504,11 @@ impl MerpsCache {
     ) -> bool {
         let valid_interval = merps_group.valid_interval;
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            msg!("root_bank_cache {} invalid: {}", QUOTE_INDEX, self.root_bank_cache[QUOTE_INDEX].last_update);
+            msg!(
+                "root_bank_cache {} invalid: {}",
+                QUOTE_INDEX,
+                self.root_bank_cache[QUOTE_INDEX].last_update
+            );
             return false;
         }
 
@@ -528,7 +532,11 @@ impl MerpsCache {
 
             if !merps_group.perp_markets[i].is_empty() {
                 if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    msg!("perp_market_cache {} invalid: {}", i, self.perp_market_cache[i].last_update);
+                    msg!(
+                        "perp_market_cache {} invalid: {}",
+                        i,
+                        self.perp_market_cache[i].last_update
+                    );
                     return false;
                 }
             }
@@ -1152,6 +1160,7 @@ impl PerpMarket {
             (Some(bid), Some(ask)) => {
                 // calculate mid-market rate
                 let book_price = self.lot_to_native_price((bid + ask) / 2);
+                // TODO: clamp funding rate
                 (book_price / index_price) - ONE_I80F48
             }
             (Some(_bid), None) => ONE_SIDED_PENALTY_FUNDING,
