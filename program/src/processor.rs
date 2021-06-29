@@ -378,9 +378,7 @@ impl Processor {
             bids_ai,
             asks_ai,
             event_queue_ai,
-            &mango_group,
             &rent,
-            market_index,
             base_lot_size,
             quote_lot_size,
         )?;
@@ -2432,20 +2430,24 @@ impl Processor {
     ) -> MangoResult<()> {
         // TODO - fee behavior
 
-        const NUM_FIXED: usize = 3;
+        const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,     // read
-            perp_market_ai,     // read
+            mango_cache_ai,     // read
+            perp_market_ai,     // write
             event_queue_ai,     // write
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        let mut event_queue =
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let mut event_queue: EventQueue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        let cache = &mango_cache.perp_market_cache[market_index];
         for _ in 0..limit {
             let event = match event_queue.peek_front() {
                 None => break,
@@ -2456,32 +2458,35 @@ impl Processor {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
 
-                    if fill_event.maker {
-                        let mut mango_account = match mango_account_ais
-                            .binary_search_by_key(&fill_event.owner, |ai| *ai.key)
-                        {
-                            Ok(i) => MangoAccount::load_mut_checked(
-                                &mango_account_ais[i],
-                                program_id,
-                                mango_group_ai.key,
-                            )?,
-                            Err(_) => return Ok(()), // If it's not found, stop consuming events
-                        };
+                    let mut maker = match mango_account_ais
+                        .binary_search_by_key(&fill_event.maker, |ai| *ai.key)
+                    {
+                        Ok(i) => MangoAccount::load_mut_checked(
+                            &mango_account_ais[i],
+                            program_id,
+                            mango_group_ai.key,
+                        )?,
+                        Err(_) => return Ok(()), // If it's not found, stop consuming events
+                    };
 
-                        let perp_account = &mut mango_account.perp_accounts[market_index];
-                        perp_account.change_position(
-                            fill_event.base_change,
-                            I80F48::from_num(perp_market.quote_lot_size * fill_event.quote_change),
-                            fill_event.long_funding,
-                            fill_event.short_funding,
-                        )?;
+                    let mut taker = match mango_account_ais
+                        .binary_search_by_key(&fill_event.taker, |ai| *ai.key)
+                    {
+                        Ok(i) => MangoAccount::load_mut_checked(
+                            &mango_account_ais[i],
+                            program_id,
+                            mango_group_ai.key,
+                        )?,
+                        Err(_) => return Ok(()), // If it's not found, stop consuming events
+                    };
 
-                        if fill_event.base_change > 0 {
-                            perp_account.open_orders.bids_quantity -= fill_event.base_change;
-                        } else {
-                            perp_account.open_orders.asks_quantity += fill_event.base_change;
-                        }
-                    }
+                    perp_market.execute_trade(
+                        &mut maker.perp_accounts[market_index],
+                        &mut taker.perp_accounts[market_index],
+                        fill_event.base_change,
+                        fill_event.quote_change,
+                        cache,
+                    )?;
                 }
                 EventType::Out => {
                     let out_event: &OutEvent = cast_ref(event);
@@ -3045,3 +3050,13 @@ fn settle_borrow_full_unchecked(
 
     Ok(())
 }
+
+/*
+
+TODO
+update perp market in client
+update init mango group to include insurance fund
+update FillEvent
+consume events instruction change access types
+TODO test order types
+ */

@@ -39,7 +39,6 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO: all unit numbers are just place holders. make decisions on each unit number
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
-// TODO double check all the
 
 // units
 // long_funding: I80F48 - native quote currency per contract
@@ -63,6 +62,18 @@ pub enum DataType {
     Asks,
     MangoCache,
     EventQueue,
+}
+
+pub enum HealthType {
+    Maint,
+    Init,
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AssetType {
+    Token = 0,
+    Perp = 1,
 }
 
 #[derive(Copy, Clone, Pod, Default)]
@@ -564,342 +575,6 @@ impl MangoCache {
     }
 }
 
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct PerpOpenOrders {
-    pub bids_quantity: i64, // total contracts in sell orders
-    pub asks_quantity: i64, // total quote currency in buy orders
-    pub is_free_bits: u32,
-    pub is_bid_bits: u32,
-    pub orders: [i128; 32],
-    pub client_order_ids: [u64; 32],
-}
-
-impl PerpOpenOrders {
-    pub fn next_order_slot(self) -> u8 {
-        self.is_free_bits.trailing_zeros() as u8
-    }
-
-    pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MangoResult<()> {
-        let slot_mask = 1u32 << slot;
-        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
-
-        // accounting
-        match side {
-            Side::Bid => {
-                self.bids_quantity -= quantity;
-            }
-            Side::Ask => {
-                self.asks_quantity -= quantity;
-            }
-        }
-
-        // release space
-        self.is_free_bits |= slot_mask;
-        self.orders[slot as usize] = 0i128;
-        self.client_order_ids[slot as usize] = 0u64;
-        Ok(())
-    }
-    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MangoResult<()> {
-        check!(self.is_free_bits != 0, MangoErrorCode::TooManyOpenOrders)?;
-        let slot = self.next_order_slot();
-        let slot_mask = 1u32 << slot;
-        match side {
-            Side::Bid => {
-                // TODO make checked
-                self.is_bid_bits |= slot_mask;
-                self.bids_quantity += order.quantity;
-            }
-            Side::Ask => {
-                self.is_bid_bits &= !slot_mask;
-                self.asks_quantity += order.quantity;
-            }
-        };
-
-        self.is_free_bits &= !slot_mask;
-        self.orders[slot as usize] = order.key;
-        self.client_order_ids[slot as usize] = order.client_order_id;
-        Ok(())
-    }
-
-    pub fn cancel_order(
-        &mut self,
-        order: &LeafNode,
-        order_id: i128,
-        side: Side,
-    ) -> MangoResult<()> {
-        // input verification
-        let slot = order.owner_slot;
-        let slot_mask = 1u32 << slot;
-        check_eq!(0u32, slot_mask & self.is_free_bits, MangoErrorCode::Default)?;
-        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
-        check_eq!(order_id, self.orders[slot as usize], MangoErrorCode::Default)?;
-
-        // accounting
-        match side {
-            Side::Bid => {
-                self.bids_quantity -= order.quantity;
-            }
-            Side::Ask => {
-                self.asks_quantity -= order.quantity;
-            }
-        }
-
-        // release space
-        self.is_free_bits |= slot_mask;
-        self.orders[slot as usize] = 0i128;
-        self.client_order_ids[slot as usize] = 0u64;
-
-        Ok(())
-    }
-
-    #[inline]
-    fn iter_filled_slots(&self) -> impl Iterator<Item = u8> {
-        struct Iter {
-            bits: u32,
-        }
-        impl Iterator for Iter {
-            type Item = u8;
-            #[inline(always)]
-            fn next(&mut self) -> Option<Self::Item> {
-                if self.bits == 0 {
-                    None
-                } else {
-                    let next = self.bits.trailing_zeros();
-                    let mask = 1u32 << next;
-                    self.bits &= !mask;
-                    Some(next as u8)
-                }
-            }
-        }
-        Iter { bits: !self.is_free_bits }
-    }
-
-    #[inline]
-    pub fn slot_side(&self, slot: u8) -> Option<Side> {
-        let slot_mask = 1u32 << slot;
-        if self.is_free_bits & slot_mask != 0 {
-            None
-        } else if self.is_bid_bits & slot_mask != 0 {
-            Some(Side::Bid)
-        } else {
-            Some(Side::Ask)
-        }
-    }
-
-    #[inline]
-    pub fn orders_with_client_ids(&self) -> impl Iterator<Item = (NonZeroU64, i128, Side)> + '_ {
-        self.iter_filled_slots().filter_map(move |slot| {
-            let client_order_id = NonZeroU64::new(self.client_order_ids[slot as usize])?;
-            let order_id = self.orders[slot as usize];
-            let side = self.slot_side(slot).unwrap();
-            Some((client_order_id, order_id, side))
-        })
-    }
-}
-
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct PerpAccount {
-    pub base_position: i64,     // measured in base lots
-    pub quote_position: I80F48, // measured in native quote
-
-    pub long_settled_funding: I80F48,
-    pub short_settled_funding: I80F48,
-    pub open_orders: PerpOpenOrders,
-}
-
-impl PerpAccount {
-    pub fn change_position(
-        &mut self,
-        base_change: i64,     // this is in contract size
-        quote_change: I80F48, // this is in native units
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> MangoResult<()> {
-        /*
-            How to adjust the funding settled
-            FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
-
-            Funding owed:
-            FO_t = (TF - FS_t) * BP_t
-        */
-        // TODO this check unnecessary if callers are smart
-        check!(base_change != 0, MangoErrorCode::Default)?;
-
-        let bp0 = self.base_position;
-        self.base_position += base_change;
-        self.quote_position += quote_change;
-
-        if bp0 > 0 {
-            if self.base_position <= 0 {
-                // implies there was a sign change
-                let funding_owed = (long_funding - self.long_settled_funding)
-                    * I80F48::from_num(self.base_position);
-                self.quote_position -= funding_owed;
-                self.short_settled_funding = short_funding;
-            } else {
-                self.long_settled_funding = (self.long_settled_funding - long_funding)
-                    * I80F48::from_num(bp0 / self.base_position)
-                    + long_funding;
-            }
-        } else if bp0 < 0 {
-            if self.base_position >= 0 {
-                let funding_owed = (short_funding - self.short_settled_funding)
-                    * I80F48::from_num(self.base_position);
-                self.quote_position -= funding_owed;
-                self.long_settled_funding = long_funding;
-            } else {
-                self.short_settled_funding = (self.short_settled_funding - short_funding)
-                    * I80F48::from_num(bp0 / self.base_position)
-                    + short_funding;
-            }
-        } else {
-            if base_change > 0 {
-                self.long_settled_funding = long_funding;
-            } else {
-                // base_change must be less than 0, if == 0, that's error state
-                self.short_settled_funding = short_funding;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Move unrealized funding payments into the quote_position
-    pub fn move_funding(&mut self, long_funding: I80F48, short_funding: I80F48) {
-        if self.base_position > 0 {
-            self.quote_position -=
-                (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position);
-            self.long_settled_funding = long_funding;
-        } else if self.base_position < 0 {
-            self.quote_position -=
-                (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position);
-            self.short_settled_funding = short_funding;
-        }
-    }
-
-    /// Return the health factor if position changed by `base_change` at current prices
-    fn sim_position_health(
-        &self,
-        perp_market_info: &PerpMarketInfo,
-        price: I80F48,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-        base_change: i64,
-    ) -> I80F48 {
-        // TODO make checked
-        let new_base = self.base_position + base_change;
-
-        let mut health = self.quote_position
-            - I80F48::from_num(base_change * perp_market_info.base_lot_size) * price;
-        if new_base > 0 {
-            health +=
-                I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * asset_weight;
-        } else {
-            health +=
-                I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
-        }
-
-        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
-
-        health
-    }
-
-    pub fn get_health(
-        &self,
-        perp_market_info: &PerpMarketInfo,
-        price: I80F48,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> I80F48 {
-        // TODO make sure bids and asks quantity are updated on FillEvent
-
-        // Account for orders that are expansionary
-        let bids_health = self.sim_position_health(
-            perp_market_info,
-            price,
-            asset_weight,
-            liab_weight,
-            self.open_orders.bids_quantity,
-        );
-
-        let asks_health = self.sim_position_health(
-            perp_market_info,
-            price,
-            asset_weight,
-            liab_weight,
-            -self.open_orders.asks_quantity,
-        );
-
-        // Pick the worse of the two simulated health
-        let h = if bids_health < asks_health { bids_health } else { asks_health };
-
-        // msg!(
-        //     "get_health h={:?} of={} bp={}",
-        //     h,
-        //     long_funding - self.long_settled_funding,
-        //     self.base_position
-        // );
-
-        // Account for unrealized funding payments
-        // TODO make checked
-        // TODO - consider force moving funding into the realized at start of every instruction
-        if self.base_position > 0 {
-            h - (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position)
-        } else {
-            h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
-        }
-    }
-
-    /// Returns value of assets, excludes open orders
-    pub fn get_assets_val(
-        &self,
-        price: I80F48,
-        asset_weight: I80F48,
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> I80F48 {
-        let base_position = I80F48::from_num(self.base_position);
-        if self.base_position > ZERO_I80F48 {
-            let quote_position =
-                self.quote_position - (long_funding - self.long_settled_funding) * base_position;
-
-            if quote_position > ZERO_I80F48 {
-                base_position * asset_weight * price + quote_position
-            } else {
-                base_position * asset_weight * price
-            }
-        } else {
-            let quote_position =
-                self.quote_position + (short_funding - self.short_settled_funding) * base_position;
-
-            if quote_position > ZERO_I80F48 {
-                quote_position
-            } else {
-                ZERO_I80F48
-            }
-        }
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.base_position != 0
-            || !self.quote_position.is_zero()
-            || self.open_orders.bids_quantity != 0
-            || self.open_orders.asks_quantity != 0
-
-        // Note funding only applies if base position not 0
-    }
-
-    /// Decrement self and increment other
-    pub fn transfer_quote_position(&mut self, other: &mut PerpAccount, quantity: I80F48) {
-        self.quote_position -= quantity;
-        other.quote_position += quantity;
-    }
-}
-
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
@@ -927,20 +602,6 @@ pub struct MangoAccount {
     /// This account cannot do anything except go through `resolve_bankruptcy`
     pub is_bankrupt: bool, // ***
     pub padding: [u8; 6],
-}
-
-pub enum HealthType {
-    Maint,
-    Init,
-}
-
-#[derive(
-    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
-)]
-#[repr(u8)]
-pub enum AssetType {
-    Token = 0,
-    Perp = 1,
 }
 
 impl MangoAccount {
@@ -1234,36 +895,409 @@ impl MangoAccount {
     }
 }
 
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct PerpOpenOrders {
+    pub bids_quantity: i64, // total contracts in sell orders
+    pub asks_quantity: i64, // total quote currency in buy orders
+    pub is_free_bits: u32,
+    pub is_bid_bits: u32,
+    pub orders: [i128; 32],
+    pub client_order_ids: [u64; 32],
+}
+
+impl PerpOpenOrders {
+    pub fn next_order_slot(self) -> u8 {
+        self.is_free_bits.trailing_zeros() as u8
+    }
+
+    pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MangoResult<()> {
+        let slot_mask = 1u32 << slot;
+        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
+
+        // accounting
+        match side {
+            Side::Bid => {
+                self.bids_quantity -= quantity;
+            }
+            Side::Ask => {
+                self.asks_quantity -= quantity;
+            }
+        }
+
+        // release space
+        self.is_free_bits |= slot_mask;
+        self.orders[slot as usize] = 0i128;
+        self.client_order_ids[slot as usize] = 0u64;
+        Ok(())
+    }
+    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MangoResult<()> {
+        check!(self.is_free_bits != 0, MangoErrorCode::TooManyOpenOrders)?;
+        let slot = self.next_order_slot();
+        let slot_mask = 1u32 << slot;
+        match side {
+            Side::Bid => {
+                // TODO make checked
+                self.is_bid_bits |= slot_mask;
+                self.bids_quantity += order.quantity;
+            }
+            Side::Ask => {
+                self.is_bid_bits &= !slot_mask;
+                self.asks_quantity += order.quantity;
+            }
+        };
+
+        self.is_free_bits &= !slot_mask;
+        self.orders[slot as usize] = order.key;
+        self.client_order_ids[slot as usize] = order.client_order_id;
+        Ok(())
+    }
+
+    pub fn cancel_order(
+        &mut self,
+        order: &LeafNode,
+        order_id: i128,
+        side: Side,
+    ) -> MangoResult<()> {
+        // input verification
+        let slot = order.owner_slot;
+        let slot_mask = 1u32 << slot;
+        check_eq!(0u32, slot_mask & self.is_free_bits, MangoErrorCode::Default)?;
+        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
+        check_eq!(order_id, self.orders[slot as usize], MangoErrorCode::Default)?;
+
+        // accounting
+        match side {
+            Side::Bid => {
+                self.bids_quantity -= order.quantity;
+            }
+            Side::Ask => {
+                self.asks_quantity -= order.quantity;
+            }
+        }
+
+        // release space
+        self.is_free_bits |= slot_mask;
+        self.orders[slot as usize] = 0i128;
+        self.client_order_ids[slot as usize] = 0u64;
+
+        Ok(())
+    }
+
+    #[inline]
+    fn iter_filled_slots(&self) -> impl Iterator<Item = u8> {
+        struct Iter {
+            bits: u32,
+        }
+        impl Iterator for Iter {
+            type Item = u8;
+            #[inline(always)]
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.bits == 0 {
+                    None
+                } else {
+                    let next = self.bits.trailing_zeros();
+                    let mask = 1u32 << next;
+                    self.bits &= !mask;
+                    Some(next as u8)
+                }
+            }
+        }
+        Iter { bits: !self.is_free_bits }
+    }
+
+    #[inline]
+    pub fn slot_side(&self, slot: u8) -> Option<Side> {
+        let slot_mask = 1u32 << slot;
+        if self.is_free_bits & slot_mask != 0 {
+            None
+        } else if self.is_bid_bits & slot_mask != 0 {
+            Some(Side::Bid)
+        } else {
+            Some(Side::Ask)
+        }
+    }
+
+    #[inline]
+    pub fn orders_with_client_ids(&self) -> impl Iterator<Item = (NonZeroU64, i128, Side)> + '_ {
+        self.iter_filled_slots().filter_map(move |slot| {
+            let client_order_id = NonZeroU64::new(self.client_order_ids[slot as usize])?;
+            let order_id = self.orders[slot as usize];
+            let side = self.slot_side(slot).unwrap();
+            Some((client_order_id, order_id, side))
+        })
+    }
+}
+
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct PerpAccount {
+    pub base_position: i64,     // measured in base lots
+    pub quote_position: I80F48, // measured in native quote
+
+    pub long_settled_funding: I80F48,
+    pub short_settled_funding: I80F48,
+    pub open_orders: PerpOpenOrders,
+}
+
+impl PerpAccount {
+    /// Execute trade and return the net change in open interest
+    /// This assumes settle_funding was already called
+    pub fn execute_trade(
+        &mut self,
+        perp_market: &mut PerpMarket,
+        is_maker: bool,
+        base_change: i64,
+        quote_change: i64,
+    ) {
+        self.change_base_position(perp_market, base_change);
+        self.quote_position += I80F48::from_num(perp_market.quote_lot_size * quote_change);
+
+        if is_maker {
+            if base_change > 0 {
+                self.open_orders.bids_quantity -= base_change;
+            } else if base_change < 0 {
+                self.open_orders.asks_quantity += base_change;
+            }
+        }
+    }
+
+    /// This assumes settle_funding was already called
+    pub fn change_base_position(&mut self, perp_market: &mut PerpMarket, base_change: i64) {
+        let start = self.base_position;
+        self.base_position += base_change;
+        perp_market.open_interest += self.base_position.abs() - start.abs();
+    }
+
+    pub fn change_position(
+        &mut self,
+        base_change: i64,     // this is in contract size
+        quote_change: I80F48, // this is in native units
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> MangoResult<()> {
+        /*
+            How to adjust the funding settled
+            FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
+
+            Funding owed:
+            FO_t = (TF - FS_t) * BP_t
+        */
+        // TODO this check unnecessary if callers are smart
+        check!(base_change != 0, MangoErrorCode::Default)?;
+
+        let bp0 = self.base_position;
+        self.base_position += base_change;
+        self.quote_position += quote_change;
+
+        if bp0 > 0 {
+            if self.base_position <= 0 {
+                // implies there was a sign change
+                let funding_owed = (long_funding - self.long_settled_funding)
+                    * I80F48::from_num(self.base_position);
+                self.quote_position -= funding_owed;
+                self.short_settled_funding = short_funding;
+            } else {
+                self.long_settled_funding = (self.long_settled_funding - long_funding)
+                    * I80F48::from_num(bp0 / self.base_position)
+                    + long_funding;
+            }
+        } else if bp0 < 0 {
+            if self.base_position >= 0 {
+                let funding_owed = (short_funding - self.short_settled_funding)
+                    * I80F48::from_num(self.base_position);
+                self.quote_position -= funding_owed;
+                self.long_settled_funding = long_funding;
+            } else {
+                self.short_settled_funding = (self.short_settled_funding - short_funding)
+                    * I80F48::from_num(bp0 / self.base_position)
+                    + short_funding;
+            }
+        } else {
+            if base_change > 0 {
+                self.long_settled_funding = long_funding;
+            } else {
+                // base_change must be less than 0, if == 0, that's error state
+                self.short_settled_funding = short_funding;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Move unrealized funding payments into the quote_position
+    pub fn settle_funding(&mut self, cache: &PerpMarketCache) {
+        if self.base_position > 0 {
+            self.quote_position -= (cache.long_funding - self.long_settled_funding)
+                * I80F48::from_num(self.base_position);
+        } else if self.base_position < 0 {
+            self.quote_position -= (cache.short_funding - self.short_settled_funding)
+                * I80F48::from_num(self.base_position);
+        }
+        self.long_settled_funding = cache.long_funding;
+        self.short_settled_funding = cache.short_funding;
+    }
+
+    /// Move unrealized funding payments into the quote_position
+    pub fn move_funding(&mut self, long_funding: I80F48, short_funding: I80F48) {
+        if self.base_position > 0 {
+            self.quote_position -=
+                (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position);
+            self.long_settled_funding = long_funding;
+        } else if self.base_position < 0 {
+            self.quote_position -=
+                (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position);
+            self.short_settled_funding = short_funding;
+        }
+    }
+
+    /// Return the health factor if position changed by `base_change` at current prices
+    fn sim_position_health(
+        &self,
+        perp_market_info: &PerpMarketInfo,
+        price: I80F48,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+        base_change: i64,
+    ) -> I80F48 {
+        // TODO make checked
+        let new_base = self.base_position + base_change;
+
+        let mut health = self.quote_position
+            - I80F48::from_num(base_change * perp_market_info.base_lot_size) * price;
+        if new_base > 0 {
+            health +=
+                I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * asset_weight;
+        } else {
+            health +=
+                I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
+        }
+
+        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+
+        health
+    }
+
+    pub fn get_health(
+        &self,
+        perp_market_info: &PerpMarketInfo,
+        price: I80F48,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> I80F48 {
+        // TODO make sure bids and asks quantity are updated on FillEvent
+
+        // Account for orders that are expansionary
+        let bids_health = self.sim_position_health(
+            perp_market_info,
+            price,
+            asset_weight,
+            liab_weight,
+            self.open_orders.bids_quantity,
+        );
+
+        let asks_health = self.sim_position_health(
+            perp_market_info,
+            price,
+            asset_weight,
+            liab_weight,
+            -self.open_orders.asks_quantity,
+        );
+
+        // Pick the worse of the two simulated health
+        let h = if bids_health < asks_health { bids_health } else { asks_health };
+
+        // msg!(
+        //     "get_health h={:?} of={} bp={}",
+        //     h,
+        //     long_funding - self.long_settled_funding,
+        //     self.base_position
+        // );
+
+        // Account for unrealized funding payments
+        // TODO make checked
+        // TODO - consider force moving funding into the realized at start of every instruction
+        if self.base_position > 0 {
+            h - (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position)
+        } else {
+            h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
+        }
+    }
+
+    /// Returns value of assets, excludes open orders
+    pub fn get_assets_val(
+        &self,
+        price: I80F48,
+        asset_weight: I80F48,
+        long_funding: I80F48,
+        short_funding: I80F48,
+    ) -> I80F48 {
+        let base_position = I80F48::from_num(self.base_position);
+        if self.base_position > ZERO_I80F48 {
+            let quote_position =
+                self.quote_position - (long_funding - self.long_settled_funding) * base_position;
+
+            if quote_position > ZERO_I80F48 {
+                base_position * asset_weight * price + quote_position
+            } else {
+                base_position * asset_weight * price
+            }
+        } else {
+            let quote_position =
+                self.quote_position + (short_funding - self.short_settled_funding) * base_position;
+
+            if quote_position > ZERO_I80F48 {
+                quote_position
+            } else {
+                ZERO_I80F48
+            }
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.base_position != 0
+            || !self.quote_position.is_zero()
+            || self.open_orders.bids_quantity != 0
+            || self.open_orders.asks_quantity != 0
+
+        // Note funding only applies if base position not 0
+    }
+
+    /// Decrement self and increment other
+    pub fn transfer_quote_position(&mut self, other: &mut PerpAccount, quantity: I80F48) {
+        self.quote_position -= quantity;
+        other.quote_position += quantity;
+    }
+}
+
 /// This will hold top level info about the perps market
 /// Likely all perps transactions on a market will be locked on this one because this will be passed in as writable
 #[derive(Copy, Clone, Pod, Loadable, Default)]
 #[repr(C)]
 pub struct PerpMarket {
-    // TODO consider adding the market_index here for easy lookup
     pub meta_data: MetaData,
 
     pub mango_group: Pubkey,
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
+    pub quote_lot_size: i64, // number of quote native that reresents min tick
+    pub base_lot_size: i64,  // represents number of base native quantity; greater than 0
 
+    // TODO - consider just moving this into the cache
     pub long_funding: I80F48,
     pub short_funding: I80F48,
 
-    // TODO - remove open interest, not being used except maybe on stats?
     pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
-    pub quote_lot_size: i64, // number of quote native that reresents min tick
-    pub index_oracle: Pubkey, // TODO - remove, not being used
     pub last_updated: u64,
     pub seq_num: u64,
-
-    pub contract_size: i64, // represents number of base native quantity; greater than 0
-
-                            // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
-                            // index_price = some function of centralized exchange spot prices
-                            // book_price = average of impact bid and impact ask; used to calculate basis
-                            // basis = book_price / index_price - 1; some moving average of this is used for mark price
+    // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+    // index_price = some function of centralized exchange spot prices
+    // book_price = average of impact bid and impact ask; used to calculate basis
+    // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 
 impl PerpMarket {
@@ -1275,11 +1309,8 @@ impl PerpMarket {
         asks_ai: &'a AccountInfo,
         event_queue_ai: &'a AccountInfo,
 
-        mango_group: &MangoGroup,
         rent: &Rent,
-
-        market_index: usize,
-        contract_size: i64,
+        base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
@@ -1296,8 +1327,7 @@ impl PerpMarket {
         state.asks = *asks_ai.key;
         state.event_queue = *event_queue_ai.key;
         state.quote_lot_size = quote_lot_size;
-        state.index_oracle = mango_group.oracles[market_index];
-        state.contract_size = contract_size;
+        state.base_lot_size = base_lot_size;
 
         let clock = Clock::get()?;
         state.last_updated = clock.unix_timestamp as u64;
@@ -1341,7 +1371,7 @@ impl PerpMarket {
         }
     }
 
-    /// Use current order book price
+    /// Use current order book price and index price to update the instantaneous funding
     pub fn update_funding(
         &mut self,
         mango_group: &MangoGroup,
@@ -1383,7 +1413,7 @@ impl PerpMarket {
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff
             * time_factor
-            * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
+            * I80F48::from_num(self.base_lot_size)  // TODO check cost of conversion op
             * index_price;
 
         self.long_funding += funding_delta;
@@ -1398,7 +1428,7 @@ impl PerpMarket {
         I80F48::from_num(price)
             .checked_mul(I80F48::from_num(self.quote_lot_size))
             .unwrap()
-            .checked_div(I80F48::from_num(self.contract_size))
+            .checked_div(I80F48::from_num(self.base_lot_size))
             .unwrap()
     }
 
@@ -1409,6 +1439,25 @@ impl PerpMarket {
         _cache: &mut MangoCache,
     ) -> MangoResult<()> {
         unimplemented!() // TODO
+    }
+
+    /// Execute a trade between the maker and taker accounts
+    /// base_change is from the taker's perspective; maker's base_change will be -base_change
+    pub fn execute_trade(
+        &mut self,
+        maker: &mut PerpAccount,
+        taker: &mut PerpAccount,
+        base_change: i64,
+        quote_change: i64,
+        cache: &PerpMarketCache,
+    ) -> MangoResult<()> {
+        maker.settle_funding(cache);
+        taker.settle_funding(cache);
+
+        taker.execute_trade(self, false, base_change, quote_change);
+        maker.execute_trade(self, true, -base_change, -quote_change);
+
+        Ok(())
     }
 }
 

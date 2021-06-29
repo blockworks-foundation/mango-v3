@@ -81,6 +81,10 @@ pub enum MangoErrorCode {
     MarginBasketFull,
     #[error("MangoErrorCode::NotLiquidatable")]
     NotLiquidatable,
+    #[error("MangoErrorCode::Unimplemented")]
+    Unimplemented,
+    #[error("MangoErrorCode::PostOnly")]
+    PostOnly,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
