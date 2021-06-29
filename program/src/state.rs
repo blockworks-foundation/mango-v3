@@ -724,7 +724,6 @@ impl PerpAccount {
             Funding owed:
             FO_t = (TF - FS_t) * BP_t
         */
-
         // TODO this check unnecessary if callers are smart
         check!(base_change != 0, MangoErrorCode::Default)?;
 

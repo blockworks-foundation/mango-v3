@@ -2223,10 +2223,7 @@ impl Processor {
                 HealthType::Maint,
             )?;
             if assets_val < DUST_THRESHOLD {
-                // quote token can't pay off not quote liabs
-                // hence the liabs should be transferred to the liqor
-                // If insurance fund is depleted, ADL on every perp market that still has open positions
-                // Perhaps bankrupt accounts get put on event queue to be handled separately
+                // Liquidation must now continue with the resolve_bankruptcy instruction
                 liqee_ma.is_bankrupt = true;
             }
         } else {
@@ -2366,7 +2363,6 @@ impl Processor {
 
         let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
         for i in 0..mango_group.num_oracles {
-            // TODO - what if there are
             if liqee_active_assets[i]
                 && (liqee_ma.perp_accounts[i].quote_position.is_negative()
                     || liqee_ma.borrows[i].is_positive())
@@ -2390,7 +2386,7 @@ impl Processor {
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
         // If insurance fund does not have enough, start the socialize loss function
-
+        // TODO =
         unimplemented!()
     }
 
