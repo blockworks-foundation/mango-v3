@@ -2337,6 +2337,7 @@ impl Processor {
 
         let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
         for i in 0..mango_group.num_oracles {
+            // TODO - what if there are
             if liqee_active_assets[i]
                 && (liqee_ma.perp_accounts[i].quote_position.is_negative()
                     || liqee_ma.borrows[i].is_positive())
@@ -2345,7 +2346,6 @@ impl Processor {
                 break;
             }
         }
-
         liqee_ma.is_bankrupt = is_bankrupt;
 
         Ok(())
