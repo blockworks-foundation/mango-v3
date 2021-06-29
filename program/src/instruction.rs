@@ -181,9 +181,9 @@ pub enum MangoInstruction {
     /// 2. `[signer]` owner_ai - TODO
     /// 3. `[]` mango_cache_ai - TODO
     /// 4. `[writable]` perp_market_ai - TODO
-    /// 5. `[writable]` bids_ai - TODO  
-    /// 6. `[writable]` asks_ai - TODO  
-    /// 7. `[writable]` event_queue_ai - TODO  
+    /// 5. `[writable]` bids_ai - TODO
+    /// 6. `[writable]` asks_ai - TODO
+    /// 7. `[writable]` event_queue_ai - TODO
     PlacePerpOrder {
         price: i64,
         quantity: i64,
