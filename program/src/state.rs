@@ -701,54 +701,9 @@ impl PerpOpenOrders {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpAccount {
-    /// can call liquidate_perp_market if base_position != 0
-    /// if base_position == 0 && quote_position != 0, you can call liquidate_token_and_perp
-    /// You can only liquidate until the account's init_health goes above zero
-    /// You can only withdraw a asset until it goes to zero
-    pub base_position: i64, // measured in base lots
+    pub base_position: i64,     // measured in base lots
     pub quote_position: I80F48, // measured in native quote
 
-    /*
-    bp = 0
-    qp = -10k
-    BTC deposits = 1
-
-    liqor_qp = -10k
-    liquidatee will give up some of his collateral tokens e.g. BTC
-
-    liqee
-    bp = 0
-    qp = 0
-    btc deposits = 0
-
-    liqor
-    bp = 0
-    qp = -10k
-    btc deposits = 1
-
-    1 btc base position == 1e-4 BTC
-
-    base lot size == 100
-    BTC/USD price -> 1e-6 USDC per 1e-6 BTC
-
-
-    liqee
-    BTC-PERP
-    bp = 10,000 ~= 1 BTC
-    quote position = -10b ~= -10k
-    eth deposits = 3
-    USDC borrows = 30k
-
-    token_and_token -> asset_index for ETH, liab index for USDC
-    -> eth deposits = 0
-    USDC borrows = 27k
-
-    liquidate_perp_market
-    BTC-PERP
-    bp = 0
-    quote position
-
-     */
     pub long_settled_funding: I80F48,
     pub short_settled_funding: I80F48,
     pub open_orders: PerpOpenOrders,

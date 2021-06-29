@@ -1506,7 +1506,9 @@ impl Processor {
     }
 
     #[allow(unused)]
-    // Token to token
+    /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
+    /// the token at `asset_index`
+    /// Requires: `liab_index != asset_index`  
     fn liquidate_token_and_token(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -2013,8 +2015,29 @@ impl Processor {
 
         Ok(())
     }
-    /// Liquidate an account similar to Mango
+
     #[allow(unused)]
+    /// Reduce some of the base position in exchange for quote position in this market
+    /// Transfer will not exceed abs(base_position)
+    /// Example:
+    ///     BTC/USD price 9.4k
+    ///     liquidation_fee = 0.025
+    ///     liqee initial
+    ///         USDC deposit 10k
+    ///         BTC-PERP base_position = 10
+    ///         BTC-PERP quote_position = -100k
+    ///         maint_health = -700
+    ///         init_health = -5400
+    ///
+    ///     liqee after liquidate_perp_market
+    ///         USDC deposit 10k
+    ///         BTC-PERP base_position = 2.3404
+    ///         BTC-PERP quote_position = -29799.766
+    ///         init_health = 0.018
+    ///     
+    ///     liqor after liquidate_perp_market
+    ///         BTC-PERP base_position = 7.6596
+    ///         BTC-PERP quote_position = -70200.234
     fn liquidate_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -2025,6 +2048,7 @@ impl Processor {
         // TODO - which market gets liquidated first?
         // liqor passes in his own account and the liqee mango account
         // position is transfered to the liqor at favorable rate
+
         const NUM_FIXED: usize = 5;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
@@ -2119,6 +2143,11 @@ impl Processor {
             check!(base_transfer_request > 0, MangoErrorCode::Default)?;
 
             // TODO - verify this calculation is accurate
+
+            // Max liab transferred to reach init_health == 0
+            let deficit_max_liab: I80F48 = -init_health
+                / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+
             let max_transfer: I80F48 = -init_health
                 / (price
                     * (ONE_I80F48
