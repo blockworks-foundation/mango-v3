@@ -1369,12 +1369,11 @@ impl PerpMarket {
         account: &mut PerpAccount,
         cache: &mut PerpMarketCache,
     ) -> MangoResult<()> {
-        let loss = account.quote_position;
-
         // native USDC per contract open interest
-        let change = loss / (I80F48::from_num(self.open_interest));
-        self.long_funding -= change;
-        self.short_funding += change;
+        let socialized_loss = account.quote_position / (I80F48::from_num(self.open_interest));
+        account.quote_position = ZERO_I80F48;
+        self.long_funding -= socialized_loss;
+        self.short_funding += socialized_loss;
 
         cache.short_funding = self.short_funding;
         cache.long_funding = self.long_funding;
