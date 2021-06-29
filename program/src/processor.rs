@@ -2152,11 +2152,6 @@ impl Processor {
             check!(base_transfer_request > 0, MangoErrorCode::Default)?;
 
             // TODO - verify this calculation is accurate
-
-            // Max liab transferred to reach init_health == 0
-            let deficit_max_liab: I80F48 = -init_health
-                / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
-
             let max_transfer: I80F48 = -init_health
                 / (price
                     * (ONE_I80F48
