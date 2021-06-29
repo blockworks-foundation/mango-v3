@@ -1464,8 +1464,8 @@ impl Processor {
         let b = &mut mango_account_b.perp_accounts[market_index];
 
         // Account for unrealized funding payments before settling
-        a.move_funding(perp_market_cache.long_funding, perp_market_cache.short_funding);
-        b.move_funding(perp_market_cache.long_funding, perp_market_cache.short_funding);
+        a.settle_funding(perp_market_cache);
+        b.settle_funding(perp_market_cache);
 
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
@@ -2362,8 +2362,10 @@ impl Processor {
                 MangoErrorCode::Default
             )?;
 
-            perp_market
-                .socialize_loss(&mut liqee_ma.perp_accounts[liab_index], &mut mango_cache)?;
+            perp_market.socialize_loss(
+                &mut liqee_ma.perp_accounts[liab_index],
+                &mut mango_cache.perp_market_cache[liab_index],
+            )?;
         }
 
         let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
@@ -2392,6 +2394,27 @@ impl Processor {
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
         // If insurance fund does not have enough, start the socialize loss function
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+
+        const NUM_FIXED: usize = 12;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+
+        let [
+            mango_group_ai,         // read
+            mango_cache_ai,         // write
+            liqee_mango_account_ai, // write
+            liqor_mango_account_ai, // write
+            liqor_ai,               // read, signer
+            root_bank_ai,           // read
+            node_bank_ai,           // write
+            vault_ai,               // write
+            insurance_vault_ai,     // write
+            signer_ai,              // read
+            perp_market_ai,         // read
+            token_prog_ai,          // read
+        ] = fixed_ais;
 
         Ok(())
     }

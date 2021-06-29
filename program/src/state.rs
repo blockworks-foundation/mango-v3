@@ -1082,19 +1082,6 @@ impl PerpAccount {
         self.short_settled_funding = cache.short_funding;
     }
 
-    /// Move unrealized funding payments into the quote_position
-    pub fn move_funding(&mut self, long_funding: I80F48, short_funding: I80F48) {
-        if self.base_position > 0 {
-            self.quote_position -=
-                (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position);
-            self.long_settled_funding = long_funding;
-        } else if self.base_position < 0 {
-            self.quote_position -=
-                (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position);
-            self.short_settled_funding = short_funding;
-        }
-    }
-
     /// Return the health factor if position changed by `base_change` at current prices
     fn sim_position_health(
         &self,
@@ -1379,10 +1366,20 @@ impl PerpMarket {
     /// Socialize the loss in this account across all longs and shorts
     pub fn socialize_loss(
         &mut self,
-        _account: &mut PerpAccount,
-        _cache: &mut MangoCache,
+        account: &mut PerpAccount,
+        cache: &mut PerpMarketCache,
     ) -> MangoResult<()> {
-        unimplemented!() // TODO
+        let loss = account.quote_position;
+
+        // native USDC per contract open interest
+        let change = loss / (I80F48::from_num(self.open_interest));
+        self.long_funding -= change;
+        self.short_funding += change;
+
+        cache.short_funding = self.short_funding;
+        cache.long_funding = self.long_funding;
+
+        Ok(())
     }
 
     /// Execute a trade between the maker and taker accounts
