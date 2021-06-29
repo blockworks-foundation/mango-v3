@@ -19,6 +19,7 @@ use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
+use std::cmp::{max, min};
 
 pub const MAX_TOKENS: usize = 32;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -66,6 +67,7 @@ pub enum DataType {
 
 #[derive(Copy, Clone, Pod, Default)]
 #[repr(C)]
+/// Stores meta information about the `Account` on chain
 pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
@@ -149,6 +151,8 @@ pub struct MangoGroup {
     pub dex_program_id: Pubkey, // Consider allowing more
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
+
+    pub insurance_vault: Pubkey, // ***
 }
 
 impl MangoGroup {
@@ -550,6 +554,14 @@ impl MangoCache {
 
         true
     }
+
+    pub fn get_price(&self, i: usize) -> I80F48 {
+        if i == QUOTE_INDEX {
+            ONE_I80F48
+        } else {
+            self.price_cache[i].price // Just panic if index out of bounds
+        }
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -691,6 +703,7 @@ impl PerpOpenOrders {
 pub struct PerpAccount {
     pub base_position: i64,     // measured in base lots
     pub quote_position: I80F48, // measured in native quote
+
     pub long_settled_funding: I80F48,
     pub short_settled_funding: I80F48,
     pub open_orders: PerpOpenOrders,
@@ -711,7 +724,6 @@ impl PerpAccount {
             Funding owed:
             FO_t = (TF - FS_t) * BP_t
         */
-
         // TODO this check unnecessary if callers are smart
         check!(base_change != 0, MangoErrorCode::Default)?;
 
@@ -880,6 +892,12 @@ impl PerpAccount {
 
         // Note funding only applies if base position not 0
     }
+
+    /// Decrement self and increment other
+    pub fn transfer_quote_position(&mut self, other: &mut PerpAccount, quantity: I80F48) {
+        self.quote_position -= quantity;
+        other.quote_position += quantity;
+    }
 }
 
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
@@ -903,8 +921,12 @@ pub struct MangoAccount {
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 
+    /// This account cannot open new positions or borrow until `init_health >= 0`
     pub being_liquidated: bool,
-    pub padding: [u8; 7],
+
+    /// This account cannot do anything except go through `resolve_bankruptcy`
+    pub is_bankrupt: bool, // ***
+    pub padding: [u8; 6],
 }
 
 pub enum HealthType {
@@ -918,8 +940,7 @@ pub enum HealthType {
 #[repr(u8)]
 pub enum AssetType {
     Token = 0,
-    PerpBase = 1,
-    PerpQuote = 2,
+    Perp = 1,
 }
 
 impl MangoAccount {
@@ -1344,15 +1365,17 @@ impl PerpMarket {
         let bid = book.get_best_bid_price();
         let ask = book.get_best_ask_price();
 
-        const ONE_SIDED_PENALTY_FUNDING: I80F48 = I80F48!(0.05);
+        const MAX_FUNDING: I80F48 = I80F48!(0.05);
+        const MIN_FUNDING: I80F48 = I80F48!(-0.05);
+
         let diff = match (bid, ask) {
             (Some(bid), Some(ask)) => {
                 // calculate mid-market rate
                 let book_price = self.lot_to_native_price((bid + ask) / 2);
-                (book_price / index_price) - ONE_I80F48
+                min(max((book_price / index_price) - ONE_I80F48, MIN_FUNDING), MAX_FUNDING)
             }
-            (Some(_bid), None) => ONE_SIDED_PENALTY_FUNDING,
-            (None, Some(_ask)) => -ONE_SIDED_PENALTY_FUNDING,
+            (Some(_bid), None) => MAX_FUNDING,
+            (None, Some(_ask)) => MIN_FUNDING,
             (None, None) => ZERO_I80F48,
         };
 
@@ -1377,6 +1400,15 @@ impl PerpMarket {
             .unwrap()
             .checked_div(I80F48::from_num(self.contract_size))
             .unwrap()
+    }
+
+    /// Socialize the loss in this account across all longs and shorts
+    pub fn socialize_loss(
+        &mut self,
+        _account: &mut PerpAccount,
+        _cache: &mut MangoCache,
+    ) -> MangoResult<()> {
+        unimplemented!() // TODO
     }
 }
 
