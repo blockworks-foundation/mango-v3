@@ -85,6 +85,8 @@ pub enum MangoErrorCode {
     Unimplemented,
     #[error("MangoErrorCode::PostOnly")]
     PostOnly,
+    #[error("MangoErrorCode::Bankrupt Invalid instruction for bankrupt account")]
+    Bankrupt,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

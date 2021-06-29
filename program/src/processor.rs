@@ -1546,11 +1546,13 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
 
@@ -1603,8 +1605,6 @@ impl Processor {
             HealthType::Init,
         )?;
 
-        // Cannot liquidate bankrupt accounts. Must go through insurance fund
-        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Default)?;
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
@@ -1778,10 +1778,13 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
@@ -2048,15 +2051,14 @@ impl Processor {
     fn liquidate_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        market_index: usize,
         base_transfer_request: i64,
     ) -> MangoResult<()> {
         // TODO - make sure sum of all quote positions + funding in system == 0
-        // TODO - which market gets liquidated first?
+        // TODO - find a way to send in open orders accounts
         // liqor passes in his own account and the liqee mango account
         // position is transfered to the liqor at favorable rate
 
-        const NUM_FIXED: usize = 5;
+        const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
             array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
@@ -2064,6 +2066,7 @@ impl Processor {
         let [
             mango_group_ai,         // read
             mango_cache_ai,         // read
+            perp_market_ai,         // write
             liqee_mango_account_ai, // write
             liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
@@ -2074,13 +2077,20 @@ impl Processor {
 
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
         let perp_market_info = &mango_group.perp_markets[market_index];
         check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+
         let now_ts = Clock::get()?.unix_timestamp as u64;
 
         let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
@@ -2140,10 +2150,9 @@ impl Processor {
         let liqor_perp_account = &mut liqor_ma.perp_accounts[market_index];
 
         // Move funding into quote position. Not necessary to adjust funding settled after funding is moved
-        let long_funding = mango_cache.perp_market_cache[market_index].long_funding;
-        let short_funding = mango_cache.perp_market_cache[market_index].short_funding;
-        liqee_perp_account.move_funding(long_funding, short_funding);
-        liqor_perp_account.move_funding(long_funding, short_funding);
+        let cache = &mango_cache.perp_market_cache[market_index];
+        liqee_perp_account.settle_funding(cache);
+        liqor_perp_account.settle_funding(cache);
 
         let price = mango_cache.price_cache[market_index].price;
         let (base_transfer, quote_transfer) = if liqee_perp_account.base_position > 0 {
@@ -2164,9 +2173,6 @@ impl Processor {
                 * price
                 * (ONE_I80F48 - perp_market_info.liquidation_fee);
 
-            // if liqor base pos crosses to long from short, make sure funding is correct
-            liqor_perp_account.long_settled_funding = long_funding;
-
             (base_transfer, quote_transfer)
         } else if liqee_perp_account.base_position < 0 {
             check!(base_transfer_request < 0, MangoErrorCode::Default)?;
@@ -2183,19 +2189,16 @@ impl Processor {
             let quote_transfer = I80F48::from_num(-base_transfer * perp_market_info.base_lot_size)
                 * price
                 * (ONE_I80F48 + perp_market_info.liquidation_fee);
-            // if liqor base pos crosses to short from long, make sure funding is correct
-            liqor_perp_account.short_settled_funding = short_funding;
 
             (base_transfer, quote_transfer)
         } else {
             return Err(throw!());
         };
 
-        liqee_perp_account.base_position -= base_transfer;
-        liqee_perp_account.quote_position -= quote_transfer;
+        liqee_perp_account.change_base_position(&mut perp_market, -base_transfer);
+        liqor_perp_account.change_base_position(&mut perp_market, base_transfer);
 
-        liqor_perp_account.base_position += base_transfer;
-        liqor_perp_account.quote_position += quote_transfer;
+        liqee_perp_account.transfer_quote_position(liqor_perp_account, quote_transfer);
 
         let liqor_health = liqor_ma.get_health(
             &mango_group,
@@ -2383,13 +2386,14 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         liab_index: usize,
+        max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
         // If insurance fund does not have enough, start the socialize loss function
-        // TODO =
-        unimplemented!()
+
+        Ok(())
     }
 
     /// *** Keeper Related Instructions ***

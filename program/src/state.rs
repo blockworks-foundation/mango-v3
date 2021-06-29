@@ -1069,62 +1069,6 @@ impl PerpAccount {
         perp_market.open_interest += self.base_position.abs() - start.abs();
     }
 
-    pub fn change_position(
-        &mut self,
-        base_change: i64,     // this is in contract size
-        quote_change: I80F48, // this is in native units
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> MangoResult<()> {
-        /*
-            How to adjust the funding settled
-            FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
-
-            Funding owed:
-            FO_t = (TF - FS_t) * BP_t
-        */
-        // TODO this check unnecessary if callers are smart
-        check!(base_change != 0, MangoErrorCode::Default)?;
-
-        let bp0 = self.base_position;
-        self.base_position += base_change;
-        self.quote_position += quote_change;
-
-        if bp0 > 0 {
-            if self.base_position <= 0 {
-                // implies there was a sign change
-                let funding_owed = (long_funding - self.long_settled_funding)
-                    * I80F48::from_num(self.base_position);
-                self.quote_position -= funding_owed;
-                self.short_settled_funding = short_funding;
-            } else {
-                self.long_settled_funding = (self.long_settled_funding - long_funding)
-                    * I80F48::from_num(bp0 / self.base_position)
-                    + long_funding;
-            }
-        } else if bp0 < 0 {
-            if self.base_position >= 0 {
-                let funding_owed = (short_funding - self.short_settled_funding)
-                    * I80F48::from_num(self.base_position);
-                self.quote_position -= funding_owed;
-                self.long_settled_funding = long_funding;
-            } else {
-                self.short_settled_funding = (self.short_settled_funding - short_funding)
-                    * I80F48::from_num(bp0 / self.base_position)
-                    + short_funding;
-            }
-        } else {
-            if base_change > 0 {
-                self.long_settled_funding = long_funding;
-            } else {
-                // base_change must be less than 0, if == 0, that's error state
-                self.short_settled_funding = short_funding;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Move unrealized funding payments into the quote_position
     pub fn settle_funding(&mut self, cache: &PerpMarketCache) {
         if self.base_position > 0 {
