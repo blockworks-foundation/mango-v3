@@ -632,7 +632,11 @@ impl Processor {
         // First check all caches to make sure valid
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut active_assets = mango_account.get_active_assets(&mango_group);
-        active_assets[token_index] = true; // Make sure token index is always checked
+
+        if token_index != QUOTE_INDEX {
+            active_assets[token_index] = true; // Make sure token index is always checked
+        }
+
         check!(
             mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
             MangoErrorCode::InvalidCache
