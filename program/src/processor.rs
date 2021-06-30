@@ -2037,13 +2037,11 @@ impl Processor {
     ///         BTC-PERP quote_position = -100k
     ///         maint_health = -700
     ///         init_health = -5400
-    ///
     ///     liqee after liquidate_perp_market
     ///         USDC deposit 10k
     ///         BTC-PERP base_position = 2.3404
     ///         BTC-PERP quote_position = -29799.766
     ///         init_health = 0.018
-    ///     
     ///     liqor after liquidate_perp_market
     ///         BTC-PERP base_position = 7.6596
     ///         BTC-PERP quote_position = -70200.234
