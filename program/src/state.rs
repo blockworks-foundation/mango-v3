@@ -29,9 +29,6 @@ pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 pub const DAY: I80F48 = I80F48!(86400);
 
-const OPTIMAL_UTIL: I80F48 = I80F48!(0.7);
-const OPTIMAL_R: I80F48 = I80F48!(6.3419583967529173008625e-09); // 20% APY -> 0.1 / YEAR
-const MAX_R: I80F48 = I80F48!(9.5129375951293759512937e-08); // max 300% APY -> 1 / YEAR
 pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
 
 declare_check_assert_macros!(SourceFileId::State);
@@ -226,13 +223,21 @@ impl MangoGroup {
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct RootBank {
+    // ***
     pub meta_data: MetaData,
+
+    pub optimal_util: I80F48,
+    pub optimal_rate: I80F48,
+    pub max_rate: I80F48,
 
     pub num_node_banks: usize,
     pub node_banks: [Pubkey; MAX_NODE_BANKS],
+
     pub deposit_index: I80F48,
     pub borrow_index: I80F48,
     pub last_updated: u64,
+
+    padding: [u8; 64], // used for future expansions
 }
 
 impl RootBank {
@@ -240,8 +245,10 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         node_bank_ai: &'a AccountInfo,
-
         rent: &Rent,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut root_bank = Self::load_mut(account)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
@@ -257,7 +264,27 @@ impl RootBank {
         root_bank.deposit_index = ONE_I80F48;
         root_bank.borrow_index = ONE_I80F48;
 
+        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
         Ok(root_bank)
+    }
+    pub fn set_rate_params(
+        &mut self,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
+    ) -> MangoResult<()> {
+        check!(
+            optimal_util > ZERO_I80F48 && optimal_util < ONE_I80F48,
+            MangoErrorCode::InvalidParam
+        )?;
+        check!(optimal_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(max_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+
+        self.optimal_util = optimal_util;
+        self.optimal_rate = optimal_rate;
+        self.max_rate = max_rate;
+
+        Ok(())
     }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -324,12 +351,12 @@ impl RootBank {
 
         // Calculate interest rate
         // TODO: Review interest rate calculation
-        let interest_rate = if utilization > OPTIMAL_UTIL {
-            let extra_util = utilization - OPTIMAL_UTIL;
-            let slope = (MAX_R - OPTIMAL_R) / (ONE_I80F48 - OPTIMAL_UTIL);
-            OPTIMAL_R + slope * extra_util
+        let interest_rate = if utilization > self.optimal_util {
+            let extra_util = utilization - self.optimal_util;
+            let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
+            self.optimal_rate + slope * extra_util
         } else {
-            let slope = OPTIMAL_R / OPTIMAL_UTIL;
+            let slope = self.optimal_rate / self.optimal_util;
             slope * utilization
         };
 

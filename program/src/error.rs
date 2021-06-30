@@ -89,6 +89,8 @@ pub enum MangoErrorCode {
     Bankrupt,
     #[error("MangoErrorCode::InsufficientHealth")]
     InsufficientHealth,
+    #[error("MangoErrorCode::InvalidParam")]
+    InvalidParam,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

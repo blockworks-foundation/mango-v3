@@ -28,8 +28,12 @@ pub enum MangoInstruction {
     /// 6. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
     /// 8. `[]` dex_prog_ai - TODO
     InitMangoGroup {
+        // ***
         signer_nonce: u64,
         valid_interval: u64,
+        quote_optimal_util: I80F48,
+        quote_optimal_rate: I80F48,
+        quote_max_rate: I80F48,
     },
 
     /// Initialize a mango account for a user
@@ -96,6 +100,9 @@ pub enum MangoInstruction {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
     },
 
     /// Add a spot market to a mango account basket
@@ -280,12 +287,21 @@ impl MangoInstruction {
         let discrim = u32::from_le_bytes(discrim);
         Some(match discrim {
             0 => {
-                let data = array_ref![data, 0, 16];
-                let (signer_nonce, valid_interval) = array_refs![data, 8, 8];
+                let data = array_ref![data, 0, 64];
+                let (
+                    signer_nonce,
+                    valid_interval,
+                    quote_optimal_util,
+                    quote_optimal_rate,
+                    quote_max_rate,
+                ) = array_refs![data, 8, 8, 16, 16, 16];
 
                 MangoInstruction::InitMangoGroup {
                     signer_nonce: u64::from_le_bytes(*signer_nonce),
                     valid_interval: u64::from_le_bytes(*valid_interval),
+                    quote_optimal_util: I80F48::from_le_bytes(*quote_optimal_util),
+                    quote_optimal_rate: I80F48::from_le_bytes(*quote_optimal_rate),
+                    quote_max_rate: I80F48::from_le_bytes(*quote_max_rate),
                 }
             }
             1 => MangoInstruction::InitMangoAccount,
@@ -308,12 +324,22 @@ impl MangoInstruction {
                 }
             }
             4 => {
-                let data = array_ref![data, 0, 40];
-                let (market_index, maint_leverage, init_leverage) = array_refs![data, 8, 16, 16];
+                let data = array_ref![data, 0, 88];
+                let (
+                    market_index,
+                    maint_leverage,
+                    init_leverage,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                ) = array_refs![data, 8, 16, 16, 16, 16, 16];
                 MangoInstruction::AddSpotMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    optimal_util: I80F48::from_le_bytes(*optimal_util),
+                    optimal_rate: I80F48::from_le_bytes(*optimal_rate),
+                    max_rate: I80F48::from_le_bytes(*max_rate),
                 }
             }
             5 => {
@@ -478,6 +504,9 @@ pub fn init_mango_group(
 
     signer_nonce: u64,
     valid_interval: u64,
+    quote_optimal_util: I80F48,
+    quote_optimal_rate: I80F48,
+    quote_max_rate: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -491,7 +520,13 @@ pub fn init_mango_group(
         AccountMeta::new_readonly(*dex_program_pk, false),
     ];
 
-    let instr = MangoInstruction::InitMangoGroup { signer_nonce, valid_interval };
+    let instr = MangoInstruction::InitMangoGroup {
+        signer_nonce,
+        valid_interval,
+        quote_optimal_util,
+        quote_optimal_rate,
+        quote_max_rate,
+    };
 
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -559,6 +594,9 @@ pub fn add_spot_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    optimal_util: I80F48,
+    optimal_rate: I80F48,
+    max_rate: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -571,7 +609,14 @@ pub fn add_spot_market(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr = MangoInstruction::AddSpotMarket { market_index, maint_leverage, init_leverage };
+    let instr = MangoInstruction::AddSpotMarket {
+        market_index,
+        maint_leverage,
+        init_leverage,
+        optimal_util,
+        optimal_rate,
+        max_rate,
+    };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

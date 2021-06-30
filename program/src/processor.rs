@@ -41,10 +41,14 @@ pub struct Processor {}
 
 impl Processor {
     fn init_mango_group(
+        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         signer_nonce: u64,
         valid_interval: u64,
+        quote_optimal_util: I80F48,
+        quote_optimal_rate: I80F48,
+        quote_max_rate: I80F48,
     ) -> ProgramResult {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -87,6 +91,9 @@ impl Processor {
             quote_root_bank_ai,
             quote_node_bank_ai,
             &rent,
+            quote_optimal_util,
+            quote_optimal_rate,
+            quote_max_rate,
         )?;
 
         let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
@@ -154,11 +161,15 @@ impl Processor {
     /// Only allow admin to add to MangoGroup
     // TODO think about how to remove an asset. Maybe this just can't be done?
     fn add_spot_market(
+        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -196,6 +207,9 @@ impl Processor {
             root_bank_ai,
             node_bank_ai,
             &Rent::get()?,
+            optimal_util,
+            optimal_rate,
+            max_rate,
         )?;
 
         let mint = Mint::unpack(&mint_ai.try_borrow_data()?)?;
@@ -448,6 +462,36 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
+    /// Change the shape of the interest rate function
+    fn set_rate_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai, // read
+            root_bank_ai,   // read
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(
+            mango_group.find_root_bank_index(root_bank_ai.key).is_some(),
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let mut root_bank = RootBank::load_mut_checked(root_bank_ai, program_id)?;
+        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
+
+        Ok(())
+    }
+
     /// Write oracle prices onto MangoAccount before calling a value-dep instruction (e.g. Withdraw)
     fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 2;
@@ -666,6 +710,7 @@ impl Processor {
             )?;
         }
 
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
@@ -1587,6 +1632,7 @@ impl Processor {
         pa.quote_position += settlement;
 
         // Transfer quote token from bank vault to dao vault
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
@@ -1610,6 +1656,45 @@ impl Processor {
 
         Ok(())
     }
+
+    #[allow(unused)]
+    fn force_cancel_spot_orders(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MangoResult<()> {
+        /*
+        Only cancel orders if account is being liquidated
+        Only cancel orders that reduce the health of the account
+            an order reduces health of the account if it increases the absolute value of base_position for that market
+            => only cancel orders up to the abs value of the opposite side of the position
+            e.g. if +10 base positions then only allow up to 10 asks_quantity and 0 in bids_quantity
+
+        All expansionary orders must be cancelled before liquidaton can continue
+         */
+
+        Ok(())
+    }
+
+    #[allow(unused)]
+    fn force_cancel_perp_orders(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+    ) -> MangoResult<()> {
+        /*
+        Only cancel orders if account is being liquidated
+        Only cancel orders that reduce the health of the account
+            an order reduces health of the account if it increases the absolute value of base_position for that market
+            => only cancel orders up to the abs value of the opposite side of the position
+            e.g. if +10 base positions then only allow up to 10 asks_quantity and 0 in bids_quantity
+
+        All expansionary orders must be cancelled before liquidaton can continue
+         */
+
+        Ok(())
+    }
+
     #[allow(unused)]
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
@@ -2443,6 +2528,7 @@ impl Processor {
             .min(dao_vault.amount);
 
         if liab_transfer_u64 != 0 {
+            check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
@@ -2616,6 +2702,7 @@ impl Processor {
             .min(dao_vault.amount);
 
         if dao_transfer != 0 {
+            check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
@@ -2670,6 +2757,7 @@ impl Processor {
         if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
             // insurance fund empty so socialize loss
             let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
+            // TODO - log this
             liab_root_bank.socialize_loss(
                 program_id,
                 liab_index,
@@ -2858,32 +2946,27 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
-    fn force_cancel_perp_orders(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        market_index: usize,
-    ) -> MangoResult<()> {
-        /*
-        Only cancel orders if account is being liquidated
-        Only cancel orders that reduce the health of the account
-            an order reduces health of the account if it increases the absolute value of base_position for that market
-            => only cancel orders up to the abs value of the opposite side of the position
-            e.g. if +10 base positions then only allow up to 10 asks_quantity and 0 in bids_quantity
-
-        All expansionary orders must be cancelled before liquidaton can continue
-         */
-
-        Ok(())
-    }
-
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         match instruction {
-            MangoInstruction::InitMangoGroup { signer_nonce, valid_interval } => {
+            MangoInstruction::InitMangoGroup {
+                signer_nonce,
+                valid_interval,
+                quote_optimal_util,
+                quote_optimal_rate,
+                quote_max_rate,
+            } => {
                 msg!("Mango: InitMangoGroup");
-                Self::init_mango_group(program_id, accounts, signer_nonce, valid_interval)?;
+                Self::init_mango_group(
+                    program_id,
+                    accounts,
+                    signer_nonce,
+                    valid_interval,
+                    quote_optimal_util,
+                    quote_optimal_rate,
+                    quote_max_rate,
+                )?;
             }
             MangoInstruction::InitMangoAccount => {
                 msg!("Mango: InitMangoAccount");
@@ -2897,7 +2980,14 @@ impl Processor {
                 msg!("Mango: Withdraw");
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)?;
             }
-            MangoInstruction::AddSpotMarket { market_index, maint_leverage, init_leverage } => {
+            MangoInstruction::AddSpotMarket {
+                market_index,
+                maint_leverage,
+                init_leverage,
+                optimal_util,
+                optimal_rate,
+                max_rate,
+            } => {
                 msg!("Mango: AddSpotMarket");
                 Self::add_spot_market(
                     program_id,
@@ -2905,6 +2995,9 @@ impl Processor {
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
                 )?;
             }
             MangoInstruction::AddToBasket { .. } => {
@@ -3031,6 +3124,10 @@ fn init_root_bank(
     root_bank_ai: &AccountInfo,
     node_bank_ai: &AccountInfo,
     rent: &Rent,
+
+    optimal_util: I80F48,
+    optimal_rate: I80F48,
+    max_rate: I80F48,
 ) -> MangoResult<RootBank> {
     let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
     check!(vault.is_initialized(), MangoErrorCode::Default)?;
@@ -3039,7 +3136,15 @@ fn init_root_bank(
     check_eq!(vault_ai.owner, &spl_token::id(), MangoErrorCode::Default)?;
 
     let mut _node_bank = NodeBank::load_and_init(&node_bank_ai, &program_id, &vault_ai, rent)?;
-    let root_bank = RootBank::load_and_init(&root_bank_ai, &program_id, node_bank_ai, rent)?;
+    let root_bank = RootBank::load_and_init(
+        &root_bank_ai,
+        &program_id,
+        node_bank_ai,
+        rent,
+        optimal_util,
+        optimal_rate,
+        max_rate,
+    )?;
 
     Ok(*root_bank)
 }
