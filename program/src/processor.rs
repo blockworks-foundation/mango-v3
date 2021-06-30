@@ -31,7 +31,7 @@ use crate::state::{
     check_open_orders, load_market_state, load_open_orders, AssetType, DataType, HealthType,
     MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache,
     PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, DUST_THRESHOLD,
-    MAX_NUM_IN_MARGIN_BASKET, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    MAX_NODE_BANKS, MAX_NUM_IN_MARGIN_BASKET, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -1617,10 +1617,11 @@ impl Processor {
     fn liquidate_token_and_token(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        asset_index: usize,
-        liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
+        // parameter checks
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
@@ -1637,8 +1638,6 @@ impl Processor {
             liab_root_bank_ai,      // read    
             liab_node_bank_ai,      // write    
         ] = fixed_ais;
-        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
-        check!(asset_index != liab_index, MangoErrorCode::Default)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -1652,8 +1651,21 @@ impl Processor {
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
-        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let asset_root_bank = RootBank::load_checked(asset_root_bank_ai, program_id)?;
+        let asset_index = mango_group.find_root_bank_index(asset_root_bank_ai.key).unwrap();
+        let mut asset_node_bank = NodeBank::load_mut_checked(asset_node_bank_ai, program_id)?;
+        check!(
+            asset_root_bank.node_banks.contains(asset_node_bank_ai.key),
+            MangoErrorCode::Default
+        )?;
 
+        let liab_root_bank = RootBank::load_checked(liab_root_bank_ai, program_id)?;
+        let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
+        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
+        check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
+        check!(asset_index != liab_index, MangoErrorCode::Default)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
         check!(
             mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
@@ -1667,17 +1679,6 @@ impl Processor {
             mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
             MangoErrorCode::InvalidCache
         )?;
-
-        let asset_root_bank = RootBank::load_checked(asset_root_bank_ai, program_id)?;
-        let mut asset_node_bank = NodeBank::load_mut_checked(asset_node_bank_ai, program_id)?;
-        check!(
-            asset_root_bank.node_banks.contains(asset_node_bank_ai.key),
-            MangoErrorCode::Default
-        )?;
-
-        let liab_root_bank = RootBank::load_checked(liab_root_bank_ai, program_id)?;
-        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
-        check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
 
         // Make sure orders are cancelled for perps
         for i in 0..mango_group.num_oracles {
@@ -1803,7 +1804,7 @@ impl Processor {
         )?;
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        let liqee_health = liqee_ma.get_health(
+        let liqee_maint_health = liqee_ma.get_health(
             &mango_group,
             &mango_cache,
             liqee_open_orders_ais,
@@ -1811,7 +1812,7 @@ impl Processor {
             HealthType::Maint,
         )?;
 
-        if liqee_health < ZERO_I80F48 {
+        if liqee_maint_health < ZERO_I80F48 {
             // To start liquidating, make sure all orders that increase position are canceled
             let assets_val = liqee_ma.get_assets_val(
                 &mango_group,
@@ -1840,6 +1841,17 @@ impl Processor {
                 // For tokens, insurance fund will pay
             }
         } else {
+            let liqee_init_health = liqee_ma.get_health(
+                &mango_group,
+                &mango_cache,
+                liqee_open_orders_ais,
+                &liqee_active_assets,
+                HealthType::Init,
+            )?;
+
+            if liqee_init_health >= ZERO_I80F48 {
+                liqee_ma.being_liquidated = false;
+            }
         }
 
         Ok(())
@@ -2355,12 +2367,13 @@ impl Processor {
         // TODO - since liquidation fee is 0 for USDC, what's the incentive for someone to call this?
         //  just add 1bp fee
 
+        // Do parameter checks
+        check!(liab_index < QUOTE_INDEX, MangoErrorCode::Default)?;
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
         const NUM_FIXED: usize = 12;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
-        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
-            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, liqor_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
         let [
             mango_group_ai,         // read
@@ -2376,15 +2389,19 @@ impl Processor {
             perp_market_ai,         // read
             token_prog_ai,          // read
         ] = fixed_ais;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(liqee_ma.is_bankrupt, MangoErrorCode::Default)?;
+
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         check!(
@@ -2409,21 +2426,16 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
 
-        // Make sure the account is already set as bankrupt
-        check!(liqee_ma.is_bankrupt, MangoErrorCode::Default)?;
-        check!(liab_index < QUOTE_INDEX, MangoErrorCode::Default)?;
-
         check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
-        let bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
-
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
 
+        let bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
         check!(
             liqee_ma.perp_accounts[liab_index].quote_position.is_negative(),
             MangoErrorCode::Default
         )?;
 
-        let liab_transfer_u64: u64 = max_liab_transfer
+        let liab_transfer_u64 = max_liab_transfer
             .min(-liqee_ma.perp_accounts[liab_index].quote_position)
             .checked_ceil()
             .unwrap()
@@ -2445,6 +2457,16 @@ impl Processor {
             liqee_ma.perp_accounts[liab_index]
                 .transfer_quote_position(&mut liqor_ma.perp_accounts[liab_index], -liab_transfer);
             checked_add_net(bank_cache, &mut node_bank, &mut liqor_ma, QUOTE_INDEX, liab_transfer)?;
+
+            // Make sure liqor is above init health
+            let liqor_health = liqor_ma.get_health(
+                &mango_group,
+                &mango_cache,
+                liqor_open_orders_ais,
+                &liqor_active_assets,
+                HealthType::Init,
+            )?;
+            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
         }
 
         let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
@@ -2463,6 +2485,7 @@ impl Processor {
             )?;
         }
 
+        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
         let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets[i]
@@ -2482,8 +2505,7 @@ impl Processor {
     fn resolve_token_bankruptcy(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        liab_index: usize,
-        max_liab_transfer: I80F48,
+        max_liab_transfer: I80F48, // in native token terms
     ) -> MangoResult<()> {
         // First check the account is bankrupt
         // Determine the value of the liab transfer
@@ -2491,10 +2513,13 @@ impl Processor {
         // If insurance fund does not have enough, start the socialize loss function
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
-        const NUM_FIXED: usize = 12;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
-        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
-            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+        const NUM_FIXED: usize = 13;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS + MAX_NODE_BANKS];
+        let (
+            fixed_ais,
+            liqor_open_orders_ais, // read
+            liab_node_bank_ais,    // write
+        ) = array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_NODE_BANKS];
 
         let [
             mango_group_ai,         // read
@@ -2502,14 +2527,170 @@ impl Processor {
             liqee_mango_account_ai, // write
             liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            root_bank_ai,           // read
-            node_bank_ai,           // write
-            vault_ai,               // write
-        dao_vault_ai,               // write
+            quote_root_bank_ai,     // read
+            quote_node_bank_ai,     // write
+            quote_vault_ai,         // write
+            dao_vault_ai,           // write
             signer_ai,              // read
-            perp_market_ai,         // read
+            liab_root_bank_ai,      // write
+            liab_node_bank_ai,      // write
             token_prog_ai,          // read
         ] = fixed_ais;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_cache =
+            MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
+
+        // Load the liqee's mango account
+        let mut liqee_ma =
+            MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(liqee_ma.is_bankrupt, MangoErrorCode::Default)?;
+
+        // Load the liqor's mango account
+        let mut liqor_ma =
+            MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
+        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        // Load the bank for liab token
+        let mut liab_root_bank = RootBank::load_mut_checked(liab_root_bank_ai, program_id)?;
+        let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
+        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
+        check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
+
+        // Load the bank for quote token
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::Default
+        )?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
+        check!(
+            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
+            MangoErrorCode::InvalidCache
+        )?;
+
+        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
+        liqor_active_assets[liab_index] = true;
+        check!(
+            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
+            MangoErrorCode::InvalidCache
+        )?;
+
+        // Load the dao vault (insurance fund)
+        check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
+        let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
+
+        if liab_index == QUOTE_INDEX {
+            // TODO
+        }
+
+        // Make sure there actually exist liabs here
+        check!(liqee_ma.borrows[liab_index].is_positive(), MangoErrorCode::Default)?;
+        let liab_price = mango_cache.get_price(liab_index);
+        let liab_fee = if liab_index == QUOTE_INDEX {
+            ONE_I80F48
+        } else {
+            let liab_info = &mango_group.spot_markets[liab_index];
+            ONE_I80F48 - liab_info.liquidation_fee
+        };
+
+        let liab_bank_cache = &mango_cache.root_bank_cache[liab_index];
+        let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
+        let borrows_val = native_borrows * liab_price;
+
+        let insured_liabs = I80F48::from_num(dao_vault.amount) * liab_fee / liab_price;
+        let liab_transfer = max_liab_transfer.min(native_borrows).min(insured_liabs);
+
+        let dao_transfer = (liab_transfer * liab_price / liab_fee)
+            .checked_ceil()
+            .unwrap()
+            .to_num::<u64>()
+            .min(dao_vault.amount);
+
+        if dao_transfer != 0 {
+            check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+            let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+            invoke_transfer(
+                token_prog_ai,
+                dao_vault_ai,
+                quote_vault_ai,
+                signer_ai,
+                &[&signers_seeds],
+                dao_transfer,
+            )?;
+            let liab_transfer = I80F48::from_num(dao_transfer) * liab_fee / liab_price;
+
+            checked_add_net(
+                &mango_cache.root_bank_cache[QUOTE_INDEX],
+                &mut quote_node_bank,
+                &mut liqor_ma,
+                QUOTE_INDEX,
+                I80F48::from_num(dao_transfer),
+            )?;
+
+            checked_add_net(
+                liab_bank_cache,
+                &mut liab_node_bank,
+                &mut liqee_ma,
+                liab_index,
+                liab_transfer,
+            )?;
+            checked_sub_net(
+                liab_bank_cache,
+                &mut liab_node_bank,
+                &mut liqor_ma,
+                liab_index,
+                liab_transfer,
+            )?;
+            check!(
+                liab_node_bank.has_valid_deposits_borrows(liab_bank_cache),
+                MangoErrorCode::Default
+            )?;
+
+            // Make sure liqor is above init health
+
+            let liqor_health = liqor_ma.get_health(
+                &mango_group,
+                &mango_cache,
+                liqor_open_orders_ais,
+                &liqor_active_assets,
+                HealthType::Init,
+            )?;
+            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+        }
+
+        if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
+            // insurance fund empty so socialize loss
+            let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
+            liab_root_bank.socialize_loss(
+                program_id,
+                liab_index,
+                &mut mango_cache,
+                &mut liqee_ma,
+                liab_node_bank_ais,
+            )?;
+        }
+
+        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
+        let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
+        for i in 0..mango_group.num_oracles {
+            if liqee_active_assets[i]
+                && (liqee_ma.perp_accounts[i].quote_position.is_negative()
+                    || liqee_ma.borrows[i].is_positive())
+            {
+                is_bankrupt = true;
+                break;
+            }
+        }
+        liqee_ma.is_bankrupt = is_bankrupt;
 
         Ok(())
     }
@@ -2691,7 +2872,6 @@ impl Processor {
             e.g. if +10 base positions then only allow up to 10 asks_quantity and 0 in bids_quantity
 
         All expansionary orders must be cancelled before liquidaton can continue
-
          */
 
         Ok(())
@@ -2842,6 +3022,7 @@ impl Processor {
         Ok(())
     }
 }
+
 fn init_root_bank(
     program_id: &Pubkey,
     mango_group: &MangoGroup,

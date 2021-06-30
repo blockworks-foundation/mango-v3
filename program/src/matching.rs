@@ -37,6 +37,9 @@ pub struct InnerNode {
 }
 
 impl InnerNode {
+    fn new(prefix_len: u32, key: i128) -> Self {
+        Self { tag: NodeTag::InnerNode.into(), prefix_len, key, children: [0; 2], padding: [0; 40] }
+    }
     fn walk_down(&self, search_key: i128) -> (NodeHandle, bool) {
         let crit_bit_mask = 1i128 << (127 - self.prefix_len);
         let crit_bit = (search_key & crit_bit_mask) != 0;
@@ -445,13 +448,7 @@ impl BookSide {
             };
 
             let new_root: &mut InnerNode = cast_mut(self.get_mut(root).unwrap());
-            *new_root = InnerNode {
-                tag: NodeTag::InnerNode.into(),
-                prefix_len: shared_prefix_len,
-                key: new_leaf.key,
-                children: [0; 2],
-                padding: [0u8; 40],
-            };
+            *new_root = InnerNode::new(shared_prefix_len, new_leaf.key);
 
             new_root.children[new_leaf_crit_bit as usize] = new_leaf_handle;
             new_root.children[old_root_crit_bit as usize] = moved_root_handle;

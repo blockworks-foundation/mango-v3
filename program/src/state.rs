@@ -353,6 +353,57 @@ impl RootBank {
 
         Ok(())
     }
+
+    pub fn socialize_loss(
+        &mut self,
+        program_id: &Pubkey,
+        token_index: usize,
+        mango_cache: &mut MangoCache,
+        bankrupt_account: &mut MangoAccount,
+        node_bank_ais: &[AccountInfo; MAX_NODE_BANKS],
+    ) -> MangoResult<()> {
+        let mut native_deposits = ZERO_I80F48;
+        let mut native_borrows = ZERO_I80F48;
+
+        let mut max_node_bank_index = 0;
+        let mut max_node_bank_borrows = ZERO_I80F48;
+        for i in 0..self.num_node_banks {
+            check!(node_bank_ais[i].key == &self.node_banks[i], MangoErrorCode::InvalidNodeBank)?;
+            let node_bank = NodeBank::load_checked(&node_bank_ais[i], program_id)?;
+            native_deposits = native_deposits
+                .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
+                .unwrap();
+
+            native_borrows = native_borrows
+                .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
+                .unwrap();
+
+            if node_bank.borrows > max_node_bank_borrows {
+                max_node_bank_index = i;
+                max_node_bank_borrows = node_bank.borrows;
+            }
+        }
+
+        let loss = bankrupt_account.borrows[token_index];
+        let native_loss: I80F48 = loss * self.borrow_index;
+
+        let percentage_loss = native_loss.checked_div(native_deposits).unwrap();
+        self.deposit_index = self
+            .deposit_index
+            .checked_sub(percentage_loss.checked_mul(self.deposit_index).unwrap())
+            .unwrap();
+
+        mango_cache.root_bank_cache[token_index].deposit_index = self.deposit_index;
+        mango_cache.root_bank_cache[token_index].borrow_index = self.borrow_index;
+
+        let mut node_bank =
+            NodeBank::load_mut_checked(&node_bank_ais[max_node_bank_index], program_id)?;
+
+        bankrupt_account.checked_sub_borrow(token_index, loss)?;
+        node_bank.checked_sub_borrow(loss)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Pod, Loadable)]
@@ -523,7 +574,7 @@ impl MangoCache {
     pub fn check_caches_valid(
         &self,
         mango_group: &MangoGroup,
-        active_assets: &[bool; MAX_PAIRS],
+        active_assets: &[bool; MAX_TOKENS],
         now_ts: u64,
     ) -> bool {
         let valid_interval = mango_group.valid_interval;
@@ -747,7 +798,7 @@ impl MangoAccount {
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         open_orders_ais: &[AccountInfo],
-        active_assets: &[bool; MAX_PAIRS],
+        active_assets: &[bool; MAX_TOKENS],
         health_type: HealthType,
     ) -> MangoResult<I80F48> {
         let mut assets_val =
@@ -828,7 +879,7 @@ impl MangoAccount {
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         spot_open_orders_ais: &[AccountInfo],
-        active_assets: &[bool; MAX_PAIRS],
+        active_assets: &[bool; MAX_TOKENS],
         health_type: HealthType,
     ) -> MangoResult<I80F48> {
         let mut health = (mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index
@@ -886,8 +937,9 @@ impl MangoAccount {
     }
 
     /// Return an array of bools that are true if any part of token, spot or perps for that index are nonzero
-    pub fn get_active_assets(&self, mango_group: &MangoGroup) -> [bool; MAX_PAIRS] {
-        let mut active_assets = [false; MAX_PAIRS];
+    pub fn get_active_assets(&self, mango_group: &MangoGroup) -> [bool; MAX_TOKENS] {
+        let mut active_assets = [false; MAX_TOKENS];
+        active_assets[QUOTE_INDEX] = true;
         for i in 0..mango_group.num_oracles {
             active_assets[i] = self.in_margin_basket[i]
                 || !self.deposits[i].is_zero()
