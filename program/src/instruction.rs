@@ -499,6 +499,7 @@ pub fn init_mango_group(
     quote_vault_pk: &Pubkey,
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
+    dao_vault_pk: &Pubkey,
     mango_cache_ai: &Pubkey,
     dex_program_pk: &Pubkey,
 
@@ -516,6 +517,7 @@ pub fn init_mango_group(
         AccountMeta::new_readonly(*quote_vault_pk, false),
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
+        AccountMeta::new_readonly(*dao_vault_pk, false),
         AccountMeta::new(*mango_cache_ai, false),
         AccountMeta::new_readonly(*dex_program_pk, false),
     ];

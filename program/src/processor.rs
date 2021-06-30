@@ -50,7 +50,7 @@ impl Processor {
         quote_optimal_rate: I80F48,
         quote_max_rate: I80F48,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -61,6 +61,7 @@ impl Processor {
             quote_vault_ai,     // read
             quote_node_bank_ai, // write
             quote_root_bank_ai, // write
+            dao_vault_ai,       // read
             mango_cache_ai,     // write
             dex_prog_ai         // read
         ] = accounts;
@@ -82,6 +83,13 @@ impl Processor {
         mango_group.signer_key = *signer_ai.key;
         mango_group.valid_interval = valid_interval;
         mango_group.dex_program_id = *dex_prog_ai.key;
+
+        let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
+        check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
+        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::Default)?; // TODO - owner should be dao
+        check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::Default)?;
+        check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::Default)?;
+        mango_group.dao_vault = *dao_vault_ai.key;
 
         let _root_bank = init_root_bank(
             program_id,
