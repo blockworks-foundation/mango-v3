@@ -128,12 +128,15 @@ impl SpotMarketInfo {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketInfo {
+    // ***
     pub perp_market: Pubkey, // One of these may be empty
     pub maint_asset_weight: I80F48,
     pub init_asset_weight: I80F48,
     pub maint_liab_weight: I80F48,
     pub init_liab_weight: I80F48,
     pub liquidation_fee: I80F48,
+    pub maker_fee: I80F48,
+    pub taker_fee: I80F48,
     pub base_lot_size: i64,  // The lot size of the underlying
     pub quote_lot_size: i64, // min tick
 }
@@ -163,7 +166,7 @@ pub struct MangoGroup {
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
 
-    pub insurance_vault: Pubkey, // ***
+    pub dao_vault: Pubkey, // ***
 }
 
 impl MangoGroup {
@@ -1046,20 +1049,28 @@ impl PerpAccount {
     pub fn execute_trade(
         &mut self,
         perp_market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         is_maker: bool,
         base_change: i64,
         quote_change: i64,
     ) {
         self.change_base_position(perp_market, base_change);
-        self.quote_position += I80F48::from_num(perp_market.quote_lot_size * quote_change);
+        let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
 
-        if is_maker {
+        let fees = if is_maker {
             if base_change > 0 {
                 self.open_orders.bids_quantity -= base_change;
             } else if base_change < 0 {
                 self.open_orders.asks_quantity += base_change;
             }
-        }
+
+            quote.abs() * info.maker_fee
+        } else {
+            quote.abs() * info.taker_fee
+        };
+
+        perp_market.fees_accrued += fees;
+        self.quote_position += quote - fees;
     }
 
     /// This assumes settle_funding was already called
@@ -1225,10 +1236,13 @@ pub struct PerpMarket {
 
     pub last_updated: u64,
     pub seq_num: u64,
-    // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
-    // index_price = some function of centralized exchange spot prices
-    // book_price = average of impact bid and impact ask; used to calculate basis
-    // basis = book_price / index_price - 1; some moving average of this is used for mark price
+
+    // add in fees here
+    // Fees can be settled calling a special settle function that sends fees into the mango group vault owned by admin (or maybe insurance vault?)
+    pub fees_accrued: I80F48, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+                              // index_price = some function of centralized exchange spot prices
+                              // book_price = average of impact bid and impact ask; used to calculate basis
+                              // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 
 impl PerpMarket {
@@ -1385,17 +1399,18 @@ impl PerpMarket {
     /// base_change is from the taker's perspective; maker's base_change will be -base_change
     pub fn execute_trade(
         &mut self,
+        cache: &PerpMarketCache,
+        info: &PerpMarketInfo,
         maker: &mut PerpAccount,
         taker: &mut PerpAccount,
         base_change: i64,
         quote_change: i64,
-        cache: &PerpMarketCache,
     ) -> MangoResult<()> {
         maker.settle_funding(cache);
         taker.settle_funding(cache);
 
-        taker.execute_trade(self, false, base_change, quote_change);
-        maker.execute_trade(self, true, -base_change, -quote_change);
+        taker.execute_trade(self, info, false, base_change, quote_change);
+        maker.execute_trade(self, info, true, -base_change, -quote_change);
 
         Ok(())
     }

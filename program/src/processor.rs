@@ -306,11 +306,14 @@ impl Processor {
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
     fn add_perp_market(
+        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MangoResult<()> {
@@ -347,6 +350,8 @@ impl Processor {
             MangoErrorCode::Default
         )?;
 
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::Default)?;
+
         let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
         let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
         mango_group.perp_markets[market_index] = PerpMarketInfo {
@@ -356,6 +361,8 @@ impl Processor {
             maint_liab_weight,
             init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
             liquidation_fee,
+            maker_fee,
+            taker_fee,
             base_lot_size,
             quote_lot_size,
         };
@@ -1473,9 +1480,6 @@ impl Processor {
         let a_pnl = a.quote_position - new_quote_pos_a;
         let b_pnl = b.quote_position - new_quote_pos_b;
 
-        let deposit_index = mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index;
-        let borrow_index = mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index;
-
         // pnl must be opposite signs for there to be a settlement
         if a_pnl * b_pnl > 0 {
             return Ok(());
@@ -1490,18 +1494,19 @@ impl Processor {
             b.quote_position -= settlement;
         }
 
-        checked_add_deposit(
+        checked_add_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             if a_pnl > 0 { &mut mango_account_a } else { &mut mango_account_b },
             QUOTE_INDEX,
-            settlement / deposit_index,
+            settlement,
         )?;
-
-        checked_add_borrow(
+        checked_sub_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             if a_pnl > 0 { &mut mango_account_b } else { &mut mango_account_a },
             QUOTE_INDEX,
-            settlement / borrow_index,
+            settlement,
         )?;
 
         check!(
@@ -1511,7 +1516,100 @@ impl Processor {
 
         Ok(())
     }
+    #[allow(unused)]
+    /// Take an account that has losses in the selected perp market to account for fees_accrued
+    fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        // ***
+        const NUM_FIXED: usize = 11;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_cache_ai,     // read
+            perp_market_ai,     // write
+            mango_account_ai,   // write
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+            bank_vault_ai,      // write
+            dao_vault_ai,       // write
+            signer_ai,          // read
+            admin_ai,           // read, signer
+            token_prog_ai,      // read
+        ] = accounts;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        check!(admin_ai.key == &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
+        match mango_group.find_root_bank_index(root_bank_ai.key) {
+            None => return Err(throw_err!(MangoErrorCode::InvalidRootBank)),
+            Some(i) => check!(i == QUOTE_INDEX, MangoErrorCode::InvalidRootBank)?,
+        }
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::Default)?;
+        check!(bank_vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
+        let valid_last_update = now_ts - mango_group.valid_interval;
+        let perp_market_cache = &mango_cache.perp_market_cache[market_index];
+        let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+
+        check!(
+            valid_last_update <= mango_cache.price_cache[market_index].last_update,
+            MangoErrorCode::InvalidCache
+        )?;
+        check!(valid_last_update <= root_bank_cache.last_update, MangoErrorCode::InvalidCache)?;
+        check!(valid_last_update <= perp_market_cache.last_update, MangoErrorCode::InvalidCache)?;
+
+        let price = mango_cache.price_cache[market_index].price;
+
+        let pa = &mut mango_account.perp_accounts[market_index];
+
+        let contract_size = mango_group.perp_markets[market_index].base_lot_size;
+        let new_quote_pos = I80F48::from_num(-pa.base_position * contract_size) * price;
+        let pnl: I80F48 = pa.quote_position - new_quote_pos;
+        check!(pnl.is_negative(), MangoErrorCode::Default)?;
+        check!(perp_market.fees_accrued.is_positive(), MangoErrorCode::Default)?;
+
+        let settlement = pnl.abs().min(perp_market.fees_accrued).checked_floor().unwrap();
+
+        perp_market.fees_accrued -= settlement;
+        pa.quote_position += settlement;
+
+        // Transfer quote token from bank vault to dao vault
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            bank_vault_ai,
+            dao_vault_ai,
+            signer_ai,
+            &[&signers_seeds],
+            settlement.to_num(),
+        );
+
+        // Decrement deposits on mango account
+        checked_sub_net(
+            root_bank_cache,
+            &mut node_bank,
+            &mut mango_account,
+            QUOTE_INDEX,
+            settlement,
+        );
+
+        check!(node_bank.has_valid_deposits_borrows(root_bank_cache), MangoErrorCode::Default)?;
+
+        Ok(())
+    }
     #[allow(unused)]
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
@@ -2273,7 +2371,7 @@ impl Processor {
             root_bank_ai,           // read
             node_bank_ai,           // write
             vault_ai,               // write
-            insurance_vault_ai,     // write
+            dao_vault_ai,           // write
             signer_ai,              // read
             perp_market_ai,         // read
             token_prog_ai,          // read
@@ -2315,13 +2413,10 @@ impl Processor {
         check!(liqee_ma.is_bankrupt, MangoErrorCode::Default)?;
         check!(liab_index < QUOTE_INDEX, MangoErrorCode::Default)?;
 
-        check!(
-            insurance_vault_ai.key == &mango_group.insurance_vault,
-            MangoErrorCode::InvalidVault
-        )?;
+        check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
         let bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
 
-        let insurance_vault = Account::unpack(&insurance_vault_ai.try_borrow_data()?)?;
+        let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
 
         check!(
             liqee_ma.perp_accounts[liab_index].quote_position.is_negative(),
@@ -2333,14 +2428,14 @@ impl Processor {
             .checked_ceil()
             .unwrap()
             .to_num::<u64>()
-            .min(insurance_vault.amount);
+            .min(dao_vault.amount);
 
         if liab_transfer_u64 != 0 {
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
-                insurance_vault_ai,
+                dao_vault_ai,
                 vault_ai,
                 signer_ai,
                 &[&signers_seeds],
@@ -2353,7 +2448,7 @@ impl Processor {
         }
 
         let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
-        if liab_transfer_u64 == insurance_vault.amount && quote_position.is_negative() {
+        if liab_transfer_u64 == dao_vault.amount && quote_position.is_negative() {
             // insurance fund empty so socialize loss
             let mut perp_market =
                 PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2410,7 +2505,7 @@ impl Processor {
             root_bank_ai,           // read
             node_bank_ai,           // write
             vault_ai,               // write
-            insurance_vault_ai,     // write
+        dao_vault_ai,               // write
             signer_ai,              // read
             perp_market_ai,         // read
             token_prog_ai,          // read
@@ -2475,6 +2570,7 @@ impl Processor {
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
         let cache = &mango_cache.perp_market_cache[market_index];
+        let info = &mango_group.perp_markets[market_index];
         for _ in 0..limit {
             let event = match event_queue.peek_front() {
                 None => break,
@@ -2508,11 +2604,12 @@ impl Processor {
                     };
 
                     perp_market.execute_trade(
+                        cache,
+                        info,
                         &mut maker.perp_accounts[market_index],
                         &mut taker.perp_accounts[market_index],
                         fill_event.base_change,
                         fill_event.quote_change,
-                        cache,
                     )?;
                 }
                 EventType::Out => {
@@ -2682,6 +2779,8 @@ impl Processor {
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    ZERO_I80F48, // TODO
+                    ZERO_I80F48,
                     base_lot_size,
                     quote_lot_size,
                 )?;
@@ -2848,26 +2947,26 @@ fn invoke_cancel_order<'a>(
 }
 
 fn invoke_transfer<'a>(
-    token_prog_acc: &AccountInfo<'a>,
-    source_acc: &AccountInfo<'a>,
-    dest_acc: &AccountInfo<'a>,
-    authority_acc: &AccountInfo<'a>,
+    token_prog_ai: &AccountInfo<'a>,
+    source_ai: &AccountInfo<'a>,
+    dest_ai: &AccountInfo<'a>,
+    authority_ai: &AccountInfo<'a>,
     signers_seeds: &[&[&[u8]]],
     quantity: u64,
 ) -> ProgramResult {
     let transfer_instruction = spl_token::instruction::transfer(
         &spl_token::ID,
-        source_acc.key,
-        dest_acc.key,
-        authority_acc.key,
+        source_ai.key,
+        dest_ai.key,
+        authority_ai.key,
         &[],
         quantity,
     )?;
     let accs = [
-        token_prog_acc.clone(), // TODO check if passing in program_id is necessary
-        source_acc.clone(),
-        dest_acc.clone(),
-        authority_acc.clone(),
+        token_prog_ai.clone(), // TODO check if passing in program_id is necessary
+        source_ai.clone(),
+        dest_ai.clone(),
+        authority_ai.clone(),
     ];
 
     solana_program::program::invoke_signed(&transfer_instruction, &accs, signers_seeds)
@@ -3085,5 +3184,7 @@ update perp market in client
 update init mango group to include insurance fund
 update FillEvent
 consume events instruction change access types
+check bankruptcy everywhere
+
 TODO test order types
  */
