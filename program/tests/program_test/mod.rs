@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
+use mango::entrypoint::process_instruction;
 use mango_common::Loadable;
-use merps::entrypoint::process_instruction;
 use solana_program::{
     account_info::AccountInfo, program_option::COption, program_pack::Pack, pubkey::*, rent::*,
     system_instruction,
@@ -69,7 +69,7 @@ impl MangoProgramTest {
         let mango_program_id = Pubkey::new_unique();
         let serum_program_id = Pubkey::new_unique();
 
-        let mut test = ProgramTest::new("merps", mango_program_id, processor!(process_instruction));
+        let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
 
         // passing mango's process instruction just to satisfy the compiler
         test.add_program("serum_dex", serum_program_id, processor!(process_instruction));
