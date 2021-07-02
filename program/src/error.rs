@@ -91,6 +91,8 @@ pub enum MangoErrorCode {
     InsufficientHealth,
     #[error("MangoErrorCode::InvalidParam")]
     InvalidParam,
+    #[error("MangoErrorCode::SignerNecessary")]
+    SignerNecessary,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

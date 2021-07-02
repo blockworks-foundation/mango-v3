@@ -3,7 +3,7 @@ use std::convert::identity;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
-use bytemuck::{from_bytes, from_bytes_mut};
+use bytemuck::{cast_slice_mut, from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use mango_common::Loadable;
@@ -19,6 +19,7 @@ use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
+use enumflags2::BitFlags;
 use std::cmp::{max, min};
 
 pub const MAX_TOKENS: usize = 32;
@@ -975,6 +976,45 @@ impl MangoAccount {
         }
         active_assets
     }
+
+    /// Add a market to margin basket
+    /// This function should be called any time you place a spot order
+    pub fn add_to_basket(&mut self, market_index: usize) -> MangoResult<()> {
+        if self.num_in_margin_basket == MAX_NUM_IN_MARGIN_BASKET {
+            check!(self.in_margin_basket[market_index], MangoErrorCode::MarginBasketFull)
+        } else {
+            if !self.in_margin_basket[market_index] {
+                self.in_margin_basket[market_index] = true;
+                self.num_in_margin_basket += 1;
+            }
+            Ok(())
+        }
+    }
+
+    /// Determine if margin basket should be updated.
+    /// This function should be called any time you settle funds on serum dex
+    pub fn update_basket(
+        &mut self,
+        market_index: usize,
+        open_orders: &serum_dex::state::OpenOrders,
+    ) -> MangoResult<()> {
+        let is_empty = open_orders.native_pc_total == 0
+            && open_orders.native_coin_total == 0
+            && open_orders.referrer_rebates_accrued == 0;
+
+        if self.in_margin_basket[market_index] && is_empty {
+            self.in_margin_basket[market_index] = false;
+            self.num_in_margin_basket -= 1;
+        } else if !self.in_margin_basket[market_index] && !is_empty {
+            check!(
+                self.num_in_margin_basket < MAX_NUM_IN_MARGIN_BASKET,
+                MangoErrorCode::MarginBasketFull
+            )?;
+            self.in_margin_basket[market_index] = true;
+            self.num_in_margin_basket += 1;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -1544,3 +1584,79 @@ pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MangoResult<()> {
 
     Ok(())
 }
+
+fn strip_dex_padding_mut<'a>(acc: &'a AccountInfo) -> MangoResult<RefMut<'a, [u8]>> {
+    check!(acc.data_len() >= 12, MangoErrorCode::Default)?;
+    let unpadded_data: RefMut<[u8]> = RefMut::map(acc.try_borrow_mut_data()?, |data| {
+        let data_len = data.len() - 12;
+        let (_, rest) = data.split_at_mut(5);
+        let (mid, _) = rest.split_at_mut(data_len);
+        mid
+    });
+    Ok(unpadded_data)
+}
+
+fn strip_data_header_mut<'a, H: Pod, D: Pod>(
+    orig_data: RefMut<'a, [u8]>,
+) -> MangoResult<(RefMut<'a, H>, RefMut<'a, [D]>)> {
+    let (header, inner): (RefMut<'a, [H]>, RefMut<'a, [D]>) =
+        RefMut::map_split(orig_data, |data| {
+            let (header_bytes, inner_bytes) = data.split_at_mut(size_of::<H>());
+            let header: &mut H;
+            let inner: &mut [D];
+            header = try_from_bytes_mut(header_bytes).unwrap();
+            inner = remove_slop_mut(inner_bytes);
+            (std::slice::from_mut(header), inner)
+        });
+    let header = RefMut::map(header, |s| s.first_mut().unwrap_or_else(|| unreachable!()));
+    Ok((header, inner))
+}
+
+pub fn load_bids_mut<'a>(
+    sm: &RefMut<serum_dex::state::MarketState>,
+    bids: &'a AccountInfo,
+) -> MangoResult<RefMut<'a, serum_dex::critbit::Slab>> {
+    check_eq!(&bids.key.to_aligned_bytes(), &identity(sm.bids), MangoErrorCode::Default)?;
+
+    let orig_data = strip_dex_padding_mut(bids)?;
+    let (header, buf) = strip_data_header_mut::<OrderBookStateHeader, u8>(orig_data)?;
+    let flags = BitFlags::from_bits(header.account_flags).unwrap();
+    check_eq!(
+        &flags,
+        &(serum_dex::state::AccountFlag::Initialized | serum_dex::state::AccountFlag::Bids),
+        MangoErrorCode::Default
+    )?;
+    Ok(RefMut::map(buf, serum_dex::critbit::Slab::new))
+}
+
+pub fn load_asks_mut<'a>(
+    sm: &RefMut<serum_dex::state::MarketState>,
+    asks: &'a AccountInfo,
+) -> MangoResult<RefMut<'a, serum_dex::critbit::Slab>> {
+    check_eq!(&asks.key.to_aligned_bytes(), &identity(sm.asks), MangoErrorCode::Default)?;
+    let orig_data = strip_dex_padding_mut(asks)?;
+    let (header, buf) = strip_data_header_mut::<OrderBookStateHeader, u8>(orig_data)?;
+    let flags = BitFlags::from_bits(header.account_flags).unwrap();
+    check_eq!(
+        &flags,
+        &(serum_dex::state::AccountFlag::Initialized | serum_dex::state::AccountFlag::Asks),
+        MangoErrorCode::Default
+    )?;
+    Ok(RefMut::map(buf, serum_dex::critbit::Slab::new))
+}
+
+#[inline]
+fn remove_slop_mut<T: Pod>(bytes: &mut [u8]) -> &mut [T] {
+    let slop = bytes.len() % size_of::<T>();
+    let new_len = bytes.len() - slop;
+    cast_slice_mut(&mut bytes[..new_len])
+}
+
+/// Copied over from serum dex
+#[derive(Copy, Clone)]
+#[repr(packed)]
+pub struct OrderBookStateHeader {
+    pub account_flags: u64, // Initialized, (Bids or Asks)
+}
+unsafe impl Zeroable for OrderBookStateHeader {}
+unsafe impl Pod for OrderBookStateHeader {}
