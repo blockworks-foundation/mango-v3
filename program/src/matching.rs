@@ -738,10 +738,8 @@ impl<'a> Book<'a> {
 
     pub fn cancel_order(
         &mut self,
-        _event_queue: &mut EventQueue, // TODO remove
         oo: &mut PerpOpenOrders,
         mango_account_pk: &Pubkey,
-        _market_index: usize, // TODO remove
         order_id: i128,
         side: Side,
     ) -> MangoResult<()> {
@@ -757,6 +755,33 @@ impl<'a> Book<'a> {
 
         // TODO: write to event queue
 
+        Ok(())
+    }
+    pub fn cancel_all(
+        &mut self,
+        open_orders: &mut PerpOpenOrders,
+        mut limit: u8,
+    ) -> MangoResult<()> {
+        for i in 0..32 {
+            let slot_mask = 1u32 << i;
+            if open_orders.is_free_bits & slot_mask != 0 {
+                // means slot is free
+                continue;
+            }
+            let order_id = open_orders.orders[i];
+            if open_orders.is_bid_bits & slot_mask != 0 {
+                let order = self.bids.remove_by_key(order_id).ok_or(throw!())?;
+                open_orders.cancel_order(&order, order_id, Side::Bid)?;
+            } else {
+                let order = self.asks.remove_by_key(order_id).ok_or(throw!())?;
+                open_orders.cancel_order(&order, order_id, Side::Ask)?;
+            }
+
+            limit -= 1;
+            if limit == 0 {
+                break;
+            }
+        }
         Ok(())
     }
 }

@@ -312,7 +312,7 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected:
     ForceCancelPerpOrders {
-        market_index: usize,
+        limit: u8,
     },
 
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
@@ -530,11 +530,9 @@ impl MangoInstruction {
                 MangoInstruction::ForceCancelSpotOrders { limit: u8::from_le_bytes(*data_arr) }
             }
             25 => {
-                let data_arr = array_ref![data, 0, 8];
+                let data_arr = array_ref![data, 0, 1];
 
-                MangoInstruction::ForceCancelPerpOrders {
-                    market_index: usize::from_le_bytes(*data_arr),
-                }
+                MangoInstruction::ForceCancelPerpOrders { limit: u8::from_le_bytes(*data_arr) }
             }
             26 => {
                 let data_arr = array_ref![data, 0, 16];

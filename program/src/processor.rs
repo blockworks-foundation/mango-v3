@@ -41,6 +41,7 @@ declare_check_assert_macros!(SourceFileId::Processor);
 pub struct Processor {}
 
 impl Processor {
+    #[inline(never)]
     fn init_mango_group(
         // ***
         program_id: &Pubkey,
@@ -128,6 +129,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
     /// TODO make the mango account a derived address
     fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
@@ -164,6 +166,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Add asset and spot market to mango group
     /// Initialize a root bank and add it to the mango group
     /// Requires a price oracle for this asset priced in quote currency
@@ -267,6 +270,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Add an oracle to the MangoGroup
     /// This must be called first before `add_spot_market` or `add_perp_market`
     /// There will never be a gap in the mango_group.oracles array
@@ -303,6 +307,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -326,6 +331,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
     fn add_perp_market(
@@ -416,6 +422,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Deposit instruction
     /// TODO - fix instruction.rs and intruction.ts
     fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
@@ -472,6 +479,7 @@ impl Processor {
     }
 
     #[allow(unused)]
+    #[inline(never)]
     /// Change the shape of the interest rate function
     fn set_rate_params(
         program_id: &Pubkey,
@@ -501,6 +509,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Write oracle prices onto MangoAccount before calling a value-dep instruction (e.g. Withdraw)
     fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 2;
@@ -525,6 +534,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -551,6 +561,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     fn cache_perp_markets(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, perp_market_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -577,6 +588,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     #[allow(unused_variables)]
     fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
         // TODO don't allow borrow of infinite amount of quote currency
@@ -640,6 +652,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Withdraw a token from the bank if collateral ratio permits
     fn withdraw(
         program_id: &Pubkey,
@@ -1042,6 +1055,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     fn cancel_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1094,6 +1108,7 @@ impl Processor {
     }
 
     #[allow(unused)]
+    #[inline(never)]
     fn settle_borrow(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1131,6 +1146,7 @@ impl Processor {
         // Ok(())
     }
 
+    #[inline(never)]
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 17;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -1246,6 +1262,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     fn place_perp_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1272,6 +1289,7 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
@@ -1280,7 +1298,7 @@ impl Processor {
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
         for i in 0..mango_group.num_oracles {
-            if !mango_account.in_margin_basket[i] || mango_group.spot_markets[i].is_empty() {
+            if !mango_account.in_margin_basket[i] {
                 continue;
             }
             check_eq!(
@@ -1334,12 +1352,14 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     fn cancel_perp_order_by_client_id(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         client_order_id: u64,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 7;
+        // ***
+        const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
@@ -1348,14 +1368,13 @@ impl Processor {
             perp_market_ai,     // write
             bids_ai,            // write
             asks_ai,            // write
-            event_queue_ai,     // write
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
@@ -1376,28 +1395,20 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        let mut event_queue =
-            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-
-        book.cancel_order(
-            &mut event_queue,
-            oo,
-            mango_account_ai.key,
-            market_index,
-            order_id,
-            side,
-        )?;
+        book.cancel_order(oo, mango_account_ai.key, order_id, side)?;
 
         Ok(())
     }
 
+    #[inline(never)]
     fn cancel_perp_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order_id: i128,
         side: Side,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 7;
+        // ***
+        const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
@@ -1406,14 +1417,13 @@ impl Processor {
             perp_market_ai,     // write
             bids_ai,            // write
             asks_ai,            // write
-            event_queue_ai,     // write
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
@@ -1424,21 +1434,12 @@ impl Processor {
         let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        let mut event_queue =
-            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-
-        book.cancel_order(
-            &mut event_queue,
-            oo,
-            mango_account_ai.key,
-            market_index,
-            order_id,
-            side,
-        )?;
+        book.cancel_order(oo, mango_account_ai.key, order_id, side)?;
 
         Ok(())
     }
 
+    #[inline(never)]
     /// Take two MangoAccount and settle quote currency pnl between them
     #[allow(unused)]
     fn settle_pnl(
@@ -1546,6 +1547,8 @@ impl Processor {
 
         Ok(())
     }
+
+    #[inline(never)]
     #[allow(unused)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
@@ -1642,6 +1645,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     #[allow(unused)]
     fn force_cancel_spot_orders(
         // ***
@@ -1827,25 +1831,86 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     #[allow(unused)]
     fn force_cancel_perp_orders(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        market_index: usize,
+        limit: u8,
     ) -> MangoResult<()> {
-        /*
-        Only cancel orders if account is being liquidated
-        Only cancel orders that reduce the health of the account
-            an order reduces health of the account if it increases the absolute value of base_position for that market
-            => only cancel orders up to the abs value of the opposite side of the position
-            e.g. if +10 base positions then only allow up to 10 asks_quantity and 0 in bids_quantity
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
-        All expansionary orders must be cancelled before liquidaton can continue
-         */
+        let [
+            mango_group_ai,         // read
+            mango_cache_ai,         // read
+            perp_market_ai,         // write
+            bids_ai,                // write
+            asks_ai,                // write
+            liqee_mango_account_ai, // write
+        ] = fixed_ais;
 
-        Ok(())
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+
+        let mut liqee_ma =
+            MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        let perp_market_info = &mango_group.perp_markets[market_index];
+        check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
+        let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
+        check!(
+            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
+            MangoErrorCode::InvalidCache
+        )?;
+
+        let maint_health = liqee_ma.get_health(
+            &mango_group,
+            &mango_cache,
+            liqee_open_orders_ais,
+            &liqee_active_assets,
+            HealthType::Maint,
+        )?;
+        // Determine how much position can be taken from liqee to get him above init_health
+        let init_health = liqee_ma.get_health(
+            &mango_group,
+            &mango_cache,
+            liqee_open_orders_ais,
+            &liqee_active_assets,
+            HealthType::Init,
+        )?;
+        if liqee_ma.being_liquidated {
+            if init_health > ZERO_I80F48 {
+                liqee_ma.being_liquidated = false;
+                msg!("Account init_health above zero.");
+                return Ok(());
+            }
+        } else if maint_health >= ZERO_I80F48 {
+            return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+        } else {
+            liqee_ma.being_liquidated = true;
+        }
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let open_orders = &mut liqee_ma.perp_accounts[market_index].open_orders;
+
+        let limit = min(limit, open_orders.is_free_bits.count_zeros() as u8);
+        if limit == 0 {
+            Ok(())
+        } else {
+            book.cancel_all(open_orders, limit)
+        }
     }
 
+    #[inline(never)]
     #[allow(unused)]
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
@@ -2093,6 +2158,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     #[allow(unused)]
     /// swap tokens for perp quote position only and only if the base position in that market is 0
     fn liquidate_token_and_perp(
@@ -2372,6 +2438,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     #[allow(unused)]
     /// Reduce some of the base position in exchange for quote position in this market
     /// Transfer will not exceed abs(base_position)
@@ -2587,6 +2654,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     #[allow(unused)]
     /// Claim insurance fund and then socialize loss
     fn resolve_perp_bankruptcy(
@@ -2737,6 +2805,8 @@ impl Processor {
 
         Ok(())
     }
+
+    #[inline(never)]
     #[allow(unused)]
     /// Claim insurance fund and then socialize loss
     fn resolve_token_bankruptcy(
@@ -2934,6 +3004,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// *** Keeper Related Instructions ***
     /// Update the deposit and borrow index on a passed in RootBank
     fn update_root_bank(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
@@ -2964,6 +3035,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// similar to serum dex, but also need to do some extra magic with funding
     fn consume_events(
         program_id: &Pubkey,
@@ -3059,6 +3131,7 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
     /// Update the `funding_earned` of a `PerpMarket` using the current book price, spot index price
     /// and time since last update
     fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
@@ -3265,9 +3338,9 @@ impl Processor {
                 msg!("Mango: ForceCancelSpotOrders");
                 Self::force_cancel_spot_orders(program_id, accounts, limit)?;
             }
-            MangoInstruction::ForceCancelPerpOrders { market_index } => {
+            MangoInstruction::ForceCancelPerpOrders { limit } => {
                 msg!("Mango: ForceCancelPerpOrders");
-                Self::force_cancel_perp_orders(program_id, accounts, market_index)?;
+                Self::force_cancel_perp_orders(program_id, accounts, limit)?;
             }
             MangoInstruction::LiquidateTokenAndToken { max_liab_transfer } => {
                 msg!("Mango: LiquidateTokenAndToken");
