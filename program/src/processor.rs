@@ -3261,6 +3261,40 @@ impl Processor {
                 msg!("Mango: SettleBorrow");
                 Self::settle_borrow(program_id, accounts, token_index, quantity)?;
             }
+            MangoInstruction::ForceCancelSpotOrders { limit } => {
+                msg!("Mango: ForceCancelSpotOrders");
+                Self::force_cancel_spot_orders(program_id, accounts, limit)?;
+            }
+            MangoInstruction::ForceCancelPerpOrders { market_index } => {
+                msg!("Mango: ForceCancelPerpOrders");
+                Self::force_cancel_perp_orders(program_id, accounts, market_index)?;
+            }
+            MangoInstruction::LiquidateTokenAndToken { max_liab_transfer } => {
+                msg!("Mango: LiquidateTokenAndToken");
+                Self::liquidate_token_and_token(program_id, accounts, max_liab_transfer)?;
+            }
+            MangoInstruction::LiquidateTokenAndPerp {
+                asset_type,
+                asset_index,
+                liab_type,
+                liab_index,
+                max_liab_transfer,
+            } => {
+                msg!("Mango: LiquidateTokenAndPerp");
+                Self::liquidate_token_and_perp(
+                    program_id,
+                    accounts,
+                    asset_type,
+                    asset_index,
+                    liab_type,
+                    liab_index,
+                    max_liab_transfer,
+                )?;
+            }
+            MangoInstruction::LiquidatePerpMarket { base_transfer_request } => {
+                msg!("Mango: LiquidatePerpMarket");
+                Self::liquidate_perp_market(program_id, accounts, base_transfer_request)?;
+            }
         }
 
         Ok(())

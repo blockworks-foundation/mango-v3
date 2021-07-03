@@ -1,4 +1,5 @@
 use crate::matching::{OrderType, Side};
+use crate::state::AssetType;
 use crate::state::MAX_PAIRS;
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::num::NonZeroU64;
 
 #[repr(C)]
@@ -279,6 +280,94 @@ pub enum MangoInstruction {
         token_index: usize,
         quantity: u64,
     },
+
+    /// Force cancellation of open orders for a user being liquidated
+    ///
+    /// Accounts expected: 19 + Liqee open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[]` base_root_bank_ai - RootBank
+    /// 4. `[writable]` base_node_bank_ai - NodeBank
+    /// 5. `[writable]` base_vault_ai - MangoGroup base vault acc
+    /// 6. `[]` quote_root_bank_ai - RootBank
+    /// 7. `[writable]` quote_node_bank_ai - NodeBank
+    /// 8. `[writable]` quote_vault_ai - MangoGroup quote vault acc
+    /// 9. `[writable]` spot_market_ai - SpotMarket
+    /// 10. `[writable]` bids_ai - SpotMarket bids acc
+    /// 11. `[writable]` asks_ai - SpotMarket asks acc
+    /// 12. `[signer]` signer_ai - Signer
+    /// 13. `[writable]` dex_event_queue_ai - Market event queue acc
+    /// 14. `[writable]` dex_base_ai -
+    /// 15. `[writable]` dex_quote_ai -
+    /// 16. `[]` dex_signer_ai -
+    /// 17. `[]` dex_prog_ai - Dex Program acc
+    /// 18. `[]` token_prog_ai - Token Program acc
+    /// 19+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    ForceCancelSpotOrders {
+        limit: u8,
+    },
+
+    /// Force cancellation of open orders for a user being liquidated
+    ///
+    /// Accounts expected:
+    ForceCancelPerpOrders {
+        market_index: usize,
+    },
+
+    /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
+    /// the token at `asset_index`
+    ///
+    /// Accounts expected: 9 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` asset_root_bank_ai - RootBank
+    /// 6. `[writable]` asset_node_bank_ai - NodeBank
+    /// 7. `[]` liab_root_bank_ai - RootBank
+    /// 8. `[writable]` liab_node_bank_ai - NodeBank
+    /// 9+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 9+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidateTokenAndToken {
+        max_liab_transfer: I80F48,
+    },
+
+    /// Swap tokens for perp quote position if only and only if the base position in that market is 0
+    ///
+    /// Accounts expected: 7 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` root_bank_ai - RootBank
+    /// 6. `[writable]` node_bank_ai - NodeBank
+    /// 7+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 7+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidateTokenAndPerp {
+        asset_type: AssetType,
+        asset_index: usize,
+        liab_type: AssetType,
+        liab_index: usize,
+        max_liab_transfer: I80F48,
+    },
+
+    /// Reduce some of the base position in exchange for quote position in this market
+    ///
+    /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 3. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 4. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 5. `[signer]` liqor_ai - Liqor Account
+    /// 6+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 6+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidatePerpMarket {
+        base_transfer_request: i64,
+    },
 }
 
 impl MangoInstruction {
@@ -433,6 +522,45 @@ impl MangoInstruction {
                 MangoInstruction::SettleBorrow {
                     token_index: usize::from_le_bytes(*token_index),
                     quantity: u64::from_le_bytes(*quantity),
+                }
+            }
+            24 => {
+                let data_arr = array_ref![data, 0, 1];
+
+                MangoInstruction::ForceCancelSpotOrders { limit: u8::from_le_bytes(*data_arr) }
+            }
+            25 => {
+                let data_arr = array_ref![data, 0, 8];
+
+                MangoInstruction::ForceCancelPerpOrders {
+                    market_index: usize::from_le_bytes(*data_arr),
+                }
+            }
+            26 => {
+                let data_arr = array_ref![data, 0, 16];
+
+                MangoInstruction::LiquidateTokenAndToken {
+                    max_liab_transfer: I80F48::from_le_bytes(*data_arr),
+                }
+            }
+            27 => {
+                let data = array_ref![data, 0, 34];
+                let (asset_type, asset_index, liab_type, liab_index, max_liab_transfer) =
+                    array_refs![data, 1, 8, 1, 8, 16];
+
+                MangoInstruction::LiquidateTokenAndPerp {
+                    asset_type: AssetType::try_from(u8::from_le_bytes(*asset_type)).unwrap(),
+                    asset_index: usize::from_le_bytes(*asset_index),
+                    liab_type: AssetType::try_from(u8::from_le_bytes(*liab_type)).unwrap(),
+                    liab_index: usize::from_le_bytes(*liab_index),
+                    max_liab_transfer: I80F48::from_le_bytes(*max_liab_transfer),
+                }
+            }
+            28 => {
+                let data_arr = array_ref![data, 0, 8];
+
+                MangoInstruction::LiquidatePerpMarket {
+                    base_transfer_request: i64::from_le_bytes(*data_arr),
                 }
             }
             _ => {

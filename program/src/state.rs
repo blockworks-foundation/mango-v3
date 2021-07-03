@@ -67,7 +67,9 @@ pub enum HealthType {
     Init,
 }
 
-#[derive(Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize)]
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
 #[repr(u8)]
 pub enum AssetType {
     Token = 0,
