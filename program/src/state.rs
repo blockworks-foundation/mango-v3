@@ -29,6 +29,7 @@ pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 pub const DAY: I80F48 = I80F48!(86400);
+pub const YEAR: I80F48 = I80F48!(31536000);
 
 pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
 
@@ -284,8 +285,8 @@ impl RootBank {
         check!(max_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
 
         self.optimal_util = optimal_util;
-        self.optimal_rate = optimal_rate;
-        self.max_rate = max_rate;
+        self.optimal_rate = optimal_rate / YEAR;
+        self.max_rate = max_rate / YEAR;
 
         Ok(())
     }

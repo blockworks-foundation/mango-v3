@@ -25,7 +25,7 @@ pub enum MangoInstruction {
     /// 4. `[]` quote_vault_ai - TODO
     /// 5. `[writable]` quote_node_bank_ai - TODO
     /// 6. `[writable]` quote_root_bank_ai - TODO
-    /// 7. `[read]` dao_vault_ai - aka insurance fund
+    /// 7. `[]` dao_vault_ai - aka insurance fund
     /// 8. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
     /// 9. `[]` dex_prog_ai - TODO
     InitMangoGroup {
