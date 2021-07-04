@@ -549,7 +549,7 @@ impl<'a> Book<'a> {
     ) -> MangoResult<()> {
         // TODO proper error handling
         // TODO handle the case where we run out of compute
-        // TODO *** test the order types
+        // TODO test the order types
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
             OrderType::ImmediateOrCancel => (false, false),

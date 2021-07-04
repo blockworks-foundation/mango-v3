@@ -43,7 +43,6 @@ pub struct Processor {}
 impl Processor {
     #[inline(never)]
     fn init_mango_group(
-        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         signer_nonce: u64,
@@ -173,7 +172,6 @@ impl Processor {
     /// Only allow admin to add to MangoGroup
     // TODO think about how to remove an asset. Maybe this just can't be done?
     fn add_spot_market(
-        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
@@ -193,7 +191,7 @@ impl Processor {
             node_bank_ai,   // write
             vault_ai,       // read
             root_bank_ai,   // write
-            admin_ai        // read
+            admin_ai        // read, signer
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
@@ -335,7 +333,6 @@ impl Processor {
     /// Initialize perp market including orderbooks and queues
     //  Requires a contract_size for the asset
     fn add_perp_market(
-        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
@@ -1255,7 +1252,6 @@ impl Processor {
         accounts: &[AccountInfo],
         client_order_id: u64,
     ) -> MangoResult<()> {
-        // ***
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1304,7 +1300,6 @@ impl Processor {
         order_id: i128,
         side: Side,
     ) -> MangoResult<()> {
-        // ***
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1449,7 +1444,7 @@ impl Processor {
     #[allow(unused)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        // ***
+        // TODO *** - implement client, instruction.rs and instruction.ts
         const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1545,7 +1540,7 @@ impl Processor {
     #[inline(never)]
     #[allow(unused)]
     fn force_cancel_spot_orders(
-        // ***
+        // TODO *** - implement client, instruction.rs and instruction.ts
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         limit: u8,
@@ -1735,6 +1730,8 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: u8,
     ) -> MangoResult<()> {
+        // TODO *** - implement client, instruction.rs and instruction.ts
+
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -1809,6 +1806,7 @@ impl Processor {
 
     #[inline(never)]
     #[allow(unused)]
+
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
     /// Requires: `liab_index != asset_index`  
@@ -1817,6 +1815,8 @@ impl Processor {
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
+        // TODO *** - implement client, instruction.rs and instruction.ts
+
         // parameter checks
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
@@ -2067,6 +2067,8 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
+        // TODO *** - implement client, instruction.rs and instruction.ts
+
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
         const NUM_FIXED: usize = 7;
@@ -2361,6 +2363,8 @@ impl Processor {
         accounts: &[AccountInfo],
         base_transfer_request: i64,
     ) -> MangoResult<()> {
+        // TODO *** - implement client, instruction.rs and instruction.ts
+
         // TODO - make sure sum of all quote positions + funding in system == 0
         // TODO - find a way to send in open orders accounts
         // liqor passes in his own account and the liqee mango account
@@ -2558,6 +2562,8 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
+        // TODO *** - implement client, instruction.rs and instruction.ts
+
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
@@ -2709,6 +2715,8 @@ impl Processor {
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48, // in native token terms
     ) -> MangoResult<()> {
+        // TODO *** - implement client, instruction.rs and instruction.ts
+
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
@@ -3160,6 +3168,8 @@ impl Processor {
                 market_index,
                 maint_leverage,
                 init_leverage,
+                maker_fee,
+                taker_fee,
                 base_lot_size,
                 quote_lot_size,
             } => {
@@ -3170,8 +3180,8 @@ impl Processor {
                     market_index,
                     maint_leverage,
                     init_leverage,
-                    ZERO_I80F48, // TODO
-                    ZERO_I80F48,
+                    maker_fee,
+                    taker_fee,
                     base_lot_size,
                     quote_lot_size,
                 )?;

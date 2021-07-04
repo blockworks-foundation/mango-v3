@@ -129,7 +129,6 @@ impl SpotMarketInfo {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketInfo {
-    // ***
     pub perp_market: Pubkey, // One of these may be empty
     pub maint_asset_weight: I80F48,
     pub init_asset_weight: I80F48,
@@ -167,7 +166,7 @@ pub struct MangoGroup {
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
 
-    pub dao_vault: Pubkey, // ***
+    pub dao_vault: Pubkey,
 }
 
 impl MangoGroup {
@@ -227,7 +226,6 @@ impl MangoGroup {
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct RootBank {
-    // ***
     pub meta_data: MetaData,
 
     pub optimal_util: I80F48,
@@ -685,7 +683,7 @@ pub struct MangoAccount {
     pub being_liquidated: bool,
 
     /// This account cannot do anything except go through `resolve_bankruptcy`
-    pub is_bankrupt: bool, // ***
+    pub is_bankrupt: bool,
     pub padding: [u8; 6],
 }
 

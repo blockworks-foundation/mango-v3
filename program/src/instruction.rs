@@ -29,7 +29,6 @@ pub enum MangoInstruction {
     /// 8. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
     /// 9. `[]` dex_prog_ai - TODO
     InitMangoGroup {
-        // ***
         signer_nonce: u64,
         valid_interval: u64,
         quote_optimal_util: I80F48,
@@ -179,6 +178,8 @@ pub enum MangoInstruction {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
     },
@@ -449,13 +450,22 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
-                let data_arr = array_ref![data, 0, 56];
-                let (market_index, maint_leverage, init_leverage, base_lot_size, quote_lot_size) =
-                    array_refs![data_arr, 8, 16, 16, 8, 8];
+                let data_arr = array_ref![data, 0, 88];
+                let (
+                    market_index,
+                    maint_leverage,
+                    init_leverage,
+                    maker_fee,
+                    taker_fee,
+                    base_lot_size,
+                    quote_lot_size,
+                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 8, 8];
                 MangoInstruction::AddPerpMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    maker_fee: I80F48::from_le_bytes(*maker_fee),
+                    taker_fee: I80F48::from_le_bytes(*taker_fee),
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
                 }
@@ -762,6 +772,8 @@ pub fn add_perp_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    maker_fee: I80F48,
+    taker_fee: I80F48,
     base_lot_size: i64,
     quote_lot_size: i64,
 ) -> Result<Instruction, ProgramError> {
@@ -778,6 +790,8 @@ pub fn add_perp_market(
         market_index,
         maint_leverage,
         init_leverage,
+        maker_fee,
+        taker_fee,
         base_lot_size,
         quote_lot_size,
     };
@@ -829,7 +843,6 @@ pub fn cancel_perp_order_by_client_id(
     perp_market_pk: &Pubkey,   // write
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
-    event_queue_pk: &Pubkey,   // write
     client_order_id: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
@@ -839,7 +852,6 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
-        AccountMeta::new(*event_queue_pk, false),
     ];
     let instr = MangoInstruction::CancelPerpOrderByClientId { client_order_id };
     let data = instr.pack();
@@ -854,7 +866,6 @@ pub fn cancel_perp_order(
     perp_market_pk: &Pubkey,   // write
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
-    event_queue_pk: &Pubkey,   // write
     order_id: i128,
     side: Side,
 ) -> Result<Instruction, ProgramError> {
@@ -865,7 +876,6 @@ pub fn cancel_perp_order(
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
-        AccountMeta::new(*event_queue_pk, false),
     ];
     let instr = MangoInstruction::CancelPerpOrder { order_id, side };
     let data = instr.pack();
