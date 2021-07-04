@@ -641,7 +641,11 @@ impl Processor {
         // First check all caches to make sure valid
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut active_assets = mango_account.get_active_assets(&mango_group);
-        active_assets[token_index] = true; // Make sure token index is always checked
+
+        if token_index != QUOTE_INDEX {
+            active_assets[token_index] = true; // Make sure token index is always checked
+        }
+
         check!(
             mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
             MangoErrorCode::InvalidCache
@@ -2344,13 +2348,11 @@ impl Processor {
     ///         BTC-PERP quote_position = -100k
     ///         maint_health = -700
     ///         init_health = -5400
-    ///
     ///     liqee after liquidate_perp_market
     ///         USDC deposit 10k
     ///         BTC-PERP base_position = 2.3404
     ///         BTC-PERP quote_position = -29799.766
     ///         init_health = 0.018
-    ///     
     ///     liqor after liquidate_perp_market
     ///         BTC-PERP base_position = 7.6596
     ///         BTC-PERP quote_position = -70200.234
