@@ -471,11 +471,13 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
 
-        // increment mango account
-        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank_cache.deposit_index;
-        checked_add_deposit(&mut node_bank, &mut mango_account, token_index, deposit)?;
-
-        Ok(())
+        checked_add_net(
+            root_bank_cache,
+            &mut node_bank,
+            &mut mango_account,
+            token_index,
+            I80F48::from_num(quantity),
+        )
     }
 
     #[allow(unused)]
@@ -589,70 +591,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused_variables)]
-    fn borrow(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
-        // TODO don't allow borrow of infinite amount of quote currency
-        // TODO only allow borrow and withdraw or borrow and trade, not borrow by itself
-        const NUM_FIXED: usize = 6;
-        let (fixed_accs, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
-        let [
-            mango_group_ai,     // read
-            mango_account_ai,   // write
-            owner_ai,           // read
-            mango_cache_ai,     // read
-            root_bank_ai,       // read
-            node_bank_ai,       // write
-        ] = fixed_accs;
-
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-
-        let mut mango_account =
-            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
-
-        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-
-        // Make sure the root bank is in the mango group
-        let token_index = mango_group
-            .find_root_bank_index(root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
-
-        // First check all caches to make sure valid
-
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let root_bank_cache = &mango_cache.root_bank_cache[token_index];
-
-        let deposit: I80F48 = I80F48::from_num(quantity) / root_bank_cache.deposit_index;
-        let borrow: I80F48 = I80F48::from_num(quantity) / root_bank_cache.borrow_index;
-
-        checked_add_deposit(&mut node_bank, &mut mango_account, token_index, deposit)?;
-        checked_add_borrow(&mut node_bank, &mut mango_account, token_index, borrow)?;
-
-        let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
-        let active_assets = mango_account.get_active_assets(&mango_group);
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
-            MangoErrorCode::InvalidCache
-        )?;
-        let health = mango_account.get_health(
-            &mango_group,
-            &mango_cache,
-            open_orders_ais,
-            &active_assets,
-            HealthType::Init,
-        )?;
-
-        // TODO fix coll_ratio checks
-        check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
-        check!(node_bank.has_valid_deposits_borrows(&root_bank_cache), MangoErrorCode::Default)?;
-
-        Ok(())
-    }
-
-    #[inline(never)]
     /// Withdraw a token from the bank if collateral ratio permits
     fn withdraw(
         program_id: &Pubkey,
@@ -712,27 +650,21 @@ impl Processor {
 
         // Borrow if withdrawing more than deposits
         let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index)?;
-        let rem_to_borrow = I80F48::from_num(quantity) - native_deposit;
-        if rem_to_borrow.is_positive() {
-            check!(allow_borrow, MangoErrorCode::InsufficientFunds)?;
-            let avail_deposit = mango_account.deposits[token_index];
-            checked_sub_deposit(&mut node_bank, &mut mango_account, token_index, avail_deposit)?;
-            checked_add_borrow(
-                &mut node_bank,
-                &mut mango_account,
-                token_index,
-                rem_to_borrow / root_bank_cache.borrow_index,
-            )?;
-        } else {
-            checked_sub_deposit(
-                &mut node_bank,
-                &mut mango_account,
-                token_index,
-                I80F48::from_num(quantity) / root_bank_cache.deposit_index,
-            )?;
-        }
+        let withdraw = I80F48::from_num(quantity);
 
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
+        check!(native_deposit >= withdraw || allow_borrow, MangoErrorCode::InsufficientFunds)?;
+        checked_sub_net(
+            root_bank_cache,
+            &mut node_bank,
+            &mut mango_account,
+            token_index,
+            withdraw,
+        )?;
+        check!(
+            node_bank.has_valid_deposits_borrows(root_bank_cache),
+            MangoErrorCode::InsufficientLiquidity
+        )?;
+
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
@@ -1105,45 +1037,6 @@ impl Processor {
             &[&signer_seeds],
         )?;
         Ok(())
-    }
-
-    #[allow(unused)]
-    #[inline(never)]
-    fn settle_borrow(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        token_index: usize,
-        quantity: u64,
-    ) -> MangoResult<()> {
-        // TODO - basically this should never occur because deposits and borrows should never both be >0
-        // TODO - basically, this offsetting should happen automatically whenever deposits and borrows change
-        unimplemented!();
-        // const NUM_FIXED: usize = 5;
-        // let accounts = array_ref![accounts, 0, NUM_FIXED];
-        // let [
-        //     mango_group_ai,     // read
-        //     mango_account_ai,   // write
-        //     root_bank_ai,       // read
-        //     node_bank_ai,       // write
-        //     owner_ai            // read
-        // ] = accounts;
-        //
-        // let mut mango_account =
-        //     MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        // let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-        // let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-        //
-        // check!(owner_ai.is_signer, MangoErrorCode::Default)?;
-        // check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::Default)?;
-        //
-        // settle_borrow_unchecked(
-        //     &root_bank,
-        //     &mut node_bank,
-        //     &mut mango_account,
-        //     token_index,
-        //     I80F48::from_num(quantity),
-        // )?;
-        // Ok(())
     }
 
     #[inline(never)]
@@ -3228,9 +3121,8 @@ impl Processor {
                 msg!("Mango: AddToBasket Deprecated");
                 unimplemented!() // TODO remove
             }
-            MangoInstruction::Borrow { quantity } => {
-                msg!("Mango: Borrow");
-                Self::borrow(program_id, accounts, quantity)?;
+            MangoInstruction::Borrow { .. } => {
+                msg!("Mango: Borrow DEPRECATED");
             }
             MangoInstruction::CachePrices => {
                 msg!("Mango: CachePrices");
@@ -3330,9 +3222,8 @@ impl Processor {
                 msg!("Mango: SettlePnl");
                 Self::settle_pnl(program_id, accounts, market_index)?;
             }
-            MangoInstruction::SettleBorrow { token_index, quantity } => {
-                msg!("Mango: SettleBorrow");
-                Self::settle_borrow(program_id, accounts, token_index, quantity)?;
+            MangoInstruction::SettleBorrow { .. } => {
+                msg!("Mango: SettleBorrow DEPRECATED");
             }
             MangoInstruction::ForceCancelSpotOrders { limit } => {
                 msg!("Mango: ForceCancelSpotOrders");

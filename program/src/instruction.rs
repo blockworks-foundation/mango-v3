@@ -16,18 +16,18 @@ use std::num::NonZeroU64;
 pub enum MangoInstruction {
     /// Initialize a group of lending pools that can be cross margined
     ///
-    /// Accounts expected by this instruction (9):
+    /// Accounts expected by this instruction (10):
     ///
     /// 0. `[writable]` mango_group_ai - TODO
-    /// 1. `[]` rent_ai - TODO
-    /// 2. `[]` signer_ai - TODO
-    /// 3. `[]` admin_ai - TODO
-    /// 4. `[]` quote_mint_ai - TODO
-    /// 5. `[]` quote_vault_ai - TODO
-    /// 6. `[writable]` quote_node_bank_ai - TODO
-    /// 7. `[writable]` quote_root_bank_ai - TODO
-    /// 6. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
-    /// 8. `[]` dex_prog_ai - TODO
+    /// 1. `[]` signer_ai - TODO
+    /// 2. `[]` admin_ai - TODO
+    /// 3. `[]` quote_mint_ai - TODO
+    /// 4. `[]` quote_vault_ai - TODO
+    /// 5. `[writable]` quote_node_bank_ai - TODO
+    /// 6. `[writable]` quote_root_bank_ai - TODO
+    /// 7. `[read]` dao_vault_ai - aka insurance fund
+    /// 8. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
+    /// 9. `[]` dex_prog_ai - TODO
     InitMangoGroup {
         // ***
         signer_nonce: u64,
@@ -87,16 +87,16 @@ pub enum MangoInstruction {
 
     /// Add a token to a mango group
     ///
-    /// Accounts expected by this instruction (7):
+    /// Accounts expected by this instruction (8):
     ///
     /// 0. `[writable]` mango_group_ai - TODO
     /// 1. `[]` spot_market_ai - TODO
     /// 2. `[]` dex_program_ai - TODO
-    /// 1. `[]` mint_ai - TODO
-    /// 2. `[writable]` node_bank_ai - TODO
-    /// 3. `[]` vault_ai - TODO
-    /// 4. `[writable]` root_bank_ai - TODO
-    /// 5. `[signer]` admin_ai - TODO
+    /// 3. `[]` mint_ai - TODO
+    /// 4. `[writable]` node_bank_ai - TODO
+    /// 5. `[]` vault_ai - TODO
+    /// 6. `[writable]` root_bank_ai - TODO
+    /// 7. `[signer]` admin_ai - TODO
     AddSpotMarket {
         market_index: usize,
         maint_leverage: I80F48,
@@ -106,6 +106,7 @@ pub enum MangoInstruction {
         max_rate: I80F48,
     },
 
+    /// DEPRECATED
     /// Add a spot market to a mango account basket
     ///
     /// Accounts expected by this instruction (6)
