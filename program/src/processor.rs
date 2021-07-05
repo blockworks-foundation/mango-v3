@@ -252,7 +252,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai, // write
-            oracle_ai,      // read
+            oracle_ai,      // write
             admin_ai        // read
         ] = accounts;
 
@@ -1521,7 +1521,7 @@ impl Processor {
     #[allow(unused)]
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
-    /// Requires: `liab_index != asset_index`  
+    /// Requires: `liab_index != asset_index`
     fn liquidate_token_and_token(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1538,12 +1538,12 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            asset_root_bank_ai,     // read    
-            asset_node_bank_ai,     // write    
-            liab_root_bank_ai,      // read    
-            liab_node_bank_ai,      // write    
+            asset_root_bank_ai,     // read
+            asset_node_bank_ai,     // write
+            liab_root_bank_ai,      // read
+            liab_node_bank_ai,      // write
         ] = fixed_ais;
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
         check!(asset_index != liab_index, MangoErrorCode::Default)?;
@@ -1775,10 +1775,10 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            root_bank_ai,           // read    
-            node_bank_ai,           // write    
+            root_bank_ai,           // read
+            node_bank_ai,           // write
         ] = fixed_ais;
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;

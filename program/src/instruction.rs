@@ -859,7 +859,7 @@ pub fn add_oracle(
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
-        AccountMeta::new_readonly(*oracle_pk, false),
+        AccountMeta::new(*oracle_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
