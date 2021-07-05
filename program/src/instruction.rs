@@ -305,14 +305,21 @@ pub enum MangoInstruction {
     /// 16. `[]` dex_signer_ai -
     /// 17. `[]` dex_prog_ai - Dex Program acc
     /// 18. `[]` token_prog_ai - Token Program acc
-    /// 19+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 19+... `[]` liqee_open_orders_ais - Liqee open orders accs
     ForceCancelSpotOrders {
         limit: u8,
     },
 
     /// Force cancellation of open orders for a user being liquidated
     ///
-    /// Accounts expected:
+    /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 3. `[writable]` bids_ai - Bids acc
+    /// 4. `[writable]` asks_ai - Asks acc
+    /// 5. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
+    /// 6+... `[]` liqor_open_orders_ais - Liqee open orders accs
     ForceCancelPerpOrders {
         limit: u8,
     },
@@ -330,7 +337,7 @@ pub enum MangoInstruction {
     /// 6. `[writable]` asset_node_bank_ai - NodeBank
     /// 7. `[]` liab_root_bank_ai - RootBank
     /// 8. `[writable]` liab_node_bank_ai - NodeBank
-    /// 9+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 9+... `[]` liqee_open_orders_ais - Liqee open orders accs
     /// 9+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidateTokenAndToken {
         max_liab_transfer: I80F48,
@@ -346,7 +353,7 @@ pub enum MangoInstruction {
     /// 4. `[signer]` liqor_ai - Liqor Account
     /// 5. `[]` root_bank_ai - RootBank
     /// 6. `[writable]` node_bank_ai - NodeBank
-    /// 7+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
     /// 7+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidateTokenAndPerp {
         asset_type: AssetType,
@@ -365,10 +372,69 @@ pub enum MangoInstruction {
     /// 3. `[writable]` liqee_mango_account_ai - MangoAccount
     /// 4. `[writable]` liqor_mango_account_ai - MangoAccount
     /// 5. `[signer]` liqor_ai - Liqor Account
-    /// 6+... `[]` liqee_open_orders_ais - Liquee open orders accs
+    /// 6+... `[]` liqee_open_orders_ais - Liqee open orders accs
     /// 6+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidatePerpMarket {
         base_transfer_request: i64,
+    },
+
+    /// Take an account that has losses in the selected perp market to account for fees_accrued
+    ///
+    /// Accounts expected: 11
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 3. `[writable]` mango_account_ai - MangoAccount
+    /// 4. `[]` root_bank_ai - RootBank
+    /// 5. `[writable]` node_bank_ai - NodeBank
+    /// 6. `[writable]` bank_vault_ai - ?
+    /// 7. `[writable]` dao_vault_ai - DAO Vault
+    /// 8. `[]` signer_ai - Group Signer Account
+    /// 9. `[signer]` admin_ai - Group Admin Account
+    /// 10. `[]` token_prog_ai - Token Program Account
+    SettleFees,
+
+    /// Claim insurance fund and then socialize loss
+    ///
+    /// Accounts expected: 12 + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - Liqor MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` root_bank_ai - RootBank
+    /// 6. `[writable]` node_bank_ai - NodeBank
+    /// 7. `[writable]` vault_ai - ?
+    /// 8. `[writable]` dao_vault_ai - DAO Vault
+    /// 9. `[]` signer_ai - Group Signer Account
+    /// 10. `[]` perp_market_ai - PerpMarket
+    /// 11. `[]` token_prog_ai - Token Program Account
+    /// 12+... `[]` liqor_open_orders_ais - Liqor open orders accs
+    ResolvePerpBankruptcy {
+        liab_index: usize,
+        max_liab_transfer: I80F48,
+    },
+
+    /// Claim insurance fund and then socialize loss
+    ///
+    /// Accounts expected: 13 + Liqor open orders accounts (MAX_PAIRS) + Liab node banks (MAX_NODE_BANKS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - Liqor MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` quote_root_bank_ai - RootBank
+    /// 6. `[writable]` quote_node_bank_ai - NodeBank
+    /// 7. `[writable]` quote_vault_ai - ?
+    /// 8. `[writable]` dao_vault_ai - DAO Vault
+    /// 9. `[]` signer_ai - Group Signer Account
+    /// 10. `[]` liab_root_bank_ai - RootBank
+    /// 11. `[writable]` liab_node_bank_ai - NodeBank
+    /// 12. `[]` token_prog_ai - Token Program Account
+    /// 13+... `[]` liqor_open_orders_ais - Liqor open orders accs
+    /// 14+MAX_PAIRS... `[]` liab_node_bank_ais - Lib token node banks
+    ResolveTokenBankruptcy {
+        max_liab_transfer: I80F48,
     },
 }
 
@@ -570,6 +636,23 @@ impl MangoInstruction {
 
                 MangoInstruction::LiquidatePerpMarket {
                     base_transfer_request: i64::from_le_bytes(*data_arr),
+                }
+            }
+            29 => MangoInstruction::SettleFees,
+            30 => {
+                let data = array_ref![data, 0, 24];
+                let (liab_index, max_liab_transfer) = array_refs![data, 8, 16];
+
+                MangoInstruction::ResolvePerpBankruptcy {
+                    liab_index: usize::from_le_bytes(*liab_index),
+                    max_liab_transfer: I80F48::from_le_bytes(*max_liab_transfer),
+                }
+            }
+            31 => {
+                let data_arr = array_ref![data, 0, 16];
+
+                MangoInstruction::ResolveTokenBankruptcy {
+                    max_liab_transfer: I80F48::from_le_bytes(*data_arr),
                 }
             }
             _ => {

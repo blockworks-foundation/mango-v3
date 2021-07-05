@@ -1444,7 +1444,7 @@ impl Processor {
     #[allow(unused)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
         const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1540,7 +1540,7 @@ impl Processor {
     #[inline(never)]
     #[allow(unused)]
     fn force_cancel_spot_orders(
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         limit: u8,
@@ -1730,7 +1730,7 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: u8,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
 
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
@@ -1815,7 +1815,7 @@ impl Processor {
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
 
         // parameter checks
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
@@ -2067,7 +2067,7 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
 
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
@@ -2363,7 +2363,7 @@ impl Processor {
         accounts: &[AccountInfo],
         base_transfer_request: i64,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
 
         // TODO - make sure sum of all quote positions + funding in system == 0
         // TODO - find a way to send in open orders accounts
@@ -2562,7 +2562,7 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
 
         // First check the account is bankrupt
         // Determine the value of the liab transfer
@@ -2715,7 +2715,7 @@ impl Processor {
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48, // in native token terms
     ) -> MangoResult<()> {
-        // TODO *** - implement client, instruction.rs and instruction.ts
+        // TODO *** - implement client, and instruction.ts
 
         // First check the account is bankrupt
         // Determine the value of the liab transfer
@@ -3270,6 +3270,18 @@ impl Processor {
             MangoInstruction::LiquidatePerpMarket { base_transfer_request } => {
                 msg!("Mango: LiquidatePerpMarket");
                 Self::liquidate_perp_market(program_id, accounts, base_transfer_request)?;
+            }
+            MangoInstruction::SettleFees => {
+                msg!("Mango: SettleFees");
+                Self::settle_fees(program_id, accounts)?
+            }
+            MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
+                msg!("Mango: ResolvePerpBankruptcy");
+                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)?
+            }
+            MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
+                msg!("Mango: ResolveTokenBankruptcy");
+                Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)?
             }
         }
 
