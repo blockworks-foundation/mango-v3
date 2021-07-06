@@ -1207,6 +1207,7 @@ impl PerpAccount {
         self.apply_incentives(
             perp_market,
             side,
+            fill.price,
             fill.best_initial,
             fill.price,
             fill.timestamp,
@@ -1229,19 +1230,48 @@ impl PerpAccount {
         }
     }
 
-    #[allow(unused_variables)]
     pub fn apply_incentives(
         &mut self,
         perp_market: &mut PerpMarket,
 
         side: Side,
+        price: i64,
         best_initial: i64,
         best_final: i64,
         time_initial: u64,
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
-        //
+        let dist_bps = match side {
+            Side::Bid => {
+                let best_bid = max(best_initial, best_final);
+
+                // Guaranteed to be non-negative
+                I80F48::from_num((best_bid - price) * 10_000) / I80F48::from_num(best_bid)
+            }
+            Side::Ask => {
+                let best_ask = min(best_initial, best_final);
+
+                // Guaranteed to be non-negative
+                I80F48::from_num((price - best_ask) * 10_000) / I80F48::from_num(best_ask)
+            }
+        };
+
+        let dist_factor = max(perp_market.max_depth_bps - dist_bps, ZERO_I80F48);
+
+        // TODO - check overflow possibilities here by throwing in reasonable large numbers
+        let points = dist_factor
+            * dist_factor
+            * I80F48::from_num(time_final - time_initial)
+            * I80F48::from_num(quantity)
+            * perp_market.scaler;
+
+        // TODO OPT remove this sanity check if confident
+        check!(!points.is_negative(), MangoErrorCode::Default)?;
+
+        perp_market.total_liquidity_points += points;
+        self.liquidity_points += points;
+
         Ok(())
     }
 
@@ -1412,7 +1442,7 @@ pub struct PerpMarket {
 
     // ***
     // Liquidity incentive params
-    pub max_depth: I80F48,
+    pub max_depth_bps: I80F48,
     pub scaler: I80F48,
     pub total_liquidity_points: I80F48,
 }

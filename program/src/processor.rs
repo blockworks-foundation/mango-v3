@@ -1272,25 +1272,43 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let perp_market =
+        let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
-        let oo = &mut mango_account.perp_accounts[market_index].open_orders;
+        let perp_account = &mut mango_account.perp_accounts[market_index];
 
         // we should consider not throwing an error but to silently ignore cancel_order when it passes an unknown
         // client_order_id, this would allow batching multiple cancel instructions with place instructions for
         // super-efficient updating of orders. if not then the same usage pattern might often trigger errors due
         // to the possibility of already filled orders?
-        let (_, order_id, side) = oo
+        let (_, order_id, side) = perp_account
+            .open_orders
             .orders_with_client_ids()
             .find(|entry| client_order_id == u64::from(entry.0))
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        book.cancel_order(oo, mango_account_ai.key, order_id, side)?;
 
+        let best_final = match side {
+            Side::Bid => book.get_best_bid_price().unwrap(),
+            Side::Ask => book.get_best_ask_price().unwrap(),
+        };
+
+        let order = book.cancel_order(order_id, side)?;
+        check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
+        perp_account.open_orders.cancel_order(&order, order_id, side)?;
+        perp_account.apply_incentives(
+            &mut perp_market,
+            side,
+            order.price(),
+            order.best_initial,
+            best_final,
+            order.timestamp,
+            Clock::get()?.unix_timestamp as u64,
+            order.quantity,
+        )?;
         Ok(())
     }
 
@@ -1320,14 +1338,32 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let perp_market =
+        let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
+        let perp_account = &mut mango_account.perp_accounts[market_index];
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        book.cancel_order(oo, mango_account_ai.key, order_id, side)?;
+
+        let best_final = match side {
+            Side::Bid => book.get_best_bid_price().unwrap(),
+            Side::Ask => book.get_best_ask_price().unwrap(),
+        };
+
+        let order = book.cancel_order(order_id, side)?;
+        check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
+        perp_account.open_orders.cancel_order(&order, order_id, side)?;
+        perp_account.apply_incentives(
+            &mut perp_market,
+            side,
+            order.price(),
+            order.best_initial,
+            best_final,
+            order.timestamp,
+            Clock::get()?.unix_timestamp as u64,
+            order.quantity,
+        )?;
 
         Ok(())
     }

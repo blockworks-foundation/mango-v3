@@ -9,14 +9,11 @@ use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
 use solana_program::msg;
 use solana_program::pubkey::Pubkey;
-use solana_program::sysvar::recent_blockhashes::RecentBlockhashes;
 use solana_program::sysvar::rent::Rent;
-use solana_program::sysvar::Sysvar;
 use static_assertions::const_assert_eq;
 use std::cell::RefMut;
 use std::convert::TryFrom;
 use std::mem::size_of;
-use std::ops::DerefMut;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -828,27 +825,30 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
-    pub fn cancel_order(
-        &mut self,
-        oo: &mut PerpOpenOrders,
-        mango_account_pk: &Pubkey,
-        order_id: i128,
-        side: Side,
-    ) -> MangoResult<()> {
-        let book_side = match side {
-            Side::Bid => self.bids.deref_mut(),
-            Side::Ask => self.asks.deref_mut(),
-        };
+    pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
+        match side {
+            Side::Bid => self.bids.remove_by_key(order_id).ok_or(throw!()),
+            Side::Ask => self.asks.remove_by_key(order_id).ok_or(throw!()),
+        }
 
-        let order = book_side.remove_by_key(order_id).ok_or(throw_err!(MangoErrorCode::Default))?;
-        check_eq!(order.owner, *mango_account_pk, MangoErrorCode::Default)?;
-
-        oo.cancel_order(&order, order_id, side)?;
-
-        // TODO *** - apply liquidity incentives
-
-        Ok(())
+        // let order = book_side.remove_by_key(order_id).ok_or(throw_err!(MangoErrorCode::Default))?;
+        //
+        // let book_side = match side {
+        //     Side::Bid => self.bids.deref_mut(),
+        //     Side::Ask => self.asks.deref_mut(),
+        // };
+        //
+        // // TODO OPT - remove this check if
+        // check_eq!(order.owner, *mango_account_pk, MangoErrorCode::Default)?;
+        //
+        // oo.cancel_order(&order, order_id, side)?;
+        //
+        // // TODO *** - apply liquidity incentives
+        //
+        // Ok(())
     }
+
+    /// Used by force cancel so does not need to give liquidity incentives
     pub fn cancel_all(
         &mut self,
         open_orders: &mut PerpOpenOrders,
@@ -874,23 +874,6 @@ impl<'a> Book<'a> {
                 break;
             }
         }
-        Ok(())
-    }
-
-    pub fn apply_incentives(&mut self) -> MangoResult<()> {
-        let recent_blockhashes = RecentBlockhashes::get()?;
-        let last = recent_blockhashes.last().unwrap().blockhash;
-
-        // If blockhash starts with 0x00 byte, then apply incentive
-        if last.0[0] != 0 {
-            return Ok(());
-        }
-
-        match self.bids.root() {
-            None => {}
-            Some(_) => {}
-        }
-
         Ok(())
     }
 }
