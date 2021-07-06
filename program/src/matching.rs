@@ -12,8 +12,10 @@ use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::recent_blockhashes::RecentBlockhashes;
 use solana_program::sysvar::rent::Rent;
 use solana_program::sysvar::Sysvar;
+use static_assertions::const_assert_eq;
 use std::cell::RefMut;
 use std::convert::TryFrom;
+use std::mem::size_of;
 use std::ops::DerefMut;
 
 declare_check_assert_macros!(SourceFileId::Matching);
@@ -120,6 +122,10 @@ pub struct AnyNode {
     pub tag: u32,
     pub data: [u8; NODE_SIZE - 4],
 }
+
+const_assert_eq!(size_of::<AnyNode>(), size_of::<InnerNode>());
+const_assert_eq!(size_of::<AnyNode>(), size_of::<LeafNode>());
+const_assert_eq!(size_of::<AnyNode>(), size_of::<FreeNode>());
 
 enum NodeRef<'a> {
     Inner(&'a InnerNode),
@@ -642,12 +648,12 @@ impl<'a> Book<'a> {
 
             let match_quantity = rem_quantity.min(best_ask.quantity);
             rem_quantity -= match_quantity;
-            let quote_change = match_quantity * best_ask_price;
             best_ask.quantity -= match_quantity;
-
+            let maker_out = best_ask.quantity == 0;
             let fill = FillEvent::new(
                 Side::Bid,
                 best_ask.owner_slot,
+                maker_out,
                 best_ask.owner,
                 best_ask.key,
                 best_ask.client_order_id,
@@ -656,16 +662,13 @@ impl<'a> Book<'a> {
                 *mango_account_pk,
                 order_id,
                 client_order_id,
+                best_ask_price,
                 match_quantity,
-                -quote_change,
             );
             event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_ask.quantity == 0 or rem_quantity == 0 or both
             if best_ask.quantity == 0 {
-                // Create an Out event
-                let event = OutEvent::new(Side::Ask, best_ask.owner_slot, 0, best_ask.owner);
-                event_queue.push_back(cast(event)).unwrap();
                 // Remove the order from the book
                 let key = best_ask.key;
                 let _removed_node = self.asks.remove_by_key(key).unwrap();
@@ -758,13 +761,13 @@ impl<'a> Book<'a> {
             }
 
             let match_quantity = rem_quantity.min(best_bid.quantity);
-            let quote_change = match_quantity * best_bid_price;
             rem_quantity -= match_quantity;
             best_bid.quantity -= match_quantity;
-
+            let maker_out = best_bid.quantity == 0;
             let fill = FillEvent::new(
                 Side::Ask,
                 best_bid.owner_slot,
+                maker_out,
                 best_bid.owner,
                 best_bid.key,
                 best_bid.client_order_id,
@@ -773,16 +776,13 @@ impl<'a> Book<'a> {
                 *mango_account_pk,
                 order_id,
                 client_order_id,
-                -match_quantity,
-                quote_change,
+                best_bid_price,
+                match_quantity,
             );
             event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
-            if best_bid.quantity == 0 {
-                // Create an Out event
-                let event = OutEvent::new(Side::Bid, best_bid.owner_slot, 0, best_bid.owner);
-                event_queue.push_back(cast(event)).unwrap();
+            if maker_out {
                 // Remove the order from the book
                 let key = best_bid.key;
                 let _removed_node = self.bids.remove_by_key(key).unwrap();

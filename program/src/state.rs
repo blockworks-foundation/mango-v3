@@ -20,7 +20,7 @@ use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::remove_slop_mut;
+use crate::utils::{invert_side, remove_slop_mut};
 use enumflags2::BitFlags;
 use std::cmp::{max, min};
 
@@ -1018,6 +1018,12 @@ impl MangoAccount {
         }
         Ok(())
     }
+
+    #[allow(dead_code)]
+    /// Determine the bankruptcy status of the account
+    pub fn get_bankruptcy(&self) -> MangoResult<bool> {
+        unimplemented!()
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -1169,36 +1175,74 @@ pub struct PerpAccount {
 }
 
 impl PerpAccount {
-    #[allow(unused_variables)]
-    pub fn execute_maker(
-        &mut self,
-        perp_market: &mut PerpMarket,
-        info: &PerpMarketInfo,
-        fill: &FillEvent,
-    ) {
-        unimplemented!()
-    }
-
-    #[allow(unused_variables)]
     pub fn execute_taker(
         &mut self,
         perp_market: &mut PerpMarket,
         info: &PerpMarketInfo,
         fill: &FillEvent,
-    ) {
-        unimplemented!()
+    ) -> MangoResult<()> {
+        let (base_change, quote_change) = fill.base_quote_change(fill.side);
+        self.change_base_position(perp_market, base_change);
+        let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
+        let fees = quote.abs() * info.taker_fee;
+        perp_market.fees_accrued += fees;
+        self.quote_position += quote - fees;
+        Ok(())
+    }
+
+    pub fn execute_maker(
+        &mut self,
+        perp_market: &mut PerpMarket,
+        info: &PerpMarketInfo,
+        fill: &FillEvent,
+    ) -> MangoResult<()> {
+        let side = invert_side(fill.side);
+        let (base_change, quote_change) = fill.base_quote_change(side);
+        self.change_base_position(perp_market, base_change);
+        let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
+        let fees = quote.abs() * info.taker_fee;
+        perp_market.fees_accrued += fees;
+        self.quote_position += quote - fees;
+
+        self.apply_incentives(
+            perp_market,
+            side,
+            fill.best_initial,
+            fill.price,
+            fill.timestamp,
+            Clock::get()?.unix_timestamp as u64,
+            fill.quantity,
+        )?;
+
+        if fill.maker_out {
+            self.open_orders.remove_order(side, fill.maker_slot, base_change.abs())
+        } else {
+            match side {
+                Side::Bid => {
+                    self.open_orders.bids_quantity -= base_change.abs();
+                }
+                Side::Ask => {
+                    self.open_orders.asks_quantity -= base_change.abs();
+                }
+            }
+            Ok(())
+        }
     }
 
     #[allow(unused_variables)]
     pub fn apply_incentives(
         &mut self,
+        perp_market: &mut PerpMarket,
+
         side: Side,
         best_initial: i64,
         best_final: i64,
         time_initial: u64,
         time_final: u64,
-    ) {
-        unimplemented!()
+        quantity: i64,
+    ) -> MangoResult<()> {
+        //
+        Ok(())
     }
 
     /// This assumes settle_funding was already called
@@ -1537,8 +1581,8 @@ impl PerpMarket {
         maker.settle_funding(cache);
         taker.settle_funding(cache);
 
-        taker.execute_taker(self, info, fill);
-        maker.execute_maker(self, info, fill);
+        taker.execute_taker(self, info, fill)?;
+        maker.execute_maker(self, info, fill)?;
 
         Ok(())
     }

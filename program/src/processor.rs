@@ -2532,6 +2532,7 @@ impl Processor {
             )?;
             if assets_val < DUST_THRESHOLD {
                 // Liquidation must now continue with the resolve_bankruptcy instruction
+                // TODO - an account can only go into bankruptcy if all base_positions are 0
                 liqee_ma.is_bankrupt = true;
             }
         } else {

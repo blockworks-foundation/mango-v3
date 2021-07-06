@@ -227,7 +227,8 @@ pub struct FillEvent {
     pub event_type: u8,
     pub side: Side, // side from the taker's POV
     pub maker_slot: u8,
-    padding: [u8; 5],
+    pub maker_out: bool, // true if maker order quantity == 0
+    pub padding: [u8; 4],
     pub maker: Pubkey,
     pub maker_order_id: i128,
     pub maker_client_order_id: u64,
@@ -235,15 +236,15 @@ pub struct FillEvent {
     // The best bid/ask at the time the maker order was placed. Used for liquidity incentives
     pub best_initial: i64,
 
-    // Timestamp of when the order was placed copied over from the LeafNode
+    // Timestamp of when the maker order was placed; copied over from the LeafNode
     pub timestamp: u64,
 
     pub taker: Pubkey,
     pub taker_order_id: i128,
     pub taker_client_order_id: u64,
 
-    pub base_change: i64,
-    pub quote_change: i64, // number of quote lots
+    pub price: i64,
+    pub quantity: i64, // number of quote lots
 }
 unsafe impl TriviallyTransmutable for FillEvent {}
 
@@ -251,6 +252,7 @@ impl FillEvent {
     pub fn new(
         side: Side,
         maker_slot: u8,
+        maker_out: bool,
         maker: Pubkey,
         maker_order_id: i128,
         maker_client_order_id: u64,
@@ -260,14 +262,15 @@ impl FillEvent {
         taker: Pubkey,
         taker_order_id: i128,
         taker_client_order_id: u64,
-        base_change: i64,
-        quote_change: i64,
+        price: i64,
+        quantity: i64,
     ) -> Self {
         Self {
             event_type: EventType::Fill.into(),
             side,
             maker_slot,
-            padding: [0; 5],
+            maker_out,
+            padding: [0; 4],
             maker,
             maker_order_id,
             maker_client_order_id,
@@ -276,8 +279,15 @@ impl FillEvent {
             taker,
             taker_order_id,
             taker_client_order_id,
-            base_change,
-            quote_change,
+            price,
+            quantity,
+        }
+    }
+
+    pub fn base_quote_change(&self, side: Side) -> (i64, i64) {
+        match side {
+            Side::Bid => (self.quantity, -self.price * self.quantity),
+            Side::Ask => (-self.quantity, self.price * self.quantity),
         }
     }
 }

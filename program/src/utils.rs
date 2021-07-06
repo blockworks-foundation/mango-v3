@@ -1,6 +1,7 @@
 use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 
 use crate::error::MangoResult;
+use crate::matching::Side;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
@@ -43,4 +44,12 @@ pub fn strip_header_mut<'a, H: Pod, D: Pod>(
         let (header_bytes, inner_bytes) = data.split_at_mut(size_of::<H>());
         (from_bytes_mut(header_bytes), remove_slop_mut(inner_bytes))
     }))
+}
+
+pub fn invert_side(side: Side) -> Side {
+    if side == Side::Bid {
+        Side::Ask
+    } else {
+        Side::Bid
+    }
 }
