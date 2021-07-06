@@ -68,7 +68,6 @@ pub struct LeafNode {
     pub quantity: i64,
     pub client_order_id: u64,
 
-    // ***
     // Liquidity incentive related parameters
     // Either the best bid or best ask at the time the order was placed
     pub best_initial: i64,

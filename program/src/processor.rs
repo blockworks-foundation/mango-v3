@@ -331,7 +331,6 @@ impl Processor {
 
     #[inline(never)]
     /// Initialize perp market including orderbooks and queues
-    //  Requires a contract_size for the asset
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -342,7 +341,13 @@ impl Processor {
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
+        max_depth_bps: I80F48,
+        scaler: I80F48,
     ) -> MangoResult<()> {
+        // params check
+        check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(!scaler.is_negative(), MangoErrorCode::InvalidParam)?;
+
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -3193,6 +3198,8 @@ impl Processor {
                 taker_fee,
                 base_lot_size,
                 quote_lot_size,
+                max_depth_bps,
+                scaler,
             } => {
                 msg!("Mango: AddPerpMarket");
                 Self::add_perp_market(
@@ -3205,6 +3212,8 @@ impl Processor {
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
+                    max_depth_bps,
+                    scaler,
                 )?;
             }
             MangoInstruction::PlacePerpOrder {

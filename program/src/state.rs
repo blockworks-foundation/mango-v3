@@ -1164,7 +1164,6 @@ impl PerpOpenOrders {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpAccount {
-    // ***
     pub base_position: i64,     // measured in base lots
     pub quote_position: I80F48, // measured in native quote
 
@@ -1440,7 +1439,6 @@ pub struct PerpMarket {
     pub seq_num: u64,
     pub fees_accrued: I80F48, // native quote currency
 
-    // ***
     // Liquidity incentive params
     pub max_depth_bps: I80F48,
     pub scaler: I80F48,

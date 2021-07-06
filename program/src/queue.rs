@@ -223,7 +223,6 @@ unsafe impl TriviallyTransmutable for AnyEvent {}
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct FillEvent {
-    // ***
     pub event_type: u8,
     pub side: Side, // side from the taker's POV
     pub maker_slot: u8,
