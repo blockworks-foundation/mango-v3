@@ -30,7 +30,7 @@ pub fn create_signer_key_and_nonce(program_id: &Pubkey, acc_pk: &Pubkey) -> (Pub
 }
 
 #[inline]
-fn remove_slop_mut<T: Pod>(bytes: &mut [u8]) -> &mut [T] {
+pub fn remove_slop_mut<T: Pod>(bytes: &mut [u8]) -> &mut [T] {
     let slop = bytes.len() % size_of::<T>();
     let new_len = bytes.len() - slop;
     cast_slice_mut(&mut bytes[..new_len])

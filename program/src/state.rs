@@ -3,7 +3,7 @@ use std::convert::identity;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
-use bytemuck::{cast_slice_mut, from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
+use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use mango_common::Loadable;
@@ -19,6 +19,8 @@ use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
+use crate::queue::FillEvent;
+use crate::utils::remove_slop_mut;
 use enumflags2::BitFlags;
 use std::cmp::{max, min};
 
@@ -1036,6 +1038,7 @@ impl PerpOpenOrders {
 
     pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MangoResult<()> {
         let slot_mask = 1u32 << slot;
+        // TODO OPT - remove this check if we're confident
         check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
 
         // accounting
@@ -1155,42 +1158,47 @@ impl PerpOpenOrders {
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpAccount {
+    // ***
     pub base_position: i64,     // measured in base lots
     pub quote_position: I80F48, // measured in native quote
 
     pub long_settled_funding: I80F48,
     pub short_settled_funding: I80F48,
     pub open_orders: PerpOpenOrders,
+    pub liquidity_points: I80F48,
 }
 
 impl PerpAccount {
-    /// Execute trade and return the net change in open interest
-    /// This assumes settle_funding was already called
-    pub fn execute_trade(
+    #[allow(unused_variables)]
+    pub fn execute_maker(
         &mut self,
         perp_market: &mut PerpMarket,
         info: &PerpMarketInfo,
-        is_maker: bool,
-        base_change: i64,
-        quote_change: i64,
+        fill: &FillEvent,
     ) {
-        self.change_base_position(perp_market, base_change);
-        let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
+        unimplemented!()
+    }
 
-        let fees = if is_maker {
-            if base_change > 0 {
-                self.open_orders.bids_quantity -= base_change;
-            } else if base_change < 0 {
-                self.open_orders.asks_quantity += base_change;
-            }
+    #[allow(unused_variables)]
+    pub fn execute_taker(
+        &mut self,
+        perp_market: &mut PerpMarket,
+        info: &PerpMarketInfo,
+        fill: &FillEvent,
+    ) {
+        unimplemented!()
+    }
 
-            quote.abs() * info.maker_fee
-        } else {
-            quote.abs() * info.taker_fee
-        };
-
-        perp_market.fees_accrued += fees;
-        self.quote_position += quote - fees;
+    #[allow(unused_variables)]
+    pub fn apply_incentives(
+        &mut self,
+        side: Side,
+        best_initial: i64,
+        best_final: i64,
+        time_initial: u64,
+        time_final: u64,
+    ) {
+        unimplemented!()
     }
 
     /// This assumes settle_funding was already called
@@ -1356,13 +1364,13 @@ pub struct PerpMarket {
 
     pub last_updated: u64,
     pub seq_num: u64,
+    pub fees_accrued: I80F48, // native quote currency
 
-    // add in fees here
-    // Fees can be settled calling a special settle function that sends fees into the mango group vault owned by admin (or maybe insurance vault?)
-    pub fees_accrued: I80F48, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
-                              // index_price = some function of centralized exchange spot prices
-                              // book_price = average of impact bid and impact ask; used to calculate basis
-                              // basis = book_price / index_price - 1; some moving average of this is used for mark price
+    // ***
+    // Liquidity incentive params
+    pub max_depth: I80F48,
+    pub scaler: I80F48,
+    pub total_liquidity_points: I80F48,
 }
 
 impl PerpMarket {
@@ -1485,6 +1493,7 @@ impl PerpMarket {
         self.short_funding += funding_delta;
         self.last_updated = now_ts;
 
+        // Check if liquidity incentives ought to be paid out and if so pay them out
         Ok(())
     }
 
@@ -1521,16 +1530,15 @@ impl PerpMarket {
         &mut self,
         cache: &PerpMarketCache,
         info: &PerpMarketInfo,
+        fill: &FillEvent,
         maker: &mut PerpAccount,
         taker: &mut PerpAccount,
-        base_change: i64,
-        quote_change: i64,
     ) -> MangoResult<()> {
         maker.settle_funding(cache);
         taker.settle_funding(cache);
 
-        taker.execute_trade(self, info, false, base_change, quote_change);
-        maker.execute_trade(self, info, true, -base_change, -quote_change);
+        taker.execute_taker(self, info, fill);
+        maker.execute_maker(self, info, fill);
 
         Ok(())
     }
@@ -1644,13 +1652,6 @@ pub fn load_asks_mut<'a>(
         MangoErrorCode::Default
     )?;
     Ok(RefMut::map(buf, serum_dex::critbit::Slab::new))
-}
-
-#[inline]
-fn remove_slop_mut<T: Pod>(bytes: &mut [u8]) -> &mut [T] {
-    let slop = bytes.len() % size_of::<T>();
-    let new_len = bytes.len() - slop;
-    cast_slice_mut(&mut bytes[..new_len])
 }
 
 /// Copied over from serum dex

@@ -1,7 +1,7 @@
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders};
-use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
+use bytemuck::{cast, cast_mut, cast_ref};
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -9,13 +9,18 @@ use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
 use solana_program::msg;
 use solana_program::pubkey::Pubkey;
+use solana_program::sysvar::recent_blockhashes::RecentBlockhashes;
 use solana_program::sysvar::rent::Rent;
+use solana_program::sysvar::Sysvar;
 use std::cell::RefMut;
 use std::convert::TryFrom;
 use std::ops::DerefMut;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
+
+const NODE_SIZE: usize = 88;
+
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u32)]
 pub enum NodeTag {
@@ -33,12 +38,18 @@ pub struct InnerNode {
     pub prefix_len: u32,
     pub key: i128,
     pub children: [u32; 2],
-    pub padding: [u8; 40],
+    pub padding: [u8; NODE_SIZE - 32],
 }
 
 impl InnerNode {
     fn new(prefix_len: u32, key: i128) -> Self {
-        Self { tag: NodeTag::InnerNode.into(), prefix_len, key, children: [0; 2], padding: [0; 40] }
+        Self {
+            tag: NodeTag::InnerNode.into(),
+            prefix_len,
+            key,
+            children: [0; 2],
+            padding: [0; NODE_SIZE - 32],
+        }
     }
     fn walk_down(&self, search_key: i128) -> (NodeHandle, bool) {
         let crit_bit_mask = 1i128 << (127 - self.prefix_len);
@@ -57,11 +68,41 @@ pub struct LeafNode {
     pub owner: Pubkey,
     pub quantity: i64,
     pub client_order_id: u64,
+
+    // ***
+    // Liquidity incentive related parameters
+    // Either the best bid or best ask at the time the order was placed
+    pub best_initial: i64,
+
+    // The time the order was place
+    pub timestamp: u64,
 }
 
 impl LeafNode {
     pub fn price(&self) -> i64 {
         (self.key >> 64) as i64
+    }
+
+    pub fn new(
+        owner_slot: u8,
+        key: i128,
+        owner: Pubkey,
+        quantity: i64,
+        client_order_id: u64,
+        timestamp: u64,
+        best_initial: i64,
+    ) -> Self {
+        Self {
+            tag: NodeTag::LeafNode.into(),
+            owner_slot,
+            padding: [0; 3],
+            key,
+            owner,
+            quantity,
+            client_order_id,
+            best_initial,
+            timestamp,
+        }
     }
 }
 
@@ -70,14 +111,14 @@ impl LeafNode {
 struct FreeNode {
     tag: u32,
     next: u32,
-    padding: [u8; 64],
+    padding: [u8; NODE_SIZE - 8],
 }
 
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct AnyNode {
     pub tag: u32,
-    pub data: [u8; 68],
+    pub data: [u8; NODE_SIZE - 4],
 }
 
 enum NodeRef<'a> {
@@ -347,7 +388,7 @@ impl BookSide {
                 NodeTag::FreeNode.into()
             },
             next: self.free_list_head,
-            padding: Zeroable::zeroed(),
+            padding: [0; 80],
         });
 
         self.free_list_len += 1;
@@ -460,6 +501,19 @@ impl BookSide {
     pub fn is_full(&self) -> bool {
         self.free_list_len == 0 && self.bump_index == self.nodes.len()
     }
+
+    #[allow(dead_code)]
+    fn to_vec(&self, root: NodeHandle, v: &mut Vec<NodeHandle>) {
+        match self.get(root).unwrap().case().unwrap() {
+            NodeRef::Inner(inner) => {
+                self.to_vec(inner.children[0], v);
+                self.to_vec(inner.children[1], v);
+            }
+            NodeRef::Leaf(_) => {
+                v.push(root);
+            }
+        }
+    }
 }
 
 pub struct Book<'a> {
@@ -508,6 +562,7 @@ impl<'a> Book<'a> {
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
+        now_ts: u64,
     ) -> MangoResult<()> {
         match side {
             Side::Bid => self.new_bid(
@@ -520,6 +575,7 @@ impl<'a> Book<'a> {
                 quantity,
                 order_type,
                 client_order_id,
+                now_ts,
             ),
             Side::Ask => self.new_ask(
                 event_queue,
@@ -531,6 +587,7 @@ impl<'a> Book<'a> {
                 quantity,
                 order_type,
                 client_order_id,
+                now_ts,
             ),
         }
     }
@@ -546,6 +603,7 @@ impl<'a> Book<'a> {
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
+        now_ts: u64,
     ) -> MangoResult<()> {
         // TODO proper error handling
         // TODO handle the case where we run out of compute
@@ -556,6 +614,11 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true),
         };
         let order_id = market.gen_order_id(Side::Bid, price);
+
+        let best_initial = match self.get_best_bid_price() {
+            None => price,
+            Some(p) => p,
+        };
 
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
@@ -582,8 +645,20 @@ impl<'a> Book<'a> {
             let quote_change = match_quantity * best_ask_price;
             best_ask.quantity -= match_quantity;
 
-            let fill =
-                FillEvent::new(best_ask.owner, *mango_account_pk, match_quantity, -quote_change);
+            let fill = FillEvent::new(
+                Side::Bid,
+                best_ask.owner_slot,
+                best_ask.owner,
+                best_ask.key,
+                best_ask.client_order_id,
+                best_ask.best_initial,
+                best_ask.timestamp,
+                *mango_account_pk,
+                order_id,
+                client_order_id,
+                match_quantity,
+                -quote_change,
+            );
             event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_ask.quantity == 0 or rem_quantity == 0 or both
@@ -613,16 +688,15 @@ impl<'a> Book<'a> {
 
             let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
-            let new_bid = LeafNode {
-                tag: NodeTag::LeafNode as u32,
-                owner_slot: oo.next_order_slot(),
-                padding: [0; 3],
-                key: order_id,
-                owner: *mango_account_pk,
-                quantity: rem_quantity,
+            let new_bid = LeafNode::new(
+                oo.next_order_slot(),
+                order_id,
+                *mango_account_pk,
+                rem_quantity,
                 client_order_id,
-            };
-
+                now_ts,
+                best_initial,
+            );
             let _result = self.bids.insert_leaf(&new_bid)?;
 
             msg!(
@@ -649,6 +723,7 @@ impl<'a> Book<'a> {
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
+        now_ts: u64,
     ) -> MangoResult<()> {
         // TODO proper error handling
         let (post_only, post_allowed) = match order_type {
@@ -657,6 +732,11 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true),
         };
         let order_id = market.gen_order_id(Side::Ask, price);
+
+        let best_initial = match self.get_best_ask_price() {
+            None => price,
+            Some(p) => p,
+        };
 
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
@@ -682,8 +762,20 @@ impl<'a> Book<'a> {
             rem_quantity -= match_quantity;
             best_bid.quantity -= match_quantity;
 
-            let fill =
-                FillEvent::new(best_bid.owner, *mango_account_pk, -match_quantity, quote_change);
+            let fill = FillEvent::new(
+                Side::Ask,
+                best_bid.owner_slot,
+                best_bid.owner,
+                best_bid.key,
+                best_bid.client_order_id,
+                best_bid.best_initial,
+                best_bid.timestamp,
+                *mango_account_pk,
+                order_id,
+                client_order_id,
+                -match_quantity,
+                quote_change,
+            );
             event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
@@ -712,15 +804,15 @@ impl<'a> Book<'a> {
 
             let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
-            let new_ask = LeafNode {
-                tag: NodeTag::LeafNode as u32,
-                owner_slot: oo.next_order_slot(),
-                padding: [0; 3],
-                key: order_id,
-                owner: *mango_account_pk,
-                quantity: rem_quantity,
+            let new_ask = LeafNode::new(
+                oo.next_order_slot(),
+                order_id,
+                *mango_account_pk,
+                rem_quantity,
                 client_order_id,
-            };
+                now_ts,
+                best_initial,
+            );
 
             msg!(
                 "ask on book client_id={} quantity={} price={}",
@@ -753,7 +845,7 @@ impl<'a> Book<'a> {
 
         oo.cancel_order(&order, order_id, side)?;
 
-        // TODO: write to event queue
+        // TODO *** - apply liquidity incentives
 
         Ok(())
     }
@@ -782,6 +874,23 @@ impl<'a> Book<'a> {
                 break;
             }
         }
+        Ok(())
+    }
+
+    pub fn apply_incentives(&mut self) -> MangoResult<()> {
+        let recent_blockhashes = RecentBlockhashes::get()?;
+        let last = recent_blockhashes.last().unwrap().blockhash;
+
+        // If blockhash starts with 0x00 byte, then apply incentive
+        if last.0[0] != 0 {
+            return Ok(());
+        }
+
+        match self.bids.root() {
+            None => {}
+            Some(_) => {}
+        }
+
         Ok(())
     }
 }

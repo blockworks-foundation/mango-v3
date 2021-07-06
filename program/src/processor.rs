@@ -1232,6 +1232,7 @@ impl Processor {
             quantity,
             order_type,
             client_order_id,
+            Clock::get()?.unix_timestamp as u64,
         )?;
 
         let health = mango_account.get_health(
@@ -2931,8 +2932,6 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
-        // TODO - fee behavior
-
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -2987,10 +2986,9 @@ impl Processor {
                     perp_market.execute_trade(
                         cache,
                         info,
+                        fill_event,
                         &mut maker.perp_accounts[market_index],
                         &mut taker.perp_accounts[market_index],
-                        fill_event.base_change,
-                        fill_event.quote_change,
                     )?;
                 }
                 EventType::Out => {
