@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 use std::mem::size_of;
+use fixed::types::I80F48;
 use mango::{entrypoint::*, state::*, instruction::*, oracle::*, utils::*};
 use mango_common::Loadable;
 use solana_program::{
@@ -42,6 +43,22 @@ impl AddPacked for ProgramTest {
     }
 }
 
+pub struct MintUnitConfig {
+    pub index: usize,
+    pub decimals: u64,
+    pub unit: u64,
+    pub lot: u64,
+}
+
+impl MintUnitConfig {
+    fn new(index: usize, decimals: u64, unit: u64, lot: u64) -> MintUnitConfig {
+        MintUnitConfig { index: index, decimals: decimals, unit: unit, lot: lot }
+    }
+    pub fn default() -> Self {
+        MintUnitConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as u64, lot: 10 }
+    }
+}
+
 pub struct MangoProgramTestConfig {
     pub compute_limit: u64,
     pub num_users: u64,
@@ -50,12 +67,8 @@ pub struct MangoProgramTestConfig {
 
 impl MangoProgramTestConfig {
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 10_000, num_users: 2, num_mints: 10 }
+        MangoProgramTestConfig { compute_limit: 20_000, num_users: 2, num_mints: 10 }
     }
-}
-
-pub struct MintUnitConfig {
-
 }
 
 pub struct MangoProgramTest {
@@ -250,9 +263,15 @@ impl MangoProgramTest {
         let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
 
         let quote_mint_pk = self.mints[0];
+
         let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
         let quote_node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
         let quote_root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
+        let dao_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
+
+        let quote_optimal_util = I80F48::from_num(0.5);
+        let quote_optimal_rate = I80F48::from_num(1);
+        let quote_max_rate = I80F48::from_num(1);
 
         let admin_pk = self.context.payer.pubkey();
         let instructions = [mango::instruction::init_mango_group(
@@ -264,10 +283,14 @@ impl MangoProgramTest {
             &quote_vault_pk,
             &quote_node_bank_pk,
             &quote_root_bank_pk,
+            &dao_vault_pk,
             &mango_cache_pk,
             &serum_program_id,
             signer_nonce,
             5,
+            quote_optimal_util,
+            quote_optimal_rate,
+            quote_max_rate,
         )
         .unwrap()];
 
@@ -318,8 +341,13 @@ impl MangoProgramTest {
         return (oracle_pks);
     }
 
-    pub async fn with_unit_config(&mut self, mango_group: &MangoGroup, token_index: usize) {
-        let decimals = mango_group.tokens[token_index].decimals;
-        println!("Decimals: {}", decimals);
+    pub fn with_unit_config(&mut self, mango_group: &MangoGroup, index: usize, lot: u64) -> MintUnitConfig {
+        let decimals = mango_group.tokens[index].decimals as u64;
+        let unit = 10i64.pow(decimals as u32) as u64;
+        return MintUnitConfig::new(index, decimals, unit, lot);
+    }
+
+    pub fn with_oracle_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: u64) -> I80F48 {
+        return I80F48::from_num(price) * I80F48::from_num(quote_mint_config.unit) / I80F48::from_num(base_mint_config.unit);
     }
 }

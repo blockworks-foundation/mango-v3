@@ -2,7 +2,6 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref, Zeroable};
-use fixed::types::I80F48;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -38,6 +37,9 @@ pub struct InnerNode {
 }
 
 impl InnerNode {
+    fn new(prefix_len: u32, key: i128) -> Self {
+        Self { tag: NodeTag::InnerNode.into(), prefix_len, key, children: [0; 2], padding: [0; 40] }
+    }
     fn walk_down(&self, search_key: i128) -> (NodeHandle, bool) {
         let crit_bit_mask = 1i128 << (127 - self.prefix_len);
         let crit_bit = (search_key & crit_bit_mask) != 0;
@@ -446,13 +448,7 @@ impl BookSide {
             };
 
             let new_root: &mut InnerNode = cast_mut(self.get_mut(root).unwrap());
-            *new_root = InnerNode {
-                tag: NodeTag::InnerNode.into(),
-                prefix_len: shared_prefix_len,
-                key: new_leaf.key,
-                children: [0; 2],
-                padding: [0u8; 40],
-            };
+            *new_root = InnerNode::new(shared_prefix_len, new_leaf.key);
 
             new_root.children[new_leaf_crit_bit as usize] = new_leaf_handle;
             new_root.children[old_root_crit_bit as usize] = moved_root_handle;
@@ -551,26 +547,22 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
     ) -> MangoResult<()> {
-        // TODO make use of the order options
         // TODO proper error handling
         // TODO handle the case where we run out of compute
-        #[allow(unused_variables)]
+        // TODO test the order types
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel => unimplemented!(),
-            OrderType::PostOnly => unimplemented!(),
+            OrderType::ImmediateOrCancel => (false, false),
+            OrderType::PostOnly => (true, true),
         };
         let order_id = market.gen_order_id(Side::Bid, price);
 
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
-        let mut quote_used = 0; // quote lots
         while rem_quantity > 0 {
             let best_ask_h = match self.get_best_ask_handle() {
-                None => {
-                    break;
-                }
+                None => break,
                 Some(h) => h,
             };
 
@@ -581,34 +573,18 @@ impl<'a> Book<'a> {
 
             if price < best_ask_price {
                 break;
+            } else if post_only {
+                return Err(throw_err!(MangoErrorCode::PostOnly));
             }
 
             let match_quantity = rem_quantity.min(best_ask.quantity);
             rem_quantity -= match_quantity;
             let quote_change = match_quantity * best_ask_price;
-            quote_used += quote_change;
             best_ask.quantity -= match_quantity;
 
-            let maker_fill = FillEvent::new(
-                true,
-                best_ask.owner,
-                -match_quantity,
-                quote_change,
-                market.long_funding,
-                market.short_funding,
-            );
-            event_queue.push_back(cast(maker_fill)).unwrap();
-
-            // This fill is not necessary, purely for stats purposes
-            let taker_fill = FillEvent::new(
-                false,
-                *mango_account_pk,
-                match_quantity,
-                -quote_change,
-                market.long_funding,
-                market.short_funding,
-            );
-            event_queue.push_back(cast(taker_fill)).unwrap();
+            let fill =
+                FillEvent::new(best_ask.owner, *mango_account_pk, match_quantity, -quote_change);
+            event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_ask.quantity == 0 or rem_quantity == 0 or both
             if best_ask.quantity == 0 {
@@ -622,7 +598,7 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if rem_quantity > 0 {
+        if rem_quantity > 0 && post_allowed {
             if self.bids.is_full() {
                 // If this bid is higher than lowest bid, boot that bid and insert this one
                 let min_bid_handle = self.bids.find_min().unwrap();
@@ -658,23 +634,6 @@ impl<'a> Book<'a> {
             oo.add_order(Side::Bid, &new_bid)?;
         }
 
-        // Edit mango_account if some contracts were matched
-        if rem_quantity < quantity {
-            let base_change = quantity - rem_quantity;
-            mango_account.perp_accounts[market_index].change_position(
-                base_change,
-                I80F48::from_num(-quote_used * market.quote_lot_size),
-                market.long_funding,
-                market.short_funding,
-            )?;
-
-            msg!(
-                "matched base={} quote={:?}",
-                base_change,
-                I80F48::from_num(-quote_used * market.quote_lot_size)
-            );
-        }
-
         Ok(())
     }
 
@@ -691,25 +650,20 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
     ) -> MangoResult<()> {
-        // TODO make use of the order options
         // TODO proper error handling
-        #[allow(unused_variables)]
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel => unimplemented!(),
-            OrderType::PostOnly => unimplemented!(),
+            OrderType::ImmediateOrCancel => (false, false),
+            OrderType::PostOnly => (true, true),
         };
         let order_id = market.gen_order_id(Side::Ask, price);
 
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
-        let mut quote_used = 0; // quote lots
         while rem_quantity > 0 {
             let best_bid_h = match self.get_best_bid_handle() {
-                None => {
-                    break;
-                }
+                None => break,
                 Some(h) => h,
             };
 
@@ -719,34 +673,18 @@ impl<'a> Book<'a> {
             msg!("new_ask p={} bbp={}", price, best_bid_price);
             if price > best_bid_price {
                 break;
+            } else if post_only {
+                return Err(throw_err!(MangoErrorCode::PostOnly));
             }
 
             let match_quantity = rem_quantity.min(best_bid.quantity);
             let quote_change = match_quantity * best_bid_price;
             rem_quantity -= match_quantity;
-            quote_used += quote_change;
             best_bid.quantity -= match_quantity;
 
-            let maker_fill = FillEvent::new(
-                true,
-                best_bid.owner,
-                match_quantity,
-                -quote_change,
-                market.long_funding,
-                market.short_funding,
-            );
-            event_queue.push_back(cast(maker_fill)).unwrap();
-
-            // This fill is not necessary, purely for stats purposes
-            let taker_fill = FillEvent::new(
-                false,
-                *mango_account_pk,
-                -match_quantity,
-                quote_change,
-                market.long_funding,
-                market.short_funding,
-            );
-            event_queue.push_back(cast(taker_fill)).unwrap();
+            let fill =
+                FillEvent::new(best_bid.owner, *mango_account_pk, -match_quantity, quote_change);
+            event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
             if best_bid.quantity == 0 {
@@ -760,7 +698,7 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if rem_quantity > 0 {
+        if rem_quantity > 0 && post_allowed {
             if self.bids.is_full() {
                 // If this asks is lower than highest ask, boot that ask and insert this one
                 let max_ask_handle = self.asks.find_min().unwrap();
@@ -795,32 +733,13 @@ impl<'a> Book<'a> {
             oo.add_order(Side::Ask, &new_ask)?;
         }
 
-        // Edit mango_account if some contracts were matched
-        if rem_quantity < quantity {
-            let base_change = -(quantity - rem_quantity); // negative because short
-            mango_account.perp_accounts[market_index].change_position(
-                base_change,
-                I80F48::from_num(quote_used * market.quote_lot_size),
-                market.long_funding,
-                market.short_funding,
-            )?;
-
-            msg!(
-                "matched base={} quote={:?}",
-                base_change,
-                I80F48::from_num(-quote_used * market.quote_lot_size)
-            );
-        }
-
         Ok(())
     }
 
     pub fn cancel_order(
         &mut self,
-        _event_queue: &mut EventQueue, // TODO remove
         oo: &mut PerpOpenOrders,
         mango_account_pk: &Pubkey,
-        _market_index: usize, // TODO remove
         order_id: i128,
         side: Side,
     ) -> MangoResult<()> {
@@ -836,6 +755,33 @@ impl<'a> Book<'a> {
 
         // TODO: write to event queue
 
+        Ok(())
+    }
+    pub fn cancel_all(
+        &mut self,
+        open_orders: &mut PerpOpenOrders,
+        mut limit: u8,
+    ) -> MangoResult<()> {
+        for i in 0..32 {
+            let slot_mask = 1u32 << i;
+            if open_orders.is_free_bits & slot_mask != 0 {
+                // means slot is free
+                continue;
+            }
+            let order_id = open_orders.orders[i];
+            if open_orders.is_bid_bits & slot_mask != 0 {
+                let order = self.bids.remove_by_key(order_id).ok_or(throw!())?;
+                open_orders.cancel_order(&order, order_id, Side::Bid)?;
+            } else {
+                let order = self.asks.remove_by_key(order_id).ok_or(throw!())?;
+                open_orders.cancel_order(&order, order_id, Side::Ask)?;
+            }
+
+            limit -= 1;
+            if limit == 0 {
+                break;
+            }
+        }
         Ok(())
     }
 }

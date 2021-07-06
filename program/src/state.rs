@@ -3,7 +3,7 @@ use std::convert::identity;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
-use bytemuck::{from_bytes, from_bytes_mut};
+use bytemuck::{cast_slice_mut, from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use mango_common::Loadable;
@@ -19,6 +19,7 @@ use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::{Book, LeafNode, Side};
+use enumflags2::BitFlags;
 use std::cmp::{max, min};
 
 pub const MAX_TOKENS: usize = 32;
@@ -28,10 +29,8 @@ pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
 pub const DAY: I80F48 = I80F48!(86400);
+pub const YEAR: I80F48 = I80F48!(31536000);
 
-const OPTIMAL_UTIL: I80F48 = I80F48!(0.7);
-const OPTIMAL_R: I80F48 = I80F48!(6.3419583967529173008625e-09); // 20% APY -> 0.1 / YEAR
-const MAX_R: I80F48 = I80F48!(9.5129375951293759512937e-08); // max 300% APY -> 1 / YEAR
 pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
 
 declare_check_assert_macros!(SourceFileId::State);
@@ -39,7 +38,6 @@ declare_check_assert_macros!(SourceFileId::State);
 // TODO: all unit numbers are just place holders. make decisions on each unit number
 // TODO: add prop tests for nums
 // TODO add GUI hoster fee discount
-// TODO double check all the
 
 // units
 // long_funding: I80F48 - native quote currency per contract
@@ -63,6 +61,20 @@ pub enum DataType {
     Asks,
     MangoCache,
     EventQueue,
+}
+
+pub enum HealthType {
+    Maint,
+    Init,
+}
+
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
+#[repr(u8)]
+pub enum AssetType {
+    Token = 0,
+    Perp = 1,
 }
 
 #[derive(Copy, Clone, Pod, Default)]
@@ -123,6 +135,8 @@ pub struct PerpMarketInfo {
     pub maint_liab_weight: I80F48,
     pub init_liab_weight: I80F48,
     pub liquidation_fee: I80F48,
+    pub maker_fee: I80F48,
+    pub taker_fee: I80F48,
     pub base_lot_size: i64,  // The lot size of the underlying
     pub quote_lot_size: i64, // min tick
 }
@@ -152,7 +166,7 @@ pub struct MangoGroup {
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
 
-    pub insurance_vault: Pubkey, // ***
+    pub dao_vault: Pubkey,
 }
 
 impl MangoGroup {
@@ -214,11 +228,18 @@ impl MangoGroup {
 pub struct RootBank {
     pub meta_data: MetaData,
 
+    pub optimal_util: I80F48,
+    pub optimal_rate: I80F48,
+    pub max_rate: I80F48,
+
     pub num_node_banks: usize,
     pub node_banks: [Pubkey; MAX_NODE_BANKS],
+
     pub deposit_index: I80F48,
     pub borrow_index: I80F48,
     pub last_updated: u64,
+
+    padding: [u8; 64], // used for future expansions
 }
 
 impl RootBank {
@@ -226,8 +247,10 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         node_bank_ai: &'a AccountInfo,
-
         rent: &Rent,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut root_bank = Self::load_mut(account)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
@@ -243,7 +266,27 @@ impl RootBank {
         root_bank.deposit_index = ONE_I80F48;
         root_bank.borrow_index = ONE_I80F48;
 
+        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
         Ok(root_bank)
+    }
+    pub fn set_rate_params(
+        &mut self,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
+    ) -> MangoResult<()> {
+        check!(
+            optimal_util > ZERO_I80F48 && optimal_util < ONE_I80F48,
+            MangoErrorCode::InvalidParam
+        )?;
+        check!(optimal_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(max_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+
+        self.optimal_util = optimal_util;
+        self.optimal_rate = optimal_rate / YEAR;
+        self.max_rate = max_rate / YEAR;
+
+        Ok(())
     }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -310,12 +353,12 @@ impl RootBank {
 
         // Calculate interest rate
         // TODO: Review interest rate calculation
-        let interest_rate = if utilization > OPTIMAL_UTIL {
-            let extra_util = utilization - OPTIMAL_UTIL;
-            let slope = (MAX_R - OPTIMAL_R) / (ONE_I80F48 - OPTIMAL_UTIL);
-            OPTIMAL_R + slope * extra_util
+        let interest_rate = if utilization > self.optimal_util {
+            let extra_util = utilization - self.optimal_util;
+            let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
+            self.optimal_rate + slope * extra_util
         } else {
-            let slope = OPTIMAL_R / OPTIMAL_UTIL;
+            let slope = self.optimal_rate / self.optimal_util;
             slope * utilization
         };
 
@@ -336,6 +379,57 @@ impl RootBank {
             .unwrap()
             .checked_add(self.deposit_index)
             .unwrap();
+
+        Ok(())
+    }
+
+    pub fn socialize_loss(
+        &mut self,
+        program_id: &Pubkey,
+        token_index: usize,
+        mango_cache: &mut MangoCache,
+        bankrupt_account: &mut MangoAccount,
+        node_bank_ais: &[AccountInfo; MAX_NODE_BANKS],
+    ) -> MangoResult<()> {
+        let mut native_deposits = ZERO_I80F48;
+        let mut native_borrows = ZERO_I80F48;
+
+        let mut max_node_bank_index = 0;
+        let mut max_node_bank_borrows = ZERO_I80F48;
+        for i in 0..self.num_node_banks {
+            check!(node_bank_ais[i].key == &self.node_banks[i], MangoErrorCode::InvalidNodeBank)?;
+            let node_bank = NodeBank::load_checked(&node_bank_ais[i], program_id)?;
+            native_deposits = native_deposits
+                .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
+                .unwrap();
+
+            native_borrows = native_borrows
+                .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
+                .unwrap();
+
+            if node_bank.borrows > max_node_bank_borrows {
+                max_node_bank_index = i;
+                max_node_bank_borrows = node_bank.borrows;
+            }
+        }
+
+        let loss = bankrupt_account.borrows[token_index];
+        let native_loss: I80F48 = loss * self.borrow_index;
+
+        let percentage_loss = native_loss.checked_div(native_deposits).unwrap();
+        self.deposit_index = self
+            .deposit_index
+            .checked_sub(percentage_loss.checked_mul(self.deposit_index).unwrap())
+            .unwrap();
+
+        mango_cache.root_bank_cache[token_index].deposit_index = self.deposit_index;
+        mango_cache.root_bank_cache[token_index].borrow_index = self.borrow_index;
+
+        let mut node_bank =
+            NodeBank::load_mut_checked(&node_bank_ais[max_node_bank_index], program_id)?;
+
+        bankrupt_account.checked_sub_borrow(token_index, loss)?;
+        node_bank.checked_sub_borrow(loss)?;
 
         Ok(())
     }
@@ -509,7 +603,7 @@ impl MangoCache {
     pub fn check_caches_valid(
         &self,
         mango_group: &MangoGroup,
-        active_assets: &[bool; MAX_PAIRS],
+        active_assets: &[bool; MAX_TOKENS],
         now_ts: u64,
     ) -> bool {
         let valid_interval = mango_group.valid_interval;
@@ -561,6 +655,366 @@ impl MangoCache {
         } else {
             self.price_cache[i].price // Just panic if index out of bounds
         }
+    }
+}
+
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct MangoAccount {
+    pub meta_data: MetaData,
+
+    pub mango_group: Pubkey,
+    pub owner: Pubkey,
+
+    // pub in_basket: [bool; MAX_TOKENS],
+    pub in_margin_basket: [bool; MAX_PAIRS],
+    pub num_in_margin_basket: u8,
+
+    // Spot and Margin related data
+    pub deposits: [I80F48; MAX_TOKENS],
+    pub borrows: [I80F48; MAX_TOKENS],
+    pub spot_open_orders: [Pubkey; MAX_PAIRS],
+
+    // Perps related data
+    pub perp_accounts: [PerpAccount; MAX_PAIRS],
+
+    /// This account cannot open new positions or borrow until `init_health >= 0`
+    pub being_liquidated: bool,
+
+    /// This account cannot do anything except go through `resolve_bankruptcy`
+    pub is_bankrupt: bool,
+    pub padding: [u8; 6],
+}
+
+impl MangoAccount {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_group_pk: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        // load_mut checks for size already
+        // mango account must be rent exempt to even be initialized
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        let mango_account = Self::load_mut(account)?;
+
+        check_eq!(
+            mango_account.meta_data.data_type,
+            DataType::MangoAccount as u8,
+            MangoErrorCode::Default
+        )?;
+        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
+
+        Ok(mango_account)
+    }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_group_pk: &Pubkey,
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<MangoAccount>(), MangoErrorCode::Default)?;
+
+        let mango_account = Self::load(account)?;
+
+        check_eq!(
+            mango_account.meta_data.data_type,
+            DataType::MangoAccount as u8,
+            MangoErrorCode::Default
+        )?;
+        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
+
+        Ok(mango_account)
+    }
+    pub fn get_native_deposit(
+        &self,
+        root_bank_cache: &RootBankCache,
+        token_i: usize,
+    ) -> MangoResult<I80F48> {
+        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(throw!())
+    }
+    pub fn get_native_borrow(
+        &self,
+        root_bank_cache: &RootBankCache,
+        token_i: usize,
+    ) -> MangoResult<I80F48> {
+        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(throw!())
+    }
+
+    // TODO - Add checks to these math methods to prevent result from being < 0
+    // TOOD - Add unchecked versions to be used when we're confident
+    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+        Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
+    }
+    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+        Ok(self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(throw!())?)
+    }
+    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+        Ok(self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(throw!())?)
+    }
+    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+        Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
+    }
+
+    pub fn get_token_assets_liabs(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        open_orders_ais: &[AccountInfo],
+    ) -> MangoResult<([I80F48; MAX_TOKENS], [I80F48; MAX_TOKENS])> {
+        let mut assets = [ZERO_I80F48; MAX_TOKENS];
+        let mut liabs = [ZERO_I80F48; MAX_TOKENS];
+
+        assets[QUOTE_INDEX] =
+            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
+        liabs[QUOTE_INDEX] =
+            mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
+
+        for i in 0..mango_group.num_oracles {
+            if !self.in_margin_basket[i] || self.spot_open_orders[i] == Pubkey::default() {
+                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i];
+            } else {
+                // TODO make sure open orders account is checked for validity before passing in here
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i]
+                    + I80F48::from_num(open_orders.native_coin_total);
+                assets[QUOTE_INDEX] += I80F48::from_num(
+                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                );
+            }
+
+            liabs[i] = mango_cache.root_bank_cache[i].borrow_index * self.borrows[i];
+        }
+
+        Ok((assets, liabs))
+    }
+
+    pub fn get_spot_val(
+        &self,
+        mango_cache: &MangoCache,
+        market_index: usize,
+        open_orders_ai: &AccountInfo,
+        asset_weight: I80F48,
+    ) -> MangoResult<I80F48> {
+        // TODO make checked
+        let bank_cache = &mango_cache.root_bank_cache[market_index];
+        let price = mango_cache.price_cache[market_index].price;
+
+        Ok(
+            if !self.in_margin_basket[market_index]
+                || self.spot_open_orders[market_index] == Pubkey::default()
+            {
+                self.deposits[market_index] * bank_cache.deposit_index * asset_weight * price
+            } else {
+                // TODO - confirm only checked open orders are sent in here
+                let open_orders = load_open_orders(open_orders_ai)?;
+
+                ((self.deposits[market_index] * bank_cache.deposit_index
+                    + I80F48::from_num(open_orders.native_coin_total))
+                    * asset_weight
+                    * price)
+                    + I80F48::from_num(
+                        open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                    )
+            },
+        )
+    }
+
+    pub fn get_assets_val(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        open_orders_ais: &[AccountInfo],
+        active_assets: &[bool; MAX_TOKENS],
+        health_type: HealthType,
+    ) -> MangoResult<I80F48> {
+        let mut assets_val =
+            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
+
+        for i in 0..mango_group.num_oracles {
+            if !active_assets[i] {
+                continue;
+            }
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+
+            let (spot_weight, perp_weight) = match health_type {
+                HealthType::Maint => {
+                    (spot_market_info.maint_asset_weight, perp_market_info.maint_asset_weight)
+                }
+                HealthType::Init => {
+                    (spot_market_info.init_asset_weight, perp_market_info.init_asset_weight)
+                }
+            };
+
+            if !spot_market_info.is_empty() {
+                assets_val +=
+                    self.get_spot_val(mango_cache, i, &open_orders_ais[i], spot_weight)?;
+            }
+
+            if !perp_market_info.is_empty() {
+                assets_val += self.perp_accounts[i].get_assets_val(
+                    mango_cache.price_cache[i].price,
+                    perp_weight,
+                    mango_cache.perp_market_cache[i].long_funding,
+                    mango_cache.perp_market_cache[i].short_funding,
+                );
+            }
+        }
+
+        Ok(assets_val)
+    }
+    fn get_spot_health(
+        &self,
+        mango_cache: &MangoCache,
+        market_index: usize,
+        open_orders_ai: &AccountInfo,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+    ) -> MangoResult<I80F48> {
+        // TODO make checked
+        let bank_cache = &mango_cache.root_bank_cache[market_index];
+        let price = mango_cache.price_cache[market_index].price;
+
+        let (oo_base, oo_quote) = if !self.in_margin_basket[market_index]
+            || self.spot_open_orders[market_index] == Pubkey::default()
+        {
+            (ZERO_I80F48, ZERO_I80F48)
+        } else {
+            // TODO add in support for GUI hoster fee
+            let open_orders = load_open_orders(open_orders_ai)?;
+            (
+                I80F48::from_num(open_orders.native_coin_total),
+                I80F48::from_num(
+                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
+                ),
+            )
+        };
+
+        let health = (((self.deposits[market_index] * bank_cache.deposit_index + oo_base)
+            * asset_weight
+            - self.borrows[market_index] * bank_cache.borrow_index * liab_weight)
+            * price)
+            + oo_quote;
+
+        Ok(health)
+    }
+
+    /// Must validate the caches before
+    pub fn get_health(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        spot_open_orders_ais: &[AccountInfo],
+        active_assets: &[bool; MAX_TOKENS],
+        health_type: HealthType,
+    ) -> MangoResult<I80F48> {
+        let mut health = (mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index
+            * self.deposits[QUOTE_INDEX])
+            - (mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
+
+        for i in 0..mango_group.num_oracles {
+            if !active_assets[i] {
+                continue;
+            }
+
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+
+            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
+                match health_type {
+                    HealthType::Maint => (
+                        spot_market_info.maint_asset_weight,
+                        spot_market_info.maint_liab_weight,
+                        perp_market_info.maint_asset_weight,
+                        perp_market_info.maint_liab_weight,
+                    ),
+                    HealthType::Init => (
+                        spot_market_info.init_asset_weight,
+                        spot_market_info.init_liab_weight,
+                        perp_market_info.init_asset_weight,
+                        perp_market_info.init_liab_weight,
+                    ),
+                };
+
+            if !spot_market_info.is_empty() {
+                health += self.get_spot_health(
+                    mango_cache,
+                    i,
+                    &spot_open_orders_ais[i],
+                    spot_asset_weight,
+                    spot_liab_weight,
+                )?;
+            }
+
+            if !perp_market_info.is_empty() {
+                health += self.perp_accounts[i].get_health(
+                    perp_market_info,
+                    mango_cache.price_cache[i].price,
+                    perp_asset_weight,
+                    perp_liab_weight,
+                    mango_cache.perp_market_cache[i].long_funding,
+                    mango_cache.perp_market_cache[i].short_funding,
+                );
+            }
+            msg!("get_health {} => {:?}", i, health);
+        }
+
+        Ok(health)
+    }
+
+    /// Return an array of bools that are true if any part of token, spot or perps for that index are nonzero
+    pub fn get_active_assets(&self, mango_group: &MangoGroup) -> [bool; MAX_TOKENS] {
+        let mut active_assets = [false; MAX_TOKENS];
+        active_assets[QUOTE_INDEX] = true;
+        for i in 0..mango_group.num_oracles {
+            active_assets[i] = self.in_margin_basket[i]
+                || !self.deposits[i].is_zero()
+                || !self.borrows[i].is_zero()
+                || self.perp_accounts[i].is_active();
+        }
+        active_assets
+    }
+
+    /// Add a market to margin basket
+    /// This function should be called any time you place a spot order
+    pub fn add_to_basket(&mut self, market_index: usize) -> MangoResult<()> {
+        if self.num_in_margin_basket == MAX_NUM_IN_MARGIN_BASKET {
+            check!(self.in_margin_basket[market_index], MangoErrorCode::MarginBasketFull)
+        } else {
+            if !self.in_margin_basket[market_index] {
+                self.in_margin_basket[market_index] = true;
+                self.num_in_margin_basket += 1;
+            }
+            Ok(())
+        }
+    }
+
+    /// Determine if margin basket should be updated.
+    /// This function should be called any time you settle funds on serum dex
+    pub fn update_basket(
+        &mut self,
+        market_index: usize,
+        open_orders: &serum_dex::state::OpenOrders,
+    ) -> MangoResult<()> {
+        let is_empty = open_orders.native_pc_total == 0
+            && open_orders.native_coin_total == 0
+            && open_orders.referrer_rebates_accrued == 0;
+
+        if self.in_margin_basket[market_index] && is_empty {
+            self.in_margin_basket[market_index] = false;
+            self.num_in_margin_basket -= 1;
+        } else if !self.in_margin_basket[market_index] && !is_empty {
+            check!(
+                self.num_in_margin_basket < MAX_NUM_IN_MARGIN_BASKET,
+                MangoErrorCode::MarginBasketFull
+            )?;
+            self.in_margin_basket[market_index] = true;
+            self.num_in_margin_basket += 1;
+        }
+        Ok(())
     }
 }
 
@@ -710,73 +1164,53 @@ pub struct PerpAccount {
 }
 
 impl PerpAccount {
-    pub fn change_position(
+    /// Execute trade and return the net change in open interest
+    /// This assumes settle_funding was already called
+    pub fn execute_trade(
         &mut self,
-        base_change: i64,     // this is in contract size
-        quote_change: I80F48, // this is in native units
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> MangoResult<()> {
-        /*
-            How to adjust the funding settled
-            FS_t = (FS_t-1 - TF) * BP_t-1 / BP_t + TF
+        perp_market: &mut PerpMarket,
+        info: &PerpMarketInfo,
+        is_maker: bool,
+        base_change: i64,
+        quote_change: i64,
+    ) {
+        self.change_base_position(perp_market, base_change);
+        let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
 
-            Funding owed:
-            FO_t = (TF - FS_t) * BP_t
-        */
-        // TODO this check unnecessary if callers are smart
-        check!(base_change != 0, MangoErrorCode::Default)?;
-
-        let bp0 = self.base_position;
-        self.base_position += base_change;
-        self.quote_position += quote_change;
-
-        if bp0 > 0 {
-            if self.base_position <= 0 {
-                // implies there was a sign change
-                let funding_owed = (long_funding - self.long_settled_funding)
-                    * I80F48::from_num(self.base_position);
-                self.quote_position -= funding_owed;
-                self.short_settled_funding = short_funding;
-            } else {
-                self.long_settled_funding = (self.long_settled_funding - long_funding)
-                    * I80F48::from_num(bp0 / self.base_position)
-                    + long_funding;
-            }
-        } else if bp0 < 0 {
-            if self.base_position >= 0 {
-                let funding_owed = (short_funding - self.short_settled_funding)
-                    * I80F48::from_num(self.base_position);
-                self.quote_position -= funding_owed;
-                self.long_settled_funding = long_funding;
-            } else {
-                self.short_settled_funding = (self.short_settled_funding - short_funding)
-                    * I80F48::from_num(bp0 / self.base_position)
-                    + short_funding;
-            }
-        } else {
+        let fees = if is_maker {
             if base_change > 0 {
-                self.long_settled_funding = long_funding;
-            } else {
-                // base_change must be less than 0, if == 0, that's error state
-                self.short_settled_funding = short_funding;
+                self.open_orders.bids_quantity -= base_change;
+            } else if base_change < 0 {
+                self.open_orders.asks_quantity += base_change;
             }
-        }
 
-        Ok(())
+            quote.abs() * info.maker_fee
+        } else {
+            quote.abs() * info.taker_fee
+        };
+
+        perp_market.fees_accrued += fees;
+        self.quote_position += quote - fees;
+    }
+
+    /// This assumes settle_funding was already called
+    pub fn change_base_position(&mut self, perp_market: &mut PerpMarket, base_change: i64) {
+        let start = self.base_position;
+        self.base_position += base_change;
+        perp_market.open_interest += self.base_position.abs() - start.abs();
     }
 
     /// Move unrealized funding payments into the quote_position
-    pub fn move_funding(&mut self, long_funding: I80F48, short_funding: I80F48) {
+    pub fn settle_funding(&mut self, cache: &PerpMarketCache) {
         if self.base_position > 0 {
-            self.quote_position -=
-                (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position);
-            self.long_settled_funding = long_funding;
+            self.quote_position -= (cache.long_funding - self.long_settled_funding)
+                * I80F48::from_num(self.base_position);
         } else if self.base_position < 0 {
-            self.quote_position -=
-                (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position);
-            self.short_settled_funding = short_funding;
+            self.quote_position -= (cache.short_funding - self.short_settled_funding)
+                * I80F48::from_num(self.base_position);
         }
+        self.long_settled_funding = cache.long_funding;
+        self.short_settled_funding = cache.short_funding;
     }
 
     /// Return the health factor if position changed by `base_change` at current prices
@@ -900,370 +1334,35 @@ impl PerpAccount {
     }
 }
 
-pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
-#[derive(Copy, Clone, Pod, Loadable)]
-#[repr(C)]
-pub struct MangoAccount {
-    pub meta_data: MetaData,
-
-    pub mango_group: Pubkey,
-    pub owner: Pubkey,
-
-    // pub in_basket: [bool; MAX_TOKENS],
-    pub in_margin_basket: [bool; MAX_PAIRS],
-    pub num_in_margin_basket: u8,
-
-    // Spot and Margin related data
-    pub deposits: [I80F48; MAX_TOKENS],
-    pub borrows: [I80F48; MAX_TOKENS],
-    pub spot_open_orders: [Pubkey; MAX_PAIRS],
-
-    // Perps related data
-    pub perp_accounts: [PerpAccount; MAX_PAIRS],
-
-    /// This account cannot open new positions or borrow until `init_health >= 0`
-    pub being_liquidated: bool,
-
-    /// This account cannot do anything except go through `resolve_bankruptcy`
-    pub is_bankrupt: bool, // ***
-    pub padding: [u8; 6],
-}
-
-pub enum HealthType {
-    Maint,
-    Init,
-}
-
-#[derive(
-    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
-)]
-#[repr(u8)]
-pub enum AssetType {
-    Token = 0,
-    Perp = 1,
-}
-
-impl MangoAccount {
-    pub fn load_mut_checked<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-        mango_group_pk: &Pubkey,
-    ) -> MangoResult<RefMut<'a, Self>> {
-        // load_mut checks for size already
-        // mango account must be rent exempt to even be initialized
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        let mango_account = Self::load_mut(account)?;
-
-        check_eq!(
-            mango_account.meta_data.data_type,
-            DataType::MangoAccount as u8,
-            MangoErrorCode::Default
-        )?;
-        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
-        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
-
-        Ok(mango_account)
-    }
-    pub fn load_checked<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-        mango_group_pk: &Pubkey,
-    ) -> MangoResult<Ref<'a, Self>> {
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        check_eq!(account.data_len(), size_of::<MangoAccount>(), MangoErrorCode::Default)?;
-
-        let mango_account = Self::load(account)?;
-
-        check_eq!(
-            mango_account.meta_data.data_type,
-            DataType::MangoAccount as u8,
-            MangoErrorCode::Default
-        )?;
-        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
-        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
-
-        Ok(mango_account)
-    }
-    pub fn get_native_deposit(
-        &self,
-        root_bank_cache: &RootBankCache,
-        token_i: usize,
-    ) -> MangoResult<I80F48> {
-        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(throw!())
-    }
-    pub fn get_native_borrow(
-        &self,
-        root_bank_cache: &RootBankCache,
-        token_i: usize,
-    ) -> MangoResult<I80F48> {
-        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(throw!())
-    }
-
-    // TODO - Add checks to these math methods to prevent result from being < 0
-    // TOOD - Add unchecked versions to be used when we're confident
-    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
-    }
-    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(throw!())?)
-    }
-    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(throw!())?)
-    }
-    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
-    }
-
-    pub fn get_token_assets_liabs(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        open_orders_ais: &[AccountInfo],
-    ) -> MangoResult<([I80F48; MAX_TOKENS], [I80F48; MAX_TOKENS])> {
-        let mut assets = [ZERO_I80F48; MAX_TOKENS];
-        let mut liabs = [ZERO_I80F48; MAX_TOKENS];
-
-        assets[QUOTE_INDEX] =
-            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
-        liabs[QUOTE_INDEX] =
-            mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
-
-        for i in 0..mango_group.num_oracles {
-            if !self.in_margin_basket[i] || self.spot_open_orders[i] == Pubkey::default() {
-                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i];
-            } else {
-                // TODO make sure open orders account is checked for validity before passing in here
-                let open_orders = load_open_orders(&open_orders_ais[i])?;
-                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i]
-                    + I80F48::from_num(open_orders.native_coin_total);
-                assets[QUOTE_INDEX] += I80F48::from_num(
-                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                );
-            }
-
-            liabs[i] = mango_cache.root_bank_cache[i].borrow_index * self.borrows[i];
-        }
-
-        Ok((assets, liabs))
-    }
-
-    pub fn get_spot_val(
-        &self,
-        mango_cache: &MangoCache,
-        market_index: usize,
-        open_orders_ai: &AccountInfo,
-        asset_weight: I80F48,
-    ) -> MangoResult<I80F48> {
-        // TODO make checked
-        let bank_cache = &mango_cache.root_bank_cache[market_index];
-        let price = mango_cache.price_cache[market_index].price;
-
-        Ok(
-            if !self.in_margin_basket[market_index]
-                || self.spot_open_orders[market_index] == Pubkey::default()
-            {
-                self.deposits[market_index] * bank_cache.deposit_index * asset_weight * price
-            } else {
-                // TODO - confirm only checked open orders are sent in here
-                let open_orders = load_open_orders(open_orders_ai)?;
-
-                ((self.deposits[market_index] * bank_cache.deposit_index
-                    + I80F48::from_num(open_orders.native_coin_total))
-                    * asset_weight
-                    * price)
-                    + I80F48::from_num(
-                        open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                    )
-            },
-        )
-    }
-
-    pub fn get_assets_val(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        open_orders_ais: &[AccountInfo],
-        active_assets: &[bool; MAX_PAIRS],
-        health_type: HealthType,
-    ) -> MangoResult<I80F48> {
-        let mut assets_val =
-            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
-
-        for i in 0..mango_group.num_oracles {
-            if !active_assets[i] {
-                continue;
-            }
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-
-            let (spot_weight, perp_weight) = match health_type {
-                HealthType::Maint => {
-                    (spot_market_info.maint_asset_weight, perp_market_info.maint_asset_weight)
-                }
-                HealthType::Init => {
-                    (spot_market_info.init_asset_weight, perp_market_info.init_asset_weight)
-                }
-            };
-
-            if !spot_market_info.is_empty() {
-                assets_val +=
-                    self.get_spot_val(mango_cache, i, &open_orders_ais[i], spot_weight)?;
-            }
-
-            if !perp_market_info.is_empty() {
-                assets_val += self.perp_accounts[i].get_assets_val(
-                    mango_cache.price_cache[i].price,
-                    perp_weight,
-                    mango_cache.perp_market_cache[i].long_funding,
-                    mango_cache.perp_market_cache[i].short_funding,
-                );
-            }
-        }
-
-        Ok(assets_val)
-    }
-    fn get_spot_health(
-        &self,
-        mango_cache: &MangoCache,
-        market_index: usize,
-        open_orders_ai: &AccountInfo,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-    ) -> MangoResult<I80F48> {
-        // TODO make checked
-        let bank_cache = &mango_cache.root_bank_cache[market_index];
-        let price = mango_cache.price_cache[market_index].price;
-
-        let (oo_base, oo_quote) = if !self.in_margin_basket[market_index]
-            || self.spot_open_orders[market_index] == Pubkey::default()
-        {
-            (ZERO_I80F48, ZERO_I80F48)
-        } else {
-            // TODO add in support for GUI hoster fee
-            let open_orders = load_open_orders(open_orders_ai)?;
-            (
-                I80F48::from_num(open_orders.native_coin_total),
-                I80F48::from_num(
-                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                ),
-            )
-        };
-
-        let health = (((self.deposits[market_index] * bank_cache.deposit_index + oo_base)
-            * asset_weight
-            - self.borrows[market_index] * bank_cache.borrow_index * liab_weight)
-            * price)
-            + oo_quote;
-
-        Ok(health)
-    }
-
-    /// Must validate the caches before
-    pub fn get_health(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        spot_open_orders_ais: &[AccountInfo],
-        active_assets: &[bool; MAX_PAIRS],
-        health_type: HealthType,
-    ) -> MangoResult<I80F48> {
-        let mut health = (mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index
-            * self.deposits[QUOTE_INDEX])
-            - (mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
-
-        for i in 0..mango_group.num_oracles {
-            if !active_assets[i] {
-                continue;
-            }
-
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-
-            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
-                match health_type {
-                    HealthType::Maint => (
-                        spot_market_info.maint_asset_weight,
-                        spot_market_info.maint_liab_weight,
-                        perp_market_info.maint_asset_weight,
-                        perp_market_info.maint_liab_weight,
-                    ),
-                    HealthType::Init => (
-                        spot_market_info.init_asset_weight,
-                        spot_market_info.init_liab_weight,
-                        perp_market_info.init_asset_weight,
-                        perp_market_info.init_liab_weight,
-                    ),
-                };
-
-            if !spot_market_info.is_empty() {
-                health += self.get_spot_health(
-                    mango_cache,
-                    i,
-                    &spot_open_orders_ais[i],
-                    spot_asset_weight,
-                    spot_liab_weight,
-                )?;
-            }
-
-            if !perp_market_info.is_empty() {
-                health += self.perp_accounts[i].get_health(
-                    perp_market_info,
-                    mango_cache.price_cache[i].price,
-                    perp_asset_weight,
-                    perp_liab_weight,
-                    mango_cache.perp_market_cache[i].long_funding,
-                    mango_cache.perp_market_cache[i].short_funding,
-                );
-            }
-            msg!("get_health {} => {:?}", i, health);
-        }
-
-        Ok(health)
-    }
-
-    /// Return an array of bools that are true if any part of token, spot or perps for that index are nonzero
-    pub fn get_active_assets(&self, mango_group: &MangoGroup) -> [bool; MAX_PAIRS] {
-        let mut active_assets = [false; MAX_PAIRS];
-        for i in 0..mango_group.num_oracles {
-            active_assets[i] = self.in_margin_basket[i]
-                || !self.deposits[i].is_zero()
-                || !self.borrows[i].is_zero()
-                || self.perp_accounts[i].is_active();
-        }
-        active_assets
-    }
-}
-
 /// This will hold top level info about the perps market
 /// Likely all perps transactions on a market will be locked on this one because this will be passed in as writable
 #[derive(Copy, Clone, Pod, Loadable, Default)]
 #[repr(C)]
 pub struct PerpMarket {
-    // TODO consider adding the market_index here for easy lookup
     pub meta_data: MetaData,
 
     pub mango_group: Pubkey,
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
+    pub quote_lot_size: i64, // number of quote native that reresents min tick
+    pub base_lot_size: i64,  // represents number of base native quantity; greater than 0
 
+    // TODO - consider just moving this into the cache
     pub long_funding: I80F48,
     pub short_funding: I80F48,
 
-    // TODO - remove open interest, not being used except maybe on stats?
     pub open_interest: i64, // This is i64 to keep consistent with the units of contracts, but should always be > 0
 
-    pub quote_lot_size: i64, // number of quote native that reresents min tick
-    pub index_oracle: Pubkey, // TODO - remove, not being used
     pub last_updated: u64,
     pub seq_num: u64,
 
-    pub contract_size: i64, // represents number of base native quantity; greater than 0
-
-                            // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
-                            // index_price = some function of centralized exchange spot prices
-                            // book_price = average of impact bid and impact ask; used to calculate basis
-                            // basis = book_price / index_price - 1; some moving average of this is used for mark price
+    // add in fees here
+    // Fees can be settled calling a special settle function that sends fees into the mango group vault owned by admin (or maybe insurance vault?)
+    pub fees_accrued: I80F48, // mark_price = used to liquidate and calculate value of positions; function of index and some moving average of basis
+                              // index_price = some function of centralized exchange spot prices
+                              // book_price = average of impact bid and impact ask; used to calculate basis
+                              // basis = book_price / index_price - 1; some moving average of this is used for mark price
 }
 
 impl PerpMarket {
@@ -1275,11 +1374,8 @@ impl PerpMarket {
         asks_ai: &'a AccountInfo,
         event_queue_ai: &'a AccountInfo,
 
-        mango_group: &MangoGroup,
         rent: &Rent,
-
-        market_index: usize,
-        contract_size: i64,
+        base_lot_size: i64,
         quote_lot_size: i64,
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
@@ -1296,8 +1392,7 @@ impl PerpMarket {
         state.asks = *asks_ai.key;
         state.event_queue = *event_queue_ai.key;
         state.quote_lot_size = quote_lot_size;
-        state.index_oracle = mango_group.oracles[market_index];
-        state.contract_size = contract_size;
+        state.base_lot_size = base_lot_size;
 
         let clock = Clock::get()?;
         state.last_updated = clock.unix_timestamp as u64;
@@ -1341,7 +1436,7 @@ impl PerpMarket {
         }
     }
 
-    /// Use current order book price
+    /// Use current order book price and index price to update the instantaneous funding
     pub fn update_funding(
         &mut self,
         mango_group: &MangoGroup,
@@ -1383,7 +1478,7 @@ impl PerpMarket {
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff
             * time_factor
-            * I80F48::from_num(self.contract_size)  // TODO check cost of conversion op
+            * I80F48::from_num(self.base_lot_size)  // TODO check cost of conversion op
             * index_price;
 
         self.long_funding += funding_delta;
@@ -1398,17 +1493,46 @@ impl PerpMarket {
         I80F48::from_num(price)
             .checked_mul(I80F48::from_num(self.quote_lot_size))
             .unwrap()
-            .checked_div(I80F48::from_num(self.contract_size))
+            .checked_div(I80F48::from_num(self.base_lot_size))
             .unwrap()
     }
 
     /// Socialize the loss in this account across all longs and shorts
     pub fn socialize_loss(
         &mut self,
-        _account: &mut PerpAccount,
-        _cache: &mut MangoCache,
+        account: &mut PerpAccount,
+        cache: &mut PerpMarketCache,
     ) -> MangoResult<()> {
-        unimplemented!() // TODO
+        // native USDC per contract open interest
+        let socialized_loss = account.quote_position / (I80F48::from_num(self.open_interest));
+        account.quote_position = ZERO_I80F48;
+        self.long_funding -= socialized_loss;
+        self.short_funding += socialized_loss;
+
+        cache.short_funding = self.short_funding;
+        cache.long_funding = self.long_funding;
+
+        Ok(())
+    }
+
+    /// Execute a trade between the maker and taker accounts
+    /// base_change is from the taker's perspective; maker's base_change will be -base_change
+    pub fn execute_trade(
+        &mut self,
+        cache: &PerpMarketCache,
+        info: &PerpMarketInfo,
+        maker: &mut PerpAccount,
+        taker: &mut PerpAccount,
+        base_change: i64,
+        quote_change: i64,
+    ) -> MangoResult<()> {
+        maker.settle_funding(cache);
+        taker.settle_funding(cache);
+
+        taker.execute_trade(self, info, false, base_change, quote_change);
+        maker.execute_trade(self, info, true, -base_change, -quote_change);
+
+        Ok(())
     }
 }
 
@@ -1461,3 +1585,79 @@ pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MangoResult<()> {
 
     Ok(())
 }
+
+fn strip_dex_padding_mut<'a>(acc: &'a AccountInfo) -> MangoResult<RefMut<'a, [u8]>> {
+    check!(acc.data_len() >= 12, MangoErrorCode::Default)?;
+    let unpadded_data: RefMut<[u8]> = RefMut::map(acc.try_borrow_mut_data()?, |data| {
+        let data_len = data.len() - 12;
+        let (_, rest) = data.split_at_mut(5);
+        let (mid, _) = rest.split_at_mut(data_len);
+        mid
+    });
+    Ok(unpadded_data)
+}
+
+fn strip_data_header_mut<'a, H: Pod, D: Pod>(
+    orig_data: RefMut<'a, [u8]>,
+) -> MangoResult<(RefMut<'a, H>, RefMut<'a, [D]>)> {
+    let (header, inner): (RefMut<'a, [H]>, RefMut<'a, [D]>) =
+        RefMut::map_split(orig_data, |data| {
+            let (header_bytes, inner_bytes) = data.split_at_mut(size_of::<H>());
+            let header: &mut H;
+            let inner: &mut [D];
+            header = try_from_bytes_mut(header_bytes).unwrap();
+            inner = remove_slop_mut(inner_bytes);
+            (std::slice::from_mut(header), inner)
+        });
+    let header = RefMut::map(header, |s| s.first_mut().unwrap_or_else(|| unreachable!()));
+    Ok((header, inner))
+}
+
+pub fn load_bids_mut<'a>(
+    sm: &RefMut<serum_dex::state::MarketState>,
+    bids: &'a AccountInfo,
+) -> MangoResult<RefMut<'a, serum_dex::critbit::Slab>> {
+    check_eq!(&bids.key.to_aligned_bytes(), &identity(sm.bids), MangoErrorCode::Default)?;
+
+    let orig_data = strip_dex_padding_mut(bids)?;
+    let (header, buf) = strip_data_header_mut::<OrderBookStateHeader, u8>(orig_data)?;
+    let flags = BitFlags::from_bits(header.account_flags).unwrap();
+    check_eq!(
+        &flags,
+        &(serum_dex::state::AccountFlag::Initialized | serum_dex::state::AccountFlag::Bids),
+        MangoErrorCode::Default
+    )?;
+    Ok(RefMut::map(buf, serum_dex::critbit::Slab::new))
+}
+
+pub fn load_asks_mut<'a>(
+    sm: &RefMut<serum_dex::state::MarketState>,
+    asks: &'a AccountInfo,
+) -> MangoResult<RefMut<'a, serum_dex::critbit::Slab>> {
+    check_eq!(&asks.key.to_aligned_bytes(), &identity(sm.asks), MangoErrorCode::Default)?;
+    let orig_data = strip_dex_padding_mut(asks)?;
+    let (header, buf) = strip_data_header_mut::<OrderBookStateHeader, u8>(orig_data)?;
+    let flags = BitFlags::from_bits(header.account_flags).unwrap();
+    check_eq!(
+        &flags,
+        &(serum_dex::state::AccountFlag::Initialized | serum_dex::state::AccountFlag::Asks),
+        MangoErrorCode::Default
+    )?;
+    Ok(RefMut::map(buf, serum_dex::critbit::Slab::new))
+}
+
+#[inline]
+fn remove_slop_mut<T: Pod>(bytes: &mut [u8]) -> &mut [T] {
+    let slop = bytes.len() % size_of::<T>();
+    let new_len = bytes.len() - slop;
+    cast_slice_mut(&mut bytes[..new_len])
+}
+
+/// Copied over from serum dex
+#[derive(Copy, Clone)]
+#[repr(packed)]
+pub struct OrderBookStateHeader {
+    pub account_flags: u64, // Initialized, (Bids or Asks)
+}
+unsafe impl Zeroable for OrderBookStateHeader {}
+unsafe impl Pod for OrderBookStateHeader {}
