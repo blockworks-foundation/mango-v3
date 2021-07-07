@@ -3,7 +3,6 @@ use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
 use bytemuck::Pod;
-use fixed::types::I80F48;
 use mango_macro::Pod;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_transmute::{self, trivial::TriviallyTransmutable};
@@ -212,7 +211,7 @@ pub enum EventType {
     Out,
 }
 
-const EVENT_SIZE: usize = 88;
+const EVENT_SIZE: usize = 152;
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct AnyEvent {
@@ -225,34 +224,69 @@ unsafe impl TriviallyTransmutable for AnyEvent {}
 #[repr(C)]
 pub struct FillEvent {
     pub event_type: u8,
-    pub maker: bool,
-    padding: [u8; 6],
-    pub owner: Pubkey,
-    pub base_change: i64,
-    pub quote_change: i64, // number of quote lots
-    pub long_funding: I80F48,
-    pub short_funding: I80F48,
+    pub side: Side, // side from the taker's POV
+    pub maker_slot: u8,
+    pub maker_out: bool, // true if maker order quantity == 0
+    pub padding: [u8; 4],
+    pub maker: Pubkey,
+    pub maker_order_id: i128,
+    pub maker_client_order_id: u64,
+
+    // The best bid/ask at the time the maker order was placed. Used for liquidity incentives
+    pub best_initial: i64,
+
+    // Timestamp of when the maker order was placed; copied over from the LeafNode
+    pub timestamp: u64,
+
+    pub taker: Pubkey,
+    pub taker_order_id: i128,
+    pub taker_client_order_id: u64,
+
+    pub price: i64,
+    pub quantity: i64, // number of quote lots
 }
 unsafe impl TriviallyTransmutable for FillEvent {}
 
 impl FillEvent {
     pub fn new(
-        maker: bool,
-        owner: Pubkey,
-        base_change: i64,
-        quote_change: i64,
-        long_funding: I80F48,
-        short_funding: I80F48,
+        side: Side,
+        maker_slot: u8,
+        maker_out: bool,
+        maker: Pubkey,
+        maker_order_id: i128,
+        maker_client_order_id: u64,
+        best_initial: i64,
+        timestamp: u64,
+
+        taker: Pubkey,
+        taker_order_id: i128,
+        taker_client_order_id: u64,
+        price: i64,
+        quantity: i64,
     ) -> Self {
         Self {
             event_type: EventType::Fill.into(),
+            side,
+            maker_slot,
+            maker_out,
+            padding: [0; 4],
             maker,
-            padding: [0; 6],
-            owner,
-            base_change,
-            quote_change,
-            long_funding,
-            short_funding,
+            maker_order_id,
+            maker_client_order_id,
+            best_initial,
+            timestamp,
+            taker,
+            taker_order_id,
+            taker_client_order_id,
+            price,
+            quantity,
+        }
+    }
+
+    pub fn base_quote_change(&self, side: Side) -> (i64, i64) {
+        match side {
+            Side::Bid => (self.quantity, -self.price * self.quantity),
+            Side::Ask => (-self.quantity, self.price * self.quantity),
         }
     }
 }

@@ -1,4 +1,5 @@
 use crate::matching::{OrderType, Side};
+use crate::state::AssetType;
 use crate::state::MAX_PAIRS;
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::num::NonZeroU64;
 
 #[repr(C)]
@@ -15,21 +16,24 @@ use std::num::NonZeroU64;
 pub enum MangoInstruction {
     /// Initialize a group of lending pools that can be cross margined
     ///
-    /// Accounts expected by this instruction (9):
+    /// Accounts expected by this instruction (10):
     ///
     /// 0. `[writable]` mango_group_ai - TODO
-    /// 1. `[]` rent_ai - TODO
-    /// 2. `[]` signer_ai - TODO
-    /// 3. `[]` admin_ai - TODO
-    /// 4. `[]` quote_mint_ai - TODO
-    /// 5. `[]` quote_vault_ai - TODO
-    /// 6. `[writable]` quote_node_bank_ai - TODO
-    /// 7. `[writable]` quote_root_bank_ai - TODO
-    /// 6. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
-    /// 8. `[]` dex_prog_ai - TODO
+    /// 1. `[]` signer_ai - TODO
+    /// 2. `[]` admin_ai - TODO
+    /// 3. `[]` quote_mint_ai - TODO
+    /// 4. `[]` quote_vault_ai - TODO
+    /// 5. `[writable]` quote_node_bank_ai - TODO
+    /// 6. `[writable]` quote_root_bank_ai - TODO
+    /// 7. `[]` dao_vault_ai - aka insurance fund
+    /// 8. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
+    /// 9. `[]` dex_prog_ai - TODO
     InitMangoGroup {
         signer_nonce: u64,
         valid_interval: u64,
+        quote_optimal_util: I80F48,
+        quote_optimal_rate: I80F48,
+        quote_max_rate: I80F48,
     },
 
     /// Initialize a mango account for a user
@@ -82,22 +86,26 @@ pub enum MangoInstruction {
 
     /// Add a token to a mango group
     ///
-    /// Accounts expected by this instruction (7):
+    /// Accounts expected by this instruction (8):
     ///
     /// 0. `[writable]` mango_group_ai - TODO
     /// 1. `[]` spot_market_ai - TODO
     /// 2. `[]` dex_program_ai - TODO
-    /// 1. `[]` mint_ai - TODO
-    /// 2. `[writable]` node_bank_ai - TODO
-    /// 3. `[]` vault_ai - TODO
-    /// 4. `[writable]` root_bank_ai - TODO
-    /// 5. `[signer]` admin_ai - TODO
+    /// 3. `[]` mint_ai - TODO
+    /// 4. `[writable]` node_bank_ai - TODO
+    /// 5. `[]` vault_ai - TODO
+    /// 6. `[writable]` root_bank_ai - TODO
+    /// 7. `[signer]` admin_ai - TODO
     AddSpotMarket {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        optimal_util: I80F48,
+        optimal_rate: I80F48,
+        max_rate: I80F48,
     },
 
+    /// DEPRECATED
     /// Add a spot market to a mango account basket
     ///
     /// Accounts expected by this instruction (6)
@@ -170,8 +178,12 @@ pub enum MangoInstruction {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
+        max_depth_bps: I80F48,
+        scaler: I80F48,
     },
 
     /// Place an order on a perp market
@@ -272,6 +284,160 @@ pub enum MangoInstruction {
         token_index: usize,
         quantity: u64,
     },
+
+    /// Force cancellation of open orders for a user being liquidated
+    ///
+    /// Accounts expected: 19 + Liqee open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[]` base_root_bank_ai - RootBank
+    /// 4. `[writable]` base_node_bank_ai - NodeBank
+    /// 5. `[writable]` base_vault_ai - MangoGroup base vault acc
+    /// 6. `[]` quote_root_bank_ai - RootBank
+    /// 7. `[writable]` quote_node_bank_ai - NodeBank
+    /// 8. `[writable]` quote_vault_ai - MangoGroup quote vault acc
+    /// 9. `[writable]` spot_market_ai - SpotMarket
+    /// 10. `[writable]` bids_ai - SpotMarket bids acc
+    /// 11. `[writable]` asks_ai - SpotMarket asks acc
+    /// 12. `[signer]` signer_ai - Signer
+    /// 13. `[writable]` dex_event_queue_ai - Market event queue acc
+    /// 14. `[writable]` dex_base_ai -
+    /// 15. `[writable]` dex_quote_ai -
+    /// 16. `[]` dex_signer_ai -
+    /// 17. `[]` dex_prog_ai - Dex Program acc
+    /// 18. `[]` token_prog_ai - Token Program acc
+    /// 19+... `[]` liqee_open_orders_ais - Liqee open orders accs
+    ForceCancelSpotOrders {
+        limit: u8,
+    },
+
+    /// Force cancellation of open orders for a user being liquidated
+    ///
+    /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 3. `[writable]` bids_ai - Bids acc
+    /// 4. `[writable]` asks_ai - Asks acc
+    /// 5. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
+    /// 6+... `[]` liqor_open_orders_ais - Liqee open orders accs
+    ForceCancelPerpOrders {
+        limit: u8,
+    },
+
+    /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
+    /// the token at `asset_index`
+    ///
+    /// Accounts expected: 9 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` asset_root_bank_ai - RootBank
+    /// 6. `[writable]` asset_node_bank_ai - NodeBank
+    /// 7. `[]` liab_root_bank_ai - RootBank
+    /// 8. `[writable]` liab_node_bank_ai - NodeBank
+    /// 9+... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 9+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidateTokenAndToken {
+        max_liab_transfer: I80F48,
+    },
+
+    /// Swap tokens for perp quote position if only and only if the base position in that market is 0
+    ///
+    /// Accounts expected: 7 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` root_bank_ai - RootBank
+    /// 6. `[writable]` node_bank_ai - NodeBank
+    /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 7+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidateTokenAndPerp {
+        asset_type: AssetType,
+        asset_index: usize,
+        liab_type: AssetType,
+        liab_index: usize,
+        max_liab_transfer: I80F48,
+    },
+
+    /// Reduce some of the base position in exchange for quote position in this market
+    ///
+    /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 3. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 4. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 5. `[signer]` liqor_ai - Liqor Account
+    /// 6+... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 6+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidatePerpMarket {
+        base_transfer_request: i64,
+    },
+
+    /// Take an account that has losses in the selected perp market to account for fees_accrued
+    ///
+    /// Accounts expected: 11
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 3. `[writable]` mango_account_ai - MangoAccount
+    /// 4. `[]` root_bank_ai - RootBank
+    /// 5. `[writable]` node_bank_ai - NodeBank
+    /// 6. `[writable]` bank_vault_ai - ?
+    /// 7. `[writable]` dao_vault_ai - DAO Vault
+    /// 8. `[]` signer_ai - Group Signer Account
+    /// 9. `[signer]` admin_ai - Group Admin Account
+    /// 10. `[]` token_prog_ai - Token Program Account
+    SettleFees,
+
+    /// Claim insurance fund and then socialize loss
+    ///
+    /// Accounts expected: 12 + Liqor open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - Liqor MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` root_bank_ai - RootBank
+    /// 6. `[writable]` node_bank_ai - NodeBank
+    /// 7. `[writable]` vault_ai - ?
+    /// 8. `[writable]` dao_vault_ai - DAO Vault
+    /// 9. `[]` signer_ai - Group Signer Account
+    /// 10. `[]` perp_market_ai - PerpMarket
+    /// 11. `[]` token_prog_ai - Token Program Account
+    /// 12+... `[]` liqor_open_orders_ais - Liqor open orders accs
+    ResolvePerpBankruptcy {
+        liab_index: usize,
+        max_liab_transfer: I80F48,
+    },
+
+    /// Claim insurance fund and then socialize loss
+    ///
+    /// Accounts expected: 13 + Liqor open orders accounts (MAX_PAIRS) + Liab node banks (MAX_NODE_BANKS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - Liqor MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` quote_root_bank_ai - RootBank
+    /// 6. `[writable]` quote_node_bank_ai - NodeBank
+    /// 7. `[writable]` quote_vault_ai - ?
+    /// 8. `[writable]` dao_vault_ai - DAO Vault
+    /// 9. `[]` signer_ai - Group Signer Account
+    /// 10. `[]` liab_root_bank_ai - RootBank
+    /// 11. `[writable]` liab_node_bank_ai - NodeBank
+    /// 12. `[]` token_prog_ai - Token Program Account
+    /// 13+... `[]` liqor_open_orders_ais - Liqor open orders accs
+    /// 14+MAX_PAIRS... `[]` liab_node_bank_ais - Lib token node banks
+    ResolveTokenBankruptcy {
+        max_liab_transfer: I80F48,
+    },
 }
 
 impl MangoInstruction {
@@ -280,12 +446,21 @@ impl MangoInstruction {
         let discrim = u32::from_le_bytes(discrim);
         Some(match discrim {
             0 => {
-                let data = array_ref![data, 0, 16];
-                let (signer_nonce, valid_interval) = array_refs![data, 8, 8];
+                let data = array_ref![data, 0, 64];
+                let (
+                    signer_nonce,
+                    valid_interval,
+                    quote_optimal_util,
+                    quote_optimal_rate,
+                    quote_max_rate,
+                ) = array_refs![data, 8, 8, 16, 16, 16];
 
                 MangoInstruction::InitMangoGroup {
                     signer_nonce: u64::from_le_bytes(*signer_nonce),
                     valid_interval: u64::from_le_bytes(*valid_interval),
+                    quote_optimal_util: I80F48::from_le_bytes(*quote_optimal_util),
+                    quote_optimal_rate: I80F48::from_le_bytes(*quote_optimal_rate),
+                    quote_max_rate: I80F48::from_le_bytes(*quote_max_rate),
                 }
             }
             1 => MangoInstruction::InitMangoAccount,
@@ -308,12 +483,22 @@ impl MangoInstruction {
                 }
             }
             4 => {
-                let data = array_ref![data, 0, 40];
-                let (market_index, maint_leverage, init_leverage) = array_refs![data, 8, 16, 16];
+                let data = array_ref![data, 0, 88];
+                let (
+                    market_index,
+                    maint_leverage,
+                    init_leverage,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                ) = array_refs![data, 8, 16, 16, 16, 16, 16];
                 MangoInstruction::AddSpotMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    optimal_util: I80F48::from_le_bytes(*optimal_util),
+                    optimal_rate: I80F48::from_le_bytes(*optimal_rate),
+                    max_rate: I80F48::from_le_bytes(*max_rate),
                 }
             }
             5 => {
@@ -333,15 +518,28 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
-                let data_arr = array_ref![data, 0, 56];
-                let (market_index, maint_leverage, init_leverage, base_lot_size, quote_lot_size) =
-                    array_refs![data_arr, 8, 16, 16, 8, 8];
+                let data_arr = array_ref![data, 0, 120];
+                let (
+                    market_index,
+                    maint_leverage,
+                    init_leverage,
+                    maker_fee,
+                    taker_fee,
+                    base_lot_size,
+                    quote_lot_size,
+                    max_depth_bps,
+                    scaler,
+                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 8, 8, 16, 16];
                 MangoInstruction::AddPerpMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    maker_fee: I80F48::from_le_bytes(*maker_fee),
+                    taker_fee: I80F48::from_le_bytes(*taker_fee),
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
+                    max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
+                    scaler: I80F48::from_le_bytes(*scaler),
                 }
             }
             12 => {
@@ -409,6 +607,60 @@ impl MangoInstruction {
                     quantity: u64::from_le_bytes(*quantity),
                 }
             }
+            24 => {
+                let data_arr = array_ref![data, 0, 1];
+
+                MangoInstruction::ForceCancelSpotOrders { limit: u8::from_le_bytes(*data_arr) }
+            }
+            25 => {
+                let data_arr = array_ref![data, 0, 1];
+
+                MangoInstruction::ForceCancelPerpOrders { limit: u8::from_le_bytes(*data_arr) }
+            }
+            26 => {
+                let data_arr = array_ref![data, 0, 16];
+
+                MangoInstruction::LiquidateTokenAndToken {
+                    max_liab_transfer: I80F48::from_le_bytes(*data_arr),
+                }
+            }
+            27 => {
+                let data = array_ref![data, 0, 34];
+                let (asset_type, asset_index, liab_type, liab_index, max_liab_transfer) =
+                    array_refs![data, 1, 8, 1, 8, 16];
+
+                MangoInstruction::LiquidateTokenAndPerp {
+                    asset_type: AssetType::try_from(u8::from_le_bytes(*asset_type)).unwrap(),
+                    asset_index: usize::from_le_bytes(*asset_index),
+                    liab_type: AssetType::try_from(u8::from_le_bytes(*liab_type)).unwrap(),
+                    liab_index: usize::from_le_bytes(*liab_index),
+                    max_liab_transfer: I80F48::from_le_bytes(*max_liab_transfer),
+                }
+            }
+            28 => {
+                let data_arr = array_ref![data, 0, 8];
+
+                MangoInstruction::LiquidatePerpMarket {
+                    base_transfer_request: i64::from_le_bytes(*data_arr),
+                }
+            }
+            29 => MangoInstruction::SettleFees,
+            30 => {
+                let data = array_ref![data, 0, 24];
+                let (liab_index, max_liab_transfer) = array_refs![data, 8, 16];
+
+                MangoInstruction::ResolvePerpBankruptcy {
+                    liab_index: usize::from_le_bytes(*liab_index),
+                    max_liab_transfer: I80F48::from_le_bytes(*max_liab_transfer),
+                }
+            }
+            31 => {
+                let data_arr = array_ref![data, 0, 16];
+
+                MangoInstruction::ResolveTokenBankruptcy {
+                    max_liab_transfer: I80F48::from_le_bytes(*data_arr),
+                }
+            }
             _ => {
                 return None;
             }
@@ -473,11 +725,15 @@ pub fn init_mango_group(
     quote_vault_pk: &Pubkey,
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
+    dao_vault_pk: &Pubkey,
     mango_cache_ai: &Pubkey,
     dex_program_pk: &Pubkey,
 
     signer_nonce: u64,
     valid_interval: u64,
+    quote_optimal_util: I80F48,
+    quote_optimal_rate: I80F48,
+    quote_max_rate: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -487,11 +743,18 @@ pub fn init_mango_group(
         AccountMeta::new_readonly(*quote_vault_pk, false),
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
+        AccountMeta::new_readonly(*dao_vault_pk, false),
         AccountMeta::new(*mango_cache_ai, false),
         AccountMeta::new_readonly(*dex_program_pk, false),
     ];
 
-    let instr = MangoInstruction::InitMangoGroup { signer_nonce, valid_interval };
+    let instr = MangoInstruction::InitMangoGroup {
+        signer_nonce,
+        valid_interval,
+        quote_optimal_util,
+        quote_optimal_rate,
+        quote_max_rate,
+    };
 
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -559,6 +822,9 @@ pub fn add_spot_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    optimal_util: I80F48,
+    optimal_rate: I80F48,
+    max_rate: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -571,7 +837,14 @@ pub fn add_spot_market(
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
-    let instr = MangoInstruction::AddSpotMarket { market_index, maint_leverage, init_leverage };
+    let instr = MangoInstruction::AddSpotMarket {
+        market_index,
+        maint_leverage,
+        init_leverage,
+        optimal_util,
+        optimal_rate,
+        max_rate,
+    };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -588,8 +861,12 @@ pub fn add_perp_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    maker_fee: I80F48,
+    taker_fee: I80F48,
     base_lot_size: i64,
     quote_lot_size: i64,
+    max_depth_bps: I80F48,
+    scaler: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -604,8 +881,12 @@ pub fn add_perp_market(
         market_index,
         maint_leverage,
         init_leverage,
+        maker_fee,
+        taker_fee,
         base_lot_size,
         quote_lot_size,
+        max_depth_bps,
+        scaler,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -655,7 +936,6 @@ pub fn cancel_perp_order_by_client_id(
     perp_market_pk: &Pubkey,   // write
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
-    event_queue_pk: &Pubkey,   // write
     client_order_id: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
@@ -665,7 +945,6 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
-        AccountMeta::new(*event_queue_pk, false),
     ];
     let instr = MangoInstruction::CancelPerpOrderByClientId { client_order_id };
     let data = instr.pack();
@@ -680,7 +959,6 @@ pub fn cancel_perp_order(
     perp_market_pk: &Pubkey,   // write
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
-    event_queue_pk: &Pubkey,   // write
     order_id: i128,
     side: Side,
 ) -> Result<Instruction, ProgramError> {
@@ -691,7 +969,6 @@ pub fn cancel_perp_order(
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
-        AccountMeta::new(*event_queue_pk, false),
     ];
     let instr = MangoInstruction::CancelPerpOrder { order_id, side };
     let data = instr.pack();

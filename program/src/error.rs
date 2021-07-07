@@ -81,6 +81,22 @@ pub enum MangoErrorCode {
     MarginBasketFull,
     #[error("MangoErrorCode::NotLiquidatable")]
     NotLiquidatable,
+    #[error("MangoErrorCode::Unimplemented")]
+    Unimplemented,
+    #[error("MangoErrorCode::PostOnly")]
+    PostOnly,
+    #[error("MangoErrorCode::Bankrupt Invalid instruction for bankrupt account")]
+    Bankrupt,
+    #[error("MangoErrorCode::InsufficientHealth")]
+    InsufficientHealth,
+    #[error("MangoErrorCode::InvalidParam")]
+    InvalidParam,
+    #[error("MangoErrorCode::SignerNecessary")]
+    SignerNecessary,
+    #[error("MangoErrorCode::InsufficientLiquidity Not enough deposits in this node bank")]
+    InsufficientLiquidity,
+    #[error("MangoErrorCode::InvalidOrderId")]
+    InvalidOrderId,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
