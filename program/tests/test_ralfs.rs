@@ -40,12 +40,23 @@ async fn test_place_and_cancel_order_ralfs() {
     // Arrange
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
+
+    let user_index = 0;
+    let base_index = 0;
+    let quote_index = config.num_mints - 1;
+
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
-    let (mango_account_pk, mango_account) = test.with_mango_account(&mango_group_pk, 0).await;
-    let oracle_pks = test.with_oracles(&mango_group_pk, config.num_mints - 1).await;
-    let quote_unit_config = test.with_unit_config(&mango_group, config.num_mints - 1, 10);
-    let base_unit_config = test.with_unit_config(&mango_group, 0, 100);
+    let (mango_account_pk, mango_account) = test.with_mango_account(&mango_group_pk, user_index).await;
+    let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
+    let quote_unit_config = test.with_unit_config(&mango_group, quote_index, 10);
+    let deposit_amount = 10000 * quote_unit_config.unit;
+    let base_unit_config = test.with_unit_config(&mango_group, base_index, 100);
     let oracle_price = test.with_oracle_price(&quote_unit_config, &base_unit_config, 10000);
     let (perp_market_pk, perp_market) = test.with_perp_market(&mango_group_pk, &quote_unit_config, &base_unit_config, 0).await;
-    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, 0, (config.num_mints - 1) as usize, 10000 * quote_unit_config.unit);
+    let user_token_account = test.with_user_token_account(user_index, quote_index as usize);
+    let initial_balance = test.get_token_balance(user_token_account).await;
+
+    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, 0, quote_index as usize, deposit_amount).await;
+    let post_balance = test.get_token_balance(user_token_account).await;
+
 }

@@ -67,7 +67,7 @@ pub struct MangoProgramTestConfig {
 
 impl MangoProgramTestConfig {
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 50_000, num_users: 2, num_mints: 10 }
+        MangoProgramTestConfig { compute_limit: 50_000, num_users: 2, num_mints: 32 }
     }
 }
 
@@ -176,6 +176,11 @@ impl MangoProgramTest {
         Ok(())
     }
 
+    pub async fn get_token_balance(&mut self, address: Pubkey) -> u64 {
+        let mut token = self.context.banks_client.get_account(address).await.unwrap().unwrap();
+        return spl_token::state::Account::unpack(&token.data[..]).unwrap().amount;
+    }
+
     pub async fn create_account(&mut self, size: usize, owner: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(size);
@@ -263,7 +268,7 @@ impl MangoProgramTest {
         let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let admin_pk = self.context.payer.pubkey();
 
-        let quote_mint_pk = self.mints[0];
+        let quote_mint_pk = self.mints[self.mints.len() - 1];
 
         let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
         let quote_node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
@@ -302,9 +307,8 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn with_account(&mut self) -> Pubkey {
-        let user_pk = Pubkey::new_unique();
-        return user_pk;
+    pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
+        return self.token_accounts[(user_index * self.mints.len()) + token_index];
     }
 
     #[allow(dead_code)]
@@ -350,6 +354,18 @@ impl MangoProgramTest {
 
     pub fn with_oracle_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: u64) -> I80F48 {
         return I80F48::from_num(price) * I80F48::from_num(quote_mint_config.unit) / I80F48::from_num(base_mint_config.unit);
+    }
+
+    pub async fn with_root_bank(&mut self, mango_group: &MangoGroup, token_index: usize) -> (Pubkey, RootBank) {
+        let root_bank_pk = mango_group.tokens[token_index].root_bank;
+        let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
+        return (root_bank_pk, root_bank);
+    }
+
+    pub async fn with_node_bank(&mut self, root_bank: &RootBank, token_index: usize) -> (Pubkey, NodeBank) {
+        let node_bank_pk = root_bank.node_banks[token_index];
+        let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
+        return (node_bank_pk, node_bank);
     }
 
     pub async fn with_perp_market(&mut self, mango_group_pk: &Pubkey, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, index: usize) -> (Pubkey, PerpMarket) {
@@ -399,11 +415,11 @@ impl MangoProgramTest {
     pub async fn perform_deposit(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account_pk: &Pubkey, user_index: usize, token_index: usize, amount: u64) {
         let mango_program_id = self.mango_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_token_account = self.token_accounts[(user_index * self.mints.len()) + token_index];
-        let root_bank_pk = mango_group.tokens[token_index].root_bank;
-        let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
-        let node_bank_pk = root_bank.node_banks[token_index];
-        let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
+        let user_token_account = self.with_user_token_account(user_index, token_index);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, token_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
         let instructions = [
             cache_root_banks(
                 &mango_program_id,
@@ -427,5 +443,6 @@ impl MangoProgramTest {
             .unwrap(),
         ];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        println!("Deposit success");
     }
 }
