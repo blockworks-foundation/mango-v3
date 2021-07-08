@@ -48,8 +48,5 @@ async fn test_deposit_succeeds() {
     let mango_vault_balance = test.get_token_balance(node_bank.vault).await;
     assert_eq!(mango_vault_balance, deposit_amount);
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-    for x in mango_account.deposits.iter() {
-        println!("Deposit: {}", x);
-    }
     assert_eq!(mango_account.deposits[quote_index as usize], deposit_amount);
 }
