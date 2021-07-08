@@ -735,29 +735,47 @@ impl MangoAccount {
         root_bank_cache: &RootBankCache,
         token_i: usize,
     ) -> MangoResult<I80F48> {
-        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(throw!())
+        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(math_err!())
     }
     pub fn get_native_borrow(
         &self,
         root_bank_cache: &RootBankCache,
         token_i: usize,
     ) -> MangoResult<I80F48> {
-        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(throw!())
+        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(math_err!())
     }
 
-    // TODO - Add checks to these math methods to prevent result from being < 0
-    // TOOD - Add unchecked versions to be used when we're confident
+    // TODO - Add unchecked versions to be used when we're confident
+    // TODO OPT - remove negative and zero checks if we're confident
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(throw!())?)
+        self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(math_err!())?;
+        check!(
+            self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
+            MangoErrorCode::MathError
+        )
     }
     pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(throw!())?)
+        self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(math_err!())?;
+        check!(!self.borrows[token_i].is_negative(), MangoErrorCode::MathError)?;
+        check!(
+            self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
+            MangoErrorCode::MathError
+        )
     }
     pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(throw!())?)
+        self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(math_err!())?;
+        check!(
+            self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
+            MangoErrorCode::MathError
+        )
     }
     pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-        Ok(self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(throw!())?)
+        self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(math_err!())?;
+        check!(!self.deposits[token_i].is_negative(), MangoErrorCode::MathError)?;
+        check!(
+            self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
+            MangoErrorCode::MathError
+        )
     }
 
     pub fn get_token_assets_liabs(
@@ -793,6 +811,7 @@ impl MangoAccount {
         Ok((assets, liabs))
     }
 
+    // TODO conform to new way of determining spot health
     pub fn get_spot_val(
         &self,
         mango_cache: &MangoCache,
@@ -880,31 +899,53 @@ impl MangoAccount {
         let bank_cache = &mango_cache.root_bank_cache[market_index];
         let price = mango_cache.price_cache[market_index].price;
 
-        let (oo_base, oo_quote) = if !self.in_margin_basket[market_index]
+        // Note, only one of deposits and borrows are positive
+        let base_net: I80F48 = self.deposits[market_index] * bank_cache.deposit_index
+            - self.borrows[market_index] * bank_cache.borrow_index;
+
+        let health = if !self.in_margin_basket[market_index]
             || self.spot_open_orders[market_index] == Pubkey::default()
         {
-            (ZERO_I80F48, ZERO_I80F48)
+            if base_net.is_positive() {
+                base_net * asset_weight * price
+            } else {
+                base_net * liab_weight * price
+            }
         } else {
-            // TODO add in support for GUI hoster fee
             let open_orders = load_open_orders(open_orders_ai)?;
-            (
-                I80F48::from_num(open_orders.native_coin_total),
-                I80F48::from_num(
-                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                ),
-            )
-        };
 
-        let health = (((self.deposits[market_index] * bank_cache.deposit_index + oo_base)
-            * asset_weight
-            - self.borrows[market_index] * bank_cache.borrow_index * liab_weight)
-            * price)
-            + oo_quote;
+            let quote_free =
+                I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
+            let quote_locked =
+                I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free);
+            let base_free = I80F48::from_num(open_orders.native_coin_free);
+            let base_locked =
+                I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free);
+
+            // TODO account for serum dex fees in these calculations
+
+            // Simulate the health if all bids are executed at current price
+            let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+            let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
+            let bids_health: I80F48 = bids_base_net * bids_weight * price + quote_free;
+
+            // Simulate health if all asks are executed at current price
+            let asks_base_net = base_net - base_locked + base_free;
+            let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
+            let asks_health: I80F48 = asks_base_net * asks_weight * price
+                + price * base_locked
+                + quote_free
+                + quote_locked;
+
+            // Pick the worse of the two possibilities
+            bids_health.min(asks_health)
+        };
 
         Ok(health)
     }
 
     /// Must validate the caches before
+    #[inline(never)]
     pub fn get_health(
         &self,
         mango_group: &MangoGroup,
@@ -1241,21 +1282,12 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
-        let dist_bps = match side {
-            Side::Bid => {
-                let best_bid = max(best_initial, best_final);
-
-                // Guaranteed to be non-negative
-                I80F48::from_num((best_bid - price) * 10_000) / I80F48::from_num(best_bid)
-            }
-            Side::Ask => {
-                let best_ask = min(best_initial, best_final);
-
-                // Guaranteed to be non-negative
-                I80F48::from_num((price - best_ask) * 10_000) / I80F48::from_num(best_ask)
-            }
+        let best = match side {
+            Side::Bid => max(best_initial, best_final),
+            Side::Ask => min(best_initial, best_final),
         };
 
+        let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
         let dist_factor = max(perp_market.max_depth_bps - dist_bps, ZERO_I80F48);
 
         // TODO - check overflow possibilities here by throwing in reasonable large numbers
@@ -1305,7 +1337,7 @@ impl PerpAccount {
     ) -> I80F48 {
         // TODO make checked
         let new_base = self.base_position + base_change;
-
+        // TODO account for fees
         let mut health = self.quote_position
             - I80F48::from_num(base_change * perp_market_info.base_lot_size) * price;
         if new_base > 0 {
