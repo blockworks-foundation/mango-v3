@@ -1002,10 +1002,11 @@ impl Processor {
 
     #[inline(never)]
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        const NUM_FIXED: usize = 17;
+        const NUM_FIXED: usize = 18;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
+            mango_cache_ai,         // read ***
             owner_ai,               // signer
             mango_account_ai,       // write
             dex_prog_ai,            // read
@@ -1108,19 +1109,35 @@ impl Processor {
             )
         };
 
+        // TODO OPT - remove sanity check if confident
         check!(post_base <= pre_base, MangoErrorCode::Default)?;
         check!(post_quote <= pre_quote, MangoErrorCode::Default)?;
 
-        let base_change = I80F48::from_num(pre_base - post_base) / base_root_bank.deposit_index;
-        let quote_change = I80F48::from_num(pre_quote - post_quote) / quote_root_bank.deposit_index;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let valid_last_update = Clock::get()?.unix_timestamp as u64 - mango_group.valid_interval;
+        check!(
+            mango_cache.root_bank_cache[spot_market_index].last_update >= valid_last_update,
+            MangoErrorCode::InvalidCache
+        )?;
+        check!(
+            mango_cache.root_bank_cache[QUOTE_INDEX].last_update >= valid_last_update,
+            MangoErrorCode::InvalidCache
+        )?;
 
-        checked_add_deposit(
+        checked_add_net(
+            &mango_cache.root_bank_cache[spot_market_index],
             &mut base_node_bank,
             &mut mango_account,
             spot_market_index,
-            base_change,
+            I80F48::from_num(pre_base - post_base),
         )?;
-        checked_add_deposit(&mut quote_node_bank, &mut mango_account, QUOTE_INDEX, quote_change)?;
+        checked_add_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &mut quote_node_bank,
+            &mut mango_account,
+            QUOTE_INDEX,
+            I80F48::from_num(pre_quote - post_quote),
+        )?;
 
         Ok(())
     }
