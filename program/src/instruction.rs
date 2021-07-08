@@ -233,25 +233,26 @@ pub enum MangoInstruction {
 
     /// Settle all funds from serum dex open orders
     ///
-    /// Accounts expected by this instruction (14):
+    /// Accounts expected by this instruction (18):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
-    /// 1. `[signer]` owner_ai - MangoAccount owner
-    /// 2. `[writable]` mango_account_ai - MangoAccount
-    /// 3. `[]` dex_prog_ai - program id of serum dex
-    /// 4.  `[writable]` spot_market_ai - dex MarketState account
-    /// 5.  `[writable]` open_orders_ai - open orders for this market for this MangoAccount
-    /// 6. `[]` signer_ai - MangoGroup signer key
-    /// 7. `[writable]` dex_base_ai - base vault for dex MarketState
-    /// 8. `[writable]` dex_quote_ai - quote vault for dex MarketState
-    /// 9. `[]` base_root_bank_ai - MangoGroup base vault acc
-    /// 10. `[writable]` base_node_bank_ai - MangoGroup quote vault acc
-    /// 11. `[]` quote_root_bank_ai - MangoGroup quote vault acc
-    /// 12. `[writable]` quote_node_bank_ai - MangoGroup quote vault acc
-    /// 13. `[writable]` base_vault_ai - MangoGroup base vault acc
-    /// 14. `[writable]` quote_vault_ai - MangoGroup quote vault acc
-    /// 15. `[]` dex_signer_ai - dex Market signer account
-    /// 16. `[]` spl token program
+    /// 1. `[]` mango_cache_ai - MangoGroup that this mango account is for
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[writable]` mango_account_ai - MangoAccount
+    /// 4. `[]` dex_prog_ai - program id of serum dex
+    /// 5.  `[writable]` spot_market_ai - dex MarketState account
+    /// 6.  `[writable]` open_orders_ai - open orders for this market for this MangoAccount
+    /// 7. `[]` signer_ai - MangoGroup signer key
+    /// 8. `[writable]` dex_base_ai - base vault for dex MarketState
+    /// 9. `[writable]` dex_quote_ai - quote vault for dex MarketState
+    /// 10. `[]` base_root_bank_ai - MangoGroup base vault acc
+    /// 11. `[writable]` base_node_bank_ai - MangoGroup quote vault acc
+    /// 12. `[]` quote_root_bank_ai - MangoGroup quote vault acc
+    /// 13. `[writable]` quote_node_bank_ai - MangoGroup quote vault acc
+    /// 14. `[writable]` base_vault_ai - MangoGroup base vault acc
+    /// 15. `[writable]` quote_vault_ai - MangoGroup quote vault acc
+    /// 16. `[]` dex_signer_ai - dex Market signer account
+    /// 17. `[]` spl token program
     SettleFunds,
 
     /// Cancel an order using dex instruction
