@@ -970,10 +970,11 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::Default)?;
 
@@ -1024,39 +1025,48 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(token_prog_ai.key, &spl_token::id(), MangoErrorCode::Default)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(owner_ai.key == &mango_account.owner, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
+        // Make sure the spot market is valid
         let spot_market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+        check!(
+            base_root_bank_ai.key == &mango_group.tokens[spot_market_index].root_bank,
+            MangoErrorCode::InvalidRootBank
+        )?;
+
         let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check!(
+            quote_root_bank_ai.key == &mango_group.tokens[QUOTE_INDEX].root_bank,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        check_eq!(token_prog_ai.key, &spl_token::id(), MangoErrorCode::Default)?;
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
-
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::Default)?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::Default)?;
-        check_eq!(owner_ai.key, &mango_account.owner, MangoErrorCode::Default)?;
         check_eq!(
             &mango_account.spot_open_orders[spot_market_index],
             open_orders_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank,
-            quote_root_bank_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[spot_market_index].root_bank,
-            base_root_bank_ai.key,
             MangoErrorCode::Default
         )?;
 
