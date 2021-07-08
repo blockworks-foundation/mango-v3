@@ -1,4 +1,3 @@
-use std::cmp;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
@@ -35,6 +34,7 @@ use crate::state::{
     ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -75,7 +75,6 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut(mango_group_ai)?;
         check!(!mango_group.meta_data.is_initialized, MangoErrorCode::Default)?;
 
-        // TODO is there a security concern if we remove the mango_group_ai.key?
         check!(
             gen_signer_key(signer_nonce, mango_group_ai.key, program_id)? == *signer_ai.key,
             MangoErrorCode::InvalidSignerKey
@@ -87,7 +86,8 @@ impl Processor {
 
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
         check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
-        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::Default)?; // TODO - owner should be dao
+        // TODO - owner should be dao but for now we assume admin is DAO
+        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::Default)?;
         check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::Default)?;
         check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::Default)?;
         mango_group.dao_vault = *dao_vault_ai.key;
@@ -150,7 +150,7 @@ impl Processor {
 
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
-        let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
+        let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
 
@@ -170,7 +170,7 @@ impl Processor {
     /// Initialize a root bank and add it to the mango group
     /// Requires a price oracle for this asset priced in quote currency
     /// Only allow admin to add to MangoGroup
-    // TODO think about how to remove an asset. Maybe this just can't be done?
+    // TODO - implement remove asset
     fn add_spot_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -446,6 +446,7 @@ impl Processor {
 
         // TODO - Probably not necessary for deposit to be from owner
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
 
         let token_index = mango_group
@@ -613,22 +614,25 @@ impl Processor {
             signer_ai,          // read
             token_prog_ai,      // read
         ] = fixed_accs;
+        check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let token_index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
+
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
-
-        let token_index = mango_group
-            .find_root_bank_index(root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
 
         // Safety checks
         check_eq!(
@@ -637,15 +641,11 @@ impl Processor {
             MangoErrorCode::Default
         )?;
         check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
-        check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
 
         // First check all caches to make sure valid
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut active_assets = mango_account.get_active_assets(&mango_group);
-
-        if token_index != QUOTE_INDEX {
-            active_assets[token_index] = true; // Make sure token index is always checked
-        }
+        active_assets[token_index] = true; // Make sure token index is always checked
 
         check!(
             mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
@@ -664,10 +664,6 @@ impl Processor {
             &mut mango_account,
             token_index,
             withdraw,
-        )?;
-        check!(
-            node_bank.has_valid_deposits_borrows(root_bank_cache),
-            MangoErrorCode::InsufficientLiquidity
         )?;
 
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
@@ -1170,12 +1166,11 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
-
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
         for i in 0..mango_group.num_oracles {
             if !mango_account.in_margin_basket[i] {
@@ -1382,8 +1377,11 @@ impl Processor {
 
         let mut mango_account_a =
             MangoAccount::load_mut_checked(mango_account_a_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account_a.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
         let mut mango_account_b =
             MangoAccount::load_mut_checked(mango_account_b_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account_b.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         match mango_group.find_root_bank_index(root_bank_ai.key) {
             None => return Err(throw_err!(MangoErrorCode::Default)),
@@ -1453,14 +1451,7 @@ impl Processor {
             if a_pnl > 0 { &mut mango_account_b } else { &mut mango_account_a },
             QUOTE_INDEX,
             settlement,
-        )?;
-
-        check!(
-            node_bank.has_valid_deposits_borrows(&mango_cache.root_bank_cache[market_index]),
-            MangoErrorCode::Default
-        )?;
-
-        Ok(())
+        )
     }
 
     #[inline(never)]
@@ -1552,11 +1543,7 @@ impl Processor {
             &mut mango_account,
             QUOTE_INDEX,
             settlement,
-        );
-
-        check!(node_bank.has_valid_deposits_borrows(root_bank_cache), MangoErrorCode::Default)?;
-
-        Ok(())
+        )
     }
 
     #[inline(never)]
@@ -1597,6 +1584,7 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
         check!(liqee_ma.in_margin_basket[market_index], MangoErrorCode::Default)?;
@@ -2871,13 +2859,8 @@ impl Processor {
                 liab_index,
                 liab_transfer,
             )?;
-            check!(
-                liab_node_bank.has_valid_deposits_borrows(liab_bank_cache),
-                MangoErrorCode::Default
-            )?;
 
             // Make sure liqor is above init health
-
             let liqor_health = liqor_ma.get_health(
                 &mango_group,
                 &mango_cache,
@@ -3607,64 +3590,6 @@ fn checked_sub_borrow(
 ) -> MangoResult<()> {
     mango_account.checked_sub_borrow(token_index, quantity)?;
     node_bank.checked_sub_borrow(quantity)
-}
-
-#[allow(unused)]
-fn settle_borrow_unchecked(
-    root_bank_cache: &RootBankCache,
-    node_bank: &mut NodeBank,
-    mango_account: &mut MangoAccount,
-    token_index: usize,
-    quantity: I80F48,
-) -> MangoResult<()> {
-    let native_borrow = mango_account.get_native_borrow(root_bank_cache, token_index).unwrap();
-    let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index).unwrap();
-
-    let quantity = cmp::min(quantity, native_deposit);
-    let borr_settle = quantity.checked_div(root_bank_cache.borrow_index).unwrap();
-    let dep_settle = quantity.checked_div(root_bank_cache.deposit_index).unwrap();
-
-    if quantity >= native_borrow {
-        checked_sub_deposit(
-            node_bank,
-            mango_account,
-            token_index,
-            native_borrow.checked_div(root_bank_cache.deposit_index).unwrap(),
-        )?;
-        checked_sub_borrow(
-            node_bank,
-            mango_account,
-            token_index,
-            mango_account.borrows[token_index],
-        )?;
-    } else {
-        checked_sub_deposit(node_bank, mango_account, token_index, dep_settle)?;
-        checked_sub_borrow(node_bank, mango_account, token_index, borr_settle)?;
-    }
-    Ok(())
-}
-
-#[allow(unused)]
-fn settle_borrow_full_unchecked(
-    root_bank_cache: &RootBankCache,
-    node_bank: &mut NodeBank,
-    mango_account: &mut MangoAccount,
-    token_index: usize,
-) -> MangoResult<()> {
-    let native_borrow = mango_account.get_native_borrow(root_bank_cache, token_index).unwrap();
-    let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index).unwrap();
-
-    let quantity = cmp::min(native_borrow, native_deposit);
-
-    let borr_settle = quantity / root_bank_cache.borrow_index;
-    let dep_settle = quantity / root_bank_cache.deposit_index;
-
-    checked_sub_deposit(node_bank, mango_account, token_index, dep_settle)?;
-    checked_sub_borrow(node_bank, mango_account, token_index, borr_settle)?;
-
-    // No need to check collateralization ratio or deposits/borrows validity
-
-    Ok(())
 }
 
 fn invoke_cancel_orders<'a>(
