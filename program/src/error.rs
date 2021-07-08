@@ -97,6 +97,8 @@ pub enum MangoErrorCode {
     InsufficientLiquidity,
     #[error("MangoErrorCode::InvalidOrderId")]
     InvalidOrderId,
+    #[error("MangoErrorCode::BeingLiquidated Invalid instruction while being liquidated")]
+    BeingLiquidated,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

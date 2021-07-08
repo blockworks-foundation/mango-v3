@@ -426,7 +426,6 @@ impl Processor {
 
     #[inline(never)]
     /// Deposit instruction
-    /// TODO - fix instruction.rs and intruction.ts
     fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -700,7 +699,6 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
-        // TODO use MangoCache instead of RootBanks to get the deposit/borrow indexes
         const NUM_FIXED: usize = 22;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -731,6 +729,13 @@ impl Processor {
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(token_program_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+        check_eq!(
+            dex_program_ai.key,
+            &mango_group.dex_program_id,
+            MangoErrorCode::InvalidProgramId
+        )?;
+
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
@@ -740,33 +745,30 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        if mango_account.being_liquidated {
-            // TODO - transfer over proper checks from mango v2
-        }
-
-        // TODO - put node bank pubkeys inside MangoGroup so we don't have to send in root bank here
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
-        let base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+        let token_index = mango_group
+            .find_root_bank_index(base_root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
         check!(
             base_root_bank.node_banks.contains(base_node_bank_ai.key),
             MangoErrorCode::InvalidNodeBank
         )?;
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
         check!(
             quote_root_bank_ai.key == &mango_group.tokens[QUOTE_INDEX].root_bank,
             MangoErrorCode::InvalidRootBank
         )?;
-        let quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check!(
             quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
             MangoErrorCode::InvalidNodeBank
         )?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        // Make sure the base root bank is in the mango group and spot market is valid
-        let token_index = mango_group
-            .find_root_bank_index(base_root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+        // Make sure the spot market is valid
         check!(
             &mango_group.spot_markets[token_index].spot_market == spot_market_ai.key,
             MangoErrorCode::InvalidMarket
@@ -813,27 +815,28 @@ impl Processor {
             MangoErrorCode::Default
         )?;
 
-        let health = mango_account.get_health(
+        let pre_health = mango_account.get_health(
             &mango_group,
             &mango_cache,
             open_orders_ais,
             &active_assets,
             HealthType::Init,
         )?;
-        let reduce_only = health < ZERO_I80F48;
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
 
         // TODO maybe check that root bank was updated recently
-
-        let side = order.side;
-        let (in_token_i, out_token_i, vault_ai) = match side {
-            SerumSide::Bid => (token_index, QUOTE_INDEX, quote_vault_ai),
-            SerumSide::Ask => (QUOTE_INDEX, token_index, base_vault_ai),
-        };
-
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::Default)?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::Default)?;
-        check_eq!(token_program_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
-        check_eq!(dex_program_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+        // TODO maybe check oracle was updated recently
 
         // this is to keep track of the amount of funds transferred
         let (pre_base, pre_quote) = {
@@ -841,6 +844,10 @@ impl Processor {
                 Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
                 Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
             )
+        };
+        let vault_ai = match order.side {
+            SerumSide::Bid => quote_vault_ai,
+            SerumSide::Ask => base_vault_ai,
         };
 
         let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
@@ -899,7 +906,7 @@ impl Processor {
         let open_orders = load_open_orders(&open_orders_ais[token_index])?;
         mango_account.update_basket(token_index, &open_orders)?;
 
-        // TODO - write a zero copy way to deserialize Account to reduce compute
+        // TODO OPT - write a zero copy way to deserialize Account to reduce compute
         let (post_base, post_quote) = {
             (
                 Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
@@ -907,90 +914,37 @@ impl Processor {
             )
         };
 
-        let (pre_in, pre_out, post_in, post_out, mut out_node_bank, mut in_node_bank) = match side {
-            SerumSide::Bid => {
-                (pre_base, pre_quote, post_base, post_quote, quote_node_bank, base_node_bank)
-            }
-            SerumSide::Ask => {
-                (pre_quote, pre_base, post_quote, post_base, base_node_bank, quote_node_bank)
-            }
-        };
-        let (out_root_bank_cache, in_root_bank_cache) =
-            (&mango_cache.root_bank_cache[out_token_i], &mango_cache.root_bank_cache[in_token_i]);
-
-        // if out token was net negative, then you may need to borrow more
-        // TODO - replace this with checked_add_net, checked_sub_net
-        if post_out < pre_out {
-            let total_out = pre_out.checked_sub(post_out).unwrap();
-            let native_deposit =
-                mango_account.get_native_deposit(out_root_bank_cache, out_token_i).unwrap();
-            if native_deposit < I80F48::from_num(total_out) {
-                // need to borrow
-                let avail_deposit = mango_account.deposits[out_token_i];
-                checked_sub_deposit(
-                    &mut out_node_bank,
-                    &mut mango_account,
-                    out_token_i,
-                    avail_deposit,
-                )?;
-                let rem_spend = I80F48::from_num(total_out) - native_deposit;
-
-                check!(!reduce_only, MangoErrorCode::Default)?; // Cannot borrow more in reduce only mode
-                checked_add_borrow(
-                    &mut out_node_bank,
-                    &mut mango_account,
-                    out_token_i,
-                    rem_spend / out_root_bank_cache.borrow_index,
-                )?;
-            } else {
-                // just spend user deposits
-                let mango_spent = I80F48::from_num(total_out) / out_root_bank_cache.deposit_index;
-                checked_sub_deposit(
-                    &mut out_node_bank,
-                    &mut mango_account,
-                    out_token_i,
-                    mango_spent,
-                )?;
-            }
-        } else {
-            // Add out token deposit
-            // TODO - make sure deposit doesn't go negative. checked sub will no longer error in that case
-            let deposit = I80F48::from_num(post_out.checked_sub(pre_out).unwrap())
-                / out_root_bank_cache.deposit_index;
-            checked_add_deposit(&mut out_node_bank, &mut mango_account, out_token_i, deposit)?;
-        }
-
-        let total_in = I80F48::from_num(post_in.checked_sub(pre_in).unwrap())
-            / in_root_bank_cache.deposit_index;
-        checked_add_deposit(&mut in_node_bank, &mut mango_account, in_token_i, total_in)?;
-
-        settle_borrow_full_unchecked(
-            &out_root_bank_cache,
-            &mut out_node_bank,
+        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
+        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
+        checked_change_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &mut quote_node_bank,
             &mut mango_account,
-            out_token_i,
-        )?;
-        settle_borrow_full_unchecked(
-            &in_root_bank_cache,
-            &mut in_node_bank,
-            &mut mango_account,
-            in_token_i,
+            QUOTE_INDEX,
+            quote_change,
         )?;
 
-        let health = mango_account.get_health(
+        checked_change_net(
+            &mango_cache.root_bank_cache[token_index],
+            &mut base_node_bank,
+            &mut mango_account,
+            token_index,
+            base_change,
+        )?;
+
+        let post_health = mango_account.get_health(
             &mango_group,
             &mango_cache,
             open_orders_ais,
             &active_assets,
             HealthType::Init,
         )?;
-        check!(reduce_only || health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
-        check!(
-            out_node_bank.has_valid_deposits_borrows(&out_root_bank_cache),
-            MangoErrorCode::Default
-        )?;
 
-        Ok(())
+        // If an account is in reduce_only mode, health must only go up
+        check!(
+            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
     }
 
     #[inline(never)]
@@ -1016,10 +970,11 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::Default)?;
 
@@ -1070,39 +1025,48 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(token_prog_ai.key, &spl_token::id(), MangoErrorCode::Default)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
+
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(owner_ai.key == &mango_account.owner, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
+        // Make sure the spot market is valid
         let spot_market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+        check!(
+            base_root_bank_ai.key == &mango_group.tokens[spot_market_index].root_bank,
+            MangoErrorCode::InvalidRootBank
+        )?;
+
         let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check!(
+            quote_root_bank_ai.key == &mango_group.tokens[QUOTE_INDEX].root_bank,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        check_eq!(token_prog_ai.key, &spl_token::id(), MangoErrorCode::Default)?;
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::Default)?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
-
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::Default)?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::Default)?;
-        check_eq!(owner_ai.key, &mango_account.owner, MangoErrorCode::Default)?;
         check_eq!(
             &mango_account.spot_open_orders[spot_market_index],
             open_orders_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank,
-            quote_root_bank_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[spot_market_index].root_bank,
-            base_root_bank_ai.key,
             MangoErrorCode::Default
         )?;
 
@@ -3500,6 +3464,20 @@ fn read_oracle(
     Ok(price)
 }
 
+fn checked_change_net(
+    root_bank_cache: &RootBankCache,
+    node_bank: &mut NodeBank,
+    mango_account: &mut MangoAccount,
+    token_index: usize,
+    native_quantity: I80F48,
+) -> MangoResult<()> {
+    if native_quantity.is_negative() {
+        checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)
+    } else {
+        checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)
+    }
+}
+
 /// If there are borrows, pay down borrows first then increase deposits
 /// WARNING: won't work if native_quantity is less than zero
 fn checked_add_net(
@@ -3565,6 +3543,11 @@ fn checked_sub_net(
         mango_account,
         token_index,
         native_quantity / root_bank_cache.borrow_index,
+    )?;
+
+    check!(
+        node_bank.has_valid_deposits_borrows(root_bank_cache),
+        MangoErrorCode::InsufficientLiquidity
     )
 }
 
@@ -3644,6 +3627,7 @@ fn settle_borrow_unchecked(
     Ok(())
 }
 
+#[allow(unused)]
 fn settle_borrow_full_unchecked(
     root_bank_cache: &RootBankCache,
     node_bank: &mut NodeBank,

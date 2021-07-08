@@ -16,8 +16,10 @@ async fn test_size() {
 
 #[tokio::test]
 async fn test_i80f48() {
-    let neg_one: I80F48 = I80F48!(-1.25);
-    println!("{:?}", neg_one.checked_ceil().unwrap())
+    let hundred = I80F48::from_num(100);
+    let million = I80F48::from_num(1_000_000);
+    let r: I80F48 = hundred / million;
+    println!("{:#0128b}", r.to_bits())
 }
 
 #[tokio::test]
