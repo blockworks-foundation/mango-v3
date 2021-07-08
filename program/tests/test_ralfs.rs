@@ -47,6 +47,5 @@ async fn test_place_and_cancel_order_ralfs() {
     let base_unit_config = test.with_unit_config(&mango_group, 0, 100);
     let oracle_price = test.with_oracle_price(&quote_unit_config, &base_unit_config, 10000);
     let (perp_market_pk, perp_market) = test.with_perp_market(&mango_group_pk, &quote_unit_config, &base_unit_config, 0).await;
-    // test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, 0, );
-    println!("Perp PK: {}", perp_market_pk.to_string());
+    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, 0, (config.num_mints - 1) as usize, 10000 * quote_unit_config.unit);
 }

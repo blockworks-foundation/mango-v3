@@ -342,10 +342,10 @@ impl MangoProgramTest {
         return oracle_pks;
     }
 
-    pub fn with_unit_config(&mut self, mango_group: &MangoGroup, index: usize, lot: i64) -> MintUnitConfig {
-        let decimals = mango_group.tokens[index].decimals as u64;
+    pub fn with_unit_config(&mut self, mango_group: &MangoGroup, index: u64, lot: i64) -> MintUnitConfig {
+        let decimals = mango_group.tokens[index as usize].decimals as u64;
         let unit = 10i64.pow(decimals as u32) as u64;
-        return MintUnitConfig::new(index, decimals, unit, lot);
+        return MintUnitConfig::new(index as usize, decimals, unit, lot);
     }
 
     pub fn with_oracle_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: u64) -> I80F48 {
@@ -367,6 +367,8 @@ impl MangoProgramTest {
         let maint_leverage = init_leverage * 2;
         let maker_fee = I80F48::from_num(0.01);
         let taker_fee = I80F48::from_num(0.01);
+        let max_depth_bps = I80F48::from_num(1);
+        let scaler = I80F48::from_num(1);
 
         let instructions = [mango::instruction::add_perp_market(
             &mango_program_id,
@@ -383,7 +385,8 @@ impl MangoProgramTest {
             taker_fee,
             base_mint_config.lot,
             quote_mint_config.lot,
-
+            max_depth_bps,
+            scaler,
         )
         .unwrap()];
 
@@ -396,28 +399,33 @@ impl MangoProgramTest {
     pub async fn perform_deposit(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account_pk: &Pubkey, user_index: usize, token_index: usize, amount: u64) {
         let mango_program_id = self.mango_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_token_account = self.token_accounts[(user_index * self.num_mints) + token_index];
+        let user_token_account = self.token_accounts[(user_index * self.mints.len()) + token_index];
+        let root_bank_pk = mango_group.tokens[token_index].root_bank;
+        let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
+        let node_bank_pk = root_bank.node_banks[token_index];
+        let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
         let instructions = [
             cache_root_banks(
-                &program_id,
-                &mango_group.mango_group_pk,
-                &mango_group.mango_cache_pk,
-                &[mango_group.root_banks[token_index].pubkey],
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[root_bank_pk],
             )
             .unwrap(),
             deposit(
-                &program_id,
+                &mango_program_id,
                 &mango_group_pk,
                 &mango_account_pk,
                 &user.pubkey(),
-                &mango_group.mango_cache_pk,
-                &mango_group.root_banks[token_index].pubkey,
-                &mango_group.root_banks[token_index].node_banks[token_index].pubkey,
-                &mango_group.root_banks[token_index].node_banks[token_index].vault,
-                &user_token_account.pubkey,
+                &mango_group.mango_cache,
+                &root_bank_pk,
+                &node_bank_pk,
+                &node_bank.vault,
+                &user_token_account,
                 amount,
             )
             .unwrap(),
         ];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 }
