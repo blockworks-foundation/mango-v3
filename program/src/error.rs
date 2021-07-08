@@ -95,6 +95,8 @@ pub enum MangoErrorCode {
     SignerNecessary,
     #[error("MangoErrorCode::InsufficientLiquidity Not enough deposits in this node bank")]
     InsufficientLiquidity,
+    #[error("MangoErrorCode::InvalidOrderId")]
+    InvalidOrderId,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

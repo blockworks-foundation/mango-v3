@@ -331,7 +331,6 @@ impl Processor {
 
     #[inline(never)]
     /// Initialize perp market including orderbooks and queues
-    //  Requires a contract_size for the asset
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -342,7 +341,13 @@ impl Processor {
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
+        max_depth_bps: I80F48,
+        scaler: I80F48,
     ) -> MangoResult<()> {
+        // params check
+        check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(!scaler.is_negative(), MangoErrorCode::InvalidParam)?;
+
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -1232,6 +1237,7 @@ impl Processor {
             quantity,
             order_type,
             client_order_id,
+            Clock::get()?.unix_timestamp as u64,
         )?;
 
         let health = mango_account.get_health(
@@ -1271,25 +1277,43 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let perp_market =
+        let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
-        let oo = &mut mango_account.perp_accounts[market_index].open_orders;
+        let perp_account = &mut mango_account.perp_accounts[market_index];
 
         // we should consider not throwing an error but to silently ignore cancel_order when it passes an unknown
         // client_order_id, this would allow batching multiple cancel instructions with place instructions for
         // super-efficient updating of orders. if not then the same usage pattern might often trigger errors due
         // to the possibility of already filled orders?
-        let (_, order_id, side) = oo
+        let (_, order_id, side) = perp_account
+            .open_orders
             .orders_with_client_ids()
             .find(|entry| client_order_id == u64::from(entry.0))
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        book.cancel_order(oo, mango_account_ai.key, order_id, side)?;
 
+        let best_final = match side {
+            Side::Bid => book.get_best_bid_price().unwrap(),
+            Side::Ask => book.get_best_ask_price().unwrap(),
+        };
+
+        let order = book.cancel_order(order_id, side)?;
+        check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
+        perp_account.open_orders.cancel_order(&order, order_id, side)?;
+        perp_account.apply_incentives(
+            &mut perp_market,
+            side,
+            order.price(),
+            order.best_initial,
+            best_final,
+            order.timestamp,
+            Clock::get()?.unix_timestamp as u64,
+            order.quantity,
+        )?;
         Ok(())
     }
 
@@ -1319,14 +1343,32 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let perp_market =
+        let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        let oo = &mut mango_account.perp_accounts[market_index].open_orders;
 
+        let perp_account = &mut mango_account.perp_accounts[market_index];
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        book.cancel_order(oo, mango_account_ai.key, order_id, side)?;
+
+        let best_final = match side {
+            Side::Bid => book.get_best_bid_price().unwrap(),
+            Side::Ask => book.get_best_ask_price().unwrap(),
+        };
+
+        let order = book.cancel_order(order_id, side)?;
+        check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
+        perp_account.open_orders.cancel_order(&order, order_id, side)?;
+        perp_account.apply_incentives(
+            &mut perp_market,
+            side,
+            order.price(),
+            order.best_initial,
+            best_final,
+            order.timestamp,
+            Clock::get()?.unix_timestamp as u64,
+            order.quantity,
+        )?;
 
         Ok(())
     }
@@ -1444,7 +1486,6 @@ impl Processor {
     #[allow(unused)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
         const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1540,7 +1581,6 @@ impl Processor {
     #[inline(never)]
     #[allow(unused)]
     fn force_cancel_spot_orders(
-        // TODO *** - implement client, and instruction.ts
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         limit: u8,
@@ -1730,8 +1770,6 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: u8,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
-
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -1815,8 +1853,6 @@ impl Processor {
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
-
         // parameter checks
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
@@ -2067,8 +2103,6 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
-
         check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
 
         const NUM_FIXED: usize = 7;
@@ -2363,8 +2397,6 @@ impl Processor {
         accounts: &[AccountInfo],
         base_transfer_request: i64,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
-
         // TODO - make sure sum of all quote positions + funding in system == 0
         // TODO - find a way to send in open orders accounts
         // liqor passes in his own account and the liqee mango account
@@ -2541,6 +2573,7 @@ impl Processor {
             )?;
             if assets_val < DUST_THRESHOLD {
                 // Liquidation must now continue with the resolve_bankruptcy instruction
+                // TODO - an account can only go into bankruptcy if all base_positions are 0
                 liqee_ma.is_bankrupt = true;
             }
         } else {
@@ -2562,8 +2595,6 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
-
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
@@ -2715,8 +2746,6 @@ impl Processor {
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48, // in native token terms
     ) -> MangoResult<()> {
-        // TODO *** - implement client, and instruction.ts
-
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
@@ -2945,8 +2974,6 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
-        // TODO - fee behavior
-
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -3001,10 +3028,9 @@ impl Processor {
                     perp_market.execute_trade(
                         cache,
                         info,
+                        fill_event,
                         &mut maker.perp_accounts[market_index],
                         &mut taker.perp_accounts[market_index],
-                        fill_event.base_change,
-                        fill_event.quote_change,
                     )?;
                 }
                 EventType::Out => {
@@ -3172,6 +3198,8 @@ impl Processor {
                 taker_fee,
                 base_lot_size,
                 quote_lot_size,
+                max_depth_bps,
+                scaler,
             } => {
                 msg!("Mango: AddPerpMarket");
                 Self::add_perp_market(
@@ -3184,6 +3212,8 @@ impl Processor {
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
+                    max_depth_bps,
+                    scaler,
                 )?;
             }
             MangoInstruction::PlacePerpOrder {

@@ -182,6 +182,8 @@ pub enum MangoInstruction {
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
+        max_depth_bps: I80F48,
+        scaler: I80F48,
     },
 
     /// Place an order on a perp market
@@ -516,7 +518,7 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
-                let data_arr = array_ref![data, 0, 88];
+                let data_arr = array_ref![data, 0, 120];
                 let (
                     market_index,
                     maint_leverage,
@@ -525,7 +527,9 @@ impl MangoInstruction {
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
-                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 8, 8];
+                    max_depth_bps,
+                    scaler,
+                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 8, 8, 16, 16];
                 MangoInstruction::AddPerpMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
@@ -534,6 +538,8 @@ impl MangoInstruction {
                     taker_fee: I80F48::from_le_bytes(*taker_fee),
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
+                    max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
+                    scaler: I80F48::from_le_bytes(*scaler),
                 }
             }
             12 => {
@@ -859,6 +865,8 @@ pub fn add_perp_market(
     taker_fee: I80F48,
     base_lot_size: i64,
     quote_lot_size: i64,
+    max_depth_bps: I80F48,
+    scaler: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -877,6 +885,8 @@ pub fn add_perp_market(
         taker_fee,
         base_lot_size,
         quote_lot_size,
+        max_depth_bps,
+        scaler,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
