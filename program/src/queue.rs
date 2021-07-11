@@ -263,13 +263,13 @@ impl FillEvent {
         taker_client_order_id: u64,
         price: i64,
         quantity: i64,
-    ) -> Self {
+    ) -> FillEvent {
         Self {
-            event_type: EventType::Fill.into(),
+            event_type: EventType::Fill as u8,
             side,
             maker_slot,
             maker_out,
-            padding: [0; 4],
+            padding: [0u8; 4],
             maker,
             maker_order_id,
             maker_client_order_id,

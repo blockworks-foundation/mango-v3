@@ -22,6 +22,9 @@ use solana_program::sysvar::Sysvar;
 use spl_token::state::{Account, Mint};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
+use crate::ids::mngo_token;
+use crate::ids::msrm_token;
+use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
@@ -104,7 +107,6 @@ impl Processor {
             quote_optimal_rate,
             quote_max_rate,
         )?;
-
         let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
         mango_group.tokens[QUOTE_INDEX] = TokenInfo {
             mint: *quote_mint_ai.key,
@@ -264,6 +266,22 @@ impl Processor {
             mango_group.tokens[QUOTE_INDEX].mint.to_aligned_bytes(),
             MangoErrorCode::Default
         )?;
+
+        // TODO - what if quote currency is mngo, srm or msrm
+        // if mint is MNGO set mngo_vault
+        // if mint is SRM set srm_vault
+        // if mint is MSRM set msrm_vault  -- NOTE maybe we don't want to allow trading on msrm
+
+        if mint_ai.key == &mngo_token::ID {
+            check!(mango_group.mngo_vault == Pubkey::default(), MangoErrorCode::Default)?;
+            mango_group.mngo_vault = *vault_ai.key;
+        } else if mint_ai.key == &srm_token::ID {
+            check!(mango_group.srm_vault == Pubkey::default(), MangoErrorCode::Default)?;
+            mango_group.srm_vault = *vault_ai.key;
+        } else if mint_ai.key == &msrm_token::ID {
+            check!(mango_group.msrm_vault == Pubkey::default(), MangoErrorCode::Default)?;
+            mango_group.msrm_vault = *vault_ai.key;
+        }
 
         Ok(())
     }
@@ -1580,7 +1598,12 @@ impl Processor {
             token_prog_ai,          // read
         ] = fixed_ais;
 
+        // Check token program id
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1592,29 +1615,26 @@ impl Processor {
         let open_orders_ai = &liqee_open_orders_ais[market_index];
 
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+        check_eq!(
+            &mango_group.tokens[market_index].root_bank,
+            base_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
         check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check_eq!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank,
+            quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
-
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
 
         check_eq!(
             &liqee_ma.spot_open_orders[market_index],
             open_orders_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank,
-            quote_root_bank_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[market_index].root_bank,
-            base_root_bank_ai.key,
             MangoErrorCode::Default
         )?;
 
@@ -1795,6 +1815,11 @@ impl Processor {
                 return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
+            msg!(
+                "maint health {} init health {}",
+                maint_health.to_num::<f64>(),
+                init_health.to_num::<f64>()
+            );
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
         } else {
             liqee_ma.being_liquidated = true;
@@ -3059,6 +3084,86 @@ impl Processor {
             perp_market.long_funding.to_num::<f64>(),
             perp_market.short_funding.to_num::<f64>()
         );
+
+        Ok(())
+    }
+
+    // ***
+    #[inline(never)]
+    #[allow(unused)]
+    fn deposit_msrm(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        quantity: u64,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            msrm_account_ai,    // write
+            msrm_vault_ai,      // write
+            token_prog_ai,      // read
+        ] = accounts;
+        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(msrm_vault_ai.key == &mango_group.msrm_vault, MangoErrorCode::InvalidVault)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        invoke_transfer(token_prog_ai, msrm_account_ai, msrm_vault_ai, owner_ai, &[], quantity)?;
+
+        mango_account.msrm_amount += quantity;
+
+        Ok(())
+    }
+    // ***
+    #[inline(never)]
+    #[allow(unused)]
+    fn withdraw_msrm(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        quantity: u64,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            msrm_account_ai,    // write
+            msrm_vault_ai,      // write
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(msrm_vault_ai.key == &mango_group.msrm_vault, MangoErrorCode::InvalidVault)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        check!(mango_account.msrm_amount >= quantity, MangoErrorCode::InsufficientFunds)?;
+
+        let signer_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            msrm_vault_ai,
+            msrm_account_ai,
+            signer_ai,
+            &[&signer_seeds],
+            quantity,
+        )?;
+
+        mango_account.msrm_amount -= quantity;
 
         Ok(())
     }

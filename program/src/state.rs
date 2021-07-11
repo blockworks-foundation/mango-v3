@@ -168,7 +168,11 @@ pub struct MangoGroup {
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
 
+    // DAO vault is funded by the Mango DAO with USDC and can be withdrawn by the DAO
     pub dao_vault: Pubkey,
+    pub srm_vault: Pubkey,  // ***
+    pub msrm_vault: Pubkey, // ***
+    pub mngo_vault: Pubkey, // ***
 }
 
 impl MangoGroup {
@@ -669,7 +673,6 @@ pub struct MangoAccount {
     pub mango_group: Pubkey,
     pub owner: Pubkey,
 
-    // pub in_basket: [bool; MAX_TOKENS],
     pub in_margin_basket: [bool; MAX_PAIRS],
     pub num_in_margin_basket: u8,
 
@@ -681,6 +684,7 @@ pub struct MangoAccount {
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 
+    pub msrm_amount: u64, // ***
     /// This account cannot open new positions or borrow until `init_health >= 0`
     pub being_liquidated: bool,
 
@@ -941,6 +945,8 @@ impl MangoAccount {
             bids_health.min(asks_health)
         };
 
+        msg!("spot health {:?}", health);
+
         Ok(health)
     }
 
@@ -981,7 +987,6 @@ impl MangoAccount {
                         perp_market_info.init_liab_weight,
                     ),
                 };
-
             if !spot_market_info.is_empty() {
                 health += self.get_spot_health(
                     mango_cache,
@@ -1348,7 +1353,7 @@ impl PerpAccount {
                 I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
         }
 
-        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+        msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
 
         health
     }
@@ -1384,21 +1389,16 @@ impl PerpAccount {
         // Pick the worse of the two simulated health
         let h = if bids_health < asks_health { bids_health } else { asks_health };
 
-        // msg!(
-        //     "get_health h={:?} of={} bp={}",
-        //     h,
-        //     long_funding - self.long_settled_funding,
-        //     self.base_position
-        // );
-
         // Account for unrealized funding payments
         // TODO make checked
         // TODO - consider force moving funding into the realized at start of every instruction
-        if self.base_position > 0 {
+        let x = if self.base_position > 0 {
             h - (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position)
         } else {
             h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
-        }
+        };
+        msg!("perp health {:?}", x);
+        x
     }
 
     /// Returns value of assets, excludes open orders
