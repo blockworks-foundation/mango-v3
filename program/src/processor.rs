@@ -37,6 +37,7 @@ use crate::state::{
     ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use serum_dex::instruction::NewOrderInstructionV3;
 use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -713,7 +714,7 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 22;
+        const NUM_FIXED: usize = 23;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
@@ -722,7 +723,7 @@ impl Processor {
             mango_account_ai,       // write
             owner_ai,               // read
             mango_cache_ai,         // read
-            dex_program_ai,         // read
+            dex_prog_ai,            // read
             spot_market_ai,         // write
             bids_ai,                // write
             asks_ai,                // write
@@ -736,19 +737,16 @@ impl Processor {
             quote_node_bank_ai,     // write
             quote_vault_ai,         // write
             base_vault_ai,          // write
-            token_program_ai,       // read
+            token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
             dex_signer_ai,          // read
+            msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check_eq!(token_program_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
-        check_eq!(
-            dex_program_ai.key,
-            &mango_group.dex_program_id,
-            MangoErrorCode::InvalidProgramId
-        )?;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -864,47 +862,31 @@ impl Processor {
             SerumSide::Ask => base_vault_ai,
         };
 
-        let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
-        let instruction = Instruction {
-            program_id: *dex_program_ai.key,
-            data,
-            accounts: vec![
-                AccountMeta::new(*spot_market_ai.key, false),
-                AccountMeta::new(*open_orders_ais[token_index].key, false),
-                AccountMeta::new(*dex_request_queue_ai.key, false),
-                AccountMeta::new(*dex_event_queue_ai.key, false),
-                AccountMeta::new(*bids_ai.key, false),
-                AccountMeta::new(*asks_ai.key, false),
-                AccountMeta::new(*vault_ai.key, false),
-                AccountMeta::new_readonly(*signer_ai.key, true),
-                AccountMeta::new(*dex_base_ai.key, false),
-                AccountMeta::new(*dex_quote_ai.key, false),
-                AccountMeta::new_readonly(*token_program_ai.key, false),
-                AccountMeta::new_readonly(*rent_ai.key, false),
-            ],
-        };
-        let account_infos = [
-            dex_program_ai.clone(), // Have to add account of the program id
-            spot_market_ai.clone(),
-            open_orders_ais[token_index].clone(),
-            dex_request_queue_ai.clone(),
-            dex_event_queue_ai.clone(),
-            bids_ai.clone(),
-            asks_ai.clone(),
-            vault_ai.clone(),
-            signer_ai.clone(),
-            dex_base_ai.clone(),
-            dex_quote_ai.clone(),
-            token_program_ai.clone(),
-            rent_ai.clone(),
-        ];
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
 
-        let signer_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
-        solana_program::program::invoke_signed(&instruction, &account_infos, &[&signer_seeds])?;
+        // Send order to serum dex
+        invoke_new_order(
+            dex_prog_ai,
+            spot_market_ai,
+            &open_orders_ais[token_index],
+            dex_request_queue_ai,
+            dex_event_queue_ai,
+            bids_ai,
+            asks_ai,
+            vault_ai,
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            token_prog_ai,
+            rent_ai,
+            msrm_or_srm_vault_ai,
+            &[&signers_seeds],
+            order,
+        )?;
 
         // Settle funds for this market
         invoke_settle_funds(
-            dex_program_ai,
+            dex_prog_ai,
             spot_market_ai,
             &open_orders_ais[token_index],
             signer_ai,
@@ -913,10 +895,11 @@ impl Processor {
             base_vault_ai,
             quote_vault_ai,
             dex_signer_ai,
-            token_program_ai,
-            &[&signer_seeds],
+            token_prog_ai,
+            &[&signers_seeds],
         )?;
-        // See if we can remove this token from margin
+
+        // See if we can remove this market from margin
         let open_orders = load_open_orders(&open_orders_ais[token_index])?;
         mango_account.update_basket(token_index, &open_orders)?;
 
@@ -3422,48 +3405,48 @@ fn init_root_bank(
 }
 
 fn invoke_settle_funds<'a>(
-    dex_prog_acc: &AccountInfo<'a>,
-    spot_market_acc: &AccountInfo<'a>,
-    open_orders_acc: &AccountInfo<'a>,
-    signer_acc: &AccountInfo<'a>,
-    dex_base_acc: &AccountInfo<'a>,
-    dex_quote_acc: &AccountInfo<'a>,
-    base_vault_acc: &AccountInfo<'a>,
-    quote_vault_acc: &AccountInfo<'a>,
-    dex_signer_acc: &AccountInfo<'a>,
-    token_prog_acc: &AccountInfo<'a>,
+    dex_prog_ai: &AccountInfo<'a>,
+    spot_market_ai: &AccountInfo<'a>,
+    open_orders_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    dex_base_ai: &AccountInfo<'a>,
+    dex_quote_ai: &AccountInfo<'a>,
+    base_vault_ai: &AccountInfo<'a>,
+    quote_vault_ai: &AccountInfo<'a>,
+    dex_signer_ai: &AccountInfo<'a>,
+    token_prog_ai: &AccountInfo<'a>,
     signers_seeds: &[&[&[u8]]],
 ) -> ProgramResult {
     let data = serum_dex::instruction::MarketInstruction::SettleFunds.pack();
     let instruction = Instruction {
-        program_id: *dex_prog_acc.key,
+        program_id: *dex_prog_ai.key,
         data,
         accounts: vec![
-            AccountMeta::new(*spot_market_acc.key, false),
-            AccountMeta::new(*open_orders_acc.key, false),
-            AccountMeta::new_readonly(*signer_acc.key, true),
-            AccountMeta::new(*dex_base_acc.key, false),
-            AccountMeta::new(*dex_quote_acc.key, false),
-            AccountMeta::new(*base_vault_acc.key, false),
-            AccountMeta::new(*quote_vault_acc.key, false),
-            AccountMeta::new_readonly(*dex_signer_acc.key, false),
-            AccountMeta::new_readonly(*token_prog_acc.key, false),
-            AccountMeta::new(*quote_vault_acc.key, false),
+            AccountMeta::new(*spot_market_ai.key, false),
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new(*dex_base_ai.key, false),
+            AccountMeta::new(*dex_quote_ai.key, false),
+            AccountMeta::new(*base_vault_ai.key, false),
+            AccountMeta::new(*quote_vault_ai.key, false),
+            AccountMeta::new_readonly(*dex_signer_ai.key, false),
+            AccountMeta::new_readonly(*token_prog_ai.key, false),
+            AccountMeta::new(*quote_vault_ai.key, false),
         ],
     };
 
     let account_infos = [
-        dex_prog_acc.clone(),
-        spot_market_acc.clone(),
-        open_orders_acc.clone(),
-        signer_acc.clone(),
-        dex_base_acc.clone(),
-        dex_quote_acc.clone(),
-        base_vault_acc.clone(),
-        quote_vault_acc.clone(),
-        dex_signer_acc.clone(),
-        token_prog_acc.clone(),
-        quote_vault_acc.clone(),
+        dex_prog_ai.clone(),
+        spot_market_ai.clone(),
+        open_orders_ai.clone(),
+        signer_ai.clone(),
+        dex_base_ai.clone(),
+        dex_quote_ai.clone(),
+        base_vault_ai.clone(),
+        quote_vault_ai.clone(),
+        dex_signer_ai.clone(),
+        token_prog_ai.clone(),
+        quote_vault_ai.clone(),
     ];
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
@@ -3786,6 +3769,64 @@ fn invoke_cancel_orders<'a>(
     Ok(())
 }
 
+fn invoke_new_order<'a>(
+    dex_prog_ai: &AccountInfo<'a>, // Have to add account of the program id
+    spot_market_ai: &AccountInfo<'a>,
+    open_orders_ai: &AccountInfo<'a>,
+    dex_request_queue_ai: &AccountInfo<'a>,
+    dex_event_queue_ai: &AccountInfo<'a>,
+    bids_ai: &AccountInfo<'a>,
+    asks_ai: &AccountInfo<'a>,
+    vault_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    dex_base_ai: &AccountInfo<'a>,
+    dex_quote_ai: &AccountInfo<'a>,
+    token_prog_ai: &AccountInfo<'a>,
+    rent_ai: &AccountInfo<'a>,
+    msrm_or_srm_vault_ai: &AccountInfo<'a>,
+    signers_seeds: &[&[&[u8]]],
+
+    order: NewOrderInstructionV3,
+) -> ProgramResult {
+    let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
+    let instruction = Instruction {
+        program_id: *dex_prog_ai.key,
+        data,
+        accounts: vec![
+            AccountMeta::new(*spot_market_ai.key, false),
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new(*dex_request_queue_ai.key, false),
+            AccountMeta::new(*dex_event_queue_ai.key, false),
+            AccountMeta::new(*bids_ai.key, false),
+            AccountMeta::new(*asks_ai.key, false),
+            AccountMeta::new(*vault_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new(*dex_base_ai.key, false),
+            AccountMeta::new(*dex_quote_ai.key, false),
+            AccountMeta::new_readonly(*token_prog_ai.key, false),
+            AccountMeta::new_readonly(*rent_ai.key, false),
+            AccountMeta::new_readonly(*msrm_or_srm_vault_ai.key, false),
+        ],
+    };
+    let account_infos = [
+        dex_prog_ai.clone(), // Have to add account of the program id
+        spot_market_ai.clone(),
+        open_orders_ai.clone(),
+        dex_request_queue_ai.clone(),
+        dex_event_queue_ai.clone(),
+        bids_ai.clone(),
+        asks_ai.clone(),
+        vault_ai.clone(),
+        signer_ai.clone(),
+        dex_base_ai.clone(),
+        dex_quote_ai.clone(),
+        token_prog_ai.clone(),
+        rent_ai.clone(),
+        msrm_or_srm_vault_ai.clone(),
+    ];
+
+    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
 /*
 
 TODO

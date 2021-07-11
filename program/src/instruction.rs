@@ -150,7 +150,7 @@ pub enum MangoInstruction {
 
     /// Place an order on the Serum Dex using Mango account
     ///
-    /// Accounts expected by this instruction (19 + MAX_PAIRS):
+    /// Accounts expected by this instruction (23 + MAX_PAIRS):
     ///
     PlaceSpotOrder {
         order: serum_dex::instruction::NewOrderInstructionV3,
