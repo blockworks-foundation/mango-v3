@@ -31,7 +31,7 @@ async fn test_deposit_succeeds() {
     let quote_index = config.num_mints - 1;
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
     let quote_unit_config = test.with_unit_config(&mango_group, quote_index, 10);
-    let deposit_amount = 10000 * quote_unit_config.unit;
+    let deposit_amount = (10000 * quote_unit_config.unit) as u64;
     let (mango_account_pk, mut mango_account) = test.with_mango_account(&mango_group_pk, user_index).await;
     let user_token_account = test.with_user_token_account(user_index, quote_index as usize);
     let initial_balance = test.get_token_balance(user_token_account).await;
@@ -48,5 +48,6 @@ async fn test_deposit_succeeds() {
     let mango_vault_balance = test.get_token_balance(node_bank.vault).await;
     assert_eq!(mango_vault_balance, deposit_amount);
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
+
     assert_eq!(mango_account.deposits[quote_index as usize], deposit_amount);
 }

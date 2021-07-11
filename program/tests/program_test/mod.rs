@@ -46,16 +46,16 @@ impl AddPacked for ProgramTest {
 pub struct MintUnitConfig {
     pub index: usize,
     pub decimals: u64,
-    pub unit: u64,
+    pub unit: i64,
     pub lot: i64,
 }
 
 impl MintUnitConfig {
-    fn new(index: usize, decimals: u64, unit: u64, lot: i64) -> MintUnitConfig {
+    fn new(index: usize, decimals: u64, unit: i64, lot: i64) -> MintUnitConfig {
         MintUnitConfig { index: index, decimals: decimals, unit: unit, lot: lot }
     }
     pub fn default() -> Self {
-        MintUnitConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as u64, lot: 10 as i64 }
+        MintUnitConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as i64, lot: 10 as i64 }
     }
 }
 
@@ -348,12 +348,20 @@ impl MangoProgramTest {
 
     pub fn with_unit_config(&mut self, mango_group: &MangoGroup, index: u64, lot: i64) -> MintUnitConfig {
         let decimals = mango_group.tokens[index as usize].decimals as u64;
-        let unit = 10i64.pow(decimals as u32) as u64;
+        let unit = 10i64.pow(decimals as u32) as i64;
         return MintUnitConfig::new(index as usize, decimals, unit, lot);
     }
 
     pub fn with_oracle_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: u64) -> I80F48 {
         return I80F48::from_num(price) * I80F48::from_num(quote_mint_config.unit) / I80F48::from_num(base_mint_config.unit);
+    }
+
+    pub fn with_order_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: i64) -> i64 {
+        return ((price - 1) * quote_mint_config.unit * base_mint_config.lot) / (base_mint_config.unit * quote_mint_config.lot)
+    }
+
+    pub fn with_order_size(&mut self, base_mint_config: &MintUnitConfig, quantity: i64) -> i64 {
+        return (quantity * base_mint_config.unit) / base_mint_config.lot;
     }
 
     pub async fn with_root_bank(&mut self, mango_group: &MangoGroup, token_index: usize) -> (Pubkey, RootBank) {
@@ -444,5 +452,48 @@ impl MangoProgramTest {
         ];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
         println!("Deposit success");
+    }
+
+    pub async fn place_perp_order(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account: &MangoAccount, mango_account_pk: &Pubkey, perp_market: &PerpMarket, perp_market_pk: &Pubkey, order_side: Side, order_price: i64, order_size: i64, order_id: u64, order_type: OrderType, oracle_pk: &Pubkey, user_index: usize) {
+        let mango_program_id = self.mango_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+
+        let instructions = [
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*oracle_pk]
+            )
+            .unwrap(),
+            cache_perp_markets(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*perp_market_pk],
+            )
+            .unwrap(),
+            place_perp_order(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.bids,
+                &perp_market.asks,
+                &perp_market.event_queue,
+                &mango_account.spot_open_orders,
+                order_side,
+                order_price,
+                order_size,
+                order_id,
+                order_type,
+            )
+            .unwrap(),
+        ];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+
     }
 }
