@@ -54,7 +54,7 @@ impl Processor {
         quote_optimal_rate: I80F48,
         quote_max_rate: I80F48,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 10;
+        const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -66,6 +66,7 @@ impl Processor {
             quote_node_bank_ai, // write
             quote_root_bank_ai, // write
             dao_vault_ai,       // read
+            msrm_vault_ai,      // read
             mango_cache_ai,     // write
             dex_prog_ai         // read
         ] = accounts;
@@ -87,13 +88,23 @@ impl Processor {
         mango_group.valid_interval = valid_interval;
         mango_group.dex_program_id = *dex_prog_ai.key;
 
+        // TODO - make this a PDA
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
         check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
-        // TODO - owner should be dao but for now we assume admin is DAO
-        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::Default)?;
-        check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::Default)?;
-        check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::Default)?;
+        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
+        check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
+        check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
         mango_group.dao_vault = *dao_vault_ai.key;
+
+        // TODO - make this a PDA
+        if msrm_vault_ai.key != &Pubkey::default() {
+            let msrm_vault = Account::unpack(&msrm_vault_ai.try_borrow_data()?)?;
+            check!(msrm_vault.is_initialized(), MangoErrorCode::InvalidVault)?;
+            check_eq!(msrm_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
+            check_eq!(&msrm_vault.mint, &msrm_token::ID, MangoErrorCode::InvalidVault)?;
+            check_eq!(msrm_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
+            mango_group.msrm_vault = *msrm_vault_ai.key;
+        }
 
         let _root_bank = init_root_bank(
             program_id,
@@ -274,11 +285,7 @@ impl Processor {
         if mint_ai.key == &srm_token::ID {
             check!(mango_group.srm_vault == Pubkey::default(), MangoErrorCode::Default)?;
             mango_group.srm_vault = *vault_ai.key;
-        } else if mint_ai.key == &msrm_token::ID {
-            check!(mango_group.msrm_vault == Pubkey::default(), MangoErrorCode::Default)?;
-            mango_group.msrm_vault = *vault_ai.key;
         }
-
         Ok(())
     }
 
@@ -371,7 +378,7 @@ impl Processor {
             event_queue_ai, // write
             bids_ai,        // write
             asks_ai,        // write
-            mngo_vault_ai,  // read  *** 
+            mngo_vault_ai,  // read
             admin_ai        // read, signer
         ] = accounts;
 
@@ -738,7 +745,7 @@ impl Processor {
             signer_ai,              // read
             rent_ai,                // read
             dex_signer_ai,          // read
-            msrm_or_srm_vault_ai,   // read  ***
+            msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -1000,7 +1007,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
-            mango_cache_ai,         // read ***
+            mango_cache_ai,         // read
             owner_ai,               // signer
             mango_account_ai,       // write
             dex_prog_ai,            // read
@@ -1238,7 +1245,7 @@ impl Processor {
             mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read, signer
-            perp_market_ai,     // read  ***
+            perp_market_ai,     // read
             bids_ai,            // write
             asks_ai,            // write
         ] = accounts;
@@ -1305,7 +1312,7 @@ impl Processor {
             mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read, signer
-            perp_market_ai,     // read ***
+            perp_market_ai,     // read
             bids_ai,            // write
             asks_ai,            // write
         ] = accounts;
@@ -3148,9 +3155,10 @@ impl Processor {
         Ok(())
     }
 
+    // ***
     #[inline(never)]
     #[allow(unused)]
-    /// *** Settle the liquidity points in a PerpAccount for MNGO tokens
+    /// Settle the liquidity points in a PerpAccount for MNGO tokens
     fn redeem_liquidity_points(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         // For now there can be a fixed liquidity points to MNGO conversion
         // mngo_vault must be set for this group

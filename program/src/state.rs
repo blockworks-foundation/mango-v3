@@ -173,8 +173,8 @@ pub struct MangoGroup {
 
     // DAO vault is funded by the Mango DAO with USDC and can be withdrawn by the DAO
     pub dao_vault: Pubkey,
-    pub srm_vault: Pubkey,  // ***
-    pub msrm_vault: Pubkey, // ***
+    pub srm_vault: Pubkey,
+    pub msrm_vault: Pubkey,
 }
 
 impl MangoGroup {
@@ -686,7 +686,7 @@ pub struct MangoAccount {
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 
-    pub msrm_amount: u64, // ***
+    pub msrm_amount: u64,
     /// This account cannot open new positions or borrow until `init_health >= 0`
     pub being_liquidated: bool,
 
@@ -1479,10 +1479,10 @@ pub struct PerpMarket {
     pub max_depth_bps: I80F48,
     pub scaler: I80F48,
     pub total_liquidity_points: I80F48,
-    pub points_per_mngo: I80F48, // *** how many points equal 1 native MNGO
+    pub points_per_mngo: I80F48, // how many points equal 1 native MNGO
 
     // mngo_vault holds mango tokens to be disbursed as liquidity incentives for this perp market
-    pub mngo_vault: Pubkey, // ***
+    pub mngo_vault: Pubkey,
 }
 
 impl PerpMarket {
