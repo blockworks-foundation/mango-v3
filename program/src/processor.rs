@@ -22,6 +22,8 @@ use solana_program::sysvar::Sysvar;
 use spl_token::state::{Account, Mint};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
+use crate::ids::msrm_token;
+use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
@@ -34,6 +36,7 @@ use crate::state::{
     ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use serum_dex::instruction::NewOrderInstructionV3;
 use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -51,7 +54,7 @@ impl Processor {
         quote_optimal_rate: I80F48,
         quote_max_rate: I80F48,
     ) -> ProgramResult {
-        const NUM_FIXED: usize = 10;
+        const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -63,6 +66,7 @@ impl Processor {
             quote_node_bank_ai, // write
             quote_root_bank_ai, // write
             dao_vault_ai,       // read
+            msrm_vault_ai,      // read
             mango_cache_ai,     // write
             dex_prog_ai         // read
         ] = accounts;
@@ -84,13 +88,23 @@ impl Processor {
         mango_group.valid_interval = valid_interval;
         mango_group.dex_program_id = *dex_prog_ai.key;
 
+        // TODO - make this a PDA
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
         check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
-        // TODO - owner should be dao but for now we assume admin is DAO
-        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::Default)?;
-        check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::Default)?;
-        check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::Default)?;
+        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
+        check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
+        check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
         mango_group.dao_vault = *dao_vault_ai.key;
+
+        // TODO - make this a PDA
+        if msrm_vault_ai.key != &Pubkey::default() {
+            let msrm_vault = Account::unpack(&msrm_vault_ai.try_borrow_data()?)?;
+            check!(msrm_vault.is_initialized(), MangoErrorCode::InvalidVault)?;
+            check_eq!(msrm_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
+            check_eq!(&msrm_vault.mint, &msrm_token::ID, MangoErrorCode::InvalidVault)?;
+            check_eq!(msrm_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
+            mango_group.msrm_vault = *msrm_vault_ai.key;
+        }
 
         let _root_bank = init_root_bank(
             program_id,
@@ -104,7 +118,6 @@ impl Processor {
             quote_optimal_rate,
             quote_max_rate,
         )?;
-
         let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
         mango_group.tokens[QUOTE_INDEX] = TokenInfo {
             mint: *quote_mint_ai.key,
@@ -265,6 +278,14 @@ impl Processor {
             MangoErrorCode::Default
         )?;
 
+        // TODO - what if quote currency is mngo, srm or msrm
+        // if mint is SRM set srm_vault
+        // if mint is MSRM set msrm_vault  -- NOTE maybe we don't want to allow trading on msrm
+
+        if mint_ai.key == &srm_token::ID {
+            check!(mango_group.srm_vault == Pubkey::default(), MangoErrorCode::Default)?;
+            mango_group.srm_vault = *vault_ai.key;
+        }
         Ok(())
     }
 
@@ -348,7 +369,7 @@ impl Processor {
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(!scaler.is_negative(), MangoErrorCode::InvalidParam)?;
 
-        const NUM_FIXED: usize = 6;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -357,7 +378,7 @@ impl Processor {
             event_queue_ai, // write
             bids_ai,        // write
             asks_ai,        // write
-
+            mngo_vault_ai,  // read
             admin_ai        // read, signer
         ] = accounts;
 
@@ -416,6 +437,8 @@ impl Processor {
             bids_ai,
             asks_ai,
             event_queue_ai,
+            mngo_vault_ai,
+            &mango_group,
             &rent,
             base_lot_size,
             quote_lot_size,
@@ -465,7 +488,7 @@ impl Processor {
 
         invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
 
-        // Check validity of
+        // Check validity of root bank cache
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
         check!(
@@ -695,7 +718,7 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 22;
+        const NUM_FIXED: usize = 23;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
@@ -704,7 +727,7 @@ impl Processor {
             mango_account_ai,       // write
             owner_ai,               // read
             mango_cache_ai,         // read
-            dex_program_ai,         // read
+            dex_prog_ai,            // read
             spot_market_ai,         // write
             bids_ai,                // write
             asks_ai,                // write
@@ -718,19 +741,16 @@ impl Processor {
             quote_node_bank_ai,     // write
             quote_vault_ai,         // write
             base_vault_ai,          // write
-            token_program_ai,       // read
+            token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
             dex_signer_ai,          // read
+            msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check_eq!(token_program_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
-        check_eq!(
-            dex_program_ai.key,
-            &mango_group.dex_program_id,
-            MangoErrorCode::InvalidProgramId
-        )?;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -846,47 +866,31 @@ impl Processor {
             SerumSide::Ask => base_vault_ai,
         };
 
-        let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
-        let instruction = Instruction {
-            program_id: *dex_program_ai.key,
-            data,
-            accounts: vec![
-                AccountMeta::new(*spot_market_ai.key, false),
-                AccountMeta::new(*open_orders_ais[token_index].key, false),
-                AccountMeta::new(*dex_request_queue_ai.key, false),
-                AccountMeta::new(*dex_event_queue_ai.key, false),
-                AccountMeta::new(*bids_ai.key, false),
-                AccountMeta::new(*asks_ai.key, false),
-                AccountMeta::new(*vault_ai.key, false),
-                AccountMeta::new_readonly(*signer_ai.key, true),
-                AccountMeta::new(*dex_base_ai.key, false),
-                AccountMeta::new(*dex_quote_ai.key, false),
-                AccountMeta::new_readonly(*token_program_ai.key, false),
-                AccountMeta::new_readonly(*rent_ai.key, false),
-            ],
-        };
-        let account_infos = [
-            dex_program_ai.clone(), // Have to add account of the program id
-            spot_market_ai.clone(),
-            open_orders_ais[token_index].clone(),
-            dex_request_queue_ai.clone(),
-            dex_event_queue_ai.clone(),
-            bids_ai.clone(),
-            asks_ai.clone(),
-            vault_ai.clone(),
-            signer_ai.clone(),
-            dex_base_ai.clone(),
-            dex_quote_ai.clone(),
-            token_program_ai.clone(),
-            rent_ai.clone(),
-        ];
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
 
-        let signer_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
-        solana_program::program::invoke_signed(&instruction, &account_infos, &[&signer_seeds])?;
+        // Send order to serum dex
+        invoke_new_order(
+            dex_prog_ai,
+            spot_market_ai,
+            &open_orders_ais[token_index],
+            dex_request_queue_ai,
+            dex_event_queue_ai,
+            bids_ai,
+            asks_ai,
+            vault_ai,
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            token_prog_ai,
+            rent_ai,
+            msrm_or_srm_vault_ai,
+            &[&signers_seeds],
+            order,
+        )?;
 
         // Settle funds for this market
         invoke_settle_funds(
-            dex_program_ai,
+            dex_prog_ai,
             spot_market_ai,
             &open_orders_ais[token_index],
             signer_ai,
@@ -895,10 +899,11 @@ impl Processor {
             base_vault_ai,
             quote_vault_ai,
             dex_signer_ai,
-            token_program_ai,
-            &[&signer_seeds],
+            token_prog_ai,
+            &[&signers_seeds],
         )?;
-        // See if we can remove this token from margin
+
+        // See if we can remove this market from margin
         let open_orders = load_open_orders(&open_orders_ais[token_index])?;
         mango_account.update_basket(token_index, &open_orders)?;
 
@@ -1002,7 +1007,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
-            mango_cache_ai,         // read ***
+            mango_cache_ai,         // read
             owner_ai,               // signer
             mango_account_ai,       // write
             dex_prog_ai,            // read
@@ -1240,7 +1245,7 @@ impl Processor {
             mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read, signer
-            perp_market_ai,     // write
+            perp_market_ai,     // read
             bids_ai,            // write
             asks_ai,            // write
         ] = accounts;
@@ -1253,8 +1258,7 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let mut perp_market =
-            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
@@ -1281,7 +1285,7 @@ impl Processor {
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         perp_account.open_orders.cancel_order(&order, order_id, side)?;
         perp_account.apply_incentives(
-            &mut perp_market,
+            &perp_market,
             side,
             order.price(),
             order.best_initial,
@@ -1290,6 +1294,8 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
             order.quantity,
         )?;
+
+        // convert
         Ok(())
     }
 
@@ -1306,7 +1312,7 @@ impl Processor {
             mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read, signer
-            perp_market_ai,     // write
+            perp_market_ai,     // read
             bids_ai,            // write
             asks_ai,            // write
         ] = accounts;
@@ -1319,8 +1325,7 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let mut perp_market =
-            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
@@ -1336,7 +1341,7 @@ impl Processor {
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         perp_account.open_orders.cancel_order(&order, order_id, side)?;
         perp_account.apply_incentives(
-            &mut perp_market,
+            &perp_market,
             side,
             order.price(),
             order.best_initial,
@@ -1580,7 +1585,12 @@ impl Processor {
             token_prog_ai,          // read
         ] = fixed_ais;
 
+        // Check token program id
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1592,29 +1602,26 @@ impl Processor {
         let open_orders_ai = &liqee_open_orders_ais[market_index];
 
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+        check_eq!(
+            &mango_group.tokens[market_index].root_bank,
+            base_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
         check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check_eq!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank,
+            quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
-
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
 
         check_eq!(
             &liqee_ma.spot_open_orders[market_index],
             open_orders_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank,
-            quote_root_bank_ai.key,
-            MangoErrorCode::Default
-        )?;
-        check_eq!(
-            &mango_group.tokens[market_index].root_bank,
-            base_root_bank_ai.key,
             MangoErrorCode::Default
         )?;
 
@@ -1795,6 +1802,11 @@ impl Processor {
                 return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
+            msg!(
+                "maint health {} init health {}",
+                maint_health.to_num::<f64>(),
+                init_health.to_num::<f64>()
+            );
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
         } else {
             liqee_ma.being_liquidated = true;
@@ -3063,6 +3075,176 @@ impl Processor {
         Ok(())
     }
 
+    // ***
+    #[inline(never)]
+    #[allow(unused)]
+    fn deposit_msrm(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        quantity: u64,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            msrm_account_ai,    // write
+            msrm_vault_ai,      // write
+            token_prog_ai,      // read
+        ] = accounts;
+        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(msrm_vault_ai.key == &mango_group.msrm_vault, MangoErrorCode::InvalidVault)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        invoke_transfer(token_prog_ai, msrm_account_ai, msrm_vault_ai, owner_ai, &[], quantity)?;
+
+        mango_account.msrm_amount += quantity;
+
+        Ok(())
+    }
+    // ***
+    #[inline(never)]
+    #[allow(unused)]
+    fn withdraw_msrm(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        quantity: u64,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            msrm_account_ai,    // write
+            msrm_vault_ai,      // write
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(msrm_vault_ai.key == &mango_group.msrm_vault, MangoErrorCode::InvalidVault)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        check!(mango_account.msrm_amount >= quantity, MangoErrorCode::InsufficientFunds)?;
+
+        let signer_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            msrm_vault_ai,
+            msrm_account_ai,
+            signer_ai,
+            &[&signer_seeds],
+            quantity,
+        )?;
+
+        mango_account.msrm_amount -= quantity;
+
+        Ok(())
+    }
+
+    // ***
+    #[inline(never)]
+    #[allow(unused)]
+    /// Settle the liquidity points in a PerpAccount for MNGO tokens
+    fn redeem_liquidity_points(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        // For now there can be a fixed liquidity points to MNGO conversion
+        // mngo_vault must be set for this group
+        // can only withdraw up to what is avail in mngo vault
+        const NUM_FIXED: usize = 11;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_cache_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // read
+            mngo_perp_vault_ai, // write
+            mngo_root_bank_ai,  // read
+            mngo_node_bank_ai,  // write
+            mngo_bank_vault_ai, // write
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+        let mngo_index = mango_group
+            .find_root_bank_index(mngo_root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let mngo_bank_cache = &mango_cache.root_bank_cache[mngo_index];
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let perp_account = &mut mango_account.perp_accounts[market_index];
+
+        // Load the mngo banks
+        let root_bank = RootBank::load_checked(mngo_root_bank_ai, program_id)?;
+        check!(
+            root_bank.node_banks.contains(mngo_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let mut mngo_node_bank = NodeBank::load_mut_checked(mngo_node_bank_ai, program_id)?;
+        check_eq!(&mngo_node_bank.vault, mngo_bank_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        check!(mngo_perp_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
+
+        let mngo_perp_vault = Account::unpack(&mngo_perp_vault_ai.try_borrow_data()?)?;
+        let max_points = I80F48::from_num(mngo_perp_vault.amount) * perp_market.points_per_mngo;
+
+        let points = min(perp_account.liquidity_points, max_points);
+        let transfer_quantity =
+            (points / perp_market.points_per_mngo).checked_floor().unwrap().to_num::<u64>();
+
+        perp_account.liquidity_points -= points;
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            mngo_perp_vault_ai,
+            mngo_bank_vault_ai,
+            signer_ai,
+            &[&signers_seeds],
+            transfer_quantity,
+        )?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        check!(
+            now_ts <= mngo_bank_cache.last_update + mango_group.valid_interval,
+            MangoErrorCode::InvalidCache
+        )?;
+
+        checked_add_net(
+            mngo_bank_cache,
+            &mut mngo_node_bank,
+            &mut mango_account,
+            mngo_index,
+            I80F48::from_num(transfer_quantity),
+        )
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -3317,48 +3499,48 @@ fn init_root_bank(
 }
 
 fn invoke_settle_funds<'a>(
-    dex_prog_acc: &AccountInfo<'a>,
-    spot_market_acc: &AccountInfo<'a>,
-    open_orders_acc: &AccountInfo<'a>,
-    signer_acc: &AccountInfo<'a>,
-    dex_base_acc: &AccountInfo<'a>,
-    dex_quote_acc: &AccountInfo<'a>,
-    base_vault_acc: &AccountInfo<'a>,
-    quote_vault_acc: &AccountInfo<'a>,
-    dex_signer_acc: &AccountInfo<'a>,
-    token_prog_acc: &AccountInfo<'a>,
+    dex_prog_ai: &AccountInfo<'a>,
+    spot_market_ai: &AccountInfo<'a>,
+    open_orders_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    dex_base_ai: &AccountInfo<'a>,
+    dex_quote_ai: &AccountInfo<'a>,
+    base_vault_ai: &AccountInfo<'a>,
+    quote_vault_ai: &AccountInfo<'a>,
+    dex_signer_ai: &AccountInfo<'a>,
+    token_prog_ai: &AccountInfo<'a>,
     signers_seeds: &[&[&[u8]]],
 ) -> ProgramResult {
     let data = serum_dex::instruction::MarketInstruction::SettleFunds.pack();
     let instruction = Instruction {
-        program_id: *dex_prog_acc.key,
+        program_id: *dex_prog_ai.key,
         data,
         accounts: vec![
-            AccountMeta::new(*spot_market_acc.key, false),
-            AccountMeta::new(*open_orders_acc.key, false),
-            AccountMeta::new_readonly(*signer_acc.key, true),
-            AccountMeta::new(*dex_base_acc.key, false),
-            AccountMeta::new(*dex_quote_acc.key, false),
-            AccountMeta::new(*base_vault_acc.key, false),
-            AccountMeta::new(*quote_vault_acc.key, false),
-            AccountMeta::new_readonly(*dex_signer_acc.key, false),
-            AccountMeta::new_readonly(*token_prog_acc.key, false),
-            AccountMeta::new(*quote_vault_acc.key, false),
+            AccountMeta::new(*spot_market_ai.key, false),
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new(*dex_base_ai.key, false),
+            AccountMeta::new(*dex_quote_ai.key, false),
+            AccountMeta::new(*base_vault_ai.key, false),
+            AccountMeta::new(*quote_vault_ai.key, false),
+            AccountMeta::new_readonly(*dex_signer_ai.key, false),
+            AccountMeta::new_readonly(*token_prog_ai.key, false),
+            AccountMeta::new(*quote_vault_ai.key, false),
         ],
     };
 
     let account_infos = [
-        dex_prog_acc.clone(),
-        spot_market_acc.clone(),
-        open_orders_acc.clone(),
-        signer_acc.clone(),
-        dex_base_acc.clone(),
-        dex_quote_acc.clone(),
-        base_vault_acc.clone(),
-        quote_vault_acc.clone(),
-        dex_signer_acc.clone(),
-        token_prog_acc.clone(),
-        quote_vault_acc.clone(),
+        dex_prog_ai.clone(),
+        spot_market_ai.clone(),
+        open_orders_ai.clone(),
+        signer_ai.clone(),
+        dex_base_ai.clone(),
+        dex_quote_ai.clone(),
+        base_vault_ai.clone(),
+        quote_vault_ai.clone(),
+        dex_signer_ai.clone(),
+        token_prog_ai.clone(),
+        quote_vault_ai.clone(),
     ];
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
@@ -3681,6 +3863,64 @@ fn invoke_cancel_orders<'a>(
     Ok(())
 }
 
+fn invoke_new_order<'a>(
+    dex_prog_ai: &AccountInfo<'a>, // Have to add account of the program id
+    spot_market_ai: &AccountInfo<'a>,
+    open_orders_ai: &AccountInfo<'a>,
+    dex_request_queue_ai: &AccountInfo<'a>,
+    dex_event_queue_ai: &AccountInfo<'a>,
+    bids_ai: &AccountInfo<'a>,
+    asks_ai: &AccountInfo<'a>,
+    vault_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    dex_base_ai: &AccountInfo<'a>,
+    dex_quote_ai: &AccountInfo<'a>,
+    token_prog_ai: &AccountInfo<'a>,
+    rent_ai: &AccountInfo<'a>,
+    msrm_or_srm_vault_ai: &AccountInfo<'a>,
+    signers_seeds: &[&[&[u8]]],
+
+    order: NewOrderInstructionV3,
+) -> ProgramResult {
+    let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
+    let instruction = Instruction {
+        program_id: *dex_prog_ai.key,
+        data,
+        accounts: vec![
+            AccountMeta::new(*spot_market_ai.key, false),
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new(*dex_request_queue_ai.key, false),
+            AccountMeta::new(*dex_event_queue_ai.key, false),
+            AccountMeta::new(*bids_ai.key, false),
+            AccountMeta::new(*asks_ai.key, false),
+            AccountMeta::new(*vault_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new(*dex_base_ai.key, false),
+            AccountMeta::new(*dex_quote_ai.key, false),
+            AccountMeta::new_readonly(*token_prog_ai.key, false),
+            AccountMeta::new_readonly(*rent_ai.key, false),
+            AccountMeta::new_readonly(*msrm_or_srm_vault_ai.key, false),
+        ],
+    };
+    let account_infos = [
+        dex_prog_ai.clone(), // Have to add account of the program id
+        spot_market_ai.clone(),
+        open_orders_ai.clone(),
+        dex_request_queue_ai.clone(),
+        dex_event_queue_ai.clone(),
+        bids_ai.clone(),
+        asks_ai.clone(),
+        vault_ai.clone(),
+        signer_ai.clone(),
+        dex_base_ai.clone(),
+        dex_quote_ai.clone(),
+        token_prog_ai.clone(),
+        rent_ai.clone(),
+        msrm_or_srm_vault_ai.clone(),
+    ];
+
+    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
 /*
 
 TODO

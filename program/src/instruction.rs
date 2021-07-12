@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 pub enum MangoInstruction {
     /// Initialize a group of lending pools that can be cross margined
     ///
-    /// Accounts expected by this instruction (10):
+    /// Accounts expected by this instruction (11):
     ///
     /// 0. `[writable]` mango_group_ai - TODO
     /// 1. `[]` signer_ai - TODO
@@ -26,8 +26,9 @@ pub enum MangoInstruction {
     /// 5. `[writable]` quote_node_bank_ai - TODO
     /// 6. `[writable]` quote_root_bank_ai - TODO
     /// 7. `[]` dao_vault_ai - aka insurance fund
-    /// 8. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
-    /// 9. `[]` dex_prog_ai - TODO
+    /// 8. `[]` msrm_vault_ai - msrm deposits for fee discounts; can be Pubkey::default()
+    /// 9. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
+    /// 10. `[]` dex_prog_ai - TODO
     InitMangoGroup {
         signer_nonce: u64,
         valid_interval: u64,
@@ -150,7 +151,7 @@ pub enum MangoInstruction {
 
     /// Place an order on the Serum Dex using Mango account
     ///
-    /// Accounts expected by this instruction (19 + MAX_PAIRS):
+    /// Accounts expected by this instruction (23 + MAX_PAIRS):
     ///
     PlaceSpotOrder {
         order: serum_dex::instruction::NewOrderInstructionV3,
@@ -166,14 +167,15 @@ pub enum MangoInstruction {
 
     /// Add a perp market to a mango group
     ///
-    /// Accounts expected by this instruction (6):
+    /// Accounts expected by this instruction (7):
     ///
     /// 0. `[writable]` mango_group_ai - TODO
     /// 1. `[writable]` perp_market_ai - TODO
     /// 2. `[writable]` event_queue_ai - TODO
     /// 3. `[writable]` bids_ai - TODO
     /// 4. `[writable]` asks_ai - TODO
-    /// 5. `[signer]` admin_ai - TODO
+    /// 5. `[]` mngo_vault_ai - the vault from which liquidity incentives will be paid out for this market
+    /// 6. `[signer]` admin_ai - TODO
     AddPerpMarket {
         market_index: usize,
         maint_leverage: I80F48,
@@ -236,7 +238,7 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction (18):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
-    /// 1. `[]` mango_cache_ai - MangoGroup that this mango account is for
+    /// 1. `[]` mango_cache_ai - MangoCache for this MangoGroup
     /// 2. `[signer]` owner_ai - MangoAccount owner
     /// 3. `[writable]` mango_account_ai - MangoAccount
     /// 4. `[]` dex_prog_ai - program id of serum dex
@@ -727,6 +729,7 @@ pub fn init_mango_group(
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
     dao_vault_pk: &Pubkey,
+    msrm_vault_pk: &Pubkey, // send in Pubkey:default() if not using this feature
     mango_cache_ai: &Pubkey,
     dex_program_pk: &Pubkey,
 
@@ -745,6 +748,7 @@ pub fn init_mango_group(
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
         AccountMeta::new_readonly(*dao_vault_pk, false),
+        AccountMeta::new_readonly(*msrm_vault_pk, false),
         AccountMeta::new(*mango_cache_ai, false),
         AccountMeta::new_readonly(*dex_program_pk, false),
     ];
@@ -857,6 +861,7 @@ pub fn add_perp_market(
     event_queue_pk: &Pubkey,
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
+    mngo_vault_pk: &Pubkey,
     admin_pk: &Pubkey,
 
     market_index: usize,
@@ -875,6 +880,7 @@ pub fn add_perp_market(
         AccountMeta::new(*event_queue_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
+        AccountMeta::new_readonly(*mngo_vault_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 
@@ -943,7 +949,7 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new_readonly(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
@@ -967,7 +973,7 @@ pub fn cancel_perp_order(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new_readonly(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];

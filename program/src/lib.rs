@@ -3,6 +3,7 @@
 #[macro_use]
 pub mod error;
 
+pub mod ids;
 pub mod instruction;
 pub mod matching;
 pub mod oracle;
