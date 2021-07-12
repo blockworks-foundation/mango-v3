@@ -18,10 +18,13 @@ use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
+use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
 use crate::utils::{invert_side, remove_slop_mut};
 use enumflags2::BitFlags;
+use solana_program::program_pack::Pack;
+use spl_token::state::Account;
 use std::cmp::{max, min};
 
 pub const MAX_TOKENS: usize = 32;
@@ -172,7 +175,6 @@ pub struct MangoGroup {
     pub dao_vault: Pubkey,
     pub srm_vault: Pubkey,  // ***
     pub msrm_vault: Pubkey, // ***
-    pub mngo_vault: Pubkey, // ***
 }
 
 impl MangoGroup {
@@ -1277,7 +1279,7 @@ impl PerpAccount {
 
     pub fn apply_incentives(
         &mut self,
-        perp_market: &mut PerpMarket,
+        perp_market: &PerpMarket,
 
         side: Side,
         price: i64,
@@ -1305,7 +1307,9 @@ impl PerpAccount {
         // TODO OPT remove this sanity check if confident
         check!(!points.is_negative(), MangoErrorCode::Default)?;
 
-        perp_market.total_liquidity_points += points;
+        // Not necessary for now, but may come in useful later
+        // perp_market.total_liquidity_points += points;
+
         self.liquidity_points += points;
 
         Ok(())
@@ -1475,6 +1479,10 @@ pub struct PerpMarket {
     pub max_depth_bps: I80F48,
     pub scaler: I80F48,
     pub total_liquidity_points: I80F48,
+    pub points_per_mngo: I80F48, // *** how many points equal 1 native MNGO
+
+    // mngo_vault holds mango tokens to be disbursed as liquidity incentives for this perp market
+    pub mngo_vault: Pubkey, // ***
 }
 
 impl PerpMarket {
@@ -1485,7 +1493,8 @@ impl PerpMarket {
         bids_ai: &'a AccountInfo,
         asks_ai: &'a AccountInfo,
         event_queue_ai: &'a AccountInfo,
-
+        mngo_vault_ai: &'a AccountInfo,
+        mango_group: &MangoGroup,
         rent: &Rent,
         base_lot_size: i64,
         quote_lot_size: i64,
@@ -1505,6 +1514,12 @@ impl PerpMarket {
         state.event_queue = *event_queue_ai.key;
         state.quote_lot_size = quote_lot_size;
         state.base_lot_size = base_lot_size;
+
+        let vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
+        check!(vault.owner == mango_group.signer_key, MangoErrorCode::InvalidOwner)?;
+        check!(vault.mint == mngo_token::ID, MangoErrorCode::InvalidVault)?;
+        check!(mngo_vault_ai.owner == &spl_token::ID, MangoErrorCode::InvalidOwner)?;
+        state.mngo_vault = *mngo_vault_ai.key;
 
         let clock = Clock::get()?;
         state.last_updated = clock.unix_timestamp as u64;
