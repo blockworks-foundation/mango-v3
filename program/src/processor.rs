@@ -3941,11 +3941,7 @@ fn invoke_new_order<'a>(
     }
 }
 /*
-
 TODO
-update perp market in client
-update FillEvent
-consume events instruction change access types
 check bankruptcy everywhere
 
 TODO test order types
