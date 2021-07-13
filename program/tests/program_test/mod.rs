@@ -1,6 +1,7 @@
 use std::convert::TryInto;
-
-use mango::entrypoint::process_instruction;
+use std::mem::size_of;
+use fixed::types::I80F48;
+use mango::{entrypoint::*, state::*, matching::*, queue::*, instruction::*, oracle::*, utils::*};
 use mango_common::Loadable;
 use solana_program::{
     account_info::AccountInfo, program_option::COption, program_pack::Pack, pubkey::*, rent::*,
@@ -42,6 +43,22 @@ impl AddPacked for ProgramTest {
     }
 }
 
+pub struct MintUnitConfig {
+    pub index: usize,
+    pub decimals: u64,
+    pub unit: i64,
+    pub lot: i64,
+}
+
+impl MintUnitConfig {
+    fn new(index: usize, decimals: u64, unit: i64, lot: i64) -> MintUnitConfig {
+        MintUnitConfig { index: index, decimals: decimals, unit: unit, lot: lot }
+    }
+    pub fn default() -> Self {
+        MintUnitConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as i64, lot: 10 as i64 }
+    }
+}
+
 pub struct MangoProgramTestConfig {
     pub compute_limit: u64,
     pub num_users: u64,
@@ -50,7 +67,7 @@ pub struct MangoProgramTestConfig {
 
 impl MangoProgramTestConfig {
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 10_000, num_users: 2, num_mints: 10 }
+        MangoProgramTestConfig { compute_limit: 50_000, num_users: 2, num_mints: 32 }
     }
 }
 
@@ -159,6 +176,11 @@ impl MangoProgramTest {
         Ok(())
     }
 
+    pub async fn get_token_balance(&mut self, address: Pubkey) -> u64 {
+        let mut token = self.context.banks_client.get_account(address).await.unwrap().unwrap();
+        return spl_token::state::Account::unpack(&token.data[..]).unwrap().amount;
+    }
+
     pub async fn create_account(&mut self, size: usize, owner: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(size);
@@ -203,6 +225,7 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
+    #[allow(dead_code)]
     pub async fn create_token_account(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(spl_token::state::Account::LEN);
@@ -228,9 +251,249 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
+    #[allow(dead_code)]
     pub async fn load_account<T: Loadable>(&mut self, acc_pk: Pubkey) -> T {
         let mut acc = self.context.banks_client.get_account(acc_pk).await.unwrap().unwrap();
         let acc_info: AccountInfo = (&acc_pk, &mut acc).into();
         return *T::load(&acc_info).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn with_mango_group(&mut self) -> (Pubkey, MangoGroup) {
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+
+        let mango_group_pk = self.create_account(size_of::<MangoGroup>(), &mango_program_id).await;
+        let mango_cache_pk = self.create_account(size_of::<MangoCache>(), &mango_program_id).await;
+        let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+        let admin_pk = self.context.payer.pubkey();
+
+        let quote_mint_pk = self.mints[self.mints.len() - 1];
+
+        let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
+        let quote_node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
+        let quote_root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
+        let dao_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
+
+        let quote_optimal_util = I80F48::from_num(0.7);
+        let quote_optimal_rate = I80F48::from_num(0.06);
+        let quote_max_rate = I80F48::from_num(1.5);
+
+
+        let instructions = [mango::instruction::init_mango_group(
+            &mango_program_id,
+            &mango_group_pk,
+            &signer_pk,
+            &admin_pk,
+            &quote_mint_pk,
+            &quote_vault_pk,
+            &quote_node_bank_pk,
+            &quote_root_bank_pk,
+            &dao_vault_pk,
+            &mango_cache_pk,
+            &serum_program_id,
+            signer_nonce,
+            5,
+            quote_optimal_util,
+            quote_optimal_rate,
+            quote_max_rate,
+        )
+        .unwrap()];
+
+        self.process_transaction(&instructions, None).await.unwrap();
+
+        let mango_group = self.load_account::<MangoGroup>(mango_group_pk).await;
+        return (mango_group_pk, mango_group);
+    }
+
+    #[allow(dead_code)]
+    pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
+        return self.token_accounts[(user_index * self.mints.len()) + token_index];
+    }
+
+    #[allow(dead_code)]
+    pub async fn with_mango_account(&mut self, mango_group_pk: &Pubkey, index: usize) -> (Pubkey, MangoAccount) {
+        let mango_program_id = self.mango_program_id;
+        let mango_account_pk = self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
+        let admin_pk = self.context.payer.pubkey();
+        let user = Keypair::from_base58_string(&self.users[index].to_base58_string());
+        let user_pk = user.pubkey();
+
+        let instructions = [mango::instruction::init_mango_account(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user_pk,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        let mango_account = self.load_account::<MangoAccount>(mango_account_pk).await;
+        return (mango_account_pk, mango_account);
+    }
+
+    #[allow(dead_code)]
+    pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
+        let mango_program_id = self.mango_program_id;
+        let oracle_pk = self.create_account(size_of::<StubOracle>(), &mango_program_id).await;
+        let admin_pk = self.context.payer.pubkey();
+        let mut oracle_pks = Vec::new();
+        let mut instructions = Vec::new();
+        for _ in 0..num_oracles {
+            instructions.push(add_oracle(&mango_program_id, &mango_group_pk, &oracle_pk, &admin_pk).unwrap());
+            oracle_pks.push(oracle_pk);
+        }
+        self.process_transaction(&instructions, None).await.unwrap();
+        return oracle_pks;
+    }
+
+    pub fn with_unit_config(&mut self, mango_group: &MangoGroup, index: u64, lot: i64) -> MintUnitConfig {
+        let decimals = mango_group.tokens[index as usize].decimals as u64;
+        let unit = 10i64.pow(decimals as u32) as i64;
+        return MintUnitConfig::new(index as usize, decimals, unit, lot);
+    }
+
+    pub fn with_oracle_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: u64) -> I80F48 {
+        return I80F48::from_num(price) * I80F48::from_num(quote_mint_config.unit) / I80F48::from_num(base_mint_config.unit);
+    }
+
+    pub fn with_order_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: i64) -> i64 {
+        return ((price - 1) * quote_mint_config.unit * base_mint_config.lot) / (base_mint_config.unit * quote_mint_config.lot)
+    }
+
+    pub fn with_order_size(&mut self, base_mint_config: &MintUnitConfig, quantity: i64) -> i64 {
+        return (quantity * base_mint_config.unit) / base_mint_config.lot;
+    }
+
+    pub async fn with_root_bank(&mut self, mango_group: &MangoGroup, token_index: usize) -> (Pubkey, RootBank) {
+        let root_bank_pk = mango_group.tokens[token_index].root_bank;
+        let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
+        return (root_bank_pk, root_bank);
+    }
+
+    pub async fn with_node_bank(&mut self, root_bank: &RootBank, token_index: usize) -> (Pubkey, NodeBank) {
+        let node_bank_pk = root_bank.node_banks[token_index];
+        let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
+        return (node_bank_pk, node_bank);
+    }
+
+    pub async fn with_perp_market(&mut self, mango_group_pk: &Pubkey, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, index: usize) -> (Pubkey, PerpMarket) {
+        let mango_program_id = self.mango_program_id;
+
+        let perp_market_pk = self.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
+        let max_num_events = 32;
+        let event_queue_pk = self.create_account(size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events, &mango_program_id).await;
+        let bids_pk = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
+        let asks_pk = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
+
+        let admin_pk = self.context.payer.pubkey();
+
+        let init_leverage = I80F48::from_num(10);
+        let maint_leverage = init_leverage * 2;
+        let maker_fee = I80F48::from_num(0.01);
+        let taker_fee = I80F48::from_num(0.01);
+        let max_depth_bps = I80F48::from_num(1);
+        let scaler = I80F48::from_num(1);
+
+        let instructions = [mango::instruction::add_perp_market(
+            &mango_program_id,
+            &mango_group_pk,
+            &perp_market_pk,
+            &event_queue_pk,
+            &bids_pk,
+            &asks_pk,
+            &admin_pk,
+            index,
+            maint_leverage,
+            init_leverage,
+            maker_fee,
+            taker_fee,
+            base_mint_config.lot,
+            quote_mint_config.lot,
+            max_depth_bps,
+            scaler,
+        )
+        .unwrap()];
+
+        self.process_transaction(&instructions, None).await.unwrap();
+
+        let perp_market = self.load_account::<PerpMarket>(perp_market_pk).await;
+        return (perp_market_pk, perp_market);
+    }
+
+    pub async fn perform_deposit(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account_pk: &Pubkey, user_index: usize, token_index: usize, amount: u64) {
+        let mango_program_id = self.mango_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let user_token_account = self.with_user_token_account(user_index, token_index);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, token_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
+        let instructions = [
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[root_bank_pk],
+            )
+            .unwrap(),
+            deposit(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_group.mango_cache,
+                &root_bank_pk,
+                &node_bank_pk,
+                &node_bank.vault,
+                &user_token_account,
+                amount,
+            )
+            .unwrap(),
+        ];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        println!("Deposit success");
+    }
+
+    pub async fn place_perp_order(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account: &MangoAccount, mango_account_pk: &Pubkey, perp_market: &PerpMarket, perp_market_pk: &Pubkey, order_side: Side, order_price: i64, order_size: i64, order_id: u64, order_type: OrderType, oracle_pk: &Pubkey, user_index: usize) {
+        let mango_program_id = self.mango_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+
+        let instructions = [
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*oracle_pk]
+            )
+            .unwrap(),
+            cache_perp_markets(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*perp_market_pk],
+            )
+            .unwrap(),
+            place_perp_order(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.bids,
+                &perp_market.asks,
+                &perp_market.event_queue,
+                &mango_account.spot_open_orders,
+                order_side,
+                order_price,
+                order_size,
+                order_id,
+                order_type,
+            )
+            .unwrap(),
+        ];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+
     }
 }
