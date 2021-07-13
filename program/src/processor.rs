@@ -3883,7 +3883,7 @@ fn invoke_new_order<'a>(
     order: NewOrderInstructionV3,
 ) -> ProgramResult {
     let data = serum_dex::instruction::MarketInstruction::NewOrderV3(order).pack();
-    let instruction = Instruction {
+    let mut instruction = Instruction {
         program_id: *dex_prog_ai.key,
         data,
         accounts: vec![
@@ -3899,27 +3899,46 @@ fn invoke_new_order<'a>(
             AccountMeta::new(*dex_quote_ai.key, false),
             AccountMeta::new_readonly(*token_prog_ai.key, false),
             AccountMeta::new_readonly(*rent_ai.key, false),
-            AccountMeta::new_readonly(*msrm_or_srm_vault_ai.key, false),
         ],
     };
-    let account_infos = [
-        dex_prog_ai.clone(), // Have to add account of the program id
-        spot_market_ai.clone(),
-        open_orders_ai.clone(),
-        dex_request_queue_ai.clone(),
-        dex_event_queue_ai.clone(),
-        bids_ai.clone(),
-        asks_ai.clone(),
-        vault_ai.clone(),
-        signer_ai.clone(),
-        dex_base_ai.clone(),
-        dex_quote_ai.clone(),
-        token_prog_ai.clone(),
-        rent_ai.clone(),
-        msrm_or_srm_vault_ai.clone(),
-    ];
 
-    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+    if msrm_or_srm_vault_ai.key != &Pubkey::default() {
+        instruction.accounts.push(AccountMeta::new_readonly(*msrm_or_srm_vault_ai.key, false));
+        let account_infos = [
+            dex_prog_ai.clone(), // Have to add account of the program id
+            spot_market_ai.clone(),
+            open_orders_ai.clone(),
+            dex_request_queue_ai.clone(),
+            dex_event_queue_ai.clone(),
+            bids_ai.clone(),
+            asks_ai.clone(),
+            vault_ai.clone(),
+            signer_ai.clone(),
+            dex_base_ai.clone(),
+            dex_quote_ai.clone(),
+            token_prog_ai.clone(),
+            rent_ai.clone(),
+            msrm_or_srm_vault_ai.clone(),
+        ];
+        solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+    } else {
+        let account_infos = [
+            dex_prog_ai.clone(), // Have to add account of the program id
+            spot_market_ai.clone(),
+            open_orders_ai.clone(),
+            dex_request_queue_ai.clone(),
+            dex_event_queue_ai.clone(),
+            bids_ai.clone(),
+            asks_ai.clone(),
+            vault_ai.clone(),
+            signer_ai.clone(),
+            dex_base_ai.clone(),
+            dex_quote_ai.clone(),
+            token_prog_ai.clone(),
+            rent_ai.clone(),
+        ];
+        solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+    }
 }
 /*
 
