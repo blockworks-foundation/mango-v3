@@ -2,7 +2,7 @@
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use mango::matching::{AnyNode, InnerNode, LeafNode};
-use mango::state::MangoAccount;
+use mango::state::{MangoAccount, MangoCache};
 use solana_program_test::tokio;
 use std::mem::{align_of, size_of};
 
@@ -12,6 +12,7 @@ async fn test_size() {
     println!("InnerNode: {}", size_of::<InnerNode>());
     println!("AnyNode: {}", size_of::<AnyNode>());
     println!("MangoAccount: {}", size_of::<MangoAccount>());
+    println!("MangoCache: {}", size_of::<MangoCache>());
 }
 
 #[tokio::test]

@@ -1234,6 +1234,7 @@ impl PerpAccount {
         let fees = quote.abs() * info.taker_fee;
         perp_market.fees_accrued += fees;
         self.quote_position += quote - fees;
+        // msg!("taker base pos {} quote pos {:?}", self.base_position, self.quote_position);
         Ok(())
     }
 
@@ -1250,6 +1251,7 @@ impl PerpAccount {
         let fees = quote.abs() * info.taker_fee;
         perp_market.fees_accrued += fees;
         self.quote_position += quote - fees;
+        // msg!("maker base pos {} quote pos {:?}", self.base_position, self.quote_position);
 
         self.apply_incentives(
             perp_market,
@@ -1659,6 +1661,19 @@ impl PerpMarket {
         taker.execute_taker(self, info, fill)?;
         maker.execute_maker(self, info, fill)?;
 
+        Ok(())
+    }
+
+    pub fn execute_self_trade(
+        &mut self,
+        cache: &PerpMarketCache,
+        info: &PerpMarketInfo,
+        fill: &FillEvent,
+        perp_account: &mut PerpAccount,
+    ) -> MangoResult<()> {
+        perp_account.settle_funding(cache);
+        perp_account.execute_taker(self, info, fill)?;
+        perp_account.execute_maker(self, info, fill)?;
         Ok(())
     }
 }
