@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 use std::mem::size_of;
 use fixed::types::I80F48;
-use mango::{entrypoint::*, state::*, matching::*, queue::*, instruction::*, oracle::*, utils::*};
+use mango::{entrypoint::*, ids::*, state::*, matching::*, queue::*, instruction::*, oracle::*, utils::*};
 use mango_common::Loadable;
 use solana_program::{
     account_info::AccountInfo, program_option::COption, program_pack::Pack, pubkey::*, rent::*,
@@ -113,6 +113,32 @@ impl MangoProgramTest {
             );
             mints.push(mint_pk);
         }
+
+        // add msrm mint
+        test.add_packable_account(
+            msrm_token::ID,
+            u32::MAX as u64,
+            &Mint {
+                is_initialized: true,
+                mint_authority: COption::Some(Pubkey::new_unique()),
+                decimals: 6 as u8,
+                ..Mint::default()
+            },
+            &spl_token::id(),
+        );
+
+        // add mngo mint
+        test.add_packable_account(
+            mngo_token::ID,
+            u32::MAX as u64,
+            &Mint {
+                is_initialized: true,
+                mint_authority: COption::Some(Pubkey::new_unique()),
+                decimals: 6 as u8,
+                ..Mint::default()
+            },
+            &spl_token::id(),
+        );
 
         // add users in loop
         let mut users = Vec::new();
@@ -269,11 +295,11 @@ impl MangoProgramTest {
         let admin_pk = self.context.payer.pubkey();
 
         let quote_mint_pk = self.mints[self.mints.len() - 1];
-
         let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
         let quote_node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
         let quote_root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
         let dao_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
+        let msrm_vault_pk = self.create_token_account(&signer_pk, &msrm_token::ID).await;
 
         let quote_optimal_util = I80F48::from_num(0.7);
         let quote_optimal_rate = I80F48::from_num(0.06);
@@ -290,6 +316,7 @@ impl MangoProgramTest {
             &quote_node_bank_pk,
             &quote_root_bank_pk,
             &dao_vault_pk,
+            &msrm_vault_pk,
             &mango_cache_pk,
             &serum_program_id,
             signer_nonce,
@@ -357,7 +384,7 @@ impl MangoProgramTest {
     }
 
     pub fn with_order_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: i64) -> i64 {
-        return ((price - 1) * quote_mint_config.unit * base_mint_config.lot) / (base_mint_config.unit * quote_mint_config.lot)
+        return ((price) * quote_mint_config.unit * base_mint_config.lot) / (base_mint_config.unit * quote_mint_config.lot)
     }
 
     pub fn with_order_size(&mut self, base_mint_config: &MintUnitConfig, quantity: i64) -> i64 {
@@ -380,10 +407,12 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
 
         let perp_market_pk = self.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
+        let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let max_num_events = 32;
         let event_queue_pk = self.create_account(size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events, &mango_program_id).await;
         let bids_pk = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
         let asks_pk = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
+        let mngo_vault_pk = self.create_token_account(&signer_pk, &mngo_token::ID).await;
 
         let admin_pk = self.context.payer.pubkey();
 
@@ -401,6 +430,7 @@ impl MangoProgramTest {
             &event_queue_pk,
             &bids_pk,
             &asks_pk,
+            &mngo_vault_pk,
             &admin_pk,
             index,
             maint_leverage,
@@ -418,6 +448,10 @@ impl MangoProgramTest {
 
         let perp_market = self.load_account::<PerpMarket>(perp_market_pk).await;
         return (perp_market_pk, perp_market);
+    }
+
+    pub async fn with_spot_market(&mut self, mango_group_pk: &Pubkey) {
+
     }
 
     pub async fn perform_deposit(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account_pk: &Pubkey, user_index: usize, token_index: usize, amount: u64) {

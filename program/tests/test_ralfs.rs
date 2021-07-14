@@ -29,6 +29,7 @@ async fn test_init_perp_market_ralfs() {
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
     let quote_unit_config = test.with_unit_config(&mango_group, config.num_mints - 1, 10);
     let base_unit_config = test.with_unit_config(&mango_group, 0, 100);
+    let oracle_pks = test.with_oracles(&mango_group_pk, 1).await;
     // Act
     let (perp_market_pk, perp_market) = test.with_perp_market(&mango_group_pk, &quote_unit_config, &base_unit_config, 0).await;
     // Assert
@@ -49,6 +50,9 @@ async fn test_place_and_cancel_order_ralfs() {
 
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
     let (mango_account_pk, mango_account) = test.with_mango_account(&mango_group_pk, user_index).await;
+    for x in mango_group.tokens.iter() {
+        println!("PK: {}", x.mint.to_string());
+    }
     let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
     let quote_unit_config = test.with_unit_config(&mango_group, quote_index, 10);
     let deposit_amount = (base_price * quote_unit_config.unit) as u64;
@@ -67,6 +71,9 @@ async fn test_place_and_cancel_order_ralfs() {
     let order_price = test.with_order_price(&quote_unit_config, &base_unit_config, base_price);
     let order_size = test.with_order_size(&base_unit_config, quantity);
     let order_type = OrderType::Limit;
+
+    println!("Price: {}", order_price);
+    println!("Size: {}", order_size);
 
     test.place_perp_order(&mango_group, &mango_group_pk, &mango_account, &mango_account_pk, &perp_market, &perp_market_pk, order_side, order_price, order_size, bid_id, order_type, &oracle_pks[0], user_index).await;
 
