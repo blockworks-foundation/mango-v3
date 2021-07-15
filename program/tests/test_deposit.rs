@@ -26,18 +26,20 @@ async fn test_deposit_succeeds() {
     // Arrange
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
+
     let user_index = 0;
-    let base_index = 0;
     let quote_index = config.num_mints - 1;
+    let base_price = 10000;
+
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
-    let quote_unit_config = test.with_unit_config(&mango_group, quote_index, 10);
-    let deposit_amount = (10000 * quote_unit_config.unit) as u64;
+    let quote_unit_config = test.with_unit_config(quote_index, 6, 10);
+    let deposit_amount = (base_price * quote_unit_config.unit) as u64;
     let (mango_account_pk, mut mango_account) = test.with_mango_account(&mango_group_pk, user_index).await;
     let user_token_account = test.with_user_token_account(user_index, quote_index as usize);
     let initial_balance = test.get_token_balance(user_token_account).await;
 
     // Act
-    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, 0, quote_index as usize, deposit_amount).await;
+    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, user_index, quote_index as usize, deposit_amount).await;
 
     // Assert
     let post_balance = test.get_token_balance(user_token_account).await;

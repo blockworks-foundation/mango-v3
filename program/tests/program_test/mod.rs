@@ -334,11 +334,6 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
-        return self.token_accounts[(user_index * self.mints.len()) + token_index];
-    }
-
-    #[allow(dead_code)]
     pub async fn with_mango_account(&mut self, mango_group_pk: &Pubkey, index: usize) -> (Pubkey, MangoAccount) {
         let mango_program_id = self.mango_program_id;
         let mango_account_pk = self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
@@ -358,6 +353,16 @@ impl MangoProgramTest {
         return (mango_account_pk, mango_account);
     }
 
+    pub async fn with_mango_cache(&mut self, mango_group: &MangoGroup) -> (Pubkey, MangoCache) {
+        let mango_cache = self.load_account::<MangoCache>(mango_group.mango_cache).await;
+        return (mango_group.mango_cache, mango_cache);
+    }
+
+    #[allow(dead_code)]
+    pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
+        return self.token_accounts[(user_index * self.mints.len()) + token_index];
+    }
+
     #[allow(dead_code)]
     pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
         let mango_program_id = self.mango_program_id;
@@ -373,8 +378,7 @@ impl MangoProgramTest {
         return oracle_pks;
     }
 
-    pub fn with_unit_config(&mut self, mango_group: &MangoGroup, index: u64, lot: i64) -> MintUnitConfig {
-        let decimals = mango_group.tokens[index as usize].decimals as u64;
+    pub fn with_unit_config(&mut self, index: u64, decimals: u64, lot: i64) -> MintUnitConfig {
         let unit = 10i64.pow(decimals as u32) as i64;
         return MintUnitConfig::new(index as usize, decimals, unit, lot);
     }
@@ -488,7 +492,22 @@ impl MangoProgramTest {
         println!("Deposit success");
     }
 
-    pub async fn place_perp_order(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account: &MangoAccount, mango_account_pk: &Pubkey, perp_market: &PerpMarket, perp_market_pk: &Pubkey, order_side: Side, order_price: i64, order_size: i64, order_id: u64, order_type: OrderType, oracle_pk: &Pubkey, user_index: usize) {
+    pub async fn place_perp_order(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        mango_account: &MangoAccount,
+        mango_account_pk: &Pubkey,
+        perp_market: &PerpMarket,
+        perp_market_pk: &Pubkey,
+        order_side: Side,
+        order_price: i64,
+        order_size: i64,
+        order_id: u64,
+        order_type: OrderType,
+        oracle_pk: &Pubkey,
+        user_index: usize
+    ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
 
@@ -528,6 +547,6 @@ impl MangoProgramTest {
         ];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
-
+        Ok(())
     }
 }
