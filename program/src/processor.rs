@@ -2145,7 +2145,7 @@ impl Processor {
             HealthType::Maint,
         )?;
 
-        // TODO - optimization: consider calculating both healths at same time
+        // TODO - OPT consider calculating both healths at same time
         let init_health = liqee_ma.get_health(
             &mango_group,
             &mango_cache,
@@ -2198,8 +2198,12 @@ impl Processor {
             let native_deposits = liqee_ma.get_native_deposit(bank_cache, asset_index)?;
 
             // Max liab transferred to reach init_health == 0
-            let deficit_max_liab: I80F48 = -init_health
-                / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+            let deficit_max_liab = if asset_index == QUOTE_INDEX {
+                native_deposits
+            } else {
+                -init_health
+                    / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+            };
 
             // Max liab transferred to reach asset_i == 0
             let asset_implied_liab_transfer =
