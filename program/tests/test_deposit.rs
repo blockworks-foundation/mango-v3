@@ -32,8 +32,9 @@ async fn test_deposit_succeeds() {
     let base_price = 10000;
 
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
-    let quote_unit_config = test.with_unit_config(quote_index, 6, 10);
-    let deposit_amount = (base_price * quote_unit_config.unit) as u64;
+    let quote_mint = test.with_mint(quote_index as usize);
+
+    let deposit_amount = (base_price * quote_mint.unit) as u64;
     let (mango_account_pk, mut mango_account) = test.with_mango_account(&mango_group_pk, user_index).await;
     let user_token_account = test.with_user_token_account(user_index, quote_index as usize);
     let initial_balance = test.get_token_balance(user_token_account).await;

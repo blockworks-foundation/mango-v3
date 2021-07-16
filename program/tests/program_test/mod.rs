@@ -4,7 +4,7 @@ use fixed::types::I80F48;
 use mango::{entrypoint::*, ids::*, state::*, matching::*, queue::*, instruction::*, oracle::*, utils::*};
 use mango_common::Loadable;
 use solana_program::{
-    account_info::AccountInfo, program_option::COption, program_pack::Pack, pubkey::*, rent::*,
+    program_error::ProgramError, account_info::AccountInfo, program_option::COption, program_pack::Pack, pubkey::*, rent::*,
     system_instruction,
 };
 use solana_program_test::*;
@@ -15,6 +15,7 @@ use solana_sdk::{
     transaction::Transaction,
     transport::TransportError,
 };
+
 use spl_token::{state::*, *};
 
 pub mod group;
@@ -43,20 +44,36 @@ impl AddPacked for ProgramTest {
     }
 }
 
-pub struct MintUnitConfig {
-    pub index: usize,
-    pub decimals: u64,
-    pub unit: i64,
-    pub lot: i64,
+pub struct ListingKeys {
+    market_key: Keypair,
+    req_q_key: Keypair,
+    event_q_key: Keypair,
+    bids_key: Keypair,
+    asks_key: Keypair,
+    vault_signer_pk: Pubkey,
+    vault_signer_nonce: u64,
 }
 
-impl MintUnitConfig {
-    fn new(index: usize, decimals: u64, unit: i64, lot: i64) -> MintUnitConfig {
-        MintUnitConfig { index: index, decimals: decimals, unit: unit, lot: lot }
-    }
-    pub fn default() -> Self {
-        MintUnitConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as i64, lot: 10 as i64 }
-    }
+pub struct MarketPubkeys {
+    pub market: Pubkey,
+    pub req_q: Pubkey,
+    pub event_q: Pubkey,
+    pub bids: Pubkey,
+    pub asks: Pubkey,
+    pub coin_vault: Pubkey,
+    pub pc_vault: Pubkey,
+    pub vault_signer_key: Pubkey,
+}
+
+#[derive(Copy, Clone)]
+pub struct MintConfig {
+    // pub symbol: String,
+    pub index: usize,
+    pub decimals: u8,
+    pub unit: i64,
+    pub base_lot: i64,
+    pub quote_lot: i64,
+    pub pubkey: Option<Pubkey>,
 }
 
 pub struct MangoProgramTestConfig {
@@ -77,7 +94,7 @@ pub struct MangoProgramTest {
     pub mango_program_id: Pubkey,
     pub serum_program_id: Pubkey,
     pub users: Vec<Keypair>,
-    pub mints: Vec<Pubkey>,
+    pub mints: Vec<MintConfig>,
     pub token_accounts: Vec<Pubkey>, // user x mint
 }
 
@@ -85,6 +102,44 @@ impl MangoProgramTest {
     pub async fn start_new(config: &MangoProgramTestConfig) -> Self {
         let mango_program_id = Pubkey::new_unique();
         let serum_program_id = Pubkey::new_unique();
+
+        // Note:: Maybe define a const array of all the mint params that replicate real life and use those
+        let mut mints: Vec<MintConfig> = vec![
+            // ("MNGO", 0, 6, 10i64.pow(6) as i64, 10 as i64),
+            // ("MSRM", 0, 6, 10i64.pow(6) as i64, 10 as i64),
+            MintConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 1, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 1000 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "ETH".to_string()
+            MintConfig { index: 2, decimals: 9, unit: 10i64.pow(9) as i64, base_lot: 100000000 as i64, quote_lot: 100 as i64, pubkey: None }, // symbol: "SOL".to_string()
+            MintConfig { index: 3, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100000 as i64, quote_lot: 100 as i64, pubkey: None }, // symbol: "SRM".to_string()
+            MintConfig { index: 4, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 0 as i64, quote_lot: 0 as i64, pubkey: None }, // symbol: "USDC".to_string()
+            MintConfig { index: 5, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 6, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 7, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 8, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 9, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 10, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 11, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 12, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 13, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 14, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 15, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 16, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 17, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 18, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 19, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 20, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 21, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 22, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 23, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 24, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 25, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 26, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 27, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 28, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 29, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 30, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig { index: 31, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+        ];
 
         let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
 
@@ -96,9 +151,8 @@ impl MangoProgramTest {
         test.set_bpf_compute_max_units(config.compute_limit);
 
         // add mints in loop
-        let mut mints = Vec::new();
+        // let mut mints = Vec::new();
         for m in 0..config.num_mints {
-            let mint_decimals = 6; // TODO use different decimals
             let mint_pk = Pubkey::new_unique();
             test.add_packable_account(
                 mint_pk,
@@ -106,12 +160,12 @@ impl MangoProgramTest {
                 &Mint {
                     is_initialized: true,
                     mint_authority: COption::Some(Pubkey::new_unique()),
-                    decimals: mint_decimals,
+                    decimals: mints[m as usize].decimals,
                     ..Mint::default()
                 },
                 &spl_token::id(),
             );
-            mints.push(mint_pk);
+            mints[m as usize].pubkey = Some(mint_pk);
         }
 
         // add msrm mint
@@ -152,13 +206,13 @@ impl MangoProgramTest {
 
             // give every user 10^18 (< 2^60) of every token
             // ~~ 1 trillion in case of 6 decimals
-            for mint_key in &mints {
+            for mint in &mints {
                 let token_key = Pubkey::new_unique();
                 test.add_packable_account(
                     token_key,
                     u32::MAX as u64,
                     &spl_token::state::Account {
-                        mint: *mint_key,
+                        mint: mint.pubkey.unwrap(),
                         owner: user_key.pubkey(),
                         amount: 1_000_000_000_000_000_000,
                         state: spl_token::state::AccountState::Initialized,
@@ -294,7 +348,7 @@ impl MangoProgramTest {
         let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let admin_pk = self.context.payer.pubkey();
 
-        let quote_mint_pk = self.mints[self.mints.len() - 1];
+        let quote_mint_pk = self.mints[self.mints.len() - 1].pubkey.unwrap();
         let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
         let quote_node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
         let quote_root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
@@ -358,6 +412,10 @@ impl MangoProgramTest {
         return (mango_group.mango_cache, mango_cache);
     }
 
+    pub fn with_mint(&mut self, mint_index: usize) -> MintConfig {
+        return self.mints[mint_index];
+    }
+
     #[allow(dead_code)]
     pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
         return self.token_accounts[(user_index * self.mints.len()) + token_index];
@@ -378,21 +436,16 @@ impl MangoProgramTest {
         return oracle_pks;
     }
 
-    pub fn with_unit_config(&mut self, index: u64, decimals: u64, lot: i64) -> MintUnitConfig {
-        let unit = 10i64.pow(decimals as u32) as i64;
-        return MintUnitConfig::new(index as usize, decimals, unit, lot);
+    pub fn with_oracle_price(&mut self, quote_mint: &MintConfig, base_mint: &MintConfig, price: u64) -> I80F48 {
+        return I80F48::from_num(price) * I80F48::from_num(quote_mint.unit) / I80F48::from_num(base_mint.unit);
     }
 
-    pub fn with_oracle_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: u64) -> I80F48 {
-        return I80F48::from_num(price) * I80F48::from_num(quote_mint_config.unit) / I80F48::from_num(base_mint_config.unit);
+    pub fn with_order_price(&mut self, quote_mint: &MintConfig, base_mint: &MintConfig, price: i64) -> i64 {
+        return ((price) * quote_mint.unit * base_mint.base_lot) / (base_mint.unit * base_mint.quote_lot)
     }
 
-    pub fn with_order_price(&mut self, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, price: i64) -> i64 {
-        return ((price) * quote_mint_config.unit * base_mint_config.lot) / (base_mint_config.unit * quote_mint_config.lot)
-    }
-
-    pub fn with_order_size(&mut self, base_mint_config: &MintUnitConfig, quantity: i64) -> i64 {
-        return (quantity * base_mint_config.unit) / base_mint_config.lot;
+    pub fn with_order_size(&mut self, base_mint: &MintConfig, quantity: i64) -> i64 {
+        return (quantity * base_mint.unit) / base_mint.base_lot;
     }
 
     pub async fn with_root_bank(&mut self, mango_group: &MangoGroup, token_index: usize) -> (Pubkey, RootBank) {
@@ -407,9 +460,8 @@ impl MangoProgramTest {
         return (node_bank_pk, node_bank);
     }
 
-    pub async fn with_perp_market(&mut self, mango_group_pk: &Pubkey, quote_mint_config: &MintUnitConfig, base_mint_config: &MintUnitConfig, index: usize) -> (Pubkey, PerpMarket) {
+    pub async fn with_perp_market(&mut self, mango_group_pk: &Pubkey, mint_index: usize, market_index: usize) -> (Pubkey, PerpMarket) {
         let mango_program_id = self.mango_program_id;
-
         let perp_market_pk = self.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
         let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let max_num_events = 32;
@@ -436,13 +488,13 @@ impl MangoProgramTest {
             &asks_pk,
             &mngo_vault_pk,
             &admin_pk,
-            index,
+            market_index,
             maint_leverage,
             init_leverage,
             maker_fee,
             taker_fee,
-            base_mint_config.lot,
-            quote_mint_config.lot,
+            self.mints[mint_index].base_lot,
+            self.mints[mint_index].quote_lot,
             max_depth_bps,
             scaler,
         )
@@ -452,10 +504,6 @@ impl MangoProgramTest {
 
         let perp_market = self.load_account::<PerpMarket>(perp_market_pk).await;
         return (perp_market_pk, perp_market);
-    }
-
-    pub async fn with_spot_market(&mut self, mango_group_pk: &Pubkey) {
-
     }
 
     pub async fn perform_deposit(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account_pk: &Pubkey, user_index: usize, token_index: usize, amount: u64) {
@@ -548,5 +596,166 @@ impl MangoProgramTest {
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
         Ok(())
+    }
+    pub fn create_dex_account(
+        &mut self,
+        unpadded_len: usize,
+    ) -> (Keypair, Instruction) {
+        let serum_program_id = self.serum_program_id;
+        let key = Keypair::new();
+        let len = unpadded_len + 12;
+        let rent = self.rent.minimum_balance(len);
+        let create_account_instr = solana_sdk::system_instruction::create_account(
+            &self.context.payer.pubkey(),
+            &key.pubkey(),
+            rent,
+            len as u64,
+            &serum_program_id,
+        );
+        return (key, create_account_instr);
+    }
+
+    fn gen_listing_params(
+        &mut self,
+        _coin_mint: &Pubkey,
+        _pc_mint: &Pubkey,
+    ) -> (ListingKeys, Vec<Instruction>) {
+        let serum_program_id = self.serum_program_id;
+
+        let (market_key, create_market) = self.create_dex_account(376);
+        let (req_q_key, create_req_q) = self.create_dex_account(640);
+        let (event_q_key, create_event_q) = self.create_dex_account(1 << 20);
+        let (bids_key, create_bids) = self.create_dex_account(1 << 16);
+        let (asks_key, create_asks) = self.create_dex_account(1 << 16);
+
+        let (vault_signer_pk, vault_signer_nonce) = create_signer_key_and_nonce(&serum_program_id, &market_key.pubkey());
+
+        let info = ListingKeys {
+            market_key,
+            req_q_key,
+            event_q_key,
+            bids_key,
+            asks_key,
+            vault_signer_pk,
+            vault_signer_nonce,
+        };
+        let instructions = vec![
+            create_market,
+            create_req_q,
+            create_event_q,
+            create_bids,
+            create_asks,
+        ];
+        return (info, instructions);
+    }
+
+    pub async fn list_market(
+        &mut self,
+        base_index: usize,
+        quote_index: usize,
+    ) -> Result<MarketPubkeys, ProgramError> {
+        let serum_program_id = self.serum_program_id;
+        let coin_mint = self.mints[base_index].pubkey.unwrap();
+        let pc_mint = self.mints[quote_index].pubkey.unwrap();
+        let (listing_keys, mut instructions) = self.gen_listing_params(&coin_mint, &pc_mint);
+        let ListingKeys {
+            market_key,
+            req_q_key,
+            event_q_key,
+            bids_key,
+            asks_key,
+            vault_signer_pk,
+            vault_signer_nonce,
+        } = listing_keys;
+
+        let coin_vault = self.create_token_account(&vault_signer_pk, &coin_mint).await;
+        let pc_vault = self.create_token_account(&listing_keys.vault_signer_pk, &pc_mint).await;
+
+        let init_market_instruction = serum_dex::instruction::initialize_market(
+            &market_key.pubkey(),
+            &serum_program_id,
+            &coin_mint,
+            &pc_mint,
+            &coin_vault,
+            &pc_vault,
+            &bids_key.pubkey(),
+            &asks_key.pubkey(),
+            &req_q_key.pubkey(),
+            &event_q_key.pubkey(),
+            self.mints[base_index].base_lot as u64,
+            self.mints[base_index].quote_lot as u64,
+            vault_signer_nonce,
+            100,
+        )?;
+
+        instructions.push(init_market_instruction);
+
+        let signers = vec![
+            &market_key,
+            &req_q_key,
+            &event_q_key,
+            &bids_key,
+            &asks_key,
+            &req_q_key,
+            &event_q_key,
+        ];
+
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+
+        Ok(MarketPubkeys {
+            market: market_key.pubkey(),
+            req_q: req_q_key.pubkey(),
+            event_q: event_q_key.pubkey(),
+            bids: bids_key.pubkey(),
+            asks: asks_key.pubkey(),
+            coin_vault: coin_vault,
+            pc_vault: pc_vault,
+            vault_signer_key: vault_signer_pk,
+        })
+    }
+    pub async fn add_market_to_mango_group(&mut self, mango_group_pk: &Pubkey) {
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+
+        let quote_index = self.mints.len() - 1;
+
+        for mint_index in 0..quote_index {
+            let market_pubkeys = self.list_market(mint_index as usize, quote_index as usize).await.unwrap();
+            println!("Serum Market PK: {}", market_pubkeys.market.to_string());
+
+            let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+            let vault_pk = self.create_token_account(&signer_pk, &self.mints[mint_index as usize].pubkey.unwrap()).await;
+            let node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
+            let root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
+            let init_leverage = I80F48::from_num(10);
+            let maint_leverage = init_leverage * 2;
+            let optimal_util = I80F48::from_num(0.7);
+            let optimal_rate = I80F48::from_num(0.06);
+            let max_rate = I80F48::from_num(1.5);
+
+            let admin_pk = self.context.payer.pubkey();
+
+            let instructions = [mango::instruction::add_spot_market(
+                &mango_program_id,
+                &mango_group_pk,
+                &market_pubkeys.market,
+                &serum_program_id,
+                &self.mints[mint_index as usize].pubkey.unwrap(),
+                &node_bank_pk,
+                &vault_pk,
+                &root_bank_pk,
+                &admin_pk,
+                mint_index as usize,
+                maint_leverage,
+                init_leverage,
+                optimal_util,
+                optimal_rate,
+                max_rate,
+            )
+            .unwrap()];
+
+            self.process_transaction(&instructions, None).await.unwrap();
+        }
     }
 }
