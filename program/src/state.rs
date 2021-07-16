@@ -1514,6 +1514,7 @@ impl PerpMarket {
         state.event_queue = *event_queue_ai.key;
         state.quote_lot_size = quote_lot_size;
         state.base_lot_size = base_lot_size;
+        state.points_per_mngo = ONE_I80F48;
 
         let vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
         check!(vault.owner == mango_group.signer_key, MangoErrorCode::InvalidOwner)?;
