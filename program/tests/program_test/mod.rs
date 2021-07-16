@@ -1,11 +1,11 @@
 use std::convert::TryInto;
 use std::mem::size_of;
+
 use fixed::types::I80F48;
-use mango::{entrypoint::*, ids::*, state::*, matching::*, queue::*, instruction::*, oracle::*, utils::*};
 use mango_common::Loadable;
 use solana_program::{
-    program_error::ProgramError, account_info::AccountInfo, program_option::COption, program_pack::Pack, pubkey::*, rent::*,
-    system_instruction,
+    account_info::AccountInfo, program_error::ProgramError, program_option::COption,
+    program_pack::Pack, pubkey::*, rent::*, system_instruction,
 };
 use solana_program_test::*;
 use solana_sdk::{
@@ -15,8 +15,11 @@ use solana_sdk::{
     transaction::Transaction,
     transport::TransportError,
 };
-
 use spl_token::{state::*, *};
+
+use mango::{
+    entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
+};
 
 pub mod group;
 
@@ -107,38 +110,262 @@ impl MangoProgramTest {
         let mut mints: Vec<MintConfig> = vec![
             // ("MNGO", 0, 6, 10i64.pow(6) as i64, 10 as i64),
             // ("MSRM", 0, 6, 10i64.pow(6) as i64, 10 as i64),
-            MintConfig { index: 0, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 1, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 1000 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "ETH".to_string()
-            MintConfig { index: 2, decimals: 9, unit: 10i64.pow(9) as i64, base_lot: 100000000 as i64, quote_lot: 100 as i64, pubkey: None }, // symbol: "SOL".to_string()
-            MintConfig { index: 3, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100000 as i64, quote_lot: 100 as i64, pubkey: None }, // symbol: "SRM".to_string()
-            MintConfig { index: 4, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 0 as i64, quote_lot: 0 as i64, pubkey: None }, // symbol: "USDC".to_string()
-            MintConfig { index: 5, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 6, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 7, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 8, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 9, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 10, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 11, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 12, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 13, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 14, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 15, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 16, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 17, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 18, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 19, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 20, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 21, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 22, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 23, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 24, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 25, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 26, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 27, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 28, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 29, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 30, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
-            MintConfig { index: 31, decimals: 6, unit: 10i64.pow(6) as i64, base_lot: 100 as i64, quote_lot: 10 as i64, pubkey: None }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 0,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 1,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 1000 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "ETH".to_string()
+            MintConfig {
+                index: 2,
+                decimals: 9,
+                unit: 10i64.pow(9) as i64,
+                base_lot: 100000000 as i64,
+                quote_lot: 100 as i64,
+                pubkey: None,
+            }, // symbol: "SOL".to_string()
+            MintConfig {
+                index: 3,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100000 as i64,
+                quote_lot: 100 as i64,
+                pubkey: None,
+            }, // symbol: "SRM".to_string()
+            MintConfig {
+                index: 4,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 0 as i64,
+                quote_lot: 0 as i64,
+                pubkey: None,
+            }, // symbol: "USDC".to_string()
+            MintConfig {
+                index: 5,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 6,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 7,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 8,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 9,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 10,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 11,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 12,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 13,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 14,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 15,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 16,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 17,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 18,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 19,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 20,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 21,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 22,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 23,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 24,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 25,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 26,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 27,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 28,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 29,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 30,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
+            MintConfig {
+                index: 31,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: None,
+            }, // symbol: "BTC".to_string()
         ];
 
         let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
@@ -345,20 +572,22 @@ impl MangoProgramTest {
 
         let mango_group_pk = self.create_account(size_of::<MangoGroup>(), &mango_program_id).await;
         let mango_cache_pk = self.create_account(size_of::<MangoCache>(), &mango_program_id).await;
-        let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+        let (signer_pk, signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let admin_pk = self.context.payer.pubkey();
 
         let quote_mint_pk = self.mints[self.mints.len() - 1].pubkey.unwrap();
         let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
-        let quote_node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
-        let quote_root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
+        let quote_node_bank_pk =
+            self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
+        let quote_root_bank_pk =
+            self.create_account(size_of::<RootBank>(), &mango_program_id).await;
         let dao_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
         let msrm_vault_pk = self.create_token_account(&signer_pk, &msrm_token::ID).await;
 
         let quote_optimal_util = I80F48::from_num(0.7);
         let quote_optimal_rate = I80F48::from_num(0.06);
         let quote_max_rate = I80F48::from_num(1.5);
-
 
         let instructions = [mango::instruction::init_mango_group(
             &mango_program_id,
@@ -388,9 +617,14 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn with_mango_account(&mut self, mango_group_pk: &Pubkey, index: usize) -> (Pubkey, MangoAccount) {
+    pub async fn with_mango_account(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        index: usize,
+    ) -> (Pubkey, MangoAccount) {
         let mango_program_id = self.mango_program_id;
-        let mango_account_pk = self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
+        let mango_account_pk =
+            self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
         let admin_pk = self.context.payer.pubkey();
         let user = Keypair::from_base58_string(&self.users[index].to_base58_string());
         let user_pk = user.pubkey();
@@ -429,43 +663,76 @@ impl MangoProgramTest {
         let mut oracle_pks = Vec::new();
         let mut instructions = Vec::new();
         for _ in 0..num_oracles {
-            instructions.push(add_oracle(&mango_program_id, &mango_group_pk, &oracle_pk, &admin_pk).unwrap());
+            instructions.push(
+                add_oracle(&mango_program_id, &mango_group_pk, &oracle_pk, &admin_pk).unwrap(),
+            );
             oracle_pks.push(oracle_pk);
         }
         self.process_transaction(&instructions, None).await.unwrap();
         return oracle_pks;
     }
 
-    pub fn with_oracle_price(&mut self, quote_mint: &MintConfig, base_mint: &MintConfig, price: u64) -> I80F48 {
-        return I80F48::from_num(price) * I80F48::from_num(quote_mint.unit) / I80F48::from_num(base_mint.unit);
+    pub fn with_oracle_price(
+        &mut self,
+        quote_mint: &MintConfig,
+        base_mint: &MintConfig,
+        price: u64,
+    ) -> I80F48 {
+        return I80F48::from_num(price) * I80F48::from_num(quote_mint.unit)
+            / I80F48::from_num(base_mint.unit);
     }
 
-    pub fn with_order_price(&mut self, quote_mint: &MintConfig, base_mint: &MintConfig, price: i64) -> i64 {
-        return ((price) * quote_mint.unit * base_mint.base_lot) / (base_mint.unit * base_mint.quote_lot)
+    pub fn with_order_price(
+        &mut self,
+        quote_mint: &MintConfig,
+        base_mint: &MintConfig,
+        price: i64,
+    ) -> i64 {
+        return ((price) * quote_mint.unit * base_mint.base_lot)
+            / (base_mint.unit * base_mint.quote_lot);
     }
 
     pub fn with_order_size(&mut self, base_mint: &MintConfig, quantity: i64) -> i64 {
         return (quantity * base_mint.unit) / base_mint.base_lot;
     }
 
-    pub async fn with_root_bank(&mut self, mango_group: &MangoGroup, token_index: usize) -> (Pubkey, RootBank) {
+    pub async fn with_root_bank(
+        &mut self,
+        mango_group: &MangoGroup,
+        token_index: usize,
+    ) -> (Pubkey, RootBank) {
         let root_bank_pk = mango_group.tokens[token_index].root_bank;
         let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
         return (root_bank_pk, root_bank);
     }
 
-    pub async fn with_node_bank(&mut self, root_bank: &RootBank, token_index: usize) -> (Pubkey, NodeBank) {
+    pub async fn with_node_bank(
+        &mut self,
+        root_bank: &RootBank,
+        token_index: usize,
+    ) -> (Pubkey, NodeBank) {
         let node_bank_pk = root_bank.node_banks[token_index];
         let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
         return (node_bank_pk, node_bank);
     }
 
-    pub async fn with_perp_market(&mut self, mango_group_pk: &Pubkey, mint_index: usize, market_index: usize) -> (Pubkey, PerpMarket) {
+    pub async fn with_perp_market(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        mint_index: usize,
+        market_index: usize,
+    ) -> (Pubkey, PerpMarket) {
         let mango_program_id = self.mango_program_id;
         let perp_market_pk = self.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
-        let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+        let (signer_pk, signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let max_num_events = 32;
-        let event_queue_pk = self.create_account(size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events, &mango_program_id).await;
+        let event_queue_pk = self
+            .create_account(
+                size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events,
+                &mango_program_id,
+            )
+            .await;
         let bids_pk = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
         let asks_pk = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
         let mngo_vault_pk = self.create_token_account(&signer_pk, &mngo_token::ID).await;
@@ -506,7 +773,15 @@ impl MangoProgramTest {
         return (perp_market_pk, perp_market);
     }
 
-    pub async fn perform_deposit(&mut self, mango_group: &MangoGroup, mango_group_pk: &Pubkey, mango_account_pk: &Pubkey, user_index: usize, token_index: usize, amount: u64) {
+    pub async fn perform_deposit(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        mango_account_pk: &Pubkey,
+        user_index: usize,
+        token_index: usize,
+        amount: u64,
+    ) {
         let mango_program_id = self.mango_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let user_token_account = self.with_user_token_account(user_index, token_index);
@@ -554,7 +829,7 @@ impl MangoProgramTest {
         order_id: u64,
         order_type: OrderType,
         oracle_pk: &Pubkey,
-        user_index: usize
+        user_index: usize,
     ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
@@ -564,7 +839,7 @@ impl MangoProgramTest {
                 &mango_program_id,
                 &mango_group_pk,
                 &mango_group.mango_cache,
-                &[*oracle_pk]
+                &[*oracle_pk],
             )
             .unwrap(),
             cache_perp_markets(
@@ -597,10 +872,7 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
         Ok(())
     }
-    pub fn create_dex_account(
-        &mut self,
-        unpadded_len: usize,
-    ) -> (Keypair, Instruction) {
+    pub fn create_dex_account(&mut self, unpadded_len: usize) -> (Keypair, Instruction) {
         let serum_program_id = self.serum_program_id;
         let key = Keypair::new();
         let len = unpadded_len + 12;
@@ -628,7 +900,8 @@ impl MangoProgramTest {
         let (bids_key, create_bids) = self.create_dex_account(1 << 16);
         let (asks_key, create_asks) = self.create_dex_account(1 << 16);
 
-        let (vault_signer_pk, vault_signer_nonce) = create_signer_key_and_nonce(&serum_program_id, &market_key.pubkey());
+        let (vault_signer_pk, vault_signer_nonce) =
+            create_signer_key_and_nonce(&serum_program_id, &market_key.pubkey());
 
         let info = ListingKeys {
             market_key,
@@ -639,13 +912,8 @@ impl MangoProgramTest {
             vault_signer_pk,
             vault_signer_nonce,
         };
-        let instructions = vec![
-            create_market,
-            create_req_q,
-            create_event_q,
-            create_bids,
-            create_asks,
-        ];
+        let instructions =
+            vec![create_market, create_req_q, create_event_q, create_bids, create_asks];
         return (info, instructions);
     }
 
@@ -713,19 +981,23 @@ impl MangoProgramTest {
             vault_signer_key: vault_signer_pk,
         })
     }
-    pub async fn add_market_to_mango_group(&mut self, mango_group_pk: &Pubkey) {
+    pub async fn add_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
 
         let quote_index = self.mints.len() - 1;
 
         for mint_index in 0..quote_index {
-            let market_pubkeys = self.list_market(mint_index as usize, quote_index as usize).await.unwrap();
+            let market_pubkeys =
+                self.list_market(mint_index as usize, quote_index as usize).await.unwrap();
             println!("Serum Market PK: {}", market_pubkeys.market.to_string());
 
-            let (signer_pk, signer_nonce) = create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+            let (signer_pk, signer_nonce) =
+                create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
 
-            let vault_pk = self.create_token_account(&signer_pk, &self.mints[mint_index as usize].pubkey.unwrap()).await;
+            let vault_pk = self
+                .create_token_account(&signer_pk, &self.mints[mint_index as usize].pubkey.unwrap())
+                .await;
             let node_bank_pk = self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
             let root_bank_pk = self.create_account(size_of::<RootBank>(), &mango_program_id).await;
             let init_leverage = I80F48::from_num(10);

@@ -5,8 +5,8 @@ mod program_test;
 use arrayref::array_ref;
 use bytemuck::cast_ref;
 use fixed::types::I80F48;
-use program_test::*;
 use mango_common::Loadable;
+use program_test::*;
 use std::{mem::size_of, mem::size_of_val, thread::sleep, time::Duration};
 
 use mango::{
@@ -35,12 +35,21 @@ async fn test_deposit_succeeds() {
     let quote_mint = test.with_mint(quote_index as usize);
 
     let deposit_amount = (base_price * quote_mint.unit) as u64;
-    let (mango_account_pk, mut mango_account) = test.with_mango_account(&mango_group_pk, user_index).await;
+    let (mango_account_pk, mut mango_account) =
+        test.with_mango_account(&mango_group_pk, user_index).await;
     let user_token_account = test.with_user_token_account(user_index, quote_index as usize);
     let initial_balance = test.get_token_balance(user_token_account).await;
 
     // Act
-    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, user_index, quote_index as usize, deposit_amount).await;
+    test.perform_deposit(
+        &mango_group,
+        &mango_group_pk,
+        &mango_account_pk,
+        user_index,
+        quote_index as usize,
+        deposit_amount,
+    )
+    .await;
 
     // Assert
     let post_balance = test.get_token_balance(user_token_account).await;

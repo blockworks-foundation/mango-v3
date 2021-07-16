@@ -32,7 +32,8 @@ mango-common = { path = "../common" }
 [dev-dependencies]
 solana-sdk = "^1.7.1"
 solana-program-test = "^1.7.1"
-tarpc = { version = "0.24.1", features = ["full"] }
+solana-logger = "^1.7.4"
+tarpc = { version = "^0.26.2", features = ["full"] }
 
 
 [profile.release]
