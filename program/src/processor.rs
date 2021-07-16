@@ -2202,7 +2202,7 @@ impl Processor {
                 native_deposits
             } else {
                 -init_health
-                    / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+                    / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee))
             };
 
             // Max liab transferred to reach asset_i == 0
