@@ -1,109 +1,65 @@
 #![cfg(feature = "test-bpf")]
 
-mod helpers;
+// Tests related to placing orders on a perp market
+mod program_test;
+use arrayref::array_ref;
+use bytemuck::cast_ref;
+use fixed::types::I80F48;
+use mango_common::Loadable;
+use program_test::*;
+use std::{mem::size_of, mem::size_of_val, thread::sleep, time::Duration};
 
-use helpers::*;
-use solana_program::account_info::AccountInfo;
-use solana_program_test::*;
-use solana_sdk::{
-    account::Account,
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::Transaction,
-};
-use std::mem::size_of;
-
-use mango::instruction::cache_root_banks;
 use mango::{
-    entrypoint::process_instruction,
-    instruction::{deposit, init_mango_account},
-    state::{MangoAccount, QUOTE_INDEX},
+    entrypoint::process_instruction, instruction::*, matching::*, oracle::StubOracle, queue::*,
+    state::*,
+};
+use solana_program::{account_info::AccountInfo, pubkey::Pubkey};
+use solana_program_test::*;
+use solana_sdk::account::ReadableAccount;
+use solana_sdk::{
+    account::Account, commitment_config::CommitmentLevel, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 
 #[tokio::test]
 async fn test_deposit_succeeds() {
-    let program_id = Pubkey::new_unique();
+    // Arrange
+    let config = MangoProgramTestConfig::default();
+    let mut test = MangoProgramTest::start_new(&config).await;
 
-    let mut test = ProgramTest::new("mango", program_id, processor!(process_instruction));
+    let user_index = 0;
+    let quote_index = config.num_mints - 1;
+    let base_price = 10000;
 
-    // limit to track compute unit increase
-    test.set_bpf_compute_max_units(50_000);
+    let (mango_group_pk, mango_group) = test.with_mango_group().await;
+    let quote_mint = test.with_mint(quote_index as usize);
 
-    let initial_amount = 2;
-    let deposit_amount = 1;
+    let deposit_amount = (base_price * quote_mint.unit) as u64;
+    let (mango_account_pk, mut mango_account) =
+        test.with_mango_account(&mango_group_pk, user_index).await;
+    let user_token_account = test.with_user_token_account(user_index, quote_index as usize);
+    let initial_balance = test.get_token_balance(user_token_account).await;
 
-    // setup mango group
-    let mango_group = add_mango_group_prodlike(&mut test, program_id);
+    // Act
+    test.perform_deposit(
+        &mango_group,
+        &mango_group_pk,
+        &mango_account_pk,
+        user_index,
+        quote_index as usize,
+        deposit_amount,
+    )
+    .await;
 
-    // setup user account
-    let user = Keypair::new();
-    test.add_account(user.pubkey(), Account::new(u32::MAX as u64, 0, &user.pubkey()));
+    // Assert
+    let post_balance = test.get_token_balance(user_token_account).await;
+    assert_eq!(post_balance, initial_balance - deposit_amount);
 
-    // setup user token accounts
-    let user_account =
-        add_token_account(&mut test, user.pubkey(), mango_group.tokens[0].pubkey, initial_amount);
+    let (root_bank_pk, root_bank) = test.with_root_bank(&mango_group, quote_index as usize).await;
+    let (node_bank_pk, node_bank) = test.with_node_bank(&root_bank, 0).await;
+    let mango_vault_balance = test.get_token_balance(node_bank.vault).await;
+    assert_eq!(mango_vault_balance, deposit_amount);
+    mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
 
-    let mango_account_pk = Pubkey::new_unique();
-    test.add_account(
-        mango_account_pk,
-        Account::new(u32::MAX as u64, size_of::<MangoAccount>(), &program_id),
-    );
-
-    let (mut banks_client, payer, recent_blockhash) = test.start().await;
-
-    {
-        let mut transaction = Transaction::new_with_payer(
-            &[
-                mango_group.init_mango_group(&payer.pubkey()),
-                init_mango_account(
-                    &program_id,
-                    &mango_group.mango_group_pk,
-                    &mango_account_pk,
-                    &user.pubkey(),
-                )
-                .unwrap(),
-                cache_root_banks(
-                    &program_id,
-                    &mango_group.mango_group_pk,
-                    &mango_group.mango_cache_pk,
-                    &[mango_group.root_banks[0].pubkey],
-                )
-                .unwrap(),
-                deposit(
-                    &program_id,
-                    &mango_group.mango_group_pk,
-                    &mango_account_pk,
-                    &user.pubkey(),
-                    &mango_group.mango_cache_pk,
-                    &mango_group.root_banks[0].pubkey,
-                    &mango_group.root_banks[0].node_banks[0].pubkey,
-                    &mango_group.root_banks[0].node_banks[0].vault,
-                    &user_account.pubkey,
-                    deposit_amount,
-                )
-                .unwrap(),
-            ],
-            Some(&payer.pubkey()),
-        );
-
-        transaction.sign(&[&payer, &user], recent_blockhash);
-
-        assert!(banks_client.process_transaction(transaction).await.is_ok());
-
-        let final_user_balance = get_token_balance(&mut banks_client, user_account.pubkey).await;
-        assert_eq!(final_user_balance, initial_amount - deposit_amount);
-
-        let mango_vault_balance =
-            get_token_balance(&mut banks_client, mango_group.root_banks[0].node_banks[0].vault)
-                .await;
-        assert_eq!(mango_vault_balance, deposit_amount);
-
-        let mut mango_account = banks_client.get_account(mango_account_pk).await.unwrap().unwrap();
-        let account_info: AccountInfo = (&mango_account_pk, &mut mango_account).into();
-
-        let mango_account =
-            MangoAccount::load_mut_checked(&account_info, &program_id, &mango_group.mango_group_pk)
-                .unwrap();
-        assert_eq!(mango_account.deposits[QUOTE_INDEX], deposit_amount);
-    }
+    assert_eq!(mango_account.deposits[quote_index as usize], deposit_amount);
 }

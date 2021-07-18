@@ -161,7 +161,7 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected: 3
     /// 0. `[writable]` mango_group_ai - MangoGroup
-    /// 1. `[]` oracle_ai - oracle
+    /// 1. `[writable]` oracle_ai - oracle
     /// 2. `[signer]` admin_ai - admin
     AddOracle, // = 10
 
@@ -1143,7 +1143,7 @@ pub fn add_oracle(
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
-        AccountMeta::new_readonly(*oracle_pk, false),
+        AccountMeta::new(*oracle_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
     ];
 

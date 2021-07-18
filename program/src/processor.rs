@@ -298,7 +298,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai, // write
-            oracle_ai,      // read
+            oracle_ai,      // write
             admin_ai        // read
         ] = accounts;
 
@@ -747,6 +747,13 @@ impl Processor {
             dex_signer_ai,          // read
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
+
+        // TODO OPT - reduce size of this transaction
+        // put node bank info into group +64 bytes
+        // remove settle_funds +64 bytes
+        // ask serum dex to use dynamic sysvars +32 bytes
+        // only send in open orders pubkeys we need +22 bytes
+        // shrink size of order instruction +10 bytes
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
@@ -2973,6 +2980,7 @@ impl Processor {
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
         let cache = &mango_cache.perp_market_cache[market_index];
         let info = &mango_group.perp_markets[market_index];
+
         for _ in 0..limit {
             let event = match event_queue.peek_front() {
                 None => break,
@@ -2983,35 +2991,104 @@ impl Processor {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
 
-                    let mut maker = match mango_account_ais
-                        .binary_search_by_key(&fill_event.maker, |ai| *ai.key)
-                    {
-                        Ok(i) => MangoAccount::load_mut_checked(
-                            &mango_account_ais[i],
-                            program_id,
-                            mango_group_ai.key,
-                        )?,
-                        Err(_) => return Ok(()), // If it's not found, stop consuming events
-                    };
+                    // msg!(
+                    //     "FillEvent: {:?} {} {}",
+                    //     fill_event.side,
+                    //     fill_event.price,
+                    //     fill_event.quantity,
+                    // );
 
-                    let mut taker = match mango_account_ais
-                        .binary_search_by_key(&fill_event.taker, |ai| *ai.key)
-                    {
-                        Ok(i) => MangoAccount::load_mut_checked(
-                            &mango_account_ais[i],
-                            program_id,
-                            mango_group_ai.key,
-                        )?,
-                        Err(_) => return Ok(()), // If it's not found, stop consuming events
-                    };
+                    // handle self trade separately
+                    if fill_event.maker == fill_event.taker {
+                        let mut mango_account = match mango_account_ais
+                            .binary_search_by_key(&fill_event.maker, |ai| *(ai.key))
+                        {
+                            Ok(i) => MangoAccount::load_mut_checked(
+                                &mango_account_ais[i],
+                                program_id,
+                                mango_group_ai.key,
+                            )?,
+                            Err(_) => return Ok(()), // If it's not found, stop consuming events
+                        };
 
-                    perp_market.execute_trade(
-                        cache,
-                        info,
-                        fill_event,
-                        &mut maker.perp_accounts[market_index],
-                        &mut taker.perp_accounts[market_index],
-                    )?;
+                        perp_market.execute_self_trade(
+                            cache,
+                            info,
+                            fill_event,
+                            &mut mango_account.perp_accounts[market_index],
+                        )?;
+                    } else {
+                        // msg!("taker: {}", fill_event.taker.to_string());
+                        // msg!("maker: {}", fill_event.maker.to_string());
+                        // let mut maker = match mango_account_ais
+                        //     .iter()
+                        //     .find(|ai| ai.key == &fill_event.maker)
+                        // {
+                        //     None => {
+                        //         msg!("Unable to find maker account");
+                        //         return Ok(());
+                        //     }
+                        //     Some(ai) => {
+                        //         MangoAccount::load_mut_checked(ai, program_id, mango_group_ai.key)?
+                        //     }
+                        // };
+                        // let mut taker = match mango_account_ais
+                        //     .iter()
+                        //     .find(|ai| ai.key == &fill_event.taker)
+                        // {
+                        //     None => {
+                        //         msg!("Unable to find taker account");
+                        //         return Ok(());
+                        //     }
+                        //     Some(ai) => {
+                        //         MangoAccount::load_mut_checked(ai, program_id, mango_group_ai.key)?
+                        //     }
+                        // };
+
+                        let mut maker = match mango_account_ais
+                            .binary_search_by_key(&fill_event.maker, |ai| *(ai.key))
+                        {
+                            Ok(i) => MangoAccount::load_mut_checked(
+                                &mango_account_ais[i],
+                                program_id,
+                                mango_group_ai.key,
+                            )?,
+                            Err(_) => {
+                                msg!(
+                                    "Unable to find maker account {}",
+                                    fill_event.maker.to_string()
+                                );
+                                return Ok(());
+                            } // If it's not found, stop consuming events
+                        };
+
+                        let mut taker = match mango_account_ais
+                            .binary_search_by_key(&fill_event.taker, |ai| *(ai.key))
+                        {
+                            Ok(i) => MangoAccount::load_mut_checked(
+                                &mango_account_ais[i],
+                                program_id,
+                                mango_group_ai.key,
+                            )?,
+                            Err(_) => {
+                                msg!(
+                                    "Unable to find taker account {}",
+                                    fill_event.taker.to_string()
+                                );
+                                return Ok(());
+                            } // If it's not found, stop consuming events
+                        };
+
+                        perp_market.execute_trade(
+                            cache,
+                            info,
+                            fill_event,
+                            &mut maker.perp_accounts[market_index],
+                            &mut taker.perp_accounts[market_index],
+                        )?;
+
+                        // msg!("taker base {}", taker.perp_accounts[market_index].base_position);
+                    }
                 }
                 EventType::Out => {
                     let out_event: &OutEvent = cast_ref(event);
@@ -3945,11 +4022,7 @@ fn invoke_new_order<'a>(
     }
 }
 /*
-
 TODO
-update perp market in client
-update FillEvent
-consume events instruction change access types
 check bankruptcy everywhere
 
 TODO test order types

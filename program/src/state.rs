@@ -947,7 +947,7 @@ impl MangoAccount {
             bids_health.min(asks_health)
         };
 
-        msg!("spot health {:?}", health);
+        // msg!("spot health {:?}", health);
 
         Ok(health)
     }
@@ -1009,7 +1009,7 @@ impl MangoAccount {
                     mango_cache.perp_market_cache[i].short_funding,
                 );
             }
-            msg!("get_health {} => {:?}", i, health);
+            // msg!("get_health {} => {:?}", i, health);
         }
 
         Ok(health)
@@ -1234,6 +1234,7 @@ impl PerpAccount {
         let fees = quote.abs() * info.taker_fee;
         perp_market.fees_accrued += fees;
         self.quote_position += quote - fees;
+        // msg!("taker base pos {} quote pos {:?}", self.base_position, self.quote_position);
         Ok(())
     }
 
@@ -1250,6 +1251,7 @@ impl PerpAccount {
         let fees = quote.abs() * info.taker_fee;
         perp_market.fees_accrued += fees;
         self.quote_position += quote - fees;
+        // msg!("maker base pos {} quote pos {:?}", self.base_position, self.quote_position);
 
         self.apply_incentives(
             perp_market,
@@ -1357,7 +1359,7 @@ impl PerpAccount {
                 I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
         }
 
-        msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
+        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
 
         health
     }
@@ -1401,7 +1403,7 @@ impl PerpAccount {
         } else {
             h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
         };
-        msg!("perp health {:?}", x);
+        // msg!("perp health {:?}", x);
         x
     }
 
@@ -1602,7 +1604,7 @@ impl PerpMarket {
             (None, None) => ZERO_I80F48,
         };
 
-        // TODO consider what happens if time_factor is very small. Can funding_delta == 0 when diff != 0?
+        // TODO TEST consider what happens if time_factor is very small. Can funding_delta == 0 when diff != 0?
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
         let funding_delta: I80F48 = diff
             * time_factor
@@ -1632,6 +1634,7 @@ impl PerpMarket {
         account: &mut PerpAccount,
         cache: &mut PerpMarketCache,
     ) -> MangoResult<()> {
+        // TODO convert into only socializing on one side
         // native USDC per contract open interest
         let socialized_loss = account.quote_position / (I80F48::from_num(self.open_interest));
         account.quote_position = ZERO_I80F48;
@@ -1660,6 +1663,19 @@ impl PerpMarket {
         taker.execute_taker(self, info, fill)?;
         maker.execute_maker(self, info, fill)?;
 
+        Ok(())
+    }
+
+    pub fn execute_self_trade(
+        &mut self,
+        cache: &PerpMarketCache,
+        info: &PerpMarketInfo,
+        fill: &FillEvent,
+        perp_account: &mut PerpAccount,
+    ) -> MangoResult<()> {
+        perp_account.settle_funding(cache);
+        perp_account.execute_taker(self, info, fill)?;
+        perp_account.execute_maker(self, info, fill)?;
         Ok(())
     }
 }

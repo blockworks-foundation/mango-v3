@@ -1509,12 +1509,13 @@ dependencies = [
  "safe-transmute",
  "serde",
  "serum_dex",
+ "solana-logger",
  "solana-program",
  "solana-program-test",
  "solana-sdk",
  "spl-token",
  "static_assertions",
- "tarpc",
+ "tarpc 0.26.2",
  "thiserror",
 ]
 
@@ -1781,6 +1782,22 @@ name = "opaque-debug"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
+
+[[package]]
+name = "opentelemetry"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91cea1dfd50064e52db033179952d18c770cbc5dfefc8eba45d619357ba3914"
+dependencies = [
+ "async-trait",
+ "futures 0.3.15",
+ "js-sys",
+ "lazy_static",
+ "percent-encoding",
+ "pin-project",
+ "rand 0.8.4",
+ "thiserror",
+]
 
 [[package]]
 name = "ouroboros"
@@ -2479,6 +2496,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79c719719ee05df97490f80a45acfc99e5a30ce98a1e4fb67aee422745ae14e3"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2538,7 +2564,7 @@ dependencies = [
  "solana-banks-interface",
  "solana-program",
  "solana-sdk",
- "tarpc",
+ "tarpc 0.24.1",
  "tokio 1.8.1",
  "tokio-serde",
 ]
@@ -2552,7 +2578,7 @@ dependencies = [
  "mio 0.7.13",
  "serde",
  "solana-sdk",
- "tarpc",
+ "tarpc 0.24.1",
 ]
 
 [[package]]
@@ -2569,7 +2595,7 @@ dependencies = [
  "solana-metrics",
  "solana-runtime",
  "solana-sdk",
- "tarpc",
+ "tarpc 0.24.1",
  "tokio 1.8.1",
  "tokio-serde",
  "tokio-stream",
@@ -3073,10 +3099,34 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "static_assertions",
- "tarpc-plugins",
+ "tarpc-plugins 0.9.0",
  "tokio 1.8.1",
  "tokio-serde",
  "tokio-util",
+]
+
+[[package]]
+name = "tarpc"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82cb992a07637db1bcc0e4511d0c58c3f3a03f509d7c6cc2826f7646deac2032"
+dependencies = [
+ "anyhow",
+ "fnv",
+ "futures 0.3.15",
+ "humantime",
+ "opentelemetry",
+ "pin-project",
+ "rand 0.8.4",
+ "serde",
+ "static_assertions",
+ "tarpc-plugins 0.11.0",
+ "thiserror",
+ "tokio 1.8.1",
+ "tokio-serde",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]
@@ -3084,6 +3134,17 @@ name = "tarpc-plugins"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3240378a22b1195734e085ba71d1d4188d50f034aea82635acc430b7005afb5"
+dependencies = [
+ "proc-macro2 1.0.27",
+ "quote 1.0.9",
+ "syn 1.0.73",
+]
+
+[[package]]
+name = "tarpc-plugins"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea80818e6c75f81d961d7426c1b938cbea6b3a51533b5ee71b61f82166b7ef3d"
 dependencies = [
  "proc-macro2 1.0.27",
  "quote 1.0.9",
@@ -3131,6 +3192,15 @@ dependencies = [
  "proc-macro2 1.0.27",
  "quote 1.0.9",
  "syn 1.0.73",
+]
+
+[[package]]
+name = "thread_local"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8018d24e04c95ac8790716a5987d0fec4f8b27249ffa0f7d33f1369bdfb88cbd"
+dependencies = [
+ "once_cell",
 ]
 
 [[package]]
@@ -3421,6 +3491,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite",
+ "slab",
  "tokio 1.8.1",
 ]
 
@@ -3446,8 +3517,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09adeb8c97449311ccd28a427f96fb563e7fd31aabf994189879d9da2394b89d"
 dependencies = [
  "cfg-if 1.0.0",
+ "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c42e6fa53307c8a17e4ccd4dc81cf5ec38db9209f59b222210375b54ee40d1e2"
+dependencies = [
+ "proc-macro2 1.0.27",
+ "quote 1.0.9",
+ "syn 1.0.73",
 ]
 
 [[package]]
@@ -3457,6 +3541,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9ff14f98b1a4b289c6248a023c1c2fa1491062964e9fed67ab29c4e4da4a052"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "tracing-opentelemetry"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99003208b647dae59dcefc49c98aecaa3512fbc29351685d4b9ef23a9218458e"
+dependencies = [
+ "opentelemetry",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab69019741fca4d98be3c62d2b75254528b5432233fd8a4d2739fec20278de48"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
 ]
 
 [[package]]
