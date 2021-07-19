@@ -1711,7 +1711,7 @@ fn strip_dex_padding<'a>(acc: &'a AccountInfo) -> MangoResult<Ref<'a, [u8]>> {
 
 pub fn load_open_orders<'a>(
     acc: &'a AccountInfo,
-) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {
+) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {    
     Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
 }
 
