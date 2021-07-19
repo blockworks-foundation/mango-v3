@@ -748,7 +748,12 @@ impl Processor {
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
-        msg!("== PLACING SPOT ORDER: 1 ==");
+        // TODO OPT - reduce size of this transaction
+        // put node bank info into group +64 bytes
+        // remove settle_funds +64 bytes
+        // ask serum dex to use dynamic sysvars +32 bytes
+        // only send in open orders pubkeys we need +22 bytes
+        // shrink size of order instruction +10 bytes
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
