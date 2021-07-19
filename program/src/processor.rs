@@ -746,7 +746,7 @@ impl Processor {
         ] = fixed_ais;
 
         // TODO OPT - reduce size of this transaction
-        // put node bank info into group +64 bytes
+        // put bank info into group +64 bytes
         // remove settle_funds +64 bytes
         // ask serum dex to use dynamic sysvars +32 bytes
         // only send in open orders pubkeys we need +22 bytes
