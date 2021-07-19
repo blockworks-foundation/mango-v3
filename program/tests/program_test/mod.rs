@@ -696,11 +696,11 @@ impl MangoProgramTest {
 
     pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
         let mango_program_id = self.mango_program_id;
-        let oracle_pk = self.create_account(size_of::<StubOracle>(), &mango_program_id).await;
         let admin_pk = self.context.payer.pubkey();
         let mut oracle_pks = Vec::new();
         let mut instructions = Vec::new();
         for _ in 0..num_oracles {
+            let oracle_pk = self.create_account(size_of::<StubOracle>(), &mango_program_id).await;
             instructions.push(
                 add_oracle(&mango_program_id, &mango_group_pk, &oracle_pk, &admin_pk).unwrap(),
             );

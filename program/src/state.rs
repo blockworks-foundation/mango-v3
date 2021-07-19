@@ -629,10 +629,7 @@ impl MangoCache {
             if !active_assets[i] {
                 continue;
             }
-            // TODO: Print some stuff out here to understand why invalid?
-            msg!("== PRICE CACHE LAST UPDATE: {} ==", self.price_cache[i].last_update);
-            msg!("== PRICE CACHE NOW: {} ==", now_ts);
-            msg!("== PRICE CACHE INTERVAL: {} ==", valid_interval);
+
             if now_ts > self.price_cache[i].last_update + valid_interval {
                 msg!("price_cache {} invalid: {}", i, self.price_cache[i].last_update);
                 return false;
