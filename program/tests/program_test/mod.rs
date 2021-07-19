@@ -95,7 +95,7 @@ pub struct MangoProgramTestConfig {
 
 impl MangoProgramTestConfig {
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 50_000, num_users: 2, num_mints: 32 }
+        MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 32 }
     }
 }
 
@@ -670,6 +670,26 @@ impl MangoProgramTest {
             / I80F48::from_num(base_mint.unit);
     }
 
+    pub async fn set_oracle(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        oracle_pk: &Pubkey,
+        oracle_price: I80F48,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let instructions = [
+            mango::instruction::set_oracle(
+                &mango_program_id,
+                &mango_group_pk,
+                &oracle_pk,
+                &self.context.payer.pubkey(),
+                oracle_price,
+            )
+            .unwrap()
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
     pub fn with_order_price(
         &mut self,
         quote_mint: &MintConfig,
@@ -974,12 +994,9 @@ impl MangoProgramTest {
     pub async fn init_open_orders(
         &mut self,
         spot_market: &MarketPubkeys,
-        user_index: usize,
     ) -> Pubkey {
         let serum_program_id = self.serum_program_id;
 
-        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_pk = user.pubkey();
         let (orders_key, instruction) = self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
 
         let mut instructions = Vec::new();
@@ -987,16 +1004,7 @@ impl MangoProgramTest {
         instructions.push(instruction);
         let orders_pk = orders_keypair.pubkey();
 
-        instructions.push(init_open_orders_ix(
-            &serum_program_id,
-            &orders_pk,
-            &user_pk,
-            &spot_market.market,
-        ).unwrap());
-
-        self.process_transaction(&instructions, Some(&[&orders_keypair, &user])).await.unwrap();
-
-        println!("Orders PK: {}", orders_pk.to_string());
+        self.process_transaction(&instructions, Some(&[&orders_keypair])).await.unwrap();
 
         return orders_pk;
 
@@ -1013,7 +1021,6 @@ impl MangoProgramTest {
         for mint_index in 0..quote_index {
             let market_pubkeys =
                 self.list_market(mint_index as usize, quote_index as usize).await.unwrap();
-            println!("Serum Market PK: {}", market_pubkeys.market.to_string());
 
             let (signer_pk, signer_nonce) =
                 create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
@@ -1064,6 +1071,7 @@ impl MangoProgramTest {
         mango_account: &MangoAccount,
         mango_cache_pk: &Pubkey,
         spot_market: MarketPubkeys,
+        oracle_pk: &Pubkey,
         open_orders_pks: &[Pubkey],
         user_index: usize,
         token_index: usize,
@@ -1100,35 +1108,58 @@ impl MangoProgramTest {
         // the only writable account should be OpenOrders for current market index
 
 
-        let instructions = [mango::instruction::place_spot_order(
-            &mango_program_id,
-            &mango_group_pk,
-            &mango_account_pk,
-            &user.pubkey(),
-            &mango_cache_pk,
-            &serum_program_id,
-            &spot_market.market,
-            &spot_market.bids,
-            &spot_market.asks,
-            &spot_market.req_q,
-            &spot_market.event_q,
-            &spot_market.coin_vault,
-            &spot_market.pc_vault,
-            &mint_root_bank_pk,
-            &mint_node_bank_pk,
-            &quote_root_bank_pk,
-            &quote_node_bank_pk,
-            &quote_node_bank.vault,
-            &mint_node_bank.vault,
-            &spl_token::id(), // or &user_token_account,
-            &signer_pk,
-            &solana_program::sysvar::rent::ID,
-            &dex_signer_pk,
-            &mango_group.msrm_vault,
-            &open_orders_pks, // oo ais
-            order,
-        )
-        .unwrap()];
+        let instructions = [
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*oracle_pk],
+            )
+            .unwrap(),
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[mint_root_bank_pk],
+            )
+            .unwrap(),
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[quote_root_bank_pk],
+            )
+            .unwrap(),
+            mango::instruction::place_spot_order(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_cache_pk,
+                &serum_program_id,
+                &spot_market.market,
+                &spot_market.bids,
+                &spot_market.asks,
+                &spot_market.req_q,
+                &spot_market.event_q,
+                &spot_market.coin_vault,
+                &spot_market.pc_vault,
+                &mint_root_bank_pk,
+                &mint_node_bank_pk,
+                &quote_root_bank_pk,
+                &quote_node_bank_pk,
+                &quote_node_bank.vault,
+                &mint_node_bank.vault,
+                &spl_token::id(), // or &user_token_account,
+                &signer_pk,
+                &solana_program::sysvar::rent::ID,
+                &dex_signer_pk,
+                &mango_group.msrm_vault,
+                &open_orders_pks, // oo ais
+                order,
+            )
+            .unwrap()
+        ];
 
         let signers = vec![
             &user
