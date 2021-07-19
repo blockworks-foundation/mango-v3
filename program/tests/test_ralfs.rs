@@ -147,57 +147,27 @@ async fn test_place_spot_order() {
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
+    let quote_index = config.num_mints - 1;
+    let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
+    let (mango_account_pk, mut mango_account) = test.with_mango_account(&mango_group_pk, user_index as usize).await;
+    let (mango_cache_pk, mango_cache) = test.with_mango_cache(&mango_group).await;
+    let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
+
     let base_price = 10000;
     let mint_index = 0;
-    let quote_index = config.num_mints - 1;
-
-    let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
-    let (mango_account_pk, mut mango_account) =
-        test.with_mango_account(&mango_group_pk, user_index as usize).await;
-
-    for x in mango_account.spot_open_orders {
-        println!("SOO: {}", x.to_string());
-    }
-
-    mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-
-    let (mango_cache_pk, mango_cache) = test.with_mango_cache(&mango_group).await;
-
-    let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
 
     let quote_mint = test.with_mint(quote_index as usize);
     let base_mint = test.with_mint(mint_index as usize);
+    let deposit_amount = (base_price * quote_mint.unit) as u64;
     let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
     test.set_oracle(&mango_group_pk, &oracle_pks[0], oracle_price).await;
-
-    let deposit_amount = (base_price * quote_mint.unit) as u64;
-    // Act
-    test.perform_deposit(
-        &mango_group,
-        &mango_group_pk,
-        &mango_account_pk,
-        user_index as usize,
-        quote_index as usize,
-        deposit_amount,
-    )
-    .await;
-
     let spot_markets = test.add_markets_to_mango_group(&mango_group_pk).await;
-
-    let mut open_orders_pks = Vec::new();
-
-    for spot_market in &spot_markets {
-        open_orders_pks.push(test.init_open_orders(&spot_market).await);
-    }
-
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
+    // Act
+    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, user_index as usize, quote_index as usize, deposit_amount).await;
 
-    test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[0], &oracle_pks[0], &open_orders_pks, 0, 0, 1212, 10).await;
+    test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[0], &oracle_pks[0], 0, 0, 1212, 10).await;
 
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-
-    for x in mango_account.spot_open_orders {
-        println!("SOO: {}", x.to_string());
-    }
 
 }

@@ -1017,6 +1017,7 @@ impl MangoProgramTest {
         let quote_index = self.mints.len() - 1;
 
         let mut market_pubkey_holder = Vec::new();
+        let mut instructions = Vec::new();
 
         for mint_index in 0..quote_index {
             let market_pubkeys =
@@ -1038,28 +1039,30 @@ impl MangoProgramTest {
 
             let admin_pk = self.context.payer.pubkey();
 
-            let instructions = [mango::instruction::add_spot_market(
-                &mango_program_id,
-                &mango_group_pk,
-                &market_pubkeys.market,
-                &serum_program_id,
-                &self.mints[mint_index as usize].pubkey.unwrap(),
-                &node_bank_pk,
-                &vault_pk,
-                &root_bank_pk,
-                &admin_pk,
-                mint_index as usize,
-                maint_leverage,
-                init_leverage,
-                optimal_util,
-                optimal_rate,
-                max_rate,
-            )
-            .unwrap()];
+            instructions.push(
+                mango::instruction::add_spot_market(
+                    &mango_program_id,
+                    &mango_group_pk,
+                    &market_pubkeys.market,
+                    &serum_program_id,
+                    &self.mints[mint_index as usize].pubkey.unwrap(),
+                    &node_bank_pk,
+                    &vault_pk,
+                    &root_bank_pk,
+                    &admin_pk,
+                    mint_index as usize,
+                    maint_leverage,
+                    init_leverage,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                )
+                .unwrap()
+            );
 
-            self.process_transaction(&instructions, None).await.unwrap();
             market_pubkey_holder.push(market_pubkeys);
         }
+        self.process_transaction(&instructions, None).await.unwrap();
         return market_pubkey_holder;
     }
 
@@ -1072,7 +1075,6 @@ impl MangoProgramTest {
         mango_cache_pk: &Pubkey,
         spot_market: MarketPubkeys,
         oracle_pk: &Pubkey,
-        open_orders_pks: &[Pubkey],
         user_index: usize,
         token_index: usize,
         order_id: u64,
@@ -1106,7 +1108,14 @@ impl MangoProgramTest {
 
         // Only pass in open orders if in margin basket or current market index, and
         // the only writable account should be OpenOrders for current market index
-
+        let mut open_orders_pks = Vec::new();
+        for x in 0..mango_account.spot_open_orders.len() {
+            if x as usize == token_index && mango_account.spot_open_orders[x] == Pubkey::default() {
+                open_orders_pks.push(self.init_open_orders(&spot_market).await);
+            } else {
+                open_orders_pks.push(mango_account.spot_open_orders[x]);
+            }
+        }
 
         let instructions = [
             cache_prices(
