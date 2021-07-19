@@ -95,7 +95,7 @@ pub struct MangoProgramTestConfig {
 
 impl MangoProgramTestConfig {
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 50_000, num_users: 2, num_mints: 32 }
+        MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 32 }
     }
 }
 
@@ -670,6 +670,26 @@ impl MangoProgramTest {
             / I80F48::from_num(base_mint.unit);
     }
 
+    pub async fn set_oracle(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        oracle_pk: &Pubkey,
+        oracle_price: I80F48,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let instructions = [
+            mango::instruction::set_oracle(
+                &mango_program_id,
+                &mango_group_pk,
+                &oracle_pk,
+                &self.context.payer.pubkey(),
+                oracle_price,
+            )
+            .unwrap()
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
     pub fn with_order_price(
         &mut self,
         quote_mint: &MintConfig,
@@ -974,12 +994,9 @@ impl MangoProgramTest {
     pub async fn init_open_orders(
         &mut self,
         spot_market: &MarketPubkeys,
-        user_index: usize,
     ) -> Pubkey {
         let serum_program_id = self.serum_program_id;
 
-        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_pk = user.pubkey();
         let (orders_key, instruction) = self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
 
         let mut instructions = Vec::new();
@@ -987,16 +1004,7 @@ impl MangoProgramTest {
         instructions.push(instruction);
         let orders_pk = orders_keypair.pubkey();
 
-        instructions.push(init_open_orders_ix(
-            &serum_program_id,
-            &orders_pk,
-            &user_pk,
-            &spot_market.market,
-        ).unwrap());
-
-        self.process_transaction(&instructions, Some(&[&orders_keypair, &user])).await.unwrap();
-
-        println!("Orders PK: {}", orders_pk.to_string());
+        self.process_transaction(&instructions, Some(&[&orders_keypair])).await.unwrap();
 
         return orders_pk;
 
@@ -1009,11 +1017,11 @@ impl MangoProgramTest {
         let quote_index = self.mints.len() - 1;
 
         let mut market_pubkey_holder = Vec::new();
+        let mut instructions = Vec::new();
 
         for mint_index in 0..quote_index {
             let market_pubkeys =
                 self.list_market(mint_index as usize, quote_index as usize).await.unwrap();
-            println!("Serum Market PK: {}", market_pubkeys.market.to_string());
 
             let (signer_pk, signer_nonce) =
                 create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
@@ -1031,28 +1039,30 @@ impl MangoProgramTest {
 
             let admin_pk = self.context.payer.pubkey();
 
-            let instructions = [mango::instruction::add_spot_market(
-                &mango_program_id,
-                &mango_group_pk,
-                &market_pubkeys.market,
-                &serum_program_id,
-                &self.mints[mint_index as usize].pubkey.unwrap(),
-                &node_bank_pk,
-                &vault_pk,
-                &root_bank_pk,
-                &admin_pk,
-                mint_index as usize,
-                maint_leverage,
-                init_leverage,
-                optimal_util,
-                optimal_rate,
-                max_rate,
-            )
-            .unwrap()];
+            instructions.push(
+                mango::instruction::add_spot_market(
+                    &mango_program_id,
+                    &mango_group_pk,
+                    &market_pubkeys.market,
+                    &serum_program_id,
+                    &self.mints[mint_index as usize].pubkey.unwrap(),
+                    &node_bank_pk,
+                    &vault_pk,
+                    &root_bank_pk,
+                    &admin_pk,
+                    mint_index as usize,
+                    maint_leverage,
+                    init_leverage,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                )
+                .unwrap()
+            );
 
-            self.process_transaction(&instructions, None).await.unwrap();
             market_pubkey_holder.push(market_pubkeys);
         }
+        self.process_transaction(&instructions, None).await.unwrap();
         return market_pubkey_holder;
     }
 
@@ -1064,11 +1074,10 @@ impl MangoProgramTest {
         mango_account: &MangoAccount,
         mango_cache_pk: &Pubkey,
         spot_market: MarketPubkeys,
-        open_orders_pks: &[Pubkey],
+        oracle_pk: &Pubkey,
         user_index: usize,
         token_index: usize,
-        order_id: u64,
-        limit: u16,
+        order: NewOrderInstructionV3,
     ) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
@@ -1085,50 +1094,69 @@ impl MangoProgramTest {
         let (quote_root_bank_pk, quote_root_bank) = self.with_root_bank(mango_group, self.mints.len() - 1).await;
         let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
 
-        let order = NewOrderInstructionV3{
-            side: serum_dex::matching::Side::Bid,
-            limit_price: NonZeroU64::new(10000).unwrap(),
-            max_coin_qty: NonZeroU64::new(1).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(1).unwrap(),
-            self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
-            order_type: serum_dex::matching::OrderType::Limit,
-            client_order_id: order_id,
-            limit: limit,
-        };
-
         // Only pass in open orders if in margin basket or current market index, and
         // the only writable account should be OpenOrders for current market index
+        let mut open_orders_pks = Vec::new();
+        for x in 0..mango_account.spot_open_orders.len() {
+            if x as usize == token_index && mango_account.spot_open_orders[x] == Pubkey::default() {
+                open_orders_pks.push(self.init_open_orders(&spot_market).await);
+            } else {
+                open_orders_pks.push(mango_account.spot_open_orders[x]);
+            }
+        }
 
-
-        let instructions = [mango::instruction::place_spot_order(
-            &mango_program_id,
-            &mango_group_pk,
-            &mango_account_pk,
-            &user.pubkey(),
-            &mango_cache_pk,
-            &serum_program_id,
-            &spot_market.market,
-            &spot_market.bids,
-            &spot_market.asks,
-            &spot_market.req_q,
-            &spot_market.event_q,
-            &spot_market.coin_vault,
-            &spot_market.pc_vault,
-            &mint_root_bank_pk,
-            &mint_node_bank_pk,
-            &quote_root_bank_pk,
-            &quote_node_bank_pk,
-            &quote_node_bank.vault,
-            &mint_node_bank.vault,
-            &spl_token::id(), // or &user_token_account,
-            &signer_pk,
-            &solana_program::sysvar::rent::ID,
-            &dex_signer_pk,
-            &mango_group.msrm_vault,
-            &open_orders_pks, // oo ais
-            order,
-        )
-        .unwrap()];
+        let instructions = [
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*oracle_pk],
+            )
+            .unwrap(),
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[mint_root_bank_pk],
+            )
+            .unwrap(),
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[quote_root_bank_pk],
+            )
+            .unwrap(),
+            mango::instruction::place_spot_order(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_cache_pk,
+                &serum_program_id,
+                &spot_market.market,
+                &spot_market.bids,
+                &spot_market.asks,
+                &spot_market.req_q,
+                &spot_market.event_q,
+                &spot_market.coin_vault,
+                &spot_market.pc_vault,
+                &mint_root_bank_pk,
+                &mint_node_bank_pk,
+                &quote_root_bank_pk,
+                &quote_node_bank_pk,
+                &quote_node_bank.vault,
+                &mint_node_bank.vault,
+                &spl_token::id(), // or &user_token_account,
+                &signer_pk,
+                &solana_program::sysvar::rent::ID,
+                &dex_signer_pk,
+                &mango_group.msrm_vault,
+                &open_orders_pks, // oo ais
+                order,
+            )
+            .unwrap()
+        ];
 
         let signers = vec![
             &user
