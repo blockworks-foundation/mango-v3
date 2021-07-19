@@ -21,7 +21,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{fmul, invert_side, remove_slop_mut};
+use crate::utils::{fmul, invert_side, remove_slop_mut, FI80F48};
 use enumflags2::BitFlags;
 use solana_program::log::sol_log_compute_units;
 use solana_program::program_pack::Pack;
@@ -943,36 +943,41 @@ impl MangoAccount {
         liab_weight: I80F48,
     ) -> I80F48 {
         let quote_free =
-            u64_to_i128(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
-        let quote_locked = u64_to_i128(open_orders.native_pc_total - open_orders.native_pc_free);
-        let base_free = u64_to_i128(open_orders.native_coin_free);
-        let base_locked = u64_to_i128(open_orders.native_coin_total - open_orders.native_coin_free);
+            FI80F48::from_u64(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
+        let quote_locked =
+            FI80F48::from_u64(open_orders.native_pc_total - open_orders.native_pc_free);
+        let base_free = FI80F48::from_u64(open_orders.native_coin_free);
+        let base_locked =
+            FI80F48::from_u64(open_orders.native_coin_total - open_orders.native_coin_free);
 
-        let price = price.to_bits();
-        let base_net = base_net.to_bits();
+        let price = FI80F48::from_fixed(price);
+        let base_net = FI80F48::from_fixed(base_net);
 
         // Simulate the health if all bids are executed at current price
-        let bids_base_net = base_net + ((quote_locked / price) << 48) + base_free + base_locked;
+        let bids_base_net = quote_locked.div(price).add(base_net).add(base_free).add(base_locked);
         let bids_weight = if bids_base_net.is_positive() {
-            asset_weight.to_bits()
+            FI80F48::from_fixed(asset_weight)
         } else {
-            liab_weight.to_bits()
+            FI80F48::from_fixed(liab_weight)
         };
-        let bids_health = fmul(fmul(bids_base_net, bids_weight), price) + quote_free;
+
+        let bids_health = bids_base_net.mul(bids_weight).mul(price).add(quote_free);
 
         // Simulate health if all asks are executed at current price
-        let asks_base_net = base_net - base_locked + base_free;
+        let asks_base_net = base_net.sub(base_locked).add(base_free);
         let asks_weight = if asks_base_net.is_positive() {
-            asset_weight.to_bits()
+            FI80F48::from_fixed(asset_weight)
         } else {
-            liab_weight.to_bits()
+            FI80F48::from_fixed(liab_weight)
         };
-        let asks_health = fmul(fmul(asks_base_net, asks_weight), price)
-            + fmul(price, base_locked)
-            + quote_free
-            + quote_locked;
+        let asks_health = asks_base_net
+            .mul(asks_weight)
+            .mul(price)
+            .add(price.mul(base_locked))
+            .add(quote_free)
+            .add(quote_locked);
 
-        I80F48::from_bits(bids_health.min(asks_health))
+        bids_health.min(asks_health).to_fixed()
     }
     fn get_spot_health(
         &self,
