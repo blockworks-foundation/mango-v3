@@ -56,7 +56,22 @@ pub fn invert_side(side: Side) -> Side {
     }
 }
 
-pub fn fmul(mut a: i128, b: i128) -> i128 {
+pub struct FI80F48(i128);
+impl FI80F48 {
+    fn from_fixed(x: I80F48) -> Self {
+        FI80F48(x.to_bits())
+    }
+
+    fn mul(&self, x: Self) -> Self {
+        Self(0)
+    }
+
+    fn add(&self, x: Self) -> Self {
+        Self(0)
+    }
+}
+
+pub fn fmul(a: i128, b: i128) -> i128 {
     let x = a.trailing_zeros();
     if x < 48 {
         let y = min(48 - x, b.trailing_zeros());
@@ -69,4 +84,13 @@ pub fn fmul(mut a: i128, b: i128) -> i128 {
     } else {
         (a >> 48) * b
     }
+}
+
+#[test]
+fn test_fmul() {
+    let b = I80F48::from_num(-100000.12312423534555);
+    let a = I80F48::from_num(120002.23412341231);
+
+    println!("{:?}", I80F48::from_bits(fmul(a.to_bits(), b.to_bits())));
+    println!("{:?}", a * b);
 }
