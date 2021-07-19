@@ -1077,8 +1077,7 @@ impl MangoProgramTest {
         oracle_pk: &Pubkey,
         user_index: usize,
         token_index: usize,
-        order_id: u64,
-        limit: u16,
+        order: NewOrderInstructionV3,
     ) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
@@ -1094,17 +1093,6 @@ impl MangoProgramTest {
         let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
         let (quote_root_bank_pk, quote_root_bank) = self.with_root_bank(mango_group, self.mints.len() - 1).await;
         let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
-
-        let order = NewOrderInstructionV3{
-            side: serum_dex::matching::Side::Bid,
-            limit_price: NonZeroU64::new(10000).unwrap(),
-            max_coin_qty: NonZeroU64::new(1).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(1).unwrap(),
-            self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
-            order_type: serum_dex::matching::OrderType::Limit,
-            client_order_id: order_id,
-            limit: limit,
-        };
 
         // Only pass in open orders if in margin basket or current market index, and
         // the only writable account should be OpenOrders for current market index
