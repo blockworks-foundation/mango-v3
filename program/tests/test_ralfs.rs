@@ -234,6 +234,7 @@ async fn test_worst_case_scenario() {
         };
         test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[mint_index_u], &oracle_pks[mint_index_u], user_index, mint_index_u, order).await;
         println!("== PLACED SPOT ORDER {} ==", mint_index);
+        test.advance_clock().await;
     }
 
     // Long 31 perp markets

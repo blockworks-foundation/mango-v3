@@ -1,12 +1,14 @@
 use std::convert::TryInto;
 use std::mem::size_of;
 use std::num::NonZeroU64;
+use std::borrow::Borrow;
 
 use fixed::types::I80F48;
 use mango_common::Loadable;
 use solana_program::{
     account_info::AccountInfo, program_error::ProgramError, program_option::COption,
     program_pack::Pack, pubkey::*, rent::*, system_instruction,
+    clock::{Clock, UnixTimestamp}, sysvar
 };
 use solana_program_test::*;
 use solana_sdk::{
@@ -17,6 +19,7 @@ use solana_sdk::{
     transport::TransportError,
 };
 use spl_token::{state::*, *};
+use bincode::deserialize;
 
 use mango::{
     entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
@@ -549,6 +552,53 @@ impl MangoProgramTest {
         let mut acc = self.context.banks_client.get_account(acc_pk).await.unwrap().unwrap();
         let acc_info: AccountInfo = (&acc_pk, &mut acc).into();
         return *T::load(&acc_info).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_bincode_account<T: serde::de::DeserializeOwned>(
+        &mut self,
+        address: &Pubkey,
+    ) -> T {
+        self.context
+            .banks_client
+            .get_account(*address)
+            .await
+            .unwrap()
+            .map(|a| deserialize::<T>(&a.data.borrow()).unwrap())
+            .expect(format!("GET-TEST-ACCOUNT-ERROR: Account {}", address).as_str())
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_clock(&mut self) -> Clock {
+        self.get_bincode_account::<Clock>(&sysvar::clock::id())
+            .await
+    }
+
+    #[allow(dead_code)]
+    pub async fn advance_clock_past_timestamp(&mut self, unix_timestamp: UnixTimestamp) {
+        let mut clock: Clock = self.get_clock().await;
+        let mut n = 1;
+
+        while clock.unix_timestamp <= unix_timestamp {
+            // Since the exact time is not deterministic keep wrapping by arbitrary 400 slots until we pass the requested timestamp
+            self.context.warp_to_slot(clock.slot + n * 400).unwrap();
+
+            n = n + 1;
+            clock = self.get_clock().await;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn advance_clock_by_min_timespan(&mut self, time_span: u64) {
+        let clock: Clock = self.get_clock().await;
+        self.advance_clock_past_timestamp(clock.unix_timestamp + (time_span as i64))
+            .await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn advance_clock(&mut self) {
+        let clock: Clock = self.get_clock().await;
+        self.context.warp_to_slot(clock.slot + 2).unwrap();
     }
 
     pub async fn with_mango_group(&mut self) -> (Pubkey, MangoGroup) {

@@ -545,15 +545,19 @@ impl Processor {
             mango_group_ai,     // read
             mango_cache_ai,     // write
         ] = fixed_ais;
-
+        msg!("== Caching Price 1 ==");
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
-
+        msg!("== Caching Price 2 ==");
         for oracle_ai in oracle_ais.iter() {
+            msg!("== Caching Price Oracle: {} ==", oracle_ai.key.to_string());
             let i = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
+            msg!("== Caching Price Index: {} ==", i);
+            msg!("== Caching Price: {} ==", read_oracle(&mango_group, i, oracle_ai)?.to_string());
+            msg!("== NOW TS: {} ==", now_ts);
 
             mango_cache.price_cache[i] =
                 PriceCache { price: read_oracle(&mango_group, i, oracle_ai)?, last_update: now_ts };
