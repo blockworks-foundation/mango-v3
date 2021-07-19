@@ -138,5 +138,43 @@ async fn test_add_all_markets_to_mango_group() {
 
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
     let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
-    test.add_market_to_mango_group(&mango_group_pk).await;
+    test.add_markets_to_mango_group(&mango_group_pk).await;
+}
+
+#[tokio::test]
+async fn test_place_spot_order() {
+    // Arrange
+    let user_index = 0;
+    let config = MangoProgramTestConfig::default();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let quote_index = config.num_mints - 1;
+
+    let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
+    let (mango_account_pk, mut mango_account) =
+        test.with_mango_account(&mango_group_pk, user_index as usize).await;
+
+    for x in mango_account.spot_open_orders {
+        println!("SOO: {}", x.to_string());
+    }
+
+    mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
+
+    let (mango_cache_pk, mango_cache) = test.with_mango_cache(&mango_group).await;
+
+    let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
+
+    // Act
+    let spot_markets = test.add_markets_to_mango_group(&mango_group_pk).await;
+
+    let mut open_orders_pks = Vec::new();
+
+    for spot_market in &spot_markets {
+        open_orders_pks.push(test.init_open_orders(&spot_market, user_index).await);
+    }
+    
+    mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
+
+    test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[0], &open_orders_pks, 0, 0, 1212, 10).await;
+
 }

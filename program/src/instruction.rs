@@ -1135,6 +1135,69 @@ pub fn cache_perp_markets(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn place_spot_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    dex_request_queue_pk: &Pubkey,
+    dex_event_queue_pk: &Pubkey,
+    dex_base_pk: &Pubkey,
+    dex_quote_pk: &Pubkey,
+    base_root_bank_pk: &Pubkey,
+    base_node_bank_pk: &Pubkey,
+    quote_root_bank_pk: &Pubkey,
+    quote_node_bank_pk: &Pubkey,
+    quote_vault_pk: &Pubkey,
+    base_vault_pk: &Pubkey,
+    token_prog_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    rent_pk: &Pubkey,
+    dex_signer_pk: &Pubkey,
+    msrm_or_srm_vault_pk: &Pubkey,
+    open_orders_pks: &[Pubkey],
+
+    order: serum_dex::instruction::NewOrderInstructionV3,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*dex_request_queue_pk, false),
+        AccountMeta::new(*dex_event_queue_pk, false),
+        AccountMeta::new(*dex_base_pk, false),
+        AccountMeta::new(*dex_quote_pk, false),
+        AccountMeta::new_readonly(*base_root_bank_pk, false),
+        AccountMeta::new(*base_node_bank_pk, false),
+        AccountMeta::new_readonly(*quote_root_bank_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_vault_pk, false),
+        AccountMeta::new(*base_vault_pk, false),
+        AccountMeta::new_readonly(*token_prog_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(*rent_pk, false),
+        AccountMeta::new_readonly(*dex_signer_pk, false),
+        AccountMeta::new_readonly(*msrm_or_srm_vault_pk, false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new(*pk, false)));
+
+    let instr = MangoInstruction::PlaceSpotOrder { order };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn add_oracle(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,

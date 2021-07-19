@@ -748,9 +748,13 @@ impl Processor {
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
+        msg!("== PLACING SPOT ORDER: 1 ==");
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+
+        msg!("== PLACING SPOT ORDER: 2 ==");
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -790,19 +794,27 @@ impl Processor {
             MangoErrorCode::InvalidMarket
         )?;
 
+        msg!("== PLACING SPOT ORDER: 3 ==");
+
         // Adjust margin basket
         mango_account.add_to_basket(token_index)?;
+
+        msg!("== PLACING SPOT ORDER: 3.0 ==");
 
         for i in 0..mango_group.num_oracles {
             if !mango_account.in_margin_basket[i] {
                 continue;
             }
-
+            msg!("== PLACING SPOT ORDER: 3.1 ==");
             let open_orders_ai = &open_orders_ais[i];
             if i == token_index {
                 if mango_account.spot_open_orders[i] == Pubkey::default() {
+                    msg!("== PLACING SPOT ORDER: 3.2 ==");
                     let open_orders = load_open_orders(open_orders_ai)?;
+                    msg!("== OO ACC_FLAG: {} ==", open_orders.account_flags);
+                    msg!("== PLACING SPOT ORDER: 3.3 ==");
                     check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
+                    msg!("== PLACING SPOT ORDER: 3.4 ==");
                     mango_account.spot_open_orders[i] = *open_orders_ai.key;
                 } else {
                     check_eq!(
@@ -810,9 +822,11 @@ impl Processor {
                         &mango_account.spot_open_orders[i],
                         MangoErrorCode::Default
                     )?;
+                    msg!("== PLACING SPOT ORDER: 3.5 ==");
                     check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
                 }
             } else {
+                msg!("== PLACING SPOT ORDER: 3.6 ==");
                 check_eq!(
                     open_orders_ais[i].key,
                     &mango_account.spot_open_orders[i],
@@ -821,6 +835,8 @@ impl Processor {
                 check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
             }
         }
+
+        msg!("== PLACING SPOT ORDER: 4 ==");
 
         // First check all caches to make sure valid
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -940,6 +956,8 @@ impl Processor {
             &active_assets,
             HealthType::Init,
         )?;
+
+        msg!("== PLACING SPOT ORDER: 5 ==");
 
         // If an account is in reduce_only mode, health must only go up
         check!(
@@ -1828,7 +1846,7 @@ impl Processor {
 
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
-    /// Requires: `liab_index != asset_index`  
+    /// Requires: `liab_index != asset_index`
     fn liquidate_token_and_token(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1846,12 +1864,12 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            asset_root_bank_ai,     // read    
-            asset_node_bank_ai,     // write    
-            liab_root_bank_ai,      // read    
-            liab_node_bank_ai,      // write    
+            asset_root_bank_ai,     // read
+            asset_node_bank_ai,     // write
+            liab_root_bank_ai,      // read
+            liab_node_bank_ai,      // write
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -2095,10 +2113,10 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            root_bank_ai,           // read    
-            node_bank_ai,           // write    
+            root_bank_ai,           // read
+            node_bank_ai,           // write
         ] = fixed_ais;
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;

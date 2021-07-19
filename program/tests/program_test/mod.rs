@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 use std::mem::size_of;
+use std::num::NonZeroU64;
 
 use fixed::types::I80F48;
 use mango_common::Loadable;
@@ -19,6 +20,12 @@ use spl_token::{state::*, *};
 
 use mango::{
     entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
+};
+
+use serum_dex::instruction::{
+    cancel_order_by_client_order_id as cancel_order_by_client_order_id_ix,
+    close_open_orders as close_open_orders_ix, init_open_orders as init_open_orders_ix,
+    MarketInstruction, NewOrderInstructionV3, SelfTradeBehavior,
 };
 
 pub mod group;
@@ -57,6 +64,7 @@ pub struct ListingKeys {
     vault_signer_nonce: u64,
 }
 
+#[derive(Copy, Clone)]
 pub struct MarketPubkeys {
     pub market: Pubkey,
     pub req_q: Pubkey,
@@ -116,10 +124,26 @@ impl MangoProgramTest {
                 unit: 10i64.pow(6) as i64,
                 base_lot: 100 as i64,
                 quote_lot: 10 as i64,
+                pubkey: Some(mngo_token::ID),
+            }, // symbol: "MNGO".to_string()
+            MintConfig {
+                index: 1,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
+                pubkey: Some(msrm_token::ID),
+            }, // symbol: "MSRM".to_string()
+            MintConfig {
+                index: 2,
+                decimals: 6,
+                unit: 10i64.pow(6) as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintConfig {
-                index: 1,
+                index: 3,
                 decimals: 6,
                 unit: 10i64.pow(6) as i64,
                 base_lot: 1000 as i64,
@@ -127,7 +151,7 @@ impl MangoProgramTest {
                 pubkey: None,
             }, // symbol: "ETH".to_string()
             MintConfig {
-                index: 2,
+                index: 4,
                 decimals: 9,
                 unit: 10i64.pow(9) as i64,
                 base_lot: 100000000 as i64,
@@ -135,7 +159,7 @@ impl MangoProgramTest {
                 pubkey: None,
             }, // symbol: "SOL".to_string()
             MintConfig {
-                index: 3,
+                index: 5,
                 decimals: 6,
                 unit: 10i64.pow(6) as i64,
                 base_lot: 100000 as i64,
@@ -143,29 +167,13 @@ impl MangoProgramTest {
                 pubkey: None,
             }, // symbol: "SRM".to_string()
             MintConfig {
-                index: 4,
+                index: 6,
                 decimals: 6,
                 unit: 10i64.pow(6) as i64,
                 base_lot: 0 as i64,
                 quote_lot: 0 as i64,
                 pubkey: None,
             }, // symbol: "USDC".to_string()
-            MintConfig {
-                index: 5,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 6,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
             MintConfig {
                 index: 7,
                 decimals: 6,
@@ -380,7 +388,13 @@ impl MangoProgramTest {
         // add mints in loop
         // let mut mints = Vec::new();
         for m in 0..config.num_mints {
-            let mint_pk = Pubkey::new_unique();
+            let mut mint_pk: Pubkey;
+            if (mints[m as usize].pubkey.is_none()) {
+                mint_pk = Pubkey::new_unique();
+            } else {
+                mint_pk = mints[m as usize].pubkey.unwrap();
+            }
+
             test.add_packable_account(
                 mint_pk,
                 u32::MAX as u64,
@@ -395,32 +409,6 @@ impl MangoProgramTest {
             mints[m as usize].pubkey = Some(mint_pk);
         }
 
-        // add msrm mint
-        test.add_packable_account(
-            msrm_token::ID,
-            u32::MAX as u64,
-            &Mint {
-                is_initialized: true,
-                mint_authority: COption::Some(Pubkey::new_unique()),
-                decimals: 6 as u8,
-                ..Mint::default()
-            },
-            &spl_token::id(),
-        );
-
-        // add mngo mint
-        test.add_packable_account(
-            mngo_token::ID,
-            u32::MAX as u64,
-            &Mint {
-                is_initialized: true,
-                mint_authority: COption::Some(Pubkey::new_unique()),
-                decimals: 6 as u8,
-                ..Mint::default()
-            },
-            &spl_token::id(),
-        );
-
         // add users in loop
         let mut users = Vec::new();
         let mut token_accounts = Vec::new();
@@ -433,13 +421,13 @@ impl MangoProgramTest {
 
             // give every user 10^18 (< 2^60) of every token
             // ~~ 1 trillion in case of 6 decimals
-            for mint in &mints {
+            for m in 0..config.num_mints {
                 let token_key = Pubkey::new_unique();
                 test.add_packable_account(
                     token_key,
                     u32::MAX as u64,
                     &spl_token::state::Account {
-                        mint: mint.pubkey.unwrap(),
+                        mint: mints[m as usize].pubkey.unwrap(),
                         owner: user_key.pubkey(),
                         amount: 1_000_000_000_000_000_000,
                         state: spl_token::state::AccountState::Initialized,
@@ -450,12 +438,12 @@ impl MangoProgramTest {
 
                 token_accounts.push(token_key);
             }
-
             users.push(user_key);
         }
 
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
+        mints = mints[..config.num_mints as usize].to_vec();
 
         Self { context, rent, mango_program_id, serum_program_id, mints, users, token_accounts }
     }
@@ -532,7 +520,6 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
-    #[allow(dead_code)]
     pub async fn create_token_account(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(spl_token::state::Account::LEN);
@@ -558,14 +545,12 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
-    #[allow(dead_code)]
     pub async fn load_account<T: Loadable>(&mut self, acc_pk: Pubkey) -> T {
         let mut acc = self.context.banks_client.get_account(acc_pk).await.unwrap().unwrap();
         let acc_info: AccountInfo = (&acc_pk, &mut acc).into();
         return *T::load(&acc_info).unwrap();
     }
 
-    #[allow(dead_code)]
     pub async fn with_mango_group(&mut self) -> (Pubkey, MangoGroup) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
@@ -616,17 +601,16 @@ impl MangoProgramTest {
         return (mango_group_pk, mango_group);
     }
 
-    #[allow(dead_code)]
     pub async fn with_mango_account(
         &mut self,
         mango_group_pk: &Pubkey,
-        index: usize,
+        user_index: usize,
     ) -> (Pubkey, MangoAccount) {
         let mango_program_id = self.mango_program_id;
         let mango_account_pk =
             self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
         let admin_pk = self.context.payer.pubkey();
-        let user = Keypair::from_base58_string(&self.users[index].to_base58_string());
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let user_pk = user.pubkey();
 
         let instructions = [mango::instruction::init_mango_account(
@@ -641,21 +625,25 @@ impl MangoProgramTest {
         return (mango_account_pk, mango_account);
     }
 
-    pub async fn with_mango_cache(&mut self, mango_group: &MangoGroup) -> (Pubkey, MangoCache) {
+    pub async fn with_mango_cache(
+        &mut self,
+        mango_group: &MangoGroup
+    ) -> (Pubkey, MangoCache) {
         let mango_cache = self.load_account::<MangoCache>(mango_group.mango_cache).await;
         return (mango_group.mango_cache, mango_cache);
     }
 
-    pub fn with_mint(&mut self, mint_index: usize) -> MintConfig {
+    pub fn with_mint(
+        &mut self,
+        mint_index: usize
+    ) -> MintConfig {
         return self.mints[mint_index];
     }
 
-    #[allow(dead_code)]
     pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
         return self.token_accounts[(user_index * self.mints.len()) + token_index];
     }
 
-    #[allow(dead_code)]
     pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
         let mango_program_id = self.mango_program_id;
         let oracle_pk = self.create_account(size_of::<StubOracle>(), &mango_program_id).await;
@@ -893,6 +881,7 @@ impl MangoProgramTest {
         _pc_mint: &Pubkey,
     ) -> (ListingKeys, Vec<Instruction>) {
         let serum_program_id = self.serum_program_id;
+        // let payer_pk = &self.context.payer.pubkey();
 
         let (market_key, create_market) = self.create_dex_account(376);
         let (req_q_key, create_req_q) = self.create_dex_account(640);
@@ -981,11 +970,45 @@ impl MangoProgramTest {
             vault_signer_key: vault_signer_pk,
         })
     }
-    pub async fn add_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) {
+
+    pub async fn init_open_orders(
+        &mut self,
+        spot_market: &MarketPubkeys,
+        user_index: usize,
+    ) -> Pubkey {
+        let serum_program_id = self.serum_program_id;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let user_pk = user.pubkey();
+        let (orders_key, instruction) = self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
+
+        let mut instructions = Vec::new();
+        let orders_keypair = orders_key;
+        instructions.push(instruction);
+        let orders_pk = orders_keypair.pubkey();
+
+        instructions.push(init_open_orders_ix(
+            &serum_program_id,
+            &orders_pk,
+            &user_pk,
+            &spot_market.market,
+        ).unwrap());
+
+        self.process_transaction(&instructions, Some(&[&orders_keypair, &user])).await.unwrap();
+
+        println!("Orders PK: {}", orders_pk.to_string());
+
+        return orders_pk;
+
+    }
+
+    pub async fn add_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) -> Vec<MarketPubkeys> {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
 
         let quote_index = self.mints.len() - 1;
+
+        let mut market_pubkey_holder = Vec::new();
 
         for mint_index in 0..quote_index {
             let market_pubkeys =
@@ -1028,6 +1051,90 @@ impl MangoProgramTest {
             .unwrap()];
 
             self.process_transaction(&instructions, None).await.unwrap();
+            market_pubkey_holder.push(market_pubkeys);
         }
+        return market_pubkey_holder;
     }
+
+    pub async fn place_spot_order(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        mango_group: &MangoGroup,
+        mango_account_pk: &Pubkey,
+        mango_account: &MangoAccount,
+        mango_cache_pk: &Pubkey,
+        spot_market: MarketPubkeys,
+        open_orders_pks: &[Pubkey],
+        user_index: usize,
+        token_index: usize,
+        order_id: u64,
+        limit: u16,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let user_token_account = self.with_user_token_account(user_index, token_index);
+
+        let (signer_pk, signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+        let (dex_signer_pk, _) =
+            create_signer_key_and_nonce(&serum_program_id, &spot_market.market);
+
+        let (mint_root_bank_pk, mint_root_bank) = self.with_root_bank(mango_group, token_index).await;
+        let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
+        let (quote_root_bank_pk, quote_root_bank) = self.with_root_bank(mango_group, self.mints.len() - 1).await;
+        let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
+
+        let order = NewOrderInstructionV3{
+            side: serum_dex::matching::Side::Bid,
+            limit_price: NonZeroU64::new(10000).unwrap(),
+            max_coin_qty: NonZeroU64::new(1).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(1).unwrap(),
+            self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
+            order_type: serum_dex::matching::OrderType::Limit,
+            client_order_id: order_id,
+            limit: limit,
+        };
+
+        // Only pass in open orders if in margin basket or current market index, and
+        // the only writable account should be OpenOrders for current market index
+
+
+        let instructions = [mango::instruction::place_spot_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_cache_pk,
+            &serum_program_id,
+            &spot_market.market,
+            &spot_market.bids,
+            &spot_market.asks,
+            &spot_market.req_q,
+            &spot_market.event_q,
+            &spot_market.coin_vault,
+            &spot_market.pc_vault,
+            &mint_root_bank_pk,
+            &mint_node_bank_pk,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &mint_node_bank.vault,
+            &spl_token::id(), // or &user_token_account,
+            &signer_pk,
+            &solana_program::sysvar::rent::ID,
+            &dex_signer_pk,
+            &mango_group.msrm_vault,
+            &open_orders_pks, // oo ais
+            order,
+        )
+        .unwrap()];
+
+        let signers = vec![
+            &user
+        ];
+
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+    }
+
 }
