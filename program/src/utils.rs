@@ -2,10 +2,12 @@ use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 
 use crate::error::MangoResult;
 use crate::matching::Side;
+use fixed::types::I80F48;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::cell::RefMut;
+use std::cmp::min;
 use std::mem::size_of;
 
 pub fn gen_signer_seeds<'a>(nonce: &'a u64, acc_pk: &'a Pubkey) -> [&'a [u8]; 2] {
@@ -51,5 +53,20 @@ pub fn invert_side(side: Side) -> Side {
         Side::Ask
     } else {
         Side::Bid
+    }
+}
+
+pub fn fmul(mut a: i128, b: i128) -> i128 {
+    let x = a.trailing_zeros();
+    if x < 48 {
+        let y = min(48 - x, b.trailing_zeros());
+
+        if x + y < 48 {
+            ((a >> x) * (b >> y)) >> (48 - x - y)
+        } else {
+            (a >> x) * (b >> y)
+        }
+    } else {
+        (a >> 48) * b
     }
 }

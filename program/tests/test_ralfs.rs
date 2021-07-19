@@ -169,12 +169,24 @@ async fn test_place_spot_order() {
 
     let mut open_orders_pks = Vec::new();
 
-    for spot_market in &spot_markets {
-        open_orders_pks.push(test.init_open_orders(&spot_market, user_index).await);
-    }
-    
+    // for spot_market in &spot_markets {
+    //     open_orders_pks.push(test.init_open_orders(&spot_market, user_index).await);
+    // }
+
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
-    test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[0], &open_orders_pks, 0, 0, 1212, 10).await;
-
+    test.place_spot_order(
+        &mango_group_pk,
+        &mango_group,
+        &mango_account_pk,
+        &mango_account,
+        &mango_cache_pk,
+        spot_markets[0],
+        &open_orders_pks,
+        0,
+        0,
+        1212,
+        10,
+    )
+    .await;
 }

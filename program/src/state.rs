@@ -21,8 +21,9 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut};
+use crate::utils::{fmul, invert_side, remove_slop_mut};
 use enumflags2::BitFlags;
+use solana_program::log::sol_log_compute_units;
 use solana_program::program_pack::Pack;
 use spl_token::state::Account;
 use std::cmp::{max, min};
@@ -695,6 +696,12 @@ pub struct MangoAccount {
     pub padding: [u8; 6],
 }
 
+const S: i128 = 1i128 << 48;
+
+fn u64_to_i128(x: u64) -> i128 {
+    (x as i128) * S
+}
+
 impl MangoAccount {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -893,6 +900,80 @@ impl MangoAccount {
 
         Ok(assets_val)
     }
+
+    fn sim_spot_health(
+        &self,
+        open_orders: &serum_dex::state::OpenOrders,
+        base_net: I80F48,
+        price: I80F48,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+    ) -> I80F48 {
+        let quote_free =
+            I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
+        let quote_locked =
+            I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free);
+        let base_free = I80F48::from_num(open_orders.native_coin_free);
+        let base_locked =
+            I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free);
+
+        // TODO account for serum dex fees in these calculations
+
+        // Simulate the health if all bids are executed at current price
+        let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+        let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
+        let bids_health: I80F48 = bids_base_net * bids_weight * price + quote_free;
+
+        // Simulate health if all asks are executed at current price
+        let asks_base_net = base_net - base_locked + base_free;
+        let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
+        let asks_health: I80F48 =
+            asks_base_net * asks_weight * price + price * base_locked + quote_free + quote_locked;
+
+        // Pick the worse of the two possibilities
+        bids_health.min(asks_health)
+    }
+
+    fn fast_sim_spot_health(
+        &self,
+        open_orders: &serum_dex::state::OpenOrders,
+        base_net: I80F48,
+        price: I80F48,
+        asset_weight: I80F48,
+        liab_weight: I80F48,
+    ) -> I80F48 {
+        let quote_free =
+            u64_to_i128(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
+        let quote_locked = u64_to_i128(open_orders.native_pc_total - open_orders.native_pc_free);
+        let base_free = u64_to_i128(open_orders.native_coin_free);
+        let base_locked = u64_to_i128(open_orders.native_coin_total - open_orders.native_coin_free);
+
+        let price = price.to_bits();
+        let base_net = base_net.to_bits();
+
+        // Simulate the health if all bids are executed at current price
+        let bids_base_net = base_net + ((quote_locked / price) << 48) + base_free + base_locked;
+        let bids_weight = if bids_base_net.is_positive() {
+            asset_weight.to_bits()
+        } else {
+            liab_weight.to_bits()
+        };
+        let bids_health = fmul(fmul(bids_base_net, bids_weight), price) + quote_free;
+
+        // Simulate health if all asks are executed at current price
+        let asks_base_net = base_net - base_locked + base_free;
+        let asks_weight = if asks_base_net.is_positive() {
+            asset_weight.to_bits()
+        } else {
+            liab_weight.to_bits()
+        };
+        let asks_health = fmul(fmul(asks_base_net, asks_weight), price)
+            + fmul(price, base_locked)
+            + quote_free
+            + quote_locked;
+
+        I80F48::from_bits(bids_health.min(asks_health))
+    }
     fn get_spot_health(
         &self,
         mango_cache: &MangoCache,
@@ -919,32 +1000,40 @@ impl MangoAccount {
             }
         } else {
             let open_orders = load_open_orders(open_orders_ai)?;
+            sol_log_compute_units();
+            let h = self.sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
+            sol_log_compute_units();
+            let f =
+                self.fast_sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
+            sol_log_compute_units();
 
-            let quote_free =
-                I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
-            let quote_locked =
-                I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free);
-            let base_free = I80F48::from_num(open_orders.native_coin_free);
-            let base_locked =
-                I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free);
-
-            // TODO account for serum dex fees in these calculations
-
-            // Simulate the health if all bids are executed at current price
-            let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
-            let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
-            let bids_health: I80F48 = bids_base_net * bids_weight * price + quote_free;
-
-            // Simulate health if all asks are executed at current price
-            let asks_base_net = base_net - base_locked + base_free;
-            let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
-            let asks_health: I80F48 = asks_base_net * asks_weight * price
-                + price * base_locked
-                + quote_free
-                + quote_locked;
-
-            // Pick the worse of the two possibilities
-            bids_health.min(asks_health)
+            msg!("{:?} {:?}", h, f);
+            h
+            // let quote_free =
+            //     I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
+            // let quote_locked =
+            //     I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free);
+            // let base_free = I80F48::from_num(open_orders.native_coin_free);
+            // let base_locked =
+            //     I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free);
+            //
+            // // TODO account for serum dex fees in these calculations
+            //
+            // // Simulate the health if all bids are executed at current price
+            // let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+            // let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
+            // let bids_health: I80F48 = bids_base_net * bids_weight * price + quote_free;
+            //
+            // // Simulate health if all asks are executed at current price
+            // let asks_base_net = base_net - base_locked + base_free;
+            // let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
+            // let asks_health: I80F48 = asks_base_net * asks_weight * price
+            //     + price * base_locked
+            //     + quote_free
+            //     + quote_locked;
+            //
+            // // Pick the worse of the two possibilities
+            // bids_health.min(asks_health)
         };
 
         // msg!("spot health {:?}", health);
@@ -989,6 +1078,7 @@ impl MangoAccount {
                         perp_market_info.init_liab_weight,
                     ),
                 };
+
             if !spot_market_info.is_empty() {
                 health += self.get_spot_health(
                     mango_cache,
@@ -1711,7 +1801,7 @@ fn strip_dex_padding<'a>(acc: &'a AccountInfo) -> MangoResult<Ref<'a, [u8]>> {
 
 pub fn load_open_orders<'a>(
     acc: &'a AccountInfo,
-) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {    
+) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {
     Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
 }
 
