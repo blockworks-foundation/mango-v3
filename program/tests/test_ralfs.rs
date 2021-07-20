@@ -182,7 +182,7 @@ async fn test_place_spot_order() {
         client_order_id: 1000,
         limit: std::u16::MAX,
     };
-    test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[mint_index], &oracle_pks[mint_index], user_index, mint_index, order).await;
+    test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[mint_index], &oracle_pks, user_index, mint_index, order).await;
 
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
@@ -208,14 +208,23 @@ async fn test_worst_case_scenario() {
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
     let num_spot_orders = 31;
-
     let base_price = 10000;
-    let deposit_amount = (base_price * quote_mint.unit) as u64;
-    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, user_index, quote_index, deposit_amount * num_spot_orders).await;
 
-    // Place 10 spot orders
+    let deposit_amount = (base_price * quote_mint.unit) as u64;
+    // Perform deposit for the quote
+    test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, user_index, quote_index, deposit_amount * num_spot_orders).await;
+    // Perform deposit for the rest of tokens
+    for mint_index in 0..num_spot_orders {
+        let base_mint = test.with_mint(mint_index as usize);
+        let mint_deposit_amount = (1 * base_mint.unit) as u64;
+        test.perform_deposit(&mango_group, &mango_group_pk, &mango_account_pk, user_index, mint_index as usize, mint_deposit_amount).await;
+    }
+
+
+    // Place 31 spot orders
     let starting_order_id = 1000;
     for mint_index in 0..num_spot_orders {
+        println!("== PLACING SPOT ORDER {} ==", mint_index);
         let mint_index_u = mint_index as usize;
         let base_mint = test.with_mint(mint_index_u);
         let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
@@ -230,7 +239,7 @@ async fn test_worst_case_scenario() {
             client_order_id: starting_order_id + mint_index,
             limit: std::u16::MAX,
         };
-        test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[mint_index_u], &oracle_pks[mint_index_u], user_index, mint_index_u, order).await;
+        test.place_spot_order(&mango_group_pk, &mango_group, &mango_account_pk, &mango_account, &mango_cache_pk, spot_markets[mint_index_u], &oracle_pks, user_index, mint_index_u, order).await;
         println!("== PLACED SPOT ORDER {} ==", mint_index);
         mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
         // test.advance_clock().await;
@@ -266,9 +275,18 @@ async fn test_worst_case_scenario() {
 
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
+
+    let mut active_assets = mango_account.get_active_assets(&mango_group);
+    for x in active_assets {
+        println!("AA: {}", x);
+    }
+
     for x in 0..mango_account.spot_open_orders.len() {
         println!("SOO: {}", mango_account.spot_open_orders[x].to_string());
-        let market = MarketState::load(&spot_markets[x].market, &test.serum_program_id).unwrap();
+        // let oo = test.get_account(mango_account.spot_open_orders[x]);
+        // let market = MarketState::load(&spot_markets[x].market, &test.serum_program_id).unwrap();
+        // println!("MARKET BASE DEPOSITS: {}", market.coin_deposits_total);
+        // println!("MARKET QUOTE DEPOSITS: {}", market.pc_deposits_total);
     }
     // TODO
 }

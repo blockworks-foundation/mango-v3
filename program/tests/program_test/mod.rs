@@ -1122,7 +1122,7 @@ impl MangoProgramTest {
         mango_account: &MangoAccount,
         mango_cache_pk: &Pubkey,
         spot_market: MarketPubkeys,
-        oracle_pk: &Pubkey,
+        oracle_pks: &[Pubkey],
         user_index: usize,
         token_index: usize,
         order: NewOrderInstructionV3,
@@ -1158,7 +1158,7 @@ impl MangoProgramTest {
                 &mango_program_id,
                 &mango_group_pk,
                 &mango_group.mango_cache,
-                &[*oracle_pk],
+                &oracle_pks,
             )
             .unwrap(),
             cache_root_banks(
