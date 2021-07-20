@@ -1,14 +1,20 @@
+use std::borrow::Borrow;
 use std::convert::TryInto;
 use std::mem::size_of;
 use std::num::NonZeroU64;
-use std::borrow::Borrow;
 
+use bincode::deserialize;
 use fixed::types::I80F48;
 use mango_common::Loadable;
 use solana_program::{
-    account_info::AccountInfo, program_error::ProgramError, program_option::COption,
-    program_pack::Pack, pubkey::*, rent::*, system_instruction,
-    clock::{Clock, UnixTimestamp}, sysvar
+    account_info::AccountInfo,
+    clock::{Clock, UnixTimestamp},
+    program_error::ProgramError,
+    program_option::COption,
+    program_pack::Pack,
+    pubkey::*,
+    rent::*,
+    system_instruction, sysvar,
 };
 use solana_program_test::*;
 use solana_sdk::{
@@ -19,7 +25,6 @@ use solana_sdk::{
     transport::TransportError,
 };
 use spl_token::{state::*, *};
-use bincode::deserialize;
 
 use mango::{
     entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
@@ -30,6 +35,7 @@ use serum_dex::instruction::{
     close_open_orders as close_open_orders_ix, init_open_orders as init_open_orders_ix,
     MarketInstruction, NewOrderInstructionV3, SelfTradeBehavior,
 };
+use solana_program::entrypoint::ProgramResult;
 
 pub mod group;
 
@@ -380,7 +386,7 @@ impl MangoProgramTest {
         let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
 
         // passing mango's process instruction just to satisfy the compiler
-        test.add_program("serum_dex", serum_program_id, processor!(process_instruction));
+        test.add_program("serum_dex", serum_program_id, processor!(process_serum_instruction));
         // TODO: add more programs (oracles)
 
         // limit to track compute unit increase
@@ -568,8 +574,7 @@ impl MangoProgramTest {
 
     #[allow(dead_code)]
     pub async fn get_clock(&mut self) -> Clock {
-        self.get_bincode_account::<Clock>(&sysvar::clock::id())
-            .await
+        self.get_bincode_account::<Clock>(&sysvar::clock::id()).await
     }
 
     #[allow(dead_code)]
@@ -589,8 +594,7 @@ impl MangoProgramTest {
     #[allow(dead_code)]
     pub async fn advance_clock_by_min_timespan(&mut self, time_span: u64) {
         let clock: Clock = self.get_clock().await;
-        self.advance_clock_past_timestamp(clock.unix_timestamp + (time_span as i64))
-            .await;
+        self.advance_clock_past_timestamp(clock.unix_timestamp + (time_span as i64)).await;
     }
 
     #[allow(dead_code)]
@@ -673,18 +677,12 @@ impl MangoProgramTest {
         return (mango_account_pk, mango_account);
     }
 
-    pub async fn with_mango_cache(
-        &mut self,
-        mango_group: &MangoGroup
-    ) -> (Pubkey, MangoCache) {
+    pub async fn with_mango_cache(&mut self, mango_group: &MangoGroup) -> (Pubkey, MangoCache) {
         let mango_cache = self.load_account::<MangoCache>(mango_group.mango_cache).await;
         return (mango_group.mango_cache, mango_cache);
     }
 
-    pub fn with_mint(
-        &mut self,
-        mint_index: usize
-    ) -> MintConfig {
+    pub fn with_mint(&mut self, mint_index: usize) -> MintConfig {
         return self.mints[mint_index];
     }
 
@@ -725,16 +723,14 @@ impl MangoProgramTest {
         oracle_price: I80F48,
     ) {
         let mango_program_id = self.mango_program_id;
-        let instructions = [
-            mango::instruction::set_oracle(
-                &mango_program_id,
-                &mango_group_pk,
-                &oracle_pk,
-                &self.context.payer.pubkey(),
-                oracle_price,
-            )
-            .unwrap()
-        ];
+        let instructions = [mango::instruction::set_oracle(
+            &mango_program_id,
+            &mango_group_pk,
+            &oracle_pk,
+            &self.context.payer.pubkey(),
+            oracle_price,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
@@ -891,13 +887,8 @@ impl MangoProgramTest {
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
 
         let instructions = [
-            cache_prices(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &oracle_pks,
-            )
-            .unwrap(),
+            cache_prices(&mango_program_id, &mango_group_pk, &mango_group.mango_cache, &oracle_pks)
+                .unwrap(),
             cache_perp_markets(
                 &mango_program_id,
                 &mango_group_pk,
@@ -1039,13 +1030,11 @@ impl MangoProgramTest {
         })
     }
 
-    pub async fn init_open_orders(
-        &mut self,
-        spot_market: &MarketPubkeys,
-    ) -> Pubkey {
+    pub async fn init_open_orders(&mut self, spot_market: &MarketPubkeys) -> Pubkey {
         let serum_program_id = self.serum_program_id;
 
-        let (orders_key, instruction) = self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
+        let (orders_key, instruction) =
+            self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
 
         let mut instructions = Vec::new();
         let orders_keypair = orders_key;
@@ -1055,10 +1044,12 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&orders_keypair])).await.unwrap();
 
         return orders_pk;
-
     }
 
-    pub async fn add_perp_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) -> (Vec<Pubkey>, Vec<PerpMarket>) {
+    pub async fn add_perp_markets_to_mango_group(
+        &mut self,
+        mango_group_pk: &Pubkey,
+    ) -> (Vec<Pubkey>, Vec<PerpMarket>) {
         let quote_index = self.mints.len() - 1;
         let mut perp_market_pks = Vec::new();
         let mut perp_markets = Vec::new();
@@ -1073,7 +1064,10 @@ impl MangoProgramTest {
         return (perp_market_pks, perp_markets);
     }
 
-    pub async fn add_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) -> Vec<MarketPubkeys> {
+    pub async fn add_markets_to_mango_group(
+        &mut self,
+        mango_group_pk: &Pubkey,
+    ) -> Vec<MarketPubkeys> {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
 
@@ -1120,7 +1114,7 @@ impl MangoProgramTest {
                     optimal_rate,
                     max_rate,
                 )
-                .unwrap()
+                .unwrap(),
             );
 
             market_pubkey_holder.push(market_pubkeys);
@@ -1136,15 +1130,13 @@ impl MangoProgramTest {
         perp_market_pks: &[Pubkey],
     ) {
         let mango_program_id = self.mango_program_id;
-        let instructions = [
-            cache_perp_markets(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &perp_market_pks,
-            )
-            .unwrap()
-        ];
+        let instructions = [cache_perp_markets(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &perp_market_pks,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
@@ -1171,9 +1163,11 @@ impl MangoProgramTest {
         let (dex_signer_pk, _) =
             create_signer_key_and_nonce(&serum_program_id, &spot_market.market);
 
-        let (mint_root_bank_pk, mint_root_bank) = self.with_root_bank(mango_group, token_index).await;
+        let (mint_root_bank_pk, mint_root_bank) =
+            self.with_root_bank(mango_group, token_index).await;
         let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
-        let (quote_root_bank_pk, quote_root_bank) = self.with_root_bank(mango_group, self.mints.len() - 1).await;
+        let (quote_root_bank_pk, quote_root_bank) =
+            self.with_root_bank(mango_group, self.mints.len() - 1).await;
         let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
 
         // Only pass in open orders if in margin basket or current market index, and
@@ -1188,13 +1182,8 @@ impl MangoProgramTest {
         }
 
         let instructions = [
-            cache_prices(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &oracle_pks,
-            )
-            .unwrap(),
+            cache_prices(&mango_program_id, &mango_group_pk, &mango_group.mango_cache, &oracle_pks)
+                .unwrap(),
             cache_root_banks(
                 &mango_program_id,
                 &mango_group_pk,
@@ -1237,14 +1226,19 @@ impl MangoProgramTest {
                 &open_orders_pks, // oo ais
                 order,
             )
-            .unwrap()
+            .unwrap(),
         ];
 
-        let signers = vec![
-            &user
-        ];
+        let signers = vec![&user];
 
         self.process_transaction(&instructions, Some(&signers)).await.unwrap();
     }
+}
 
+fn process_serum_instruction(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    Ok(serum_dex::state::State::process(program_id, accounts, instruction_data)?)
 }

@@ -709,6 +709,12 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    /// Withdraw a token from the bank if collateral ratio permits
+    fn init_spot_open_orders() -> MangoResult<()> {
+        Ok(())
+    }
+
     // TODO - add serum dex fee discount functionality
     #[inline(never)]
     fn place_spot_order(
@@ -810,19 +816,19 @@ impl Processor {
                     mango_account.spot_open_orders[i] = *open_orders_ai.key;
                 } else {
                     check_eq!(
-                        open_orders_ais[i].key,
+                        open_orders_ai.key,
                         &mango_account.spot_open_orders[i],
                         MangoErrorCode::Default
                     )?;
-                    check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+                    check_open_orders(open_orders_ai, &mango_group.signer_key)?;
                 }
             } else {
                 check_eq!(
-                    open_orders_ais[i].key,
+                    open_orders_ai.key,
                     &mango_account.spot_open_orders[i],
                     MangoErrorCode::Default
                 )?;
-                check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+                check_open_orders(open_orders_ai, &mango_group.signer_key)?;
             }
         }
 
@@ -891,26 +897,25 @@ impl Processor {
             &[&signers_seeds],
             order,
         )?;
-        sol_log_compute_units();
+
         // Settle funds for this market
-        invoke_settle_funds(
-            dex_prog_ai,
-            spot_market_ai,
-            &open_orders_ais[token_index],
-            signer_ai,
-            dex_base_ai,
-            dex_quote_ai,
-            base_vault_ai,
-            quote_vault_ai,
-            dex_signer_ai,
-            token_prog_ai,
-            &[&signers_seeds],
-        )?;
+        // invoke_settle_funds(
+        //     dex_prog_ai,
+        //     spot_market_ai,
+        //     &open_orders_ais[token_index],
+        //     signer_ai,
+        //     dex_base_ai,
+        //     dex_quote_ai,
+        //     base_vault_ai,
+        //     quote_vault_ai,
+        //     dex_signer_ai,
+        //     token_prog_ai,
+        //     &[&signers_seeds],
+        // )?;
 
         // See if we can remove this market from margin
         let open_orders = load_open_orders(&open_orders_ais[token_index])?;
         mango_account.update_basket(token_index, &open_orders)?;
-        sol_log_compute_units();
 
         // TODO OPT - write a zero copy way to deserialize Account to reduce compute
         let (post_base, post_quote) = {
@@ -923,7 +928,6 @@ impl Processor {
         let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
         let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
 
-        sol_log_compute_units();
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut quote_node_bank,
@@ -931,7 +935,6 @@ impl Processor {
             QUOTE_INDEX,
             quote_change,
         )?;
-        sol_log_compute_units();
 
         checked_change_net(
             &mango_cache.root_bank_cache[token_index],

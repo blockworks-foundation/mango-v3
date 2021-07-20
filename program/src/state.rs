@@ -950,6 +950,7 @@ impl MangoAccount {
         let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
 
         let bids_health = bids_base_net.mul(bids_weight).mul(price).add(quote_free);
+        // TODO account for serum dex fees in these calculations
 
         // Simulate health if all asks are executed at current price
         let asks_base_net = base_net.sub(base_locked).add(base_free);
@@ -1025,49 +1026,18 @@ impl MangoAccount {
             }
         } else {
             let open_orders = load_open_orders(open_orders_ai)?;
-            // sol_log_compute_units();
-            // let h = self.sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
-            let h = self
-                .fast_sim_spot_health(
-                    &open_orders,
-                    FI80F48::from_fixed(base_net),
-                    FI80F48::from_fixed(price),
-                    FI80F48::from_fixed(asset_weight),
-                    FI80F48::from_fixed(liab_weight),
-                )
-                .to_fixed();
-            // sol_log_compute_units();
-            // let f =
-            //     self.fast_sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
-            // sol_log_compute_units();
-
-            // msg!("{:?} {:?}", h, f);
+            let h = self.sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
+            // msg!("{} {} {}", market_index, open_orders.native_pc_total, open_orders.native_pc_free);
+            // let h = self
+            //     .fast_sim_spot_health(
+            //         &open_orders,
+            //         FI80F48::from_fixed(base_net),
+            //         FI80F48::from_fixed(price),
+            //         FI80F48::from_fixed(asset_weight),
+            //         FI80F48::from_fixed(liab_weight),
+            //     )
+            //     .to_fixed();
             h
-            // let quote_free =
-            //     I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
-            // let quote_locked =
-            //     I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free);
-            // let base_free = I80F48::from_num(open_orders.native_coin_free);
-            // let base_locked =
-            //     I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free);
-            //
-            // // TODO account for serum dex fees in these calculations
-            //
-            // // Simulate the health if all bids are executed at current price
-            // let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
-            // let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
-            // let bids_health: I80F48 = bids_base_net * bids_weight * price + quote_free;
-            //
-            // // Simulate health if all asks are executed at current price
-            // let asks_base_net = base_net - base_locked + base_free;
-            // let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
-            // let asks_health: I80F48 = asks_base_net * asks_weight * price
-            //     + price * base_locked
-            //     + quote_free
-            //     + quote_locked;
-            //
-            // // Pick the worse of the two possibilities
-            // bids_health.min(asks_health)
         };
 
         // msg!("spot health {:?}", health);
@@ -1113,7 +1083,13 @@ impl MangoAccount {
                 };
 
             if !spot_market_info.is_empty() {
-                // sol_log_compute_units();
+                let spot_health = self.get_spot_health(
+                    mango_cache,
+                    i,
+                    &spot_open_orders_ais[i],
+                    spot_asset_weight,
+                    spot_liab_weight,
+                )?;
                 // let spot_health = self
                 //     .fast_get_spot_health(
                 //         mango_cache,
@@ -1123,20 +1099,10 @@ impl MangoAccount {
                 //         FI80F48::from_fixed(spot_liab_weight),
                 //     )?
                 //     .to_fixed();
-                // sol_log_compute_units();
-                //
-                let spot_health = self.get_spot_health(
-                    mango_cache,
-                    i,
-                    &spot_open_orders_ais[i],
-                    spot_asset_weight,
-                    spot_liab_weight,
-                )?;
-                // sol_log_compute_units();
                 health += spot_health;
             }
 
-            if !perp_market_info.is_empty() {
+            if self.perp_accounts[i].is_active() && !perp_market_info.is_empty() {
                 health += self.perp_accounts[i].get_health(
                     perp_market_info,
                     mango_cache.price_cache[i].price,

@@ -60,7 +60,7 @@ pub fn invert_side(side: Side) -> Side {
 pub struct FI80F48(i128);
 impl FI80F48 {
     pub fn from_fixed(x: I80F48) -> Self {
-        FI80F48(x.to_bits())
+        Self(x.to_bits())
     }
 
     pub fn from_u64(x: u64) -> Self {
@@ -100,7 +100,7 @@ impl FI80F48 {
     }
     #[inline(always)]
     pub fn div(&self, x: Self) -> Self {
-        Self((self.0 / x.0) << 48)
+        Self::from_fixed(self.to_fixed() / x.to_fixed())
     }
     #[inline(always)]
     fn split(&self) -> (i128, i128) {
