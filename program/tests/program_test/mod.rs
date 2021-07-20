@@ -884,7 +884,7 @@ impl MangoProgramTest {
         order_size: i64,
         order_id: u64,
         order_type: OrderType,
-        oracle_pk: &Pubkey,
+        oracle_pks: &[Pubkey],
         user_index: usize,
     ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
@@ -895,7 +895,7 @@ impl MangoProgramTest {
                 &mango_program_id,
                 &mango_group_pk,
                 &mango_group.mango_cache,
-                &[*oracle_pk],
+                &oracle_pks,
             )
             .unwrap(),
             cache_perp_markets(
@@ -1058,6 +1058,21 @@ impl MangoProgramTest {
 
     }
 
+    pub async fn add_perp_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) -> (Vec<Pubkey>, Vec<PerpMarket>) {
+        let quote_index = self.mints.len() - 1;
+        let mut perp_market_pks = Vec::new();
+        let mut perp_markets = Vec::new();
+        for mint_index in 0..quote_index {
+            let mint_index_u = mint_index as usize;
+            let base_mint = self.with_mint(mint_index_u);
+            let (perp_market_pk, perp_market) =
+                self.with_perp_market(&mango_group_pk, mint_index_u, mint_index_u).await;
+            perp_market_pks.push(perp_market_pk);
+            perp_markets.push(perp_market);
+        }
+        return (perp_market_pks, perp_markets);
+    }
+
     pub async fn add_markets_to_mango_group(&mut self, mango_group_pk: &Pubkey) -> Vec<MarketPubkeys> {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
@@ -1112,6 +1127,25 @@ impl MangoProgramTest {
         }
         self.process_transaction(&instructions, None).await.unwrap();
         return market_pubkey_holder;
+    }
+
+    pub async fn cache_all_perp_markets(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        perp_market_pks: &[Pubkey],
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let instructions = [
+            cache_perp_markets(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &perp_market_pks,
+            )
+            .unwrap()
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
     }
 
     pub async fn place_spot_order(
