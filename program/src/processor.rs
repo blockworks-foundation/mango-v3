@@ -37,6 +37,7 @@ use crate::state::{
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use serum_dex::instruction::NewOrderInstructionV3;
+use solana_program::log::sol_log_compute_units;
 use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -890,7 +891,7 @@ impl Processor {
             &[&signers_seeds],
             order,
         )?;
-
+        sol_log_compute_units();
         // Settle funds for this market
         invoke_settle_funds(
             dex_prog_ai,
@@ -909,6 +910,7 @@ impl Processor {
         // See if we can remove this market from margin
         let open_orders = load_open_orders(&open_orders_ais[token_index])?;
         mango_account.update_basket(token_index, &open_orders)?;
+        sol_log_compute_units();
 
         // TODO OPT - write a zero copy way to deserialize Account to reduce compute
         let (post_base, post_quote) = {
@@ -920,6 +922,8 @@ impl Processor {
 
         let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
         let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
+
+        sol_log_compute_units();
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut quote_node_bank,
@@ -927,6 +931,7 @@ impl Processor {
             QUOTE_INDEX,
             quote_change,
         )?;
+        sol_log_compute_units();
 
         checked_change_net(
             &mango_cache.root_bank_cache[token_index],

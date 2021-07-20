@@ -21,7 +21,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{fmul, invert_side, remove_slop_mut, FI80F48};
+use crate::utils::{invert_side, remove_slop_mut, FI80F48};
 use enumflags2::BitFlags;
 use solana_program::log::sol_log_compute_units;
 use solana_program::program_pack::Pack;
@@ -696,12 +696,6 @@ pub struct MangoAccount {
     pub padding: [u8; 6],
 }
 
-const S: i128 = 1i128 << 48;
-
-fn u64_to_i128(x: u64) -> i128 {
-    (x as i128) * S
-}
-
 impl MangoAccount {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
@@ -934,14 +928,15 @@ impl MangoAccount {
         bids_health.min(asks_health)
     }
 
+    #[inline(always)]
     fn fast_sim_spot_health(
         &self,
         open_orders: &serum_dex::state::OpenOrders,
-        base_net: I80F48,
-        price: I80F48,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-    ) -> I80F48 {
+        base_net: FI80F48,
+        price: FI80F48,
+        asset_weight: FI80F48,
+        liab_weight: FI80F48,
+    ) -> FI80F48 {
         let quote_free =
             FI80F48::from_u64(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
         let quote_locked =
@@ -950,26 +945,15 @@ impl MangoAccount {
         let base_locked =
             FI80F48::from_u64(open_orders.native_coin_total - open_orders.native_coin_free);
 
-        let price = FI80F48::from_fixed(price);
-        let base_net = FI80F48::from_fixed(base_net);
-
         // Simulate the health if all bids are executed at current price
         let bids_base_net = quote_locked.div(price).add(base_net).add(base_free).add(base_locked);
-        let bids_weight = if bids_base_net.is_positive() {
-            FI80F48::from_fixed(asset_weight)
-        } else {
-            FI80F48::from_fixed(liab_weight)
-        };
+        let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
 
         let bids_health = bids_base_net.mul(bids_weight).mul(price).add(quote_free);
 
         // Simulate health if all asks are executed at current price
         let asks_base_net = base_net.sub(base_locked).add(base_free);
-        let asks_weight = if asks_base_net.is_positive() {
-            FI80F48::from_fixed(asset_weight)
-        } else {
-            FI80F48::from_fixed(liab_weight)
-        };
+        let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
         let asks_health = asks_base_net
             .mul(asks_weight)
             .mul(price)
@@ -977,7 +961,43 @@ impl MangoAccount {
             .add(quote_free)
             .add(quote_locked);
 
-        bids_health.min(asks_health).to_fixed()
+        bids_health.min(asks_health)
+    }
+
+    fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> FI80F48 {
+        FI80F48::from_fixed(self.deposits[token_index])
+            .mul(FI80F48::from_fixed(bank_cache.deposit_index))
+            .sub(
+                FI80F48::from_fixed(self.borrows[token_index])
+                    .mul(FI80F48::from_fixed(bank_cache.borrow_index)),
+            )
+    }
+
+    fn fast_get_spot_health(
+        &self,
+        mango_cache: &MangoCache,
+        market_index: usize,
+        open_orders_ai: &AccountInfo,
+        asset_weight: FI80F48,
+        liab_weight: FI80F48,
+    ) -> MangoResult<FI80F48> {
+        let bank_cache = &mango_cache.root_bank_cache[market_index];
+        let price = FI80F48::from_fixed(mango_cache.price_cache[market_index].price);
+        let base_net = self.get_net(bank_cache, market_index);
+        let health = if !self.in_margin_basket[market_index]
+            || self.spot_open_orders[market_index] == Pubkey::default()
+        {
+            if base_net.is_positive() {
+                base_net.mul(asset_weight).mul(price)
+            } else {
+                base_net.mul(liab_weight).mul(price)
+            }
+        } else {
+            let open_orders = load_open_orders(open_orders_ai)?;
+
+            self.fast_sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight)
+        };
+        Ok(health)
     }
     fn get_spot_health(
         &self,
@@ -1005,14 +1025,23 @@ impl MangoAccount {
             }
         } else {
             let open_orders = load_open_orders(open_orders_ai)?;
-            sol_log_compute_units();
-            let h = self.sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
-            sol_log_compute_units();
-            let f =
-                self.fast_sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
-            sol_log_compute_units();
+            // sol_log_compute_units();
+            // let h = self.sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
+            let h = self
+                .fast_sim_spot_health(
+                    &open_orders,
+                    FI80F48::from_fixed(base_net),
+                    FI80F48::from_fixed(price),
+                    FI80F48::from_fixed(asset_weight),
+                    FI80F48::from_fixed(liab_weight),
+                )
+                .to_fixed();
+            // sol_log_compute_units();
+            // let f =
+            //     self.fast_sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight);
+            // sol_log_compute_units();
 
-            msg!("{:?} {:?}", h, f);
+            // msg!("{:?} {:?}", h, f);
             h
             // let quote_free =
             //     I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
@@ -1056,10 +1085,9 @@ impl MangoAccount {
         active_assets: &[bool; MAX_TOKENS],
         health_type: HealthType,
     ) -> MangoResult<I80F48> {
-        let mut health = (mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index
-            * self.deposits[QUOTE_INDEX])
-            - (mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX]);
-
+        sol_log_compute_units();
+        let mut health =
+            self.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).to_fixed();
         for i in 0..mango_group.num_oracles {
             if !active_assets[i] {
                 continue;
@@ -1085,13 +1113,27 @@ impl MangoAccount {
                 };
 
             if !spot_market_info.is_empty() {
-                health += self.get_spot_health(
+                // sol_log_compute_units();
+                // let spot_health = self
+                //     .fast_get_spot_health(
+                //         mango_cache,
+                //         i,
+                //         &spot_open_orders_ais[i],
+                //         FI80F48::from_fixed(spot_asset_weight),
+                //         FI80F48::from_fixed(spot_liab_weight),
+                //     )?
+                //     .to_fixed();
+                // sol_log_compute_units();
+                //
+                let spot_health = self.get_spot_health(
                     mango_cache,
                     i,
                     &spot_open_orders_ais[i],
                     spot_asset_weight,
                     spot_liab_weight,
                 )?;
+                // sol_log_compute_units();
+                health += spot_health;
             }
 
             if !perp_market_info.is_empty() {
@@ -1106,6 +1148,7 @@ impl MangoAccount {
             }
             // msg!("get_health {} => {:?}", i, health);
         }
+        sol_log_compute_units();
 
         Ok(health)
     }

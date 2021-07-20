@@ -64,21 +64,21 @@ impl FI80F48 {
     }
 
     pub fn from_u64(x: u64) -> Self {
-        Self((x << 48) as i128)
+        Self((x as i128) << 48)
     }
 
     pub fn to_fixed(&self) -> I80F48 {
         I80F48::from_bits(self.0)
     }
-
+    #[inline(always)]
     pub fn add(&self, x: Self) -> Self {
         Self(self.0 + x.0)
     }
-
+    #[inline(always)]
     pub fn sub(&self, x: Self) -> Self {
         Self(self.0 - x.0)
     }
-
+    #[inline(always)]
     pub fn mul(&self, x: Self) -> Self {
         let n = self.0.trailing_zeros();
         Self(if n < 48 {
@@ -87,9 +87,7 @@ impl FI80F48 {
             if n + m < 48 {
                 let (r, over) = (self.0 >> n).overflowing_mul(x.0 >> m);
                 if over {
-                    let (ah, al) = self.split();
-                    let (bh, bl) = x.split();
-                    mul_hi_lo(ah, al, bh, bl)
+                    (self.to_fixed() * x.to_fixed()).to_bits()
                 } else {
                     r >> (48 - m - n)
                 }
@@ -100,10 +98,11 @@ impl FI80F48 {
             (self.0 >> 48) * x.0
         })
     }
-
+    #[inline(always)]
     pub fn div(&self, x: Self) -> Self {
         Self((self.0 / x.0) << 48)
     }
+    #[inline(always)]
     fn split(&self) -> (i128, i128) {
         (self.0 >> 64, 0xffffffffffffffffi128 & self.0)
     }
@@ -113,6 +112,7 @@ impl FI80F48 {
     pub fn is_negative(&self) -> bool {
         self.0.is_negative()
     }
+    #[inline(always)]
     pub fn min(&self, x: Self) -> Self {
         if self.0 < x.0 {
             *self
@@ -130,25 +130,10 @@ fn mul_hi_lo(ah: i128, al: i128, bh: i128, bl: i128) -> i128 {
     ah_bh.checked_add(ah_bl).unwrap().checked_add(al_bh).unwrap().checked_add(al_bl).unwrap()
 }
 
-pub fn fmul(a: i128, b: i128) -> i128 {
-    let x = a.trailing_zeros();
-    if x < 48 {
-        let y = min(48 - x, b.trailing_zeros());
-
-        if x + y < 48 {
-            ((a >> x) * (b >> y)) >> (48 - x - y)
-        } else {
-            (a >> x) * (b >> y)
-        }
-    } else {
-        (a >> 48) * b
-    }
-}
-
 #[test]
 fn test_fmul() {
-    let b = I80F48::from_bits((1i128 << 64) + 1);
-    let a = I80F48::from_bits((1i128 << 64) + 1);
+    let b = I80F48::from_num(-121231.2342349);
+    let a = I80F48::from_num(123123123.111);
 
     println!("{:?}", a * b);
     println!("{:?}", FI80F48::from_fixed(a).mul(FI80F48::from_fixed(b)).to_fixed());
