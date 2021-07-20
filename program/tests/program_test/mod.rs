@@ -119,8 +119,6 @@ impl MangoProgramTest {
 
         // Note:: Maybe define a const array of all the mint params that replicate real life and use those
         let mut mints: Vec<MintConfig> = vec![
-            // ("MNGO", 0, 6, 10i64.pow(6) as i64, 10 as i64),
-            // ("MSRM", 0, 6, 10i64.pow(6) as i64, 10 as i64),
             MintConfig {
                 index: 0,
                 decimals: 6,
@@ -173,10 +171,10 @@ impl MangoProgramTest {
                 index: 6,
                 decimals: 6,
                 unit: 10i64.pow(6) as i64,
-                base_lot: 0 as i64,
-                quote_lot: 0 as i64,
+                base_lot: 100 as i64,
+                quote_lot: 10 as i64,
                 pubkey: None,
-            }, // symbol: "USDC".to_string()
+            }, // symbol: "BTC".to_string()
             MintConfig {
                 index: 7,
                 decimals: 6,
@@ -373,10 +371,10 @@ impl MangoProgramTest {
                 index: 31,
                 decimals: 6,
                 unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
+                base_lot: 0 as i64,
+                quote_lot: 0 as i64,
                 pubkey: None,
-            }, // symbol: "BTC".to_string()
+            }, // symbol: "USDC".to_string()
         ];
 
         let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
