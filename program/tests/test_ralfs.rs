@@ -25,6 +25,8 @@ use solana_sdk::{
 use serum_dex::instruction::{
     NewOrderInstructionV3, SelfTradeBehavior,
 };
+use serum_dex::state::{MarketState, OpenOrders, State, ToAlignedBytes};
+
 
 #[tokio::test]
 async fn test_init_perp_market_ralfs() {
@@ -205,7 +207,7 @@ async fn test_worst_case_scenario() {
     let spot_markets = test.add_markets_to_mango_group(&mango_group_pk).await;
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
-    let num_spot_orders = 10;
+    let num_spot_orders = 31;
 
     let base_price = 10000;
     let deposit_amount = (base_price * quote_mint.unit) as u64;
@@ -264,5 +266,9 @@ async fn test_worst_case_scenario() {
 
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
+    for x in 0..mango_account.spot_open_orders.len() {
+        println!("SOO: {}", mango_account.spot_open_orders[x].to_string());
+        let market = MarketState::load(&spot_markets[x].market, &test.serum_program_id).unwrap();
+    }
     // TODO
 }
