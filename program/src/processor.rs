@@ -789,19 +789,12 @@ impl Processor {
             dex_event_queue_ai,     // write
             dex_base_ai,            // write
             dex_quote_ai,           // write
-            // base_root_bank_ai,      // read *** 
-            // base_node_bank_ai,      // write ***
-            // quote_root_bank_ai,     // read ***
-            // quote_node_bank_ai,     // write ***
-            // quote_vault_ai,         // write ***
-            // base_vault_ai,          // write  *** 
-            root_bank_ai,       // read ***
-            node_bank_ai,                   // write ***
-            vault_ai,          // write ***
+            root_bank_ai,           // read
+            node_bank_ai,           // write
+            vault_ai,               // write
             token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
-            // dex_signer_ai,          // read ***
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
