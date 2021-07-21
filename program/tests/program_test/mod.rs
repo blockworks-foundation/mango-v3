@@ -683,11 +683,13 @@ impl MangoProgramTest {
     }
 
     pub fn with_mint(&mut self, mint_index: usize) -> MintConfig {
-        return self.mints[mint_index];
+        let last_mint_index = (self.mints.len() - 1) as usize;
+        return self.mints[std::cmp::min(mint_index, last_mint_index)];
     }
 
-    pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
-        return self.token_accounts[(user_index * self.mints.len()) + token_index];
+    pub fn with_user_token_account(&mut self, user_index: usize, mint_index: usize) -> Pubkey {
+        let last_mint_index = (self.mints.len() - 1) as usize;
+        return self.token_accounts[(user_index * self.mints.len()) + std::cmp::min(mint_index, last_mint_index)];
     }
 
     pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
@@ -971,8 +973,9 @@ impl MangoProgramTest {
         quote_index: usize,
     ) -> Result<MarketPubkeys, ProgramError> {
         let serum_program_id = self.serum_program_id;
+        let last_mint_index = (self.mints.len() - 1) as usize;
         let coin_mint = self.mints[base_index].pubkey.unwrap();
-        let pc_mint = self.mints[quote_index].pubkey.unwrap();
+        let pc_mint = self.mints[std::cmp::min(quote_index, last_mint_index)].pubkey.unwrap();
         let (listing_keys, mut instructions) = self.gen_listing_params(&coin_mint, &pc_mint);
         let ListingKeys {
             market_key,
@@ -1050,10 +1053,10 @@ impl MangoProgramTest {
         &mut self,
         mango_group_pk: &Pubkey,
     ) -> (Vec<Pubkey>, Vec<PerpMarket>) {
-        let quote_index = self.mints.len() - 1;
+        let last_mint_index = self.mints.len() - 1;
         let mut perp_market_pks = Vec::new();
         let mut perp_markets = Vec::new();
-        for mint_index in 0..quote_index {
+        for mint_index in 0..last_mint_index {
             let mint_index_u = mint_index as usize;
             let base_mint = self.with_mint(mint_index_u);
             let (perp_market_pk, perp_market) =
@@ -1064,21 +1067,21 @@ impl MangoProgramTest {
         return (perp_market_pks, perp_markets);
     }
 
-    pub async fn add_markets_to_mango_group(
+    pub async fn add_spot_markets_to_mango_group(
         &mut self,
         mango_group_pk: &Pubkey,
     ) -> Vec<MarketPubkeys> {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
 
-        let quote_index = self.mints.len() - 1;
+        let last_mint_index = self.mints.len() - 1;
 
         let mut market_pubkey_holder = Vec::new();
         let mut instructions = Vec::new();
 
-        for mint_index in 0..quote_index {
+        for mint_index in 0..last_mint_index {
             let market_pubkeys =
-                self.list_market(mint_index as usize, quote_index as usize).await.unwrap();
+                self.list_market(mint_index as usize, last_mint_index as usize).await.unwrap();
 
             let (signer_pk, signer_nonce) =
                 create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
@@ -1167,7 +1170,7 @@ impl MangoProgramTest {
             self.with_root_bank(mango_group, token_index).await;
         let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
         let (quote_root_bank_pk, quote_root_bank) =
-            self.with_root_bank(mango_group, self.mints.len() - 1).await;
+            self.with_root_bank(mango_group, QUOTE_INDEX).await;
         let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
 
         // Only pass in open orders if in margin basket or current market index, and
