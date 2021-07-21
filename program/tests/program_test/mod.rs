@@ -864,7 +864,6 @@ impl MangoProgramTest {
             .unwrap(),
         ];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
-        println!("Deposit success");
     }
 
     pub async fn place_perp_order(

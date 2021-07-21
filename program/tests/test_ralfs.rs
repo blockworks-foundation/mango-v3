@@ -212,7 +212,7 @@ async fn test_place_spot_order() {
 async fn test_worst_case_scenario() {
     // Arrange
     let user_index: usize = 0;
-    let num_markets = 1;
+    let num_markets = 31;
     let config =
         MangoProgramTestConfig { num_mints: num_markets + 1, ..MangoProgramTestConfig::default() };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -232,10 +232,10 @@ async fn test_worst_case_scenario() {
     let oracle_pks = test.with_oracles(&mango_group_pk, num_markets).await;
 
     let spot_markets = test.add_markets_to_mango_group(&mango_group_pk).await;
-    // let (perp_market_pks, perp_markets) =
-    //     test.add_perp_markets_to_mango_group(&mango_group_pk).await;
-    //
-    // test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
+    let (perp_market_pks, perp_markets) =
+        test.add_perp_markets_to_mango_group(&mango_group_pk).await;
+
+    test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
 
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
@@ -269,7 +269,7 @@ async fn test_worst_case_scenario() {
 
     // Place 31 spot orders
     let starting_order_id = 1000;
-    for mint_index in 0..num_markets {
+    for mint_index in 0..10 {
         println!("== PLACING SPOT ORDER {} ==", mint_index);
         let mint_index_u = mint_index as usize;
         let base_mint = test.with_mint(mint_index_u);
@@ -311,38 +311,38 @@ async fn test_worst_case_scenario() {
     }
 
     // Long 31 perp markets
-    // let starting_perp_order_id = 2000;
-    // for mint_index in 0..num_orders {
-    //     println!("== PLACING PERP ORDER {} ==", mint_index);
-    //     let mint_index_u = mint_index as usize;
-    //     let base_mint = test.with_mint(mint_index_u);
-    //
-    //     let order_side = Side::Bid;
-    //     let order_price = test.with_order_price(&quote_mint, &base_mint, base_price);
-    //     let order_size = test.with_order_size(&base_mint, 1);
-    //     let order_type = OrderType::Limit;
-    //
-    //     // Act
-    //     test.place_perp_order(
-    //         &mango_group,
-    //         &mango_group_pk,
-    //         &mango_account,
-    //         &mango_account_pk,
-    //         &perp_markets[mint_index_u],
-    //         &perp_market_pks[mint_index_u],
-    //         order_side,
-    //         order_price,
-    //         order_size,
-    //         starting_perp_order_id + mint_index,
-    //         order_type,
-    //         &oracle_pks,
-    //         user_index,
-    //     )
-    //     .await;
-    //
-    //     println!("== PLACED PERP ORDER {} ==", mint_index);
-    //     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-    // }
+    let starting_perp_order_id = 2000;
+    for mint_index in 0..num_markets {
+        println!("== PLACING PERP ORDER {} ==", mint_index);
+        let mint_index_u = mint_index as usize;
+        let base_mint = test.with_mint(mint_index_u);
+
+        let order_side = Side::Bid;
+        let order_price = test.with_order_price(&quote_mint, &base_mint, base_price);
+        let order_size = test.with_order_size(&base_mint, 1);
+        let order_type = OrderType::Limit;
+
+        // Act
+        test.place_perp_order(
+            &mango_group,
+            &mango_group_pk,
+            &mango_account,
+            &mango_account_pk,
+            &perp_markets[mint_index_u],
+            &perp_market_pks[mint_index_u],
+            order_side,
+            order_price,
+            order_size,
+            starting_perp_order_id + mint_index,
+            order_type,
+            &oracle_pks,
+            user_index,
+        )
+        .await;
+
+        println!("== PLACED PERP ORDER {} ==", mint_index);
+        mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
+    }
     // Act
 
     // Assert
