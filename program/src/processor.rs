@@ -1,3 +1,4 @@
+use std::cell::RefMut;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
@@ -7,7 +8,7 @@ use arrayref::{array_ref, array_refs};
 use bytemuck::cast_ref;
 use fixed::types::I80F48;
 use mango_common::Loadable;
-use serum_dex::matching::Side as SerumSide;
+use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
@@ -30,15 +31,12 @@ use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
-    AssetType, DataType, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank,
-    PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData,
+    NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
     SpotMarketInfo, TokenInfo, DUST_THRESHOLD, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
     ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
-use serum_dex::instruction::NewOrderInstructionV3;
-use solana_program::log::sol_log_compute_units;
-use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -710,8 +708,60 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// Withdraw a token from the bank if collateral ratio permits
-    fn init_spot_open_orders() -> MangoResult<()> {
+    /// *** Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
+    fn init_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read
+            dex_prog_ai,            // read
+            open_orders_ai,         // write
+            spot_market_ai,         // read
+            signer_ai,              // read
+            rent_ai,                // read
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        {
+            // TODO OPT - Unnecessary check because serum dex also checks account flags 0
+            let open_orders = load_open_orders(open_orders_ai)?;
+
+            // Make sure this open orders account has not been initialized already
+            check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
+        }
+
+        // Make sure there isn't already an open orders account for this market
+        check!(
+            mango_account.spot_open_orders[market_index] == Pubkey::default(),
+            MangoErrorCode::Default
+        )?;
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_init_open_orders(
+            dex_prog_ai,
+            open_orders_ai,
+            signer_ai,
+            spot_market_ai,
+            rent_ai,
+            &[&signers_seeds],
+        )?;
+
+        mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
+
         Ok(())
     }
 
@@ -722,7 +772,7 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 23;
+        const NUM_FIXED: usize = 19;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
@@ -739,16 +789,19 @@ impl Processor {
             dex_event_queue_ai,     // write
             dex_base_ai,            // write
             dex_quote_ai,           // write
-            base_root_bank_ai,      // read
-            base_node_bank_ai,      // write
-            quote_root_bank_ai,     // read
-            quote_node_bank_ai,     // write
-            quote_vault_ai,         // write
-            base_vault_ai,          // write
+            // base_root_bank_ai,      // read *** 
+            // base_node_bank_ai,      // write ***
+            // quote_root_bank_ai,     // read ***
+            // quote_node_bank_ai,     // write ***
+            // quote_vault_ai,         // write ***
+            // base_vault_ai,          // write  *** 
+            root_bank_ai,       // read ***
+            node_bank_ai,                   // write ***
+            vault_ai,          // write ***
             token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
-            dex_signer_ai,          // read
+            // dex_signer_ai,          // read ***
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
@@ -756,7 +809,7 @@ impl Processor {
         // put bank info into group +64 bytes
         // remove settle_funds +64 bytes
         // ask serum dex to use dynamic sysvars +32 bytes
-        // only send in open orders pubkeys we need +22 bytes
+        // only send in open orders pubkeys we need +54 bytes
         // shrink size of order instruction +10 bytes
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -772,82 +825,55 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
-        let token_index = mango_group
-            .find_root_bank_index(base_root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
-        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
-        check!(
-            base_root_bank.node_banks.contains(base_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        let token_index = match order.side {
+            serum_dex::matching::Side::Bid => QUOTE_INDEX,
+            serum_dex::matching::Side::Ask => market_index,
+        };
+
         check!(
-            quote_root_bank_ai.key == &mango_group.tokens[QUOTE_INDEX].root_bank,
+            &mango_group.tokens[token_index].root_bank == root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
-        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-        check!(
-            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
 
-        // Make sure the spot market is valid
-        check!(
-            &mango_group.spot_markets[token_index].spot_market == spot_market_ai.key,
-            MangoErrorCode::InvalidMarket
-        )?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-        // Adjust margin basket
-        mango_account.add_to_basket(token_index)?;
+        check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
+        // Adjust margin basket; this also makes this market an active asset
+        mango_account.add_to_basket(market_index)?;
+
+        // TODO - check open orders whereever they're sent in
         for i in 0..mango_group.num_oracles {
-            if !mango_account.in_margin_basket[i] {
-                continue;
-            }
-            let open_orders_ai = &open_orders_ais[i];
-            if i == token_index {
-                if mango_account.spot_open_orders[i] == Pubkey::default() {
-                    let open_orders = load_open_orders(open_orders_ai)?;
-                    check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
-                    mango_account.spot_open_orders[i] = *open_orders_ai.key;
-                } else {
-                    check_eq!(
-                        open_orders_ai.key,
-                        &mango_account.spot_open_orders[i],
-                        MangoErrorCode::Default
-                    )?;
-                    check_open_orders(open_orders_ai, &mango_group.signer_key)?;
-                }
-            } else {
+            if mango_account.in_margin_basket[i] {
                 check_eq!(
-                    open_orders_ai.key,
+                    open_orders_ais[i].key,
                     &mango_account.spot_open_orders[i],
                     MangoErrorCode::Default
                 )?;
-                check_open_orders(open_orders_ai, &mango_group.signer_key)?;
+                check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
             }
         }
 
+        // initialize the health cache with active assets
+        let mut health_cache = HealthCache::new(&mango_group, &mango_account, HealthType::Init);
+
         // First check all caches to make sure valid
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let mut active_assets = mango_account.get_active_assets(&mango_group);
-        active_assets[token_index] = true;
+
         check!(
-            mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
+            mango_cache.check_caches_valid(&mango_group, &health_cache.active_assets, now_ts),
             MangoErrorCode::Default
         )?;
 
-        let pre_health = mango_account.get_health(
-            &mango_group,
-            &mango_cache,
-            open_orders_ais,
-            &active_assets,
-            HealthType::Init,
-        )?;
+        // Calculate health
+        health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let pre_health = health_cache.health;
 
         // update the being_liquidated flag
         if mango_account.being_liquidated {
@@ -864,25 +890,16 @@ impl Processor {
         // TODO maybe check that root bank was updated recently
         // TODO maybe check oracle was updated recently
 
-        // this is to keep track of the amount of funds transferred
-        let (pre_base, pre_quote) = {
-            (
-                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
-                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
-            )
-        };
-        let vault_ai = match order.side {
-            SerumSide::Bid => quote_vault_ai,
-            SerumSide::Ask => base_vault_ai,
-        };
-
-        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        // TODO OPT - write a zero copy way to deserialize Account to reduce compute
+        // this is to keep track of how much funds were transferred out
+        let pre_amount = Account::unpack(&vault_ai.try_borrow_data()?)?.amount;
 
         // Send order to serum dex
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_new_order(
             dex_prog_ai,
             spot_market_ai,
-            &open_orders_ais[token_index],
+            &open_orders_ais[market_index],
             dex_request_queue_ai,
             dex_event_queue_ai,
             bids_ai,
@@ -898,59 +915,30 @@ impl Processor {
             order,
         )?;
 
-        // Settle funds for this market
-        // invoke_settle_funds(
-        //     dex_prog_ai,
-        //     spot_market_ai,
-        //     &open_orders_ais[token_index],
-        //     signer_ai,
-        //     dex_base_ai,
-        //     dex_quote_ai,
-        //     base_vault_ai,
-        //     quote_vault_ai,
-        //     dex_signer_ai,
-        //     token_prog_ai,
-        //     &[&signers_seeds],
-        // )?;
-
         // See if we can remove this market from margin
-        let open_orders = load_open_orders(&open_orders_ais[token_index])?;
-        mango_account.update_basket(token_index, &open_orders)?;
+        let open_orders = load_open_orders(&open_orders_ais[market_index])?;
+        mango_account.update_basket(market_index, &open_orders)?;
 
-        // TODO OPT - write a zero copy way to deserialize Account to reduce compute
-        let (post_base, post_quote) = {
-            (
-                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
-                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
-            )
-        };
-
-        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
-        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
-
-        checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut quote_node_bank,
-            &mut mango_account,
-            QUOTE_INDEX,
-            quote_change,
-        )?;
+        let post_amount = Account::unpack(&vault_ai.try_borrow_data()?)?.amount;
 
         checked_change_net(
             &mango_cache.root_bank_cache[token_index],
-            &mut base_node_bank,
+            &mut node_bank,
             &mut mango_account,
             token_index,
-            base_change,
+            I80F48::from_num(post_amount) - I80F48::from_num(pre_amount),
         )?;
 
-        let post_health = mango_account.get_health(
+        // Update the health where it may have changed
+        health_cache.update_spot_health(
             &mango_group,
             &mango_cache,
-            open_orders_ais,
-            &active_assets,
-            HealthType::Init,
+            &mango_account,
+            &open_orders_ais[market_index],
+            market_index,
         )?;
+        health_cache.update_quote_health(&mango_cache, &mango_account)?;
+        let post_health = health_cache.health;
 
         // If an account is in reduce_only mode, health must only go up
         check!(
@@ -2995,13 +2983,6 @@ impl Processor {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
 
-                    // msg!(
-                    //     "FillEvent: {:?} {} {}",
-                    //     fill_event.side,
-                    //     fill_event.price,
-                    //     fill_event.quantity,
-                    // );
-
                     // handle self trade separately
                     if fill_event.maker == fill_event.taker {
                         let mut mango_account = match mango_account_ais
@@ -3022,33 +3003,6 @@ impl Processor {
                             &mut mango_account.perp_accounts[market_index],
                         )?;
                     } else {
-                        // msg!("taker: {}", fill_event.taker.to_string());
-                        // msg!("maker: {}", fill_event.maker.to_string());
-                        // let mut maker = match mango_account_ais
-                        //     .iter()
-                        //     .find(|ai| ai.key == &fill_event.maker)
-                        // {
-                        //     None => {
-                        //         msg!("Unable to find maker account");
-                        //         return Ok(());
-                        //     }
-                        //     Some(ai) => {
-                        //         MangoAccount::load_mut_checked(ai, program_id, mango_group_ai.key)?
-                        //     }
-                        // };
-                        // let mut taker = match mango_account_ais
-                        //     .iter()
-                        //     .find(|ai| ai.key == &fill_event.taker)
-                        // {
-                        //     None => {
-                        //         msg!("Unable to find taker account");
-                        //         return Ok(());
-                        //     }
-                        //     Some(ai) => {
-                        //         MangoAccount::load_mut_checked(ai, program_id, mango_group_ai.key)?
-                        //     }
-                        // };
-
                         let mut maker = match mango_account_ais
                             .binary_search_by_key(&fill_event.maker, |ai| *(ai.key))
                         {
@@ -3489,7 +3443,7 @@ impl Processor {
             MangoInstruction::SetOracle { price } => {
                 // msg!("Mango: SetOracle {:?}", price);
                 msg!("Mango: SetOracle");
-                Self::set_oracle(program_id, accounts, price)?
+                Self::set_oracle(program_id, accounts, price)?;
             }
             MangoInstruction::SettlePnl { market_index } => {
                 msg!("Mango: SettlePnl");
@@ -3534,15 +3488,19 @@ impl Processor {
             }
             MangoInstruction::SettleFees => {
                 msg!("Mango: SettleFees");
-                Self::settle_fees(program_id, accounts)?
+                Self::settle_fees(program_id, accounts)?;
             }
             MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
                 msg!("Mango: ResolvePerpBankruptcy");
-                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)?
+                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)?;
             }
             MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
                 msg!("Mango: ResolveTokenBankruptcy");
-                Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)?
+                Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)?;
+            }
+            MangoInstruction::InitSpotOpenOrders => {
+                msg!("Mango: InitSpotOpenOrders");
+                Self::init_spot_open_orders(program_id, accounts)?;
             }
         }
 
@@ -3740,8 +3698,10 @@ fn checked_change_net(
 ) -> MangoResult<()> {
     if native_quantity.is_negative() {
         checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)
-    } else {
+    } else if native_quantity.is_positive() {
         checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)
+    } else {
+        Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
     }
 }
 
@@ -4025,6 +3985,37 @@ fn invoke_new_order<'a>(
         solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
     }
 }
+
+fn invoke_init_open_orders<'a>(
+    dex_prog_ai: &AccountInfo<'a>, // Have to add account of the program id
+    open_orders_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    spot_market_ai: &AccountInfo<'a>,
+    rent_ai: &AccountInfo<'a>,
+    signers_seeds: &[&[&[u8]]],
+) -> ProgramResult {
+    let data = serum_dex::instruction::MarketInstruction::InitOpenOrders.pack();
+    let instruction = Instruction {
+        program_id: *dex_prog_ai.key,
+        data,
+        accounts: vec![
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new_readonly(*spot_market_ai.key, false),
+            AccountMeta::new_readonly(*rent_ai.key, false),
+        ],
+    };
+
+    let account_infos = [
+        dex_prog_ai.clone(),
+        open_orders_ai.clone(),
+        signer_ai.clone(),
+        spot_market_ai.clone(),
+        rent_ai.clone(),
+    ];
+    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
+
 /*
 TODO
 check bankruptcy everywhere

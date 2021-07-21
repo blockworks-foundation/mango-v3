@@ -212,7 +212,9 @@ async fn test_place_spot_order() {
 async fn test_worst_case_scenario() {
     // Arrange
     let user_index: usize = 0;
-    let config = MangoProgramTestConfig::default();
+    let num_markets = 1;
+    let config =
+        MangoProgramTestConfig { num_mints: num_markets + 1, ..MangoProgramTestConfig::default() };
     let mut test = MangoProgramTest::start_new(&config).await;
     solana_logger::setup_with_default(
         "solana_rbpf::vm=info,\
@@ -221,7 +223,6 @@ async fn test_worst_case_scenario() {
              solana_program_test=info",
     );
 
-    let num_markets = config.num_mints - 1;
     let quote_index = num_markets as usize;
     let quote_mint = test.with_mint(quote_index);
     let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
@@ -238,9 +239,7 @@ async fn test_worst_case_scenario() {
 
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
-    let num_orders = 31;
     let base_price = 10000;
-    let num_spot_orders = 31;
     let deposit_amount = (base_price * quote_mint.unit) as u64;
     // Perform deposit for the quote
     test.perform_deposit(
@@ -249,11 +248,12 @@ async fn test_worst_case_scenario() {
         &mango_account_pk,
         user_index,
         quote_index,
-        deposit_amount * num_spot_orders,
+        deposit_amount * num_markets,
     )
     .await;
+
     // Perform deposit for the rest of tokens
-    for mint_index in 0..num_spot_orders {
+    for mint_index in 0..num_markets {
         let base_mint = test.with_mint(mint_index as usize);
         let mint_deposit_amount = (1 * base_mint.unit) as u64;
         test.perform_deposit(
@@ -269,7 +269,7 @@ async fn test_worst_case_scenario() {
 
     // Place 31 spot orders
     let starting_order_id = 1000;
-    for mint_index in 0..num_orders {
+    for mint_index in 0..num_markets {
         println!("== PLACING SPOT ORDER {} ==", mint_index);
         let mint_index_u = mint_index as usize;
         let base_mint = test.with_mint(mint_index_u);

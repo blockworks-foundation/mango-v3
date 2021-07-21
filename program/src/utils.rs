@@ -59,8 +59,13 @@ pub fn invert_side(side: Side) -> Side {
 #[derive(Copy, Clone)]
 pub struct FI80F48(i128);
 impl FI80F48 {
+    pub const ZERO: Self = Self(0);
+
     pub fn from_fixed(x: I80F48) -> Self {
         Self(x.to_bits())
+    }
+    pub fn from_bits(x: i128) -> Self {
+        Self(x)
     }
 
     pub fn from_u64(x: u64) -> Self {
@@ -102,6 +107,8 @@ impl FI80F48 {
     pub fn div(&self, x: Self) -> Self {
         Self::from_fixed(self.to_fixed() / x.to_fixed())
     }
+
+    #[allow(dead_code)]
     #[inline(always)]
     fn split(&self) -> (i128, i128) {
         (self.0 >> 64, 0xffffffffffffffffi128 & self.0)
@@ -120,8 +127,12 @@ impl FI80F48 {
             x
         }
     }
+    pub fn neg(&self) -> Self {
+        Self(-self.0)
+    }
 }
 
+#[allow(dead_code)]
 fn mul_hi_lo(ah: i128, al: i128, bh: i128, bl: i128) -> i128 {
     let ah_bh = (ah * bh).checked_shl(80).unwrap();
     let ah_bl = (ah * bl).checked_shl(16).unwrap();
@@ -130,11 +141,42 @@ fn mul_hi_lo(ah: i128, al: i128, bh: i128, bl: i128) -> i128 {
     ah_bh.checked_add(ah_bl).unwrap().checked_add(al_bh).unwrap().checked_add(al_bl).unwrap()
 }
 
-#[test]
-fn test_fmul() {
-    let b = I80F48::from_num(-121231.2342349);
-    let a = I80F48::from_num(123123123.111);
+pub trait FastMath {
+    fn fmul(self, x: Self) -> Self;
+    fn fdiv(self, x: Self) -> Self;
+    fn fadd(self, x: Self) -> Self;
+    fn fsub(self, x: Self) -> Self;
+}
 
-    println!("{:?}", a * b);
-    println!("{:?}", FI80F48::from_fixed(a).mul(FI80F48::from_fixed(b)).to_fixed());
+impl FastMath for I80F48 {
+    fn fmul(self, x: Self) -> Self {
+        let n = self.trailing_zeros();
+        if n < 48 {
+            let m = min(48 - n, x.trailing_zeros());
+
+            if n + m < 48 {
+                let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
+                if over {
+                    self * x
+                } else {
+                    Self::from_bits(r >> (48 - m - n))
+                }
+            } else {
+                Self::from_bits((self.to_bits() >> n) * (x.to_bits() >> m))
+            }
+        } else {
+            Self::from_bits((self.to_bits() >> 48) * x.to_bits())
+        }
+    }
+
+    fn fdiv(self, x: Self) -> Self {
+        self / x
+    }
+
+    fn fadd(self, x: Self) -> Self {
+        self + x
+    }
+    fn fsub(self, x: Self) -> Self {
+        self - x
+    }
 }
