@@ -36,13 +36,12 @@ async fn place_and_cancel_order_scenario(my_order_id: u64, order_side: Side) {
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
-    let num_markets = config.num_mints - 1;
     let user_index = 0;
-    let mint_index = 0;
+    let mint_index: usize = 0;
     let market_index = 0;
 
-    let quote_mint = test.with_mint(QUOTE_INDEX);
-    let base_mint = test.with_mint(mint_index as usize);
+    let quote_mint = test.with_mint(test.quote_index);
+    let base_mint = test.with_mint(mint_index);
 
     let base_price = 10000;
     let raw_order_size = 10000;
@@ -51,17 +50,17 @@ async fn place_and_cancel_order_scenario(my_order_id: u64, order_side: Side) {
     let (mango_account_pk, mut mango_account) =
         test.with_mango_account(&mango_group_pk, user_index).await;
 
-    let oracle_pks = test.with_oracles(&mango_group_pk, num_markets).await;
-    let deposit_amount = (base_price * quote_mint.unit) as u64;
+    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_pk).await;
     let (perp_market_pk, perp_market) =
         test.with_perp_market(&mango_group_pk, mint_index, market_index).await;
 
+    let deposit_amount = (base_price * quote_mint.unit) as u64;
     test.perform_deposit(
         &mango_group,
         &mango_group_pk,
         &mango_account_pk,
         user_index,
-        QUOTE_INDEX,
+        test.quote_index,
         deposit_amount,
     )
     .await;
@@ -105,14 +104,14 @@ async fn test_place_and_cancel_order_ralfs() {
 }
 
 #[tokio::test]
-async fn test_list_market_on_serum() {
+async fn test_list_spot_market_on_serum() {
     // Arrange
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
-    let mint_index = 0;
+    let mint_index: usize = 0;
     // Act
-    let market_pubkeys = test.list_market(mint_index as usize, QUOTE_INDEX).await.unwrap();
+    let market_pubkeys = test.list_spot_market(mint_index).await.unwrap();
     // Assert
     println!("Serum Market PK: {}", market_pubkeys.market.to_string());
     // Todo: Figure out how to assert this
@@ -124,10 +123,8 @@ async fn test_add_all_markets_to_mango_group() {
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
-    let num_markets = config.num_mints - 1;
-
     let (mango_group_pk, _mango_group) = test.with_mango_group().await;
-    test.with_oracles(&mango_group_pk, num_markets).await;
+    test.add_oracles_to_mango_group(&mango_group_pk).await;
     test.add_spot_markets_to_mango_group(&mango_group_pk).await;
 }
 
@@ -138,13 +135,12 @@ async fn test_place_spot_order() {
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
-    let num_markets = config.num_mints - 1;
-    let quote_mint = test.with_mint(QUOTE_INDEX);
+    let quote_mint = test.with_mint(test.quote_index);
     let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
     let (mango_account_pk, mut mango_account) =
         test.with_mango_account(&mango_group_pk, user_index).await;
     let (mango_cache_pk, _mango_cache) = test.with_mango_cache(&mango_group).await;
-    let oracle_pks = test.with_oracles(&mango_group_pk, num_markets).await;
+    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_pk).await;
 
     let base_price = 10000;
     let mint_index: usize = 0;
@@ -161,7 +157,7 @@ async fn test_place_spot_order() {
         &mango_group_pk,
         &mango_account_pk,
         user_index,
-        QUOTE_INDEX,
+        test.quote_index,
         deposit_amount,
     )
     .await;
@@ -196,9 +192,21 @@ async fn test_place_spot_order() {
 }
 
 #[tokio::test]
+async fn test_quote_mint() {
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 6 };
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let quote_mint = test.with_mint(test.quote_index);
+
+    println!("quote_index: {}", test.quote_index);
+    println!("quote_mint.decimals: {}", quote_mint.decimals);
+    println!("quote_mint.base_lot: {}", quote_mint.base_lot);
+    println!("quote_mint.quote_lot: {}", quote_mint.quote_lot);
+}
+
+#[tokio::test]
 async fn test_worst_case_scenario() {
     // Arrange
-    let user_index: usize = 0;
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 6 };
     let mut test = MangoProgramTest::start_new(&config).await;
     solana_logger::setup_with_default(
@@ -207,60 +215,61 @@ async fn test_worst_case_scenario() {
              solana_runtime::system_instruction_processor=info,\
              solana_program_test=info",
     );
+    let user_index: usize = 0;
+    // num_orders specifies how many orders you want to perform to spot and perp markets
+    // If this number is larger than test.num_mints - 1 you will get an out_of_bounds error
+    let num_orders: usize = test.num_mints - 1;
 
-    let num_markets = config.num_mints - 1;
-    let quote_mint = test.with_mint(QUOTE_INDEX);
     let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
     let (mango_account_pk, mut mango_account) =
         test.with_mango_account(&mango_group_pk, user_index).await;
     let (mango_cache_pk, _mango_cache) = test.with_mango_cache(&mango_group).await;
-    let oracle_pks = test.with_oracles(&mango_group_pk, num_markets).await;
 
+    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_pk).await;
     let spot_markets = test.add_spot_markets_to_mango_group(&mango_group_pk).await;
     let (perp_market_pks, perp_markets) =
         test.add_perp_markets_to_mango_group(&mango_group_pk).await;
-
     test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
-
+    // Need to reload mango group because add_spot_markets add tokens in to mango_group
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
-    let num_orders = 5;
     let base_price = 10000;
+    let quote_mint = test.with_mint(test.quote_index);
     let deposit_amount = (base_price * quote_mint.unit) as u64;
-    // Perform deposit for the quote
+
+    // Act
+    // Perform deposit for the quote for as many orders as we make
     test.perform_deposit(
         &mango_group,
         &mango_group_pk,
         &mango_account_pk,
         user_index,
-        QUOTE_INDEX,
-        deposit_amount * num_orders,
+        test.quote_index,
+        deposit_amount * num_orders as u64,
     )
     .await;
 
-    // Perform deposit for the rest of tokens
+    // Perform deposit for the rest of tokens just so we have open deposits
     for mint_index in 0..num_orders {
-        let base_mint = test.with_mint(mint_index as usize);
+        let base_mint = test.with_mint(mint_index);
         let mint_deposit_amount = (1 * base_mint.unit) as u64;
         test.perform_deposit(
             &mango_group,
             &mango_group_pk,
             &mango_account_pk,
             user_index,
-            mint_index as usize,
+            mint_index,
             mint_deposit_amount,
         )
         .await;
     }
 
-    // Place 31 spot orders
+    // Place `num_orders` spot orders
     let starting_order_id = 1000;
     for mint_index in 0..num_orders {
-        println!("== PLACING SPOT ORDER {} ==", mint_index);
-        let mint_index_u = mint_index as usize;
-        let base_mint = test.with_mint(mint_index_u);
+        let base_mint = test.with_mint(mint_index);
         let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
-        test.set_oracle(&mango_group_pk, &oracle_pks[mint_index_u], oracle_price).await;
+        test.set_oracle(&mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
         let order = NewOrderInstructionV3 {
             side: serum_dex::matching::Side::Bid,
             limit_price: NonZeroU64::new(deposit_amount as u64).unwrap(),
@@ -268,7 +277,7 @@ async fn test_worst_case_scenario() {
             max_native_pc_qty_including_fees: NonZeroU64::new(deposit_amount as u64).unwrap(),
             self_trade_behavior: SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
-            client_order_id: starting_order_id + mint_index,
+            client_order_id: starting_order_id + mint_index as u64,
             limit: std::u16::MAX,
         };
         test.place_spot_order(
@@ -277,63 +286,52 @@ async fn test_worst_case_scenario() {
             &mango_account_pk,
             &mango_account,
             &mango_cache_pk,
-            spot_markets[mint_index_u],
+            spot_markets[mint_index],
             &oracle_pks,
             user_index,
-            mint_index_u,
+            mint_index,
             order,
         )
         .await;
-        println!("== PLACED SPOT ORDER {} ==", mint_index);
         mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-        // test.advance_clock().await;
     }
 
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
 
-    // Long 31 perp markets
+    // Place `num_orders` perp orders
     let starting_perp_order_id = 2000;
-    for mint_index in 0..num_markets {
-        println!("== PLACING PERP ORDER {} ==", mint_index);
-        let mint_index_u = mint_index as usize;
-        let base_mint = test.with_mint(mint_index_u);
+    for mint_index in 0..num_orders {
+        let base_mint = test.with_mint(mint_index);
 
         let order_side = Side::Bid;
         let order_price = test.with_order_price(&quote_mint, &base_mint, base_price);
         let order_size = test.with_order_size(&base_mint, 1);
         let order_type = OrderType::Limit;
 
-        // Act
         test.place_perp_order(
             &mango_group,
             &mango_group_pk,
             &mango_account,
             &mango_account_pk,
-            &perp_markets[mint_index_u],
-            &perp_market_pks[mint_index_u],
+            &perp_markets[mint_index],
+            &perp_market_pks[mint_index],
             order_side,
             order_price,
             order_size,
-            starting_perp_order_id + mint_index,
+            starting_perp_order_id + mint_index as u64,
             order_type,
             &oracle_pks,
             user_index,
         )
         .await.unwrap();
 
-        println!("== PLACED PERP ORDER {} ==", mint_index);
         mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
     }
-    // Act
 
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-    for x in 0..mango_account.spot_open_orders.len() {
-        println!("SOO: {}", mango_account.spot_open_orders[x].to_string());
-        // let oo = test.get_account(mango_account.spot_open_orders[x]);
-        // let market = MarketState::load(&spot_markets[x].market, &test.serum_program_id).unwrap();
-        // println!("MARKET BASE DEPOSITS: {}", market.coin_deposits_total);
-        // println!("MARKET QUOTE DEPOSITS: {}", market.pc_deposits_total);
+    for spot_open_orders_index in 0..num_orders {
+        assert_ne!(mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
     }
     // TODO
 }

@@ -17,10 +17,8 @@ async fn test_add_all_markets_to_mango_group() {
              solana_program_test=info",
     );
 
-    let quote_index = config.num_mints - 1;
-
     let (mango_group_pk, _mango_group) = test.with_mango_group().await;
-    test.with_oracles(&mango_group_pk, quote_index).await;
+    test.add_oracles_to_mango_group(&mango_group_pk).await;
     test.add_spot_markets_to_mango_group(&mango_group_pk).await;
 
     let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
@@ -30,13 +28,13 @@ async fn test_add_all_markets_to_mango_group() {
         test.with_mango_account(&mango_group_pk, user_index).await;
     println!("Performing deposit");
 
-    for i in 0..config.num_mints {
+    for i in 0..test.num_mints {
         test.perform_deposit(
             &mango_group,
             &mango_group_pk,
             &mango_account_pk,
             user_index,
-            i as usize,
+            i,
             1000000,
         )
         .await;
