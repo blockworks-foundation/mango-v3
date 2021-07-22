@@ -95,6 +95,7 @@ pub struct MangoProgramTestConfig {
 }
 
 impl MangoProgramTestConfig {
+    #[allow(dead_code)]
     pub fn default() -> Self {
         MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 32 }
     }
@@ -388,7 +389,7 @@ impl MangoProgramTest {
         // add mints in loop
         // let mut mints = Vec::new();
         for m in 0..config.num_mints {
-            let mut mint_pk: Pubkey;
+            let mint_pk: Pubkey;
             if mints[m as usize].pubkey.is_none() {
                 mint_pk = Pubkey::new_unique();
             } else {
@@ -474,7 +475,7 @@ impl MangoProgramTest {
 
     #[allow(dead_code)]
     pub async fn get_token_balance(&mut self, address: Pubkey) -> u64 {
-        let mut token = self.context.banks_client.get_account(address).await.unwrap().unwrap();
+        let token = self.context.banks_client.get_account(address).await.unwrap().unwrap();
         return spl_token::state::Account::unpack(&token.data[..]).unwrap().amount;
     }
 
@@ -661,7 +662,6 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_account_pk =
             self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
-        let admin_pk = self.context.payer.pubkey();
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let user_pk = user.pubkey();
 
@@ -789,7 +789,7 @@ impl MangoProgramTest {
     ) -> (Pubkey, PerpMarket) {
         let mango_program_id = self.mango_program_id;
         let perp_market_pk = self.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
-        let (signer_pk, signer_nonce) =
+        let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let max_num_events = 32;
         let event_queue_pk = self
@@ -1081,7 +1081,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn init_open_orders(&mut self, spot_market: &MarketPubkeys) -> Pubkey {
+    pub async fn init_open_orders(&mut self) -> Pubkey {
         let (orders_key, instruction) =
             self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
 
@@ -1105,7 +1105,6 @@ impl MangoProgramTest {
         let mut perp_markets = Vec::new();
         for mint_index in 0..last_mint_index {
             let mint_index_u = mint_index as usize;
-            let base_mint = self.with_mint(mint_index_u);
             let (perp_market_pk, perp_market) =
                 self.with_perp_market(&mango_group_pk, mint_index_u, mint_index_u).await;
             perp_market_pks.push(perp_market_pk);
@@ -1131,7 +1130,7 @@ impl MangoProgramTest {
             let market_pubkeys =
                 self.list_market(mint_index as usize, last_mint_index as usize).await.unwrap();
 
-            let (signer_pk, signer_nonce) =
+            let (signer_pk, _signer_nonce) =
                 create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
 
             let vault_pk = self
@@ -1209,12 +1208,9 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_token_account = self.with_user_token_account(user_index, token_index);
 
-        let (signer_pk, signer_nonce) =
+        let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
-        let (dex_signer_pk, _) =
-            create_signer_key_and_nonce(&serum_program_id, &spot_market.market);
 
         let (mint_root_bank_pk, mint_root_bank) =
             self.with_root_bank(mango_group, token_index).await;

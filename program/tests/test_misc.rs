@@ -1,6 +1,5 @@
 #![cfg(feature = "test-bpf")]
 use fixed::types::I80F48;
-use fixed_macro::types::I80F48;
 use mango::matching::{AnyNode, InnerNode, LeafNode};
 use mango::state::{MangoAccount, MangoCache};
 use solana_program_test::tokio;
