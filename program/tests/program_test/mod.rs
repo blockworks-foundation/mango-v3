@@ -1,7 +1,5 @@
 use std::borrow::Borrow;
-use std::convert::TryInto;
 use std::mem::size_of;
-use std::num::NonZeroU64;
 
 use bincode::deserialize;
 use fixed::types::I80F48;
@@ -18,7 +16,6 @@ use solana_program::{
 };
 use solana_program_test::*;
 use solana_sdk::{
-    account::Account,
     instruction::Instruction,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -29,12 +26,7 @@ use spl_token::{state::*, *};
 use mango::{
     entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
 };
-
-use serum_dex::instruction::{
-    cancel_order_by_client_order_id as cancel_order_by_client_order_id_ix,
-    close_open_orders as close_open_orders_ix, init_open_orders as init_open_orders_ix,
-    MarketInstruction, NewOrderInstructionV3, SelfTradeBehavior,
-};
+use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
 
 pub mod group;
@@ -119,6 +111,7 @@ pub struct MangoProgramTest {
 }
 
 impl MangoProgramTest {
+    #[allow(dead_code)]
     pub async fn start_new(config: &MangoProgramTestConfig) -> Self {
         let mango_program_id = Pubkey::new_unique();
         let serum_program_id = Pubkey::new_unique();
@@ -396,7 +389,7 @@ impl MangoProgramTest {
         // let mut mints = Vec::new();
         for m in 0..config.num_mints {
             let mut mint_pk: Pubkey;
-            if (mints[m as usize].pubkey.is_none()) {
+            if mints[m as usize].pubkey.is_none() {
                 mint_pk = Pubkey::new_unique();
             } else {
                 mint_pk = mints[m as usize].pubkey.unwrap();
@@ -455,6 +448,7 @@ impl MangoProgramTest {
         Self { context, rent, mango_program_id, serum_program_id, mints, users, token_accounts }
     }
 
+    #[allow(dead_code)]
     pub async fn process_transaction(
         &mut self,
         instructions: &[Instruction],
@@ -478,11 +472,13 @@ impl MangoProgramTest {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_token_balance(&mut self, address: Pubkey) -> u64 {
         let mut token = self.context.banks_client.get_account(address).await.unwrap().unwrap();
         return spl_token::state::Account::unpack(&token.data[..]).unwrap().amount;
     }
 
+    #[allow(dead_code)]
     pub async fn create_account(&mut self, size: usize, owner: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(size);
@@ -500,6 +496,7 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
+    #[allow(dead_code)]
     pub async fn create_mint(&mut self, mint_authority: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(Mint::LEN);
@@ -527,6 +524,7 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
+    #[allow(dead_code)]
     pub async fn create_token_account(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         let keypair = Keypair::new();
         let rent = self.rent.minimum_balance(spl_token::state::Account::LEN);
@@ -603,6 +601,7 @@ impl MangoProgramTest {
         self.context.warp_to_slot(clock.slot + 2).unwrap();
     }
 
+    #[allow(dead_code)]
     pub async fn with_mango_group(&mut self) -> (Pubkey, MangoGroup) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
@@ -653,6 +652,7 @@ impl MangoProgramTest {
         return (mango_group_pk, mango_group);
     }
 
+    #[allow(dead_code)]
     pub async fn with_mango_account(
         &mut self,
         mango_group_pk: &Pubkey,
@@ -677,19 +677,25 @@ impl MangoProgramTest {
         return (mango_account_pk, mango_account);
     }
 
+    #[allow(dead_code)]
     pub async fn with_mango_cache(&mut self, mango_group: &MangoGroup) -> (Pubkey, MangoCache) {
         let mango_cache = self.load_account::<MangoCache>(mango_group.mango_cache).await;
         return (mango_group.mango_cache, mango_cache);
     }
 
+    #[allow(dead_code)]
     pub fn with_mint(&mut self, mint_index: usize) -> MintConfig {
-        return self.mints[mint_index];
+        let last_mint_index = (self.mints.len() - 1) as usize;
+        return self.mints[std::cmp::min(mint_index, last_mint_index)];
     }
 
-    pub fn with_user_token_account(&mut self, user_index: usize, token_index: usize) -> Pubkey {
-        return self.token_accounts[(user_index * self.mints.len()) + token_index];
+    #[allow(dead_code)]
+    pub fn with_user_token_account(&mut self, user_index: usize, mint_index: usize) -> Pubkey {
+        let last_mint_index = (self.mints.len() - 1) as usize;
+        return self.token_accounts[(user_index * self.mints.len()) + std::cmp::min(mint_index, last_mint_index)];
     }
 
+    #[allow(dead_code)]
     pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
         let mango_program_id = self.mango_program_id;
         let admin_pk = self.context.payer.pubkey();
@@ -706,6 +712,7 @@ impl MangoProgramTest {
         return oracle_pks;
     }
 
+    #[allow(dead_code)]
     pub fn with_oracle_price(
         &mut self,
         quote_mint: &MintConfig,
@@ -716,6 +723,7 @@ impl MangoProgramTest {
             / I80F48::from_num(base_mint.unit);
     }
 
+    #[allow(dead_code)]
     pub async fn set_oracle(
         &mut self,
         mango_group_pk: &Pubkey,
@@ -734,6 +742,7 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
+    #[allow(dead_code)]
     pub fn with_order_price(
         &mut self,
         quote_mint: &MintConfig,
@@ -744,10 +753,12 @@ impl MangoProgramTest {
             / (base_mint.unit * base_mint.quote_lot);
     }
 
+    #[allow(dead_code)]
     pub fn with_order_size(&mut self, base_mint: &MintConfig, quantity: i64) -> i64 {
         return (quantity * base_mint.unit) / base_mint.base_lot;
     }
 
+    #[allow(dead_code)]
     pub async fn with_root_bank(
         &mut self,
         mango_group: &MangoGroup,
@@ -758,6 +769,7 @@ impl MangoProgramTest {
         return (root_bank_pk, root_bank);
     }
 
+    #[allow(dead_code)]
     pub async fn with_node_bank(
         &mut self,
         root_bank: &RootBank,
@@ -768,6 +780,7 @@ impl MangoProgramTest {
         return (node_bank_pk, node_bank);
     }
 
+    #[allow(dead_code)]
     pub async fn with_perp_market(
         &mut self,
         mango_group_pk: &Pubkey,
@@ -825,6 +838,7 @@ impl MangoProgramTest {
         return (perp_market_pk, perp_market);
     }
 
+    #[allow(dead_code)]
     pub async fn perform_deposit(
         &mut self,
         mango_group: &MangoGroup,
@@ -866,6 +880,7 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
+    #[allow(dead_code)]
     pub async fn place_perp_order(
         &mut self,
         mango_group: &MangoGroup,
@@ -918,6 +933,8 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
         Ok(())
     }
+
+    #[allow(dead_code)]
     pub fn create_dex_account(&mut self, unpadded_len: usize) -> (Keypair, Instruction) {
         let serum_program_id = self.serum_program_id;
         let key = Keypair::new();
@@ -964,14 +981,16 @@ impl MangoProgramTest {
         return (info, instructions);
     }
 
+    #[allow(dead_code)]
     pub async fn list_market(
         &mut self,
         base_index: usize,
         quote_index: usize,
     ) -> Result<MarketPubkeys, ProgramError> {
         let serum_program_id = self.serum_program_id;
+        let last_mint_index = (self.mints.len() - 1) as usize;
         let coin_mint = self.mints[base_index].pubkey.unwrap();
-        let pc_mint = self.mints[quote_index].pubkey.unwrap();
+        let pc_mint = self.mints[std::cmp::min(quote_index, last_mint_index)].pubkey.unwrap();
         let (listing_keys, mut instructions) = self.gen_listing_params(&coin_mint, &pc_mint);
         let ListingKeys {
             market_key,
@@ -1029,6 +1048,7 @@ impl MangoProgramTest {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn init_spot_open_orders(
         &mut self,
         mango_group_pk: &Pubkey,
@@ -1059,6 +1079,8 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&signers)).await.unwrap();
         open_orders_pk
     }
+
+    #[allow(dead_code)]
     pub async fn init_open_orders(&mut self, spot_market: &MarketPubkeys) -> Pubkey {
         let (orders_key, instruction) =
             self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
@@ -1073,14 +1095,15 @@ impl MangoProgramTest {
         return orders_pk;
     }
 
+    #[allow(dead_code)]
     pub async fn add_perp_markets_to_mango_group(
         &mut self,
         mango_group_pk: &Pubkey,
     ) -> (Vec<Pubkey>, Vec<PerpMarket>) {
-        let quote_index = self.mints.len() - 1;
+        let last_mint_index = self.mints.len() - 1;
         let mut perp_market_pks = Vec::new();
         let mut perp_markets = Vec::new();
-        for mint_index in 0..quote_index {
+        for mint_index in 0..last_mint_index {
             let mint_index_u = mint_index as usize;
             let base_mint = self.with_mint(mint_index_u);
             let (perp_market_pk, perp_market) =
@@ -1091,19 +1114,22 @@ impl MangoProgramTest {
         return (perp_market_pks, perp_markets);
     }
 
-    pub async fn add_markets_to_mango_group(
+    #[allow(dead_code)]
+    pub async fn add_spot_markets_to_mango_group(
         &mut self,
         mango_group_pk: &Pubkey,
     ) -> Vec<MarketPubkeys> {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
 
-        let num_markets = self.mints.len() - 1;
+        let last_mint_index = self.mints.len() - 1;
+
         let mut market_pubkey_holder = Vec::new();
         let mut instructions = Vec::new();
 
-        for mint_index in 0..num_markets {
-            let market_pubkeys = self.list_market(mint_index, num_markets).await.unwrap();
+        for mint_index in 0..last_mint_index {
+            let market_pubkeys =
+                self.list_market(mint_index as usize, last_mint_index as usize).await.unwrap();
 
             let (signer_pk, signer_nonce) =
                 create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
@@ -1148,6 +1174,7 @@ impl MangoProgramTest {
         return market_pubkey_holder;
     }
 
+    #[allow(dead_code)]
     pub async fn cache_all_perp_markets(
         &mut self,
         mango_group: &MangoGroup,
@@ -1165,6 +1192,7 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
+    #[allow(dead_code)]
     pub async fn place_spot_order(
         &mut self,
         mango_group_pk: &Pubkey,
@@ -1192,7 +1220,7 @@ impl MangoProgramTest {
             self.with_root_bank(mango_group, token_index).await;
         let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
         let (quote_root_bank_pk, quote_root_bank) =
-            self.with_root_bank(mango_group, self.mints.len() - 1).await;
+            self.with_root_bank(mango_group, QUOTE_INDEX).await;
         let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
 
         // Only pass in open orders if in margin basket or current market index, and

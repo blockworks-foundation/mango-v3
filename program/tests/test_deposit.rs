@@ -1,13 +1,8 @@
 #![cfg(feature = "test-bpf")]
 
-// Tests related to placing orders on a perp market
+// Tests related to depositing into mango group
 mod program_test;
-use arrayref::array_ref;
-use bytemuck::cast_ref;
-use fixed::types::I80F48;
-use mango_common::Loadable;
 use program_test::*;
-use std::{mem::size_of, mem::size_of_val, thread::sleep, time::Duration};
 
 use mango::{
     entrypoint::process_instruction, instruction::*, matching::*, oracle::StubOracle, queue::*,

@@ -1,13 +1,4 @@
-use std::num::NonZeroU64;
-use std::{mem::size_of, mem::size_of_val, thread::sleep, time::Duration};
-
-use arrayref::array_ref;
-use bytemuck::cast_ref;
-use fixed::types::I80F48;
-use mango_common::Loadable;
-use solana_program::{account_info::AccountInfo, pubkey::Pubkey};
 use solana_program_test::*;
-use solana_sdk::account::ReadableAccount;
 use solana_sdk::{
     account::Account, commitment_config::CommitmentLevel, signature::Keypair, signer::Signer,
     transaction::Transaction,
@@ -39,7 +30,7 @@ async fn test_add_all_markets_to_mango_group() {
 
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
     let oracle_pks = test.with_oracles(&mango_group_pk, quote_index).await;
-    test.add_markets_to_mango_group(&mango_group_pk).await;
+    test.add_spot_markets_to_mango_group(&mango_group_pk).await;
 
     let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
