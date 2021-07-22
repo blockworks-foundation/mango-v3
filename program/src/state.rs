@@ -21,7 +21,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut, FI80F48};
+use crate::utils::{invert_side, remove_slop_mut, FastMath, FI80F48};
 use enumflags2::BitFlags;
 use solana_program::log::sol_log_compute_units;
 use solana_program::program_pack::Pack;
@@ -713,9 +713,8 @@ impl HealthCache {
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
     ) -> MangoResult<()> {
-        let spot_health = mango_account
-            .get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX)
-            .to_fixed();
+        let spot_health =
+            mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         self.health += spot_health - self.spot_healths[QUOTE_INDEX];
         self.spot_healths[QUOTE_INDEX] = spot_health;
         return Ok(());
@@ -803,9 +802,8 @@ impl HealthCache {
         open_orders_ais: &[AccountInfo],
     ) -> MangoResult<()> {
         sol_log_compute_units();
-        self.spot_healths[QUOTE_INDEX] = mango_account
-            .get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX)
-            .to_fixed();
+        self.spot_healths[QUOTE_INDEX] =
+            mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         let mut health = self.spot_healths[QUOTE_INDEX];
 
         for i in 0..mango_group.num_oracles {
@@ -1096,6 +1094,7 @@ impl MangoAccount {
         Ok(assets_val)
     }
 
+    #[allow(dead_code)]
     fn sim_spot_health(
         &self,
         open_orders: &serum_dex::state::OpenOrders,
@@ -1173,24 +1172,14 @@ impl MangoAccount {
         bids_health.min(asks_health)
     }
 
-    fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> FI80F48 {
+    fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
         if self.deposits[token_index].is_positive() {
-            FI80F48::from_fixed(self.deposits[token_index])
-                .mul(FI80F48::from_fixed(bank_cache.borrow_index))
+            self.deposits[token_index].fmul(bank_cache.deposit_index)
         } else if self.borrows[token_index].is_positive() {
-            FI80F48::from_fixed(self.borrows[token_index])
-                .mul(FI80F48::from_fixed(bank_cache.borrow_index))
-                .neg()
+            -self.borrows[token_index].fmul(bank_cache.borrow_index)
         } else {
-            FI80F48::ZERO
+            ZERO_I80F48
         }
-
-        // FI80F48::from_fixed(self.deposits[token_index])
-        //     .mul(FI80F48::from_fixed(bank_cache.deposit_index))
-        //     .sub(
-        //         FI80F48::from_fixed(self.borrows[token_index])
-        //             .mul(FI80F48::from_fixed(bank_cache.borrow_index)),
-        //     )
     }
 
     fn fast_get_spot_health(
@@ -1203,7 +1192,7 @@ impl MangoAccount {
     ) -> MangoResult<FI80F48> {
         let bank_cache = &mango_cache.root_bank_cache[market_index];
         let price = FI80F48::from_fixed(mango_cache.price_cache[market_index].price);
-        let base_net = self.get_net(bank_cache, market_index);
+        let base_net = FI80F48::from_fixed(self.get_net(bank_cache, market_index));
         let health = if !self.in_margin_basket[market_index]
             || self.spot_open_orders[market_index] == Pubkey::default()
         {
@@ -1219,6 +1208,8 @@ impl MangoAccount {
         };
         Ok(health)
     }
+
+    #[allow(dead_code)]
     fn get_spot_health(
         &self,
         mango_cache: &MangoCache,
@@ -1275,8 +1266,7 @@ impl MangoAccount {
         health_type: HealthType,
     ) -> MangoResult<I80F48> {
         sol_log_compute_units();
-        let mut health =
-            self.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).to_fixed();
+        let mut health = self.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
             if !active_assets[i] {
                 continue;

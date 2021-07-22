@@ -779,7 +779,7 @@ impl Processor {
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
-            owner_ai,               // read
+            owner_ai,               // read & signer
             mango_cache_ai,         // read
             dex_prog_ai,            // read
             spot_market_ai,         // write
@@ -847,7 +847,7 @@ impl Processor {
                 check_eq!(
                     open_orders_ais[i].key,
                     &mango_account.spot_open_orders[i],
-                    MangoErrorCode::Default
+                    MangoErrorCode::InvalidOpenOrdersAccount
                 )?;
                 check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
             }
@@ -1145,6 +1145,9 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
     ) -> MangoResult<()> {
+        check!(price > 0, MangoErrorCode::InvalidParam)?;
+        check!(quantity > 0, MangoErrorCode::InvalidParam)?;
+
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -1182,19 +1185,39 @@ impl Processor {
         }
 
         // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
-        check!(price > 0, MangoErrorCode::Default)?;
-        check!(quantity > 0, MangoErrorCode::Default)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let mut active_assets = mango_account.get_active_assets(&mango_group);
-        active_assets[market_index] = true;
+
+        // initialize the health cache with active assets
+        let mut health_cache = HealthCache::new(&mango_group, &mango_account, HealthType::Init);
+        health_cache.set_active_asset(market_index);
+
         check!(
-            mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
-            MangoErrorCode::Default
+            mango_cache.check_caches_valid(&mango_group, &health_cache.active_assets, now_ts),
+            MangoErrorCode::InvalidCache
         )?;
+
+        // calculate init health
+        health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let pre_health = health_cache.health;
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
+
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
@@ -1213,16 +1236,19 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
         )?;
 
-        let health = mango_account.get_health(
+        health_cache.update_perp_health(
             &mango_group,
             &mango_cache,
-            open_orders_ais,
-            &active_assets,
-            HealthType::Init,
+            &mango_account,
+            market_index,
         )?;
-        check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        let post_health = health_cache.health;
 
-        Ok(())
+        // If an account is in reduce_only mode, health must only go up
+        check!(
+            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
     }
 
     #[inline(never)]
@@ -1287,7 +1313,6 @@ impl Processor {
             order.quantity,
         )?;
 
-        // convert
         Ok(())
     }
 
