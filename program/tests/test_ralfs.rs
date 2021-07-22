@@ -187,7 +187,7 @@ async fn test_place_spot_order() {
         self_trade_behavior: SelfTradeBehavior::DecrementTake,
         order_type: serum_dex::matching::OrderType::Limit,
         client_order_id: 1000,
-        limit: std::u16::MAX,
+        limit: u16::MAX,
     };
     test.place_spot_order(
         &mango_group_pk,

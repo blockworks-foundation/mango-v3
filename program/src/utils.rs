@@ -146,6 +146,9 @@ pub trait FastMath {
     fn fdiv(self, x: Self) -> Self;
     fn fadd(self, x: Self) -> Self;
     fn fsub(self, x: Self) -> Self;
+
+    // /// Checked ops that return None if overflow
+    // fn cfmul(self, x: Self) -> Option<Self>;
 }
 
 impl FastMath for I80F48 {
@@ -168,6 +171,25 @@ impl FastMath for I80F48 {
             Self::from_bits((self.to_bits() >> 48) * x.to_bits())
         }
     }
+    // fn cfmul(self, x: Self) -> Self {
+    //     let n = self.trailing_zeros();
+    //     if n < 48 {
+    //         let m = min(48 - n, x.trailing_zeros());
+    //
+    //         if n + m < 48 {
+    //             let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
+    //             if over {
+    //                 self * x
+    //             } else {
+    //                 Self::from_bits(r >> (48 - m - n))
+    //             }
+    //         } else {
+    //             Self::from_bits((self.to_bits() >> n) * (x.to_bits() >> m))
+    //         }
+    //     } else {
+    //         Self::from_bits((self.to_bits() >> 48) * x.to_bits())
+    //     }
+    // }
 
     fn fdiv(self, x: Self) -> Self {
         self / x
