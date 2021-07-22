@@ -106,8 +106,11 @@ pub struct MangoProgramTest {
     pub rent: Rent,
     pub mango_program_id: Pubkey,
     pub serum_program_id: Pubkey,
-    pub users: Vec<Keypair>,
+    pub num_mints: usize,
+    pub quote_index: usize,
     pub mints: Vec<MintConfig>,
+    pub num_users: usize,
+    pub users: Vec<Keypair>,
     pub token_accounts: Vec<Pubkey>, // user x mint
 }
 
@@ -117,7 +120,8 @@ impl MangoProgramTest {
         let mango_program_id = Pubkey::new_unique();
         let serum_program_id = Pubkey::new_unique();
 
-        // Note:: Maybe define a const array of all the mint params that replicate real life and use those
+        // Predefined mints, maybe can even add symbols to them
+        // TODO: Figure out where to put MNGO and MSRM mint
         let mut mints: Vec<MintConfig> = vec![
             MintConfig {
                 index: 0,
@@ -125,7 +129,7 @@ impl MangoProgramTest {
                 unit: 10i64.pow(6) as i64,
                 base_lot: 100 as i64,
                 quote_lot: 10 as i64,
-                pubkey: Some(mngo_token::ID),
+                pubkey: None, //Some(mngo_token::ID),
             }, // symbol: "MNGO".to_string()
             MintConfig {
                 index: 1,
@@ -133,7 +137,7 @@ impl MangoProgramTest {
                 unit: 10i64.pow(6) as i64,
                 base_lot: 100 as i64,
                 quote_lot: 10 as i64,
-                pubkey: Some(msrm_token::ID),
+                pubkey: None, //Some(msrm_token::ID),
             }, // symbol: "MSRM".to_string()
             MintConfig {
                 index: 2,
@@ -377,23 +381,51 @@ impl MangoProgramTest {
             }, // symbol: "USDC".to_string()
         ];
 
-        let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
+        let num_mints = config.num_mints as usize;
+        let quote_index = num_mints - 1;
+        let quote_mint = mints[(mints.len() - 1) as usize];
+        let num_users = config.num_users as usize;
+        // Make sure that the user defined length of mint list always have the quote_mint as last
+        mints[quote_index] = quote_mint;
 
-        // passing mango's process instruction just to satisfy the compiler
+        let mut test = ProgramTest::new("mango", mango_program_id, processor!(process_instruction));
         test.add_program("serum_dex", serum_program_id, processor!(process_serum_instruction));
         // TODO: add more programs (oracles)
-
         // limit to track compute unit increase
         test.set_bpf_compute_max_units(config.compute_limit);
 
-        // add mints in loop
-        // let mut mints = Vec::new();
-        for m in 0..config.num_mints {
+        // Add MNGO mint
+        test.add_packable_account(
+            mngo_token::ID,
+            u32::MAX as u64,
+            &Mint {
+                is_initialized: true,
+                mint_authority: COption::Some(Pubkey::new_unique()),
+                decimals: 6,
+                ..Mint::default()
+            },
+            &spl_token::id(),
+        );
+        // Add MSRM mint
+        test.add_packable_account(
+            msrm_token::ID,
+            u32::MAX as u64,
+            &Mint {
+                is_initialized: true,
+                mint_authority: COption::Some(Pubkey::new_unique()),
+                decimals: 6,
+                ..Mint::default()
+            },
+            &spl_token::id(),
+        );
+
+        // Add mints in loop
+        for mint_index in 0..num_mints {
             let mint_pk: Pubkey;
-            if mints[m as usize].pubkey.is_none() {
+            if mints[mint_index].pubkey.is_none() {
                 mint_pk = Pubkey::new_unique();
             } else {
-                mint_pk = mints[m as usize].pubkey.unwrap();
+                mint_pk = mints[mint_index].pubkey.unwrap();
             }
 
             test.add_packable_account(
@@ -402,18 +434,18 @@ impl MangoProgramTest {
                 &Mint {
                     is_initialized: true,
                     mint_authority: COption::Some(Pubkey::new_unique()),
-                    decimals: mints[m as usize].decimals,
+                    decimals: mints[mint_index].decimals,
                     ..Mint::default()
                 },
                 &spl_token::id(),
             );
-            mints[m as usize].pubkey = Some(mint_pk);
+            mints[mint_index].pubkey = Some(mint_pk);
         }
 
         // add users in loop
         let mut users = Vec::new();
         let mut token_accounts = Vec::new();
-        for _ in 0..config.num_users {
+        for _ in 0..num_users {
             let user_key = Keypair::new();
             test.add_account(
                 user_key.pubkey(),
@@ -422,13 +454,13 @@ impl MangoProgramTest {
 
             // give every user 10^18 (< 2^60) of every token
             // ~~ 1 trillion in case of 6 decimals
-            for m in 0..config.num_mints {
+            for mint_index in 0..num_mints {
                 let token_key = Pubkey::new_unique();
                 test.add_packable_account(
                     token_key,
                     u32::MAX as u64,
                     &spl_token::state::Account {
-                        mint: mints[m as usize].pubkey.unwrap(),
+                        mint: mints[mint_index].pubkey.unwrap(),
                         owner: user_key.pubkey(),
                         amount: 1_000_000_000_000_000_000,
                         state: spl_token::state::AccountState::Initialized,
@@ -444,9 +476,11 @@ impl MangoProgramTest {
 
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
-        mints = mints[..config.num_mints as usize].to_vec();
+        mints = mints[..num_mints].to_vec();
+        // TODO: Add the 32nd mint as the quote mint
 
-        Self { context, rent, mango_program_id, serum_program_id, mints, users, token_accounts }
+
+        Self { context, rent, mango_program_id, serum_program_id, num_mints, quote_index, mints, num_users, users, token_accounts }
     }
 
     #[allow(dead_code)]
@@ -613,7 +647,7 @@ impl MangoProgramTest {
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let admin_pk = self.context.payer.pubkey();
 
-        let quote_mint_pk = self.mints[self.mints.len() - 1].pubkey.unwrap();
+        let quote_mint_pk = self.mints[self.quote_index].pubkey.unwrap();
         let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
         let quote_node_bank_pk =
             self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
@@ -678,38 +712,41 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn with_mango_cache(&mut self, mango_group: &MangoGroup) -> (Pubkey, MangoCache) {
+    pub async fn with_mango_cache(
+        &mut self,
+        mango_group: &MangoGroup,
+    ) -> (Pubkey, MangoCache) {
         let mango_cache = self.load_account::<MangoCache>(mango_group.mango_cache).await;
         return (mango_group.mango_cache, mango_cache);
     }
 
     #[allow(dead_code)]
-    pub fn with_mint(&mut self, mint_index: usize) -> MintConfig {
-        let last_mint_index = (self.mints.len() - 1) as usize;
-        return self.mints[std::cmp::min(mint_index, last_mint_index)];
+    pub fn with_mint(
+        &mut self,
+        mint_index: usize,
+    ) -> MintConfig {
+        return self.mints[mint_index];
     }
 
     #[allow(dead_code)]
-    pub fn with_user_token_account(&mut self, user_index: usize, mint_index: usize) -> Pubkey {
-        let last_mint_index = (self.mints.len() - 1) as usize;
-        return self.token_accounts[(user_index * self.mints.len()) + std::cmp::min(mint_index, last_mint_index)];
+    pub fn with_user_token_account(
+        &mut self,
+        user_index: usize,
+        mint_index: usize
+    ) -> Pubkey {
+        return self.token_accounts[(user_index * self.num_mints) + mint_index];
     }
 
     #[allow(dead_code)]
-    pub async fn with_oracles(&mut self, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<Pubkey> {
-        let mango_program_id = self.mango_program_id;
-        let admin_pk = self.context.payer.pubkey();
-        let mut oracle_pks = Vec::new();
-        let mut instructions = Vec::new();
-        for _ in 0..num_oracles {
-            let oracle_pk = self.create_account(size_of::<StubOracle>(), &mango_program_id).await;
-            instructions.push(
-                add_oracle(&mango_program_id, &mango_group_pk, &oracle_pk, &admin_pk).unwrap(),
-            );
-            oracle_pks.push(oracle_pk);
-        }
-        self.process_transaction(&instructions, None).await.unwrap();
-        return oracle_pks;
+    pub async fn with_mango_account_deposit(
+        &mut self,
+        mango_account_pk: &Pubkey,
+        mint_index: usize,
+    ) -> u64 {
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index = if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+        let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
+        return mango_account.deposits[actual_mint_index].to_num();
     }
 
     #[allow(dead_code)]
@@ -762,9 +799,12 @@ impl MangoProgramTest {
     pub async fn with_root_bank(
         &mut self,
         mango_group: &MangoGroup,
-        token_index: usize,
+        mint_index: usize,
     ) -> (Pubkey, RootBank) {
-        let root_bank_pk = mango_group.tokens[token_index].root_bank;
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index = if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+
+        let root_bank_pk = mango_group.tokens[actual_mint_index].root_bank;
         let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
         return (root_bank_pk, root_bank);
     }
@@ -773,9 +813,9 @@ impl MangoProgramTest {
     pub async fn with_node_bank(
         &mut self,
         root_bank: &RootBank,
-        token_index: usize,
+        bank_index: usize,
     ) -> (Pubkey, NodeBank) {
-        let node_bank_pk = root_bank.node_banks[token_index];
+        let node_bank_pk = root_bank.node_banks[bank_index];
         let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
         return (node_bank_pk, node_bank);
     }
@@ -845,14 +885,14 @@ impl MangoProgramTest {
         mango_group_pk: &Pubkey,
         mango_account_pk: &Pubkey,
         user_index: usize,
-        token_index: usize,
+        mint_index: usize,
         amount: u64,
     ) {
         let mango_program_id = self.mango_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_token_account = self.with_user_token_account(user_index, token_index);
+        let user_token_account = self.with_user_token_account(user_index, mint_index);
 
-        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, token_index).await;
+        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, mint_index).await;
         let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
 
         let instructions = [
@@ -982,15 +1022,13 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn list_market(
+    pub async fn list_spot_market(
         &mut self,
         base_index: usize,
-        quote_index: usize,
     ) -> Result<MarketPubkeys, ProgramError> {
         let serum_program_id = self.serum_program_id;
-        let last_mint_index = (self.mints.len() - 1) as usize;
         let coin_mint = self.mints[base_index].pubkey.unwrap();
-        let pc_mint = self.mints[std::cmp::min(quote_index, last_mint_index)].pubkey.unwrap();
+        let pc_mint = self.mints[self.quote_index].pubkey.unwrap();
         let (listing_keys, mut instructions) = self.gen_listing_params(&coin_mint, &pc_mint);
         let ListingKeys {
             market_key,
@@ -1081,7 +1119,9 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn init_open_orders(&mut self) -> Pubkey {
+    pub async fn init_open_orders(
+        &mut self,
+    ) -> Pubkey {
         let (orders_key, instruction) =
             self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
 
@@ -1096,17 +1136,35 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn add_oracles_to_mango_group(
+        &mut self,
+        mango_group_pk: &Pubkey
+    ) -> Vec<Pubkey> {
+        let mango_program_id = self.mango_program_id;
+        let admin_pk = self.context.payer.pubkey();
+        let mut oracle_pks = Vec::new();
+        let mut instructions = Vec::new();
+        for _ in 0..self.quote_index {
+            let oracle_pk = self.create_account(size_of::<StubOracle>(), &mango_program_id).await;
+            instructions.push(
+                add_oracle(&mango_program_id, &mango_group_pk, &oracle_pk, &admin_pk).unwrap(),
+            );
+            oracle_pks.push(oracle_pk);
+        }
+        self.process_transaction(&instructions, None).await.unwrap();
+        return oracle_pks;
+    }
+
+    #[allow(dead_code)]
     pub async fn add_perp_markets_to_mango_group(
         &mut self,
         mango_group_pk: &Pubkey,
     ) -> (Vec<Pubkey>, Vec<PerpMarket>) {
-        let last_mint_index = self.mints.len() - 1;
         let mut perp_market_pks = Vec::new();
         let mut perp_markets = Vec::new();
-        for mint_index in 0..last_mint_index {
-            let mint_index_u = mint_index as usize;
+        for mint_index in 0..self.quote_index {
             let (perp_market_pk, perp_market) =
-                self.with_perp_market(&mango_group_pk, mint_index_u, mint_index_u).await;
+                self.with_perp_market(&mango_group_pk, mint_index, mint_index).await;
             perp_market_pks.push(perp_market_pk);
             perp_markets.push(perp_market);
         }
@@ -1121,14 +1179,12 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
 
-        let last_mint_index = self.mints.len() - 1;
-
         let mut market_pubkey_holder = Vec::new();
         let mut instructions = Vec::new();
 
-        for mint_index in 0..last_mint_index {
+        for mint_index in 0..self.quote_index {
             let market_pubkeys =
-                self.list_market(mint_index as usize, last_mint_index as usize).await.unwrap();
+                self.list_spot_market(mint_index).await.unwrap();
 
             let (signer_pk, _signer_nonce) =
                 create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
@@ -1202,7 +1258,7 @@ impl MangoProgramTest {
         spot_market: MarketPubkeys,
         oracle_pks: &[Pubkey],
         user_index: usize,
-        token_index: usize,
+        mint_index: usize,
         order: NewOrderInstructionV3,
     ) {
         let mango_program_id = self.mango_program_id;
@@ -1213,17 +1269,17 @@ impl MangoProgramTest {
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
 
         let (mint_root_bank_pk, mint_root_bank) =
-            self.with_root_bank(mango_group, token_index).await;
+            self.with_root_bank(mango_group, mint_index).await;
         let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
         let (quote_root_bank_pk, quote_root_bank) =
-            self.with_root_bank(mango_group, QUOTE_INDEX).await;
+            self.with_root_bank(mango_group, self.quote_index).await;
         let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
 
         // Only pass in open orders if in margin basket or current market index, and
         // the only writable account should be OpenOrders for current market index
         let mut open_orders_pks = Vec::new();
         for x in 0..mango_account.spot_open_orders.len() {
-            if x == token_index && mango_account.spot_open_orders[x] == Pubkey::default() {
+            if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
                 open_orders_pks.push(
                     self.init_spot_open_orders(
                         mango_group_pk,
@@ -1286,7 +1342,7 @@ impl MangoProgramTest {
                 &signer_pk,
                 &mango_group.msrm_vault,
                 &open_orders_pks, // oo ais
-                token_index,
+                mint_index,
                 order,
             )
             .unwrap(),

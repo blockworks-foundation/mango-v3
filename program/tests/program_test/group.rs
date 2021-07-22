@@ -61,7 +61,7 @@
 //     return (mango_account_pk, mango_account);
 // }
 //
-// pub async fn with_oracles(test: &mut MangoProgramTest, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<(Pubkey)> {
+// pub async fn add_oracles_to_mango_group(test: &mut MangoProgramTest, mango_group_pk: &Pubkey, num_oracles: u64) -> Vec<(Pubkey)> {
 //     let mango_program_id = test.mango_program_id;
 //     let oracle_pk = test.create_account(size_of::<StubOracle>(), &mango_program_id).await;
 //     let admin_pk = test.context.payer.pubkey();
