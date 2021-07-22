@@ -2770,7 +2770,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
-        msg!("1");
+
         // Load the liqee's mango account
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
@@ -2782,25 +2782,13 @@ impl Processor {
         check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        msg!("2");
+
         // Load the bank for liab token
         let mut liab_root_bank = RootBank::load_mut_checked(liab_root_bank_ai, program_id)?;
         let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
         let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
         check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
-        msg!("3");
-        // Load the bank for quote token
-        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-        check!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
-            MangoErrorCode::InvalidRootBank
-        )?;
-        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-        check!(
-            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
-            MangoErrorCode::Default
-        )?;
-        msg!("4");
+
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
         check!(
@@ -2814,15 +2802,10 @@ impl Processor {
             mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
             MangoErrorCode::InvalidCache
         )?;
-        msg!("5");
+
         // Load the dao vault (insurance fund)
         check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
-        msg!("6");
-        if liab_index == QUOTE_INDEX {
-            msg!("7");
-            // TODO
-        }
 
         // Make sure there actually exist liabs here
         check!(liqee_ma.borrows[liab_index].is_positive(), MangoErrorCode::Default)?;
@@ -2833,7 +2816,7 @@ impl Processor {
             let liab_info = &mango_group.spot_markets[liab_index];
             ONE_I80F48 - liab_info.liquidation_fee
         };
-        msg!("8");
+
         let liab_bank_cache = &mango_cache.root_bank_cache[liab_index];
         let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
         let borrows_val = native_borrows * liab_price;
@@ -2848,7 +2831,6 @@ impl Processor {
             .min(dao_vault.amount);
 
         if dao_transfer != 0 {
-            msg!("9");
             check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
@@ -2862,13 +2844,36 @@ impl Processor {
             )?;
             let liab_transfer = I80F48::from_num(dao_transfer) * liab_fee / liab_price;
 
-            checked_add_net(
-                &mango_cache.root_bank_cache[QUOTE_INDEX],
-                &mut quote_node_bank,
-                &mut liqor_ma,
-                QUOTE_INDEX,
-                I80F48::from_num(dao_transfer),
-            )?;
+            if (liab_index == QUOTE_INDEX) {
+                checked_add_net(
+                    &mango_cache.root_bank_cache[QUOTE_INDEX],
+                    &mut liab_node_bank,
+                    &mut liqor_ma,
+                    QUOTE_INDEX,
+                    I80F48::from_num(dao_transfer),
+                )?;
+            } else {
+                // Load the bank for quote token
+                let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+                check!(
+                    &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
+                    MangoErrorCode::InvalidRootBank
+                )?;
+                let mut quote_node_bank =
+                    NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+                check!(
+                    quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+                    MangoErrorCode::Default
+                )?;
+
+                checked_add_net(
+                    &mango_cache.root_bank_cache[QUOTE_INDEX],
+                    &mut quote_node_bank,
+                    &mut liqor_ma,
+                    QUOTE_INDEX,
+                    I80F48::from_num(dao_transfer),
+                )?;
+            }
 
             checked_add_net(
                 liab_bank_cache,
@@ -2897,7 +2902,6 @@ impl Processor {
         }
 
         if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
-            msg!("10");
             // insurance fund empty so socialize loss
             let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
             // TODO - log this
@@ -2907,6 +2911,8 @@ impl Processor {
                 &mut mango_cache,
                 &mut liqee_ma,
                 liab_node_bank_ais,
+                &mut liab_node_bank,
+                liab_node_bank_ai.key,
             )?;
         }
 

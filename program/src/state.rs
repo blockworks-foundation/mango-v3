@@ -398,14 +398,22 @@ impl RootBank {
         mango_cache: &mut MangoCache,
         bankrupt_account: &mut MangoAccount,
         node_bank_ais: &[AccountInfo; MAX_NODE_BANKS],
+        liab_node_bank: &mut NodeBank,
+        liab_node_bank_key: &Pubkey,
     ) -> MangoResult<()> {
-        let mut native_deposits = ZERO_I80F48;
-        let mut native_borrows = ZERO_I80F48;
+        let mut native_deposits = liab_node_bank.deposits.checked_mul(self.deposit_index).unwrap();
+        let mut native_borrows = liab_node_bank.borrows.checked_mul(self.borrow_index).unwrap();
 
         let mut max_node_bank_index = 0;
         let mut max_node_bank_borrows = ZERO_I80F48;
+
         for i in 0..self.num_node_banks {
             check!(node_bank_ais[i].key == &self.node_banks[i], MangoErrorCode::InvalidNodeBank)?;
+
+            if liab_node_bank_key == node_bank_ais[i].key {
+                continue;
+            }
+
             let node_bank = NodeBank::load_checked(&node_bank_ais[i], program_id)?;
             native_deposits = native_deposits
                 .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
@@ -433,11 +441,16 @@ impl RootBank {
         mango_cache.root_bank_cache[token_index].deposit_index = self.deposit_index;
         mango_cache.root_bank_cache[token_index].borrow_index = self.borrow_index;
 
-        let mut node_bank =
-            NodeBank::load_mut_checked(&node_bank_ais[max_node_bank_index], program_id)?;
+        if node_bank_ais[max_node_bank_index].key == liab_node_bank_key {
+            bankrupt_account.checked_sub_borrow(token_index, loss)?;
+            liab_node_bank.checked_sub_borrow(loss)?;
+        } else {
+            let mut node_bank =
+                NodeBank::load_mut_checked(&node_bank_ais[max_node_bank_index], program_id)?;
 
-        bankrupt_account.checked_sub_borrow(token_index, loss)?;
-        node_bank.checked_sub_borrow(loss)?;
+            bankrupt_account.checked_sub_borrow(token_index, loss)?;
+            node_bank.checked_sub_borrow(loss)?;
+        }
 
         Ok(())
     }
