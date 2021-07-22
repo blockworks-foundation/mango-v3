@@ -121,6 +121,7 @@ impl MangoProgramTest {
         let serum_program_id = Pubkey::new_unique();
 
         // Predefined mints, maybe can even add symbols to them
+        // TODO: Figure out where to put MNGO and MSRM mint
         let mut mints: Vec<MintConfig> = vec![
             MintConfig {
                 index: 0,
@@ -128,7 +129,7 @@ impl MangoProgramTest {
                 unit: 10i64.pow(6) as i64,
                 base_lot: 100 as i64,
                 quote_lot: 10 as i64,
-                pubkey: Some(mngo_token::ID),
+                pubkey: None, //Some(mngo_token::ID),
             }, // symbol: "MNGO".to_string()
             MintConfig {
                 index: 1,
@@ -136,7 +137,7 @@ impl MangoProgramTest {
                 unit: 10i64.pow(6) as i64,
                 base_lot: 100 as i64,
                 quote_lot: 10 as i64,
-                pubkey: Some(msrm_token::ID),
+                pubkey: None, //Some(msrm_token::ID),
             }, // symbol: "MSRM".to_string()
             MintConfig {
                 index: 2,
@@ -393,8 +394,32 @@ impl MangoProgramTest {
         // limit to track compute unit increase
         test.set_bpf_compute_max_units(config.compute_limit);
 
-        // add mints in loop
-        // let mut mints = Vec::new();
+        // Add MNGO mint
+        test.add_packable_account(
+            mngo_token::ID,
+            u32::MAX as u64,
+            &Mint {
+                is_initialized: true,
+                mint_authority: COption::Some(Pubkey::new_unique()),
+                decimals: 6,
+                ..Mint::default()
+            },
+            &spl_token::id(),
+        );
+        // Add MSRM mint
+        test.add_packable_account(
+            msrm_token::ID,
+            u32::MAX as u64,
+            &Mint {
+                is_initialized: true,
+                mint_authority: COption::Some(Pubkey::new_unique()),
+                decimals: 6,
+                ..Mint::default()
+            },
+            &spl_token::id(),
+        );
+
+        // Add mints in loop
         for mint_index in 0..num_mints {
             let mint_pk: Pubkey;
             if mints[mint_index].pubkey.is_none() {
