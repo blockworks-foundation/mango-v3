@@ -141,7 +141,7 @@ fn mul_hi_lo(ah: i128, al: i128, bh: i128, bl: i128) -> i128 {
     ah_bh.checked_add(ah_bl).unwrap().checked_add(al_bh).unwrap().checked_add(al_bl).unwrap()
 }
 
-pub trait FastMath {
+pub trait FastMath: Sized {
     fn fmul(self, x: Self) -> Self;
     fn fdiv(self, x: Self) -> Self;
     fn fadd(self, x: Self) -> Self;

@@ -36,7 +36,7 @@ use crate::state::{
     SpotMarketInfo, TokenInfo, DUST_THRESHOLD, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
     ZERO_I80F48,
 };
-use crate::utils::{gen_signer_key, gen_signer_seeds};
+use crate::utils::{gen_signer_key, gen_signer_seeds, FastMath};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -927,10 +927,17 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais[market_index],
+            open_orders_ais,
             market_index,
         )?;
-        health_cache.update_quote_health(&mango_cache, &mango_account)?;
+        health_cache.update_spot_health(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            open_orders_ais,
+            QUOTE_INDEX,
+        )?;
+
         let post_health = health_cache.health;
 
         // If an account is in reduce_only mode, health must only go up
@@ -1852,7 +1859,7 @@ impl Processor {
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
         // parameter checks
-        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
@@ -1897,44 +1904,47 @@ impl Processor {
         check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
         check!(asset_index != liab_index, MangoErrorCode::Default)?;
 
+        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
+            mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
             MangoErrorCode::Default
         )?;
 
-        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
-        liqor_active_assets[asset_index] = true;
-        liqor_active_assets[liab_index] = true;
+        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        liqor_health_cache.set_active_asset(asset_index);
+        liqor_health_cache.set_active_asset(liab_index);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
+            mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO write more efficient
             MangoErrorCode::InvalidCache
         )?;
 
         // Make sure orders are cancelled for perps
         for i in 0..mango_group.num_oracles {
-            if liqee_active_assets[i] {
+            if maint_health_cache.active_assets[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
                 check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
-        let maint_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
-        )?;
 
         // TODO - optimization: consider calculating both healths at same time
-        let init_health = liqee_ma.get_health(
+        init_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqee_ma,
             liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Init,
         )?;
+        let init_health = init_health_cache.health;
+
+        maint_health_cache.update_health(
+            &mango_group,
+            &mango_cache,
+            &liqee_ma,
+            liqee_open_orders_ais,
+        )?;
+        let maint_health = maint_health_cache.health;
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2027,22 +2037,26 @@ impl Processor {
             asset_transfer,
         )?;
 
-        let liqor_health = liqor_ma.get_health(
+        liqor_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqor_ma,
             liqor_open_orders_ais,
-            &liqor_active_assets,
-            HealthType::Init,
         )?;
+        let liqor_health = liqor_health_cache.health;
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        let liqee_maint_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
-        )?;
+        // Update liqee's health where it may have changed
+        for &i in &[asset_index, liab_index] {
+            maint_health_cache.update_spot_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                liqee_open_orders_ais,
+                i,
+            )?;
+        }
+        let liqee_maint_health = maint_health_cache.health;
 
         if liqee_maint_health < ZERO_I80F48 {
             // To start liquidating, make sure all orders that increase position are canceled
@@ -2050,7 +2064,7 @@ impl Processor {
                 &mango_group,
                 &mango_cache,
                 liqee_open_orders_ais,
-                &liqee_active_assets,
+                &maint_health_cache.active_assets,
                 HealthType::Maint,
             )?;
 
@@ -2061,26 +2075,19 @@ impl Processor {
                 // Perhaps bankrupt accounts get put on event queue to be handled separately
                 liqee_ma.is_bankrupt = true;
                 // TODO - if bankrupt disallow deposits or make deposits change is_bankrupt status
-
-                /*
-                bankruptcy:
-                if account is bankrupt, allow liqor to transfer liabs to himself, and get USDC deposits from insurance fund
-                if insurance fund is depleted, either socialize loss or ADL
-                ADL:
-                if position is long
-                 */
-
-                // For tokens, insurance fund will pay
             }
         } else {
-            let liqee_init_health = liqee_ma.get_health(
-                &mango_group,
-                &mango_cache,
-                liqee_open_orders_ais,
-                &liqee_active_assets,
-                HealthType::Init,
-            )?;
-
+            // TODO OPT No need to update this at end. Will be caught at beginning of another function
+            for &i in &[asset_index, liab_index] {
+                init_health_cache.update_spot_health(
+                    &mango_group,
+                    &mango_cache,
+                    &liqee_ma,
+                    liqee_open_orders_ais,
+                    i,
+                )?;
+            }
+            let liqee_init_health = init_health_cache.health;
             if liqee_init_health >= ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
             }
