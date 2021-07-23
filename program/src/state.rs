@@ -628,6 +628,7 @@ impl MangoCache {
         active_assets: &[bool; MAX_TOKENS],
         now_ts: u64,
     ) -> bool {
+        sol_log_compute_units();
         let valid_interval = mango_group.valid_interval;
         if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
             msg!(
@@ -668,6 +669,7 @@ impl MangoCache {
             }
         }
 
+        sol_log_compute_units();
         true
     }
 
@@ -1414,9 +1416,60 @@ impl MangoAccount {
     }
 
     #[allow(dead_code)]
-    /// Determine the bankruptcy status of the account
-    pub fn get_bankruptcy(&self) -> MangoResult<bool> {
-        unimplemented!()
+    /// Return true if account should enter bankruptcy.
+    /// Note entering bankruptcy is calculated differently from exiting bankruptcy because of
+    /// possible rounding issues and dust
+    pub fn check_enter_bankruptcy(
+        &self,
+        mango_group: &MangoGroup,
+        open_orders_ais: &[AccountInfo; MAX_PAIRS],
+    ) -> bool {
+        sol_log_compute_units();
+        // TODO - consider using DUST_THRESHOLD
+        // TODO - what if asset_weight == 0 for some asset? should it still be counted
+        if self.deposits[QUOTE_INDEX].is_positive() {
+            return false;
+        }
+
+        for i in 0..mango_group.num_oracles {
+            if self.deposits[i].is_positive() {
+                return false;
+            }
+            let open_orders = load_open_orders(&open_orders_ais[i]).unwrap();
+            if open_orders.native_pc_total > 0 || open_orders.native_coin_total > 0 {
+                return false;
+            }
+            let pa = &self.perp_accounts[i];
+            // We know the bids and asks are empty to even be inside the liquidate function
+            // So no need to check that
+            // TODO - what if there's unsettled funding for a short position which turns this positive?
+            if pa.quote_position.is_positive() || pa.base_position.is_positive() {
+                return false;
+            }
+        }
+        sol_log_compute_units();
+        true
+    }
+
+    /// Return true if account should exit bankruptcy.
+    /// An account can leave bankruptcy if all borrows are zero and all perp positions are non-negative
+    /// Note entering bankruptcy is calculated differently from exiting bankruptcy because of
+    /// possible rounding issues and dust
+    pub fn check_exit_bankruptcy(&self, mango_group: &MangoGroup) -> bool {
+        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
+        //      Maybe replace these checks with DUST_THRESHOLD instead
+        if self.borrows[QUOTE_INDEX].is_positive() {
+            return false;
+        }
+
+        for i in 0..mango_group.num_oracles {
+            if self.perp_accounts[i].quote_position.is_negative()
+                || self.perp_accounts[i].base_position.is_negative()
+            {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -1796,13 +1849,6 @@ impl PerpAccount {
     pub fn transfer_quote_position(&mut self, other: &mut PerpAccount, quantity: I80F48) {
         self.quote_position -= quantity;
         other.quote_position += quantity;
-    }
-
-    /// Return true if account should enter bankruptcy.
-    /// Note entering bankruptcy is calculated differently from exiting bankruptcy because of
-    /// possible rounding issues and dust
-    pub fn check_enter_bankruptcy(&self) -> bool {
-        todo!()
     }
 }
 

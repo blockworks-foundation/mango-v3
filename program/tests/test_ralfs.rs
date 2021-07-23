@@ -1,17 +1,11 @@
 // Tests related to placing orders on a perp market
 mod program_test;
+use mango::{matching::*, state::*};
 use program_test::*;
-use std::num::NonZeroU64;
-use std::{
-    mem::size_of,
-    mem::size_of_val
-};
-use mango::{
-    matching::*,
-    state::*,
-};
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
+use std::num::NonZeroU64;
+use std::{mem::size_of, mem::size_of_val};
 
 use serum_dex::instruction::{NewOrderInstructionV3, SelfTradeBehavior};
 
@@ -35,10 +29,7 @@ async fn test_init_perp_markets() {
     }
 }
 
-async fn place_perp_order_scenario(
-    order_id: u64,
-    order_side: Side,
-) {
+async fn place_perp_order_scenario(order_id: u64, order_side: Side) {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -93,12 +84,16 @@ async fn place_perp_order_scenario(
         &oracle_pks,
         user_index,
     )
-    .await.unwrap();
+    .await
+    .unwrap();
 
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-    let (client_order_id, _order_id, side) =
-        mango_account.perp_accounts[market_index].open_orders.orders_with_client_ids().last().unwrap();
+    let (client_order_id, _order_id, side) = mango_account.perp_accounts[market_index]
+        .open_orders
+        .orders_with_client_ids()
+        .last()
+        .unwrap();
     assert_eq!(client_order_id, NonZeroU64::new(order_id).unwrap());
     assert_eq!(side, order_side);
 }
@@ -212,7 +207,7 @@ async fn test_place_spot_order() {
 #[tokio::test]
 async fn test_worst_case_scenario() {
     // Arrange
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 6 };
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
     solana_logger::setup_with_default(
@@ -274,7 +269,7 @@ async fn test_worst_case_scenario() {
 
     // Place `num_orders` spot orders
     let starting_order_id = 1000;
-    for mint_index in 0..num_orders {
+    for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
         let base_mint = test.with_mint(mint_index);
         let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
         test.set_oracle(&mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
@@ -331,14 +326,15 @@ async fn test_worst_case_scenario() {
             &oracle_pks,
             user_index,
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
     }
 
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-    for spot_open_orders_index in 0..num_orders {
+    for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
         assert_ne!(mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
     }
     // TODO: more assertions
