@@ -763,19 +763,29 @@ impl MangoProgramTest {
     #[allow(dead_code)]
     pub async fn set_oracle(
         &mut self,
+        mango_group: &MangoGroup,
         mango_group_pk: &Pubkey,
         oracle_pk: &Pubkey,
         oracle_price: I80F48,
     ) {
         let mango_program_id = self.mango_program_id;
-        let instructions = [mango::instruction::set_oracle(
-            &mango_program_id,
-            &mango_group_pk,
-            &oracle_pk,
-            &self.context.payer.pubkey(),
-            oracle_price,
-        )
-        .unwrap()];
+        let instructions = [
+            mango::instruction::set_oracle(
+                &mango_program_id,
+                &mango_group_pk,
+                &oracle_pk,
+                &self.context.payer.pubkey(),
+                oracle_price,
+            )
+            .unwrap(),
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[*oracle_pk],
+            )
+            .unwrap(),
+        ];
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
@@ -879,48 +889,6 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn perform_deposit(
-        &mut self,
-        mango_group: &MangoGroup,
-        mango_group_pk: &Pubkey,
-        mango_account_pk: &Pubkey,
-        user_index: usize,
-        mint_index: usize,
-        amount: u64,
-    ) {
-        let mango_program_id = self.mango_program_id;
-        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_token_account = self.with_user_token_account(user_index, mint_index);
-
-        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, mint_index).await;
-        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
-
-        let instructions = [
-            cache_root_banks(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &[root_bank_pk],
-            )
-            .unwrap(),
-            deposit(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_account_pk,
-                &user.pubkey(),
-                &mango_group.mango_cache,
-                &root_bank_pk,
-                &node_bank_pk,
-                &node_bank.vault,
-                &user_token_account,
-                amount,
-            )
-            .unwrap(),
-        ];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
-    }
-
-    #[allow(dead_code)]
     pub async fn place_perp_order(
         &mut self,
         mango_group: &MangoGroup,
@@ -941,8 +909,13 @@ impl MangoProgramTest {
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
 
         let instructions = [
-            cache_prices(&mango_program_id, &mango_group_pk, &mango_group.mango_cache, &oracle_pks)
-                .unwrap(),
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &oracle_pks
+            )
+            .unwrap(),
             cache_perp_markets(
                 &mango_program_id,
                 &mango_group_pk,
@@ -1247,6 +1220,73 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
+    pub async fn cache_all_root_banks(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mut root_bank_pks = Vec::new();
+        for token in mango_group.tokens {
+            if token.root_bank != Pubkey::default() {
+                root_bank_pks.push(token.root_bank);
+            }
+        }
+
+        let instructions = [
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &root_bank_pks,
+            )
+            .unwrap(),
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
+    pub async fn cache_all_prices(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        oracle_pks: &[Pubkey],
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let instructions = [
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &oracle_pks
+            )
+            .unwrap()
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
+    pub async fn update_all_root_banks(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        mint_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let (root_bank_pk, root_bank) =
+            self.with_root_bank(mango_group, mint_index).await;
+        let (node_bank_pk, _node_bank) = self.with_node_bank(&root_bank, 0).await;
+
+        let instructions = [
+            update_root_bank(
+                &mango_program_id,
+                &mango_group_pk,
+                &root_bank_pk,
+                &[node_bank_pk],
+            )
+            .unwrap()
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
     #[allow(dead_code)]
     pub async fn place_spot_order(
         &mut self,
@@ -1306,8 +1346,13 @@ impl MangoProgramTest {
         };
 
         let instructions = [
-            cache_prices(&mango_program_id, &mango_group_pk, &mango_group.mango_cache, &oracle_pks)
-                .unwrap(),
+            cache_prices(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &oracle_pks
+            )
+            .unwrap(),
             cache_root_banks(
                 &mango_program_id,
                 &mango_group_pk,
@@ -1352,6 +1397,92 @@ impl MangoProgramTest {
 
         self.process_transaction(&instructions, Some(&signers)).await.unwrap();
     }
+
+    #[allow(dead_code)]
+    pub async fn perform_deposit(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        mango_account_pk: &Pubkey,
+        user_index: usize,
+        mint_index: usize,
+        amount: u64,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let user_token_account = self.with_user_token_account(user_index, mint_index);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, mint_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
+        let instructions = [
+            cache_root_banks(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &[root_bank_pk],
+            )
+            .unwrap(),
+            deposit(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_group.mango_cache,
+                &root_bank_pk,
+                &node_bank_pk,
+                &node_bank.vault,
+                &user_token_account,
+                amount,
+            )
+            .unwrap(),
+        ];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_withdraw(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        mango_group: &MangoGroup,
+        mango_account_pk: &Pubkey,
+        mango_account: &MangoAccount,
+        user_index: usize,
+        mint_index: usize,
+        quantity: u64,
+        allow_borrow: bool,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let user_token_account = self.with_user_token_account(user_index, mint_index);
+
+        let (signer_pk, signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, mint_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
+        let instructions = [
+            withdraw(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_group.mango_cache,
+                &root_bank_pk,
+                &node_bank_pk,
+                &node_bank.vault,
+                &user_token_account,
+                &signer_pk,
+                &mango_account.spot_open_orders,
+                quantity,
+                allow_borrow,
+            )
+            .unwrap(),
+        ];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
 }
 
 fn process_serum_instruction(
