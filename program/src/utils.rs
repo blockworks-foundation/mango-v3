@@ -1,3 +1,16 @@
+#![feature(link_llvm_intrinsics)]
+extern "C" {
+    #[link_name = "llvm.smul.fix.i128"]
+    pub fn unsafe_fixmul(a: i128, b: i128, scale: i32) -> i128;
+}
+
+#[inline(always)]
+fn fixmul(a: i128, b: i128, scale: i32) -> i128 {
+    unsafe {
+        return unsafe_fixmul(a, b, scale);
+    }
+}
+
 use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 
 use crate::error::MangoResult;
@@ -92,7 +105,10 @@ impl FI80F48 {
             if n + m < 48 {
                 let (r, over) = (self.0 >> n).overflowing_mul(x.0 >> m);
                 if over {
-                    (self.to_fixed() * x.to_fixed()).to_bits()
+                    // mul_hi_lo(self.0, x.0, 0, 0)
+                    // (self.to_fixed() * x.to_fixed()).to_bits()
+
+                    fixmul(self.0, x.0, 48)
                 } else {
                     r >> (48 - m - n)
                 }
@@ -155,7 +171,6 @@ pub trait FastMath: Sized {
 }
 
 impl FastMath for I80F48 {
-    #[inline(always)]
     fn fmul(self, x: Self) -> Self {
         let n = self.trailing_zeros();
         if n < 48 {
@@ -165,6 +180,7 @@ impl FastMath for I80F48 {
                 let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
                 if over {
                     self * x
+                    // Self::from_bits(fixmul(self.to_bits(), x.to_bits(), 48))
                 } else {
                     Self::from_bits(r >> (48 - m - n))
                 }

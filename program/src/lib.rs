@@ -1,3 +1,4 @@
+#![feature(link_llvm_intrinsics)]
 #![feature(destructuring_assignment)]
 
 #[macro_use]

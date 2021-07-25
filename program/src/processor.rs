@@ -364,6 +364,13 @@ impl Processor {
         scaler: I80F48,
     ) -> MangoResult<()> {
         // params check
+        check!(
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
+            MangoErrorCode::InvalidParam
+        )?;
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(base_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(quote_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(!scaler.is_negative(), MangoErrorCode::InvalidParam)?;
 
@@ -387,20 +394,13 @@ impl Processor {
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
 
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::Default)?;
+        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
         check!(mango_group.oracles[market_index] != Pubkey::default(), MangoErrorCode::Default)?;
 
         // Make sure perp market at this index not already initialized
-        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::Default)?;
-
-        check!(
-            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
-            MangoErrorCode::Default
-        )?;
-
-        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::Default)?;
+        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
         let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
         let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
@@ -425,7 +425,8 @@ impl Processor {
 
         // Initialize the EventQueue
         // TODO: check that the event queue is reasonably large
-        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
+        let _event_queue =
+            EventQueue::load_and_init(event_queue_ai, program_id, &rent, maker_fee, taker_fee)?;
 
         // Now initialize the PerpMarket itself
         let _perp_market = PerpMarket::load_and_init(
@@ -1904,7 +1905,7 @@ impl Processor {
         let now_ts = Clock::get()?.unix_timestamp as u64;
         check!(
             mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidCache
         )?;
 
         let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);

@@ -450,8 +450,8 @@ pub enum MangoInstruction {
     /// 1. `[writable]` mango_account_ai - MangoAccount
     /// 2. `[signer]` owner_ai - MangoAccount owner
     /// 3. `[]` dex_prog_ai - program id of serum dex
-    /// 4.  `[writable]` open_orders_ai - open orders for this market for this MangoAccount
-    /// 5.  `[]` spot_market_ai - dex MarketState account
+    /// 4. `[writable]` open_orders_ai - open orders for this market for this MangoAccount
+    /// 5. `[]` spot_market_ai - dex MarketState account
     /// 6. `[]` signer_ai - Group Signer Account
     /// 7. `[]` rent_ai - Rent sysvar account
     InitSpotOpenOrders,

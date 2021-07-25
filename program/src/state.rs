@@ -682,12 +682,10 @@ impl MangoCache {
     }
 }
 
-/// Used to store intermediate calculations health calculations during program execution
+/// Used to store intermediate health calculations during program execution
 ///
 pub struct HealthCache {
     pub active_assets: [bool; MAX_TOKENS],
-    // pub spot_healths: [I80F48; MAX_TOKENS],
-    // pub perp_healths: [I80F48; MAX_PAIRS],
     pub spot_healths: Vec<I80F48>,
     pub perp_healths: Vec<I80F48>,
 
@@ -1415,7 +1413,6 @@ impl MangoAccount {
         Ok(())
     }
 
-    #[allow(dead_code)]
     /// Return true if account should enter bankruptcy.
     /// Note entering bankruptcy is calculated differently from exiting bankruptcy because of
     /// possible rounding issues and dust
@@ -1706,7 +1703,7 @@ impl PerpAccount {
             * perp_market.scaler;
 
         // TODO OPT remove this sanity check if confident
-        check!(!points.is_negative(), MangoErrorCode::Default)?;
+        check!(!points.is_negative(), MangoErrorCode::MathError)?;
 
         // Not necessary for now, but may come in useful later
         // perp_market.total_liquidity_points += points;
