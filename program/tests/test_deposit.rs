@@ -8,19 +8,19 @@ mod program_test;
 
 #[tokio::test]
 async fn test_deposit_succeeds() {
-    // Disable solana log output
-    solana_logger::setup_with("error"); // Y u no work?
     // Arrange
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
+    // Disable solana log output
+    solana_logger::setup_with("error");
 
     let user_index = 0;
-    let base_price = 10000;
+    let quantity = 10000;
 
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
     let quote_mint = test.with_mint(test.quote_index);
 
-    let deposit_amount = (base_price * quote_mint.unit) as u64;
+    let deposit_amount = (quantity * quote_mint.unit) as u64;
     let (mango_account_pk, _mango_account) =
         test.with_mango_account(&mango_group_pk, user_index).await;
     let user_token_account = test.with_user_token_account(user_index, test.quote_index);

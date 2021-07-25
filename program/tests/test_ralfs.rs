@@ -158,7 +158,7 @@ async fn test_place_spot_order() {
     let oracle_pks = test.add_oracles_to_mango_group(&mango_group_pk).await;
 
     let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
-    test.set_oracle(&mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
+    test.set_oracle(&mango_group, &mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
     let spot_markets = test.add_spot_markets_to_mango_group(&mango_group_pk).await;
     mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
 
@@ -272,7 +272,7 @@ async fn test_worst_case_scenario() {
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
         let base_mint = test.with_mint(mint_index);
         let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
-        test.set_oracle(&mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
+        test.set_oracle(&mango_group, &mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
         let order = NewOrderInstructionV3 {
             side: serum_dex::matching::Side::Bid,
             limit_price: NonZeroU64::new(deposit_amount as u64).unwrap(),
@@ -338,4 +338,113 @@ async fn test_worst_case_scenario() {
         assert_ne!(mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
     }
     // TODO: more assertions
+}
+
+#[tokio::test]
+async fn test_worst_case_scenario_2() {
+    // Arrange
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let mut test = MangoProgramTest::start_new(&config).await;
+    // Supress some of the logs
+    solana_logger::setup_with_default(
+        "solana_rbpf::vm=info,\
+             solana_runtime::message_processor=debug,\
+             solana_runtime::system_instruction_processor=info,\
+             solana_program_test=info",
+    );
+
+    let borrower_user_index: usize = 0;
+    let lender_user_index: usize = 1;
+    let mint_index: usize = 0;
+    let market_index: usize = 0;
+
+    let base_mint = test.with_mint(mint_index);
+    let quote_mint = test.with_mint(test.quote_index);
+
+    let base_price = 10000;
+
+    let (mango_group_pk, mut mango_group) = test.with_mango_group().await;
+    let (borrower_mango_account_pk, mut borrower_mango_account) =
+        test.with_mango_account(&mango_group_pk, borrower_user_index).await;
+    let (lender_mango_account_pk, mut lender_mango_account) =
+        test.with_mango_account(&mango_group_pk, lender_user_index).await;
+    let (mango_cache_pk, _mango_cache) = test.with_mango_cache(&mango_group).await;
+
+    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_pk).await;
+    let spot_markets = test.add_spot_markets_to_mango_group(&mango_group_pk).await;
+    let (perp_market_pks, perp_markets) =
+        test.add_perp_markets_to_mango_group(&mango_group_pk).await;
+    test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
+    // Need to reload mango group because add_spot_markets add tokens in to mango_group
+    mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
+    let oracle_price = test.with_oracle_price(&quote_mint, &base_mint, base_price as u64);
+    test.set_oracle(&mango_group, &mango_group_pk, &oracle_pks[mint_index], oracle_price).await;
+
+    // Act
+
+    // Step 1: Make deposits from 2 accounts (Borrower / Lender)
+
+    // Deposit 15000 USDC as the borrower
+    let quote_deposit_amount = (15000 * quote_mint.unit) as u64;
+    test.perform_deposit(
+        &mango_group,
+        &mango_group_pk,
+        &borrower_mango_account_pk,
+        borrower_user_index,
+        test.quote_index,
+        quote_deposit_amount,
+    )
+    .await;
+
+    // Deposit 2 BTC as the lender
+    let base_deposit_amount = (2 * base_mint.unit) as u64;
+    test.perform_deposit(
+        &mango_group,
+        &mango_group_pk,
+        &lender_mango_account_pk,
+        lender_user_index,
+        mint_index,
+        base_deposit_amount,
+    )
+    .await;
+
+    // Step 2: Withdraw (with borrow) 1 BTC @ 10000 as the borrower
+    test.cache_all_root_banks(&mango_group, &mango_group_pk).await;
+    test.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks).await;
+    test.update_all_root_banks(&mango_group, &mango_group_pk, 0).await;
+    let withdraw_amount = (1 * base_mint.unit) as u64;
+    test.perform_withdraw(
+        &mango_group_pk,
+        &mango_group,
+        &borrower_mango_account_pk,
+        &borrower_mango_account,
+        borrower_user_index,
+        mint_index,
+        withdraw_amount,
+        true, // Allow borrow
+    )
+    .await;
+
+    let (_root_bank_pk, root_bank) =
+        test.with_root_bank(&mango_group, mint_index).await;
+    let (_node_bank_pk, node_bank) = test.with_node_bank(&root_bank, 0).await;
+
+    println!("node_bank.deposits: {}", node_bank.deposits.to_string());
+    println!("node_bank.borrows: {}", node_bank.borrows.to_string());
+    test.cache_all_root_banks(&mango_group, &mango_group_pk).await;
+    test.update_all_root_banks(&mango_group, &mango_group_pk, 0).await;
+    let mut clock = test.get_clock().await;
+    println!("Clock: {}", clock.unix_timestamp);
+
+    let mango_account_deposit = test.with_mango_account_deposit(&borrower_mango_account_pk, test.quote_index).await;
+    println!("Deposit: {}", mango_account_deposit);
+    test.advance_clock_past_timestamp(clock.unix_timestamp + (24*60*60*3)).await;
+    test.cache_all_root_banks(&mango_group, &mango_group_pk).await;
+    test.update_all_root_banks(&mango_group, &mango_group_pk, 0).await;
+    let mango_account_deposit = test.with_mango_account_deposit(&borrower_mango_account_pk, test.quote_index).await;
+    println!("Deposit: {}", mango_account_deposit);
+
+    clock = test.get_clock().await;
+    println!("Clock: {}", clock.unix_timestamp);
+
 }
