@@ -1,6 +1,6 @@
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::queue::{EventQueue, FillEvent, OutEvent};
-use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders, ZERO_I80F48};
+use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref};
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
