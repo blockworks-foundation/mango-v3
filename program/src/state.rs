@@ -688,20 +688,22 @@ pub struct HealthCache {
     pub active_assets: [bool; MAX_TOKENS],
     // pub spot_healths: [I80F48; MAX_TOKENS],
     // pub perp_healths: [I80F48; MAX_PAIRS],
-    pub spot_healths: Vec<I80F48>,
-    pub perp_healths: Vec<I80F48>,
+    pub spot_init_healths: Vec<I80F48>,
+    pub spot_maint_healths: Vec<I80F48>,
+    pub perp_init_healths: Vec<I80F48>,
+    pub perp_maint_healths: Vec<I80F48>,
+    pub health_types: Vec<HealthType>,
 
-    pub health_type: HealthType,
-
-    /// This will be zero until update_health is called for the first time
-    pub health: I80F48,
+    /// These will be zero until update_health is called for the first time
+    pub init_health: I80F48,
+    pub maint_health: I80F48,
 }
 
 impl HealthCache {
     pub fn new(
         mango_group: &MangoGroup,
         mango_account: &MangoAccount,
-        health_type: HealthType,
+        health_types: Vec<HealthType>,
     ) -> Self {
         let mut active_assets = [false; MAX_TOKENS];
         active_assets[QUOTE_INDEX] = true;
@@ -714,10 +716,13 @@ impl HealthCache {
 
         Self {
             active_assets,
-            spot_healths: vec![ZERO_I80F48; MAX_TOKENS],
-            perp_healths: vec![ZERO_I80F48; MAX_PAIRS],
-            health_type,
-            health: ZERO_I80F48,
+            spot_init_healths: vec![ZERO_I80F48; MAX_TOKENS],
+            spot_maint_healths: vec![ZERO_I80F48; MAX_TOKENS],
+            perp_init_healths: vec![ZERO_I80F48; MAX_PAIRS],
+            perp_maint_healths: vec![ZERO_I80F48; MAX_PAIRS],
+            health_types,
+            init_health: ZERO_I80F48,
+            maint_health: ZERO_I80F48,
         }
     }
 
@@ -738,37 +743,44 @@ impl HealthCache {
             return Ok(());
         }
 
-        let spot_health = if token_index == QUOTE_INDEX {
-            mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX)
-        } else {
-            let spot_market_info = &mango_group.spot_markets[token_index];
-            if spot_market_info.is_empty() {
-                return Ok(());
-            }
-
-            let (spot_asset_weight, spot_liab_weight) = match self.health_type {
-                HealthType::Maint => {
-                    (spot_market_info.maint_asset_weight, spot_market_info.maint_liab_weight)
+        for health_type in self.health_types.iter() {
+            let spot_health = if token_index == QUOTE_INDEX {
+                mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX)
+            } else {
+                let spot_market_info = &mango_group.spot_markets[token_index];
+                if spot_market_info.is_empty() {
+                    return Ok(());
                 }
-                HealthType::Init => {
-                    (spot_market_info.init_asset_weight, spot_market_info.init_liab_weight)
-                }
+                let (spot_asset_weight, spot_liab_weight) = match health_type {
+                    HealthType::Maint => {
+                        (spot_market_info.maint_asset_weight, spot_market_info.maint_liab_weight)
+                    }
+                    HealthType::Init => {
+                        (spot_market_info.init_asset_weight, spot_market_info.init_liab_weight)
+                    }
+                };
+                mango_account
+                    .fast_get_spot_health(
+                        mango_cache,
+                        token_index,
+                        &open_orders_ais[token_index],
+                        FI80F48::from_fixed(spot_asset_weight),
+                        FI80F48::from_fixed(spot_liab_weight),
+                    )?
+                    .to_fixed()
             };
 
-            mango_account
-                .fast_get_spot_health(
-                    mango_cache,
-                    token_index,
-                    &open_orders_ais[token_index],
-                    FI80F48::from_fixed(spot_asset_weight),
-                    FI80F48::from_fixed(spot_liab_weight),
-                )?
-                .to_fixed()
-        };
-
-        self.health += spot_health - self.spot_healths[token_index];
-        self.spot_healths[token_index] = spot_health;
-
+            match health_type {
+                HealthType::Maint => {
+                    self.maint_health += spot_health - self.spot_maint_healths[token_index];
+                    self.spot_maint_healths[token_index] = spot_health;
+                }
+                HealthType::Init => {
+                    self.init_health += spot_health - self.spot_init_healths[token_index];
+                    self.spot_init_healths[token_index] = spot_health;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -781,25 +793,36 @@ impl HealthCache {
         market_index: usize,
     ) -> MangoResult<()> {
         let perp_market_info = &mango_group.perp_markets[market_index];
-        let (perp_asset_weight, perp_liab_weight) = match self.health_type {
-            HealthType::Maint => {
-                (perp_market_info.maint_asset_weight, perp_market_info.maint_liab_weight)
-            }
-            HealthType::Init => {
-                (perp_market_info.init_asset_weight, perp_market_info.init_liab_weight)
-            }
-        };
+        for health_type in self.health_types.iter() {
+            let (perp_asset_weight, perp_liab_weight) = match health_type {
+                HealthType::Maint => {
+                    (perp_market_info.maint_asset_weight, perp_market_info.maint_liab_weight)
+                }
+                HealthType::Init => {
+                    (perp_market_info.init_asset_weight, perp_market_info.init_liab_weight)
+                }
+            };
 
-        let perp_health = mango_account.perp_accounts[market_index].get_health(
-            perp_market_info,
-            mango_cache.price_cache[market_index].price,
-            perp_asset_weight,
-            perp_liab_weight,
-            mango_cache.perp_market_cache[market_index].long_funding,
-            mango_cache.perp_market_cache[market_index].short_funding,
-        );
-        self.health += perp_health - self.perp_healths[market_index];
-        self.perp_healths[market_index] = perp_health;
+            let perp_health = mango_account.perp_accounts[market_index].get_health(
+                perp_market_info,
+                mango_cache.price_cache[market_index].price,
+                perp_asset_weight,
+                perp_liab_weight,
+                mango_cache.perp_market_cache[market_index].long_funding,
+                mango_cache.perp_market_cache[market_index].short_funding,
+            );
+
+            match health_type {
+                HealthType::Maint => {
+                    self.maint_health += perp_health - self.perp_maint_healths[market_index];
+                    self.perp_maint_healths[market_index] = perp_health;
+                }
+                HealthType::Init => {
+                    self.init_health += perp_health - self.perp_init_healths[market_index];
+                    self.perp_init_healths[market_index] = perp_health;
+                }
+            };
+        }
         Ok(())
     }
 
@@ -811,65 +834,83 @@ impl HealthCache {
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> MangoResult<()> {
         sol_log_compute_units();
-        self.spot_healths[QUOTE_INDEX] =
+        let quote_net =
             mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        let mut health = self.spot_healths[QUOTE_INDEX];
+        let [mut init_health, mut maint_health] = [quote_net; 2];
+        for health_type in self.health_types.iter() {
+            for i in 0..mango_group.num_oracles {
+                if !self.active_assets[i] {
+                    continue;
+                }
 
-        for i in 0..mango_group.num_oracles {
-            if !self.active_assets[i] {
-                continue;
+                let spot_market_info = &mango_group.spot_markets[i];
+                let perp_market_info = &mango_group.perp_markets[i];
+                let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
+                    match health_type {
+                        HealthType::Maint => (
+                            spot_market_info.maint_asset_weight,
+                            spot_market_info.maint_liab_weight,
+                            perp_market_info.maint_asset_weight,
+                            perp_market_info.maint_liab_weight,
+                        ),
+                        HealthType::Init => (
+                            spot_market_info.init_asset_weight,
+                            spot_market_info.init_liab_weight,
+                            perp_market_info.init_asset_weight,
+                            perp_market_info.init_liab_weight,
+                        ),
+                    };
+
+                if !spot_market_info.is_empty() {
+                    let spot_health = mango_account
+                        .fast_get_spot_health(
+                            mango_cache,
+                            i,
+                            &open_orders_ais[i],
+                            FI80F48::from_fixed(spot_asset_weight),
+                            FI80F48::from_fixed(spot_liab_weight),
+                        )?
+                        .to_fixed();
+
+                    match health_type {
+                        HealthType::Maint => {
+                            maint_health += spot_health;
+                            self.spot_maint_healths[i] = spot_health;
+                        }
+                        HealthType::Init => {
+                            init_health += spot_health;
+                            self.spot_init_healths[i] = spot_health;
+                        }
+                    };
+                }
+
+                if mango_account.perp_accounts[i].is_active() && !perp_market_info.is_empty() {
+                    let perp_health = mango_account.perp_accounts[i].get_health(
+                        perp_market_info,
+                        mango_cache.price_cache[i].price,
+                        perp_asset_weight,
+                        perp_liab_weight,
+                        mango_cache.perp_market_cache[i].long_funding,
+                        mango_cache.perp_market_cache[i].short_funding,
+                    );
+                    match health_type {
+                        HealthType::Maint => {
+                            maint_health += perp_health;
+                            self.perp_maint_healths[i] = perp_health;
+                        }
+                        HealthType::Init => {
+                            init_health += perp_health;
+                            self.perp_init_healths[i] = perp_health;
+                        }
+                    };
+                }
+                // msg!("get_health {} => {:?}", i, health);
             }
 
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-
-            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
-                match self.health_type {
-                    HealthType::Maint => (
-                        spot_market_info.maint_asset_weight,
-                        spot_market_info.maint_liab_weight,
-                        perp_market_info.maint_asset_weight,
-                        perp_market_info.maint_liab_weight,
-                    ),
-                    HealthType::Init => (
-                        spot_market_info.init_asset_weight,
-                        spot_market_info.init_liab_weight,
-                        perp_market_info.init_asset_weight,
-                        perp_market_info.init_liab_weight,
-                    ),
-                };
-
-            if !spot_market_info.is_empty() {
-                let spot_health = mango_account
-                    .fast_get_spot_health(
-                        mango_cache,
-                        i,
-                        &open_orders_ais[i],
-                        FI80F48::from_fixed(spot_asset_weight),
-                        FI80F48::from_fixed(spot_liab_weight),
-                    )?
-                    .to_fixed();
-                health += spot_health;
-                self.spot_healths[i] = spot_health;
-            }
-
-            if mango_account.perp_accounts[i].is_active() && !perp_market_info.is_empty() {
-                let perp_health = mango_account.perp_accounts[i].get_health(
-                    perp_market_info,
-                    mango_cache.price_cache[i].price,
-                    perp_asset_weight,
-                    perp_liab_weight,
-                    mango_cache.perp_market_cache[i].long_funding,
-                    mango_cache.perp_market_cache[i].short_funding,
-                );
-                health += perp_health;
-                self.perp_healths[i] = perp_health;
-            }
-            // msg!("get_health {} => {:?}", i, health);
+            self.maint_health = maint_health;
+            self.init_health = init_health;
+            sol_log_compute_units();
         }
-
-        self.health = health;
-        sol_log_compute_units();
 
         Ok(())
     }
