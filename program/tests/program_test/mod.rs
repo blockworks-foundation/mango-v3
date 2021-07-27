@@ -26,10 +26,11 @@ use spl_token::{state::*, *};
 use mango::{
     entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
 };
+
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
 
-pub mod group;
+
 
 trait AddPacked {
     fn add_packable_account<T: Pack>(
@@ -108,6 +109,7 @@ pub struct MangoProgramTest {
     pub serum_program_id: Pubkey,
     pub num_mints: usize,
     pub quote_index: usize,
+    pub quote_mint: MintConfig,
     pub mints: Vec<MintConfig>,
     pub num_users: usize,
     pub users: Vec<Keypair>,
@@ -480,7 +482,7 @@ impl MangoProgramTest {
         // TODO: Add the 32nd mint as the quote mint
 
 
-        Self { context, rent, mango_program_id, serum_program_id, num_mints, quote_index, mints, num_users, users, token_accounts }
+        Self { context, rent, mango_program_id, serum_program_id, num_mints, quote_index, quote_mint, mints, num_users, users, token_accounts }
     }
 
     #[allow(dead_code)]
@@ -498,9 +500,10 @@ impl MangoProgramTest {
             all_signers.extend_from_slice(signers);
         }
 
-        let recent_blockhash = self.context.banks_client.get_recent_blockhash().await.unwrap();
+        // This fails when warping is involved - https://gitmemory.com/issue/solana-labs/solana/18201/868325078
+        // let recent_blockhash = self.context.banks_client.get_recent_blockhash().await.unwrap();
 
-        transaction.sign(&all_signers, recent_blockhash);
+        transaction.sign(&all_signers, self.context.last_blockhash);
 
         self.context.banks_client.process_transaction(transaction).await.unwrap();
 
@@ -752,11 +755,10 @@ impl MangoProgramTest {
     #[allow(dead_code)]
     pub fn with_oracle_price(
         &mut self,
-        quote_mint: &MintConfig,
         base_mint: &MintConfig,
         price: u64,
     ) -> I80F48 {
-        return I80F48::from_num(price) * I80F48::from_num(quote_mint.unit)
+        return I80F48::from_num(price) * I80F48::from_num(self.quote_mint.unit)
             / I80F48::from_num(base_mint.unit);
     }
 
@@ -1301,6 +1303,9 @@ impl MangoProgramTest {
         mint_index: usize,
         order: NewOrderInstructionV3,
     ) {
+        self.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks).await;
+        self.cache_all_root_banks(&mango_group, &mango_group_pk).await;
+
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
@@ -1346,27 +1351,6 @@ impl MangoProgramTest {
         };
 
         let instructions = [
-            cache_prices(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &oracle_pks
-            )
-            .unwrap(),
-            cache_root_banks(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &[mint_root_bank_pk],
-            )
-            .unwrap(),
-            cache_root_banks(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &[quote_root_bank_pk],
-            )
-            .unwrap(),
             mango::instruction::place_spot_order(
                 &mango_program_id,
                 &mango_group_pk,

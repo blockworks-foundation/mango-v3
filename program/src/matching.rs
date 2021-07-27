@@ -1,5 +1,5 @@
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
+use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref};
 use mango_common::Loadable;
@@ -762,27 +762,45 @@ impl<'a> Book<'a> {
             best_bid.quantity -= match_quantity;
             let maker_out = best_bid.quantity == 0;
 
-            let fill = FillEvent {
-                event_type: EventType::Fill as u8,
-                side: Side::Ask,
-                maker_slot: best_bid.owner_slot,
+            let fill = FillEvent::new(
+                Side::Ask,
+                best_bid.owner_slot,
                 maker_out,
-                padding: [0u8; 4],
-                maker: best_bid.owner,
-                maker_order_id: best_bid.key,
-                maker_client_order_id: best_bid.client_order_id,
-                best_initial: best_bid.best_initial,
-                timestamp: best_bid.timestamp,
-                taker: *mango_account_pk,
-                taker_order_id: order_id,
-                taker_client_order_id: client_order_id,
-                price: best_bid_price,
-                quantity: match_quantity,
-            };
+                best_bid.owner,
+                best_bid.key,
+                best_bid.client_order_id,
+                best_bid.best_initial,
+                best_bid.timestamp,
+                *mango_account_pk,
+                order_id,
+                client_order_id,
+                best_bid_price,
+                match_quantity,
+            );
+
+            // let fill = FillEvent {
+            //     event_type: EventType::Fill as u8,
+            //     side: Side::Ask,
+            //     maker_slot: best_bid.owner_slot,
+            //     maker_out,
+            //     padding: [0u8; 4],
+            //     maker: best_bid.owner,
+            //     maker_order_id: best_bid.key,
+            //     maker_client_order_id: best_bid.client_order_id,
+            //     best_initial: best_bid.best_initial,
+            //     timestamp: best_bid.timestamp,
+            //     taker: *mango_account_pk,
+            //     taker_order_id: order_id,
+            //     taker_client_order_id: client_order_id,
+            //     price: best_bid_price,
+            //     quantity: match_quantity,
+            //     maker_fee: ZERO_I80F48,
+            //     taker_fee: ZERO_I80F48
+            // };
             event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
-            if maker_out {
+            if best_bid.quantity == 0 {
                 // Remove the order from the book
                 let key = best_bid.key;
                 let _removed_node = self.bids.remove_by_key(key).unwrap();
