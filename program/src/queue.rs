@@ -145,7 +145,7 @@ pub struct EventQueueHeader {
     count: usize,
     seq_num: usize,
 
-    // *** Added for good record keeping; consider shrinking to u16 and fit inside padding bytes
+    // Added here for record-keeping
     pub maker_fee: I80F48,
     pub taker_fee: I80F48,
 }
@@ -221,7 +221,6 @@ pub enum EventType {
     Out,
 }
 
-// ***
 const EVENT_SIZE: usize = 152;
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
@@ -234,7 +233,6 @@ unsafe impl TriviallyTransmutable for AnyEvent {}
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct FillEvent {
-    // ***
     pub event_type: u8,
     pub side: Side, // side from the taker's POV
     pub maker_slot: u8,

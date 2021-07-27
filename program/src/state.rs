@@ -1,9 +1,11 @@
 use std::cell::{Ref, RefMut};
+use std::cmp::{max, min};
 use std::convert::identity;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
+use enumflags2::BitFlags;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use mango_common::Loadable;
@@ -12,23 +14,21 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
+use solana_program::log::sol_log_compute_units;
 use solana_program::msg;
 use solana_program::program_error::ProgramError;
+use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
+use spl_token::state::Account;
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
 use crate::utils::{invert_side, remove_slop_mut, FastMath, FI80F48};
-use enumflags2::BitFlags;
-use solana_program::log::sol_log_compute_units;
-use solana_program::program_pack::Pack;
-use spl_token::state::Account;
-use std::cmp::{max, min};
 
-pub const MAX_TOKENS: usize = 32;
+pub const MAX_TOKENS: usize = 16;
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
@@ -38,6 +38,9 @@ pub const DAY: I80F48 = I80F48!(86400);
 pub const YEAR: I80F48 = I80F48!(31536000);
 
 pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
+const MAX_RATE_ADJ: I80F48 = I80F48!(4); // TODO make this part of PerpMarket if we want per market flexibility
+const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
+pub const INFO_LEN: usize = 32;
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -176,6 +179,8 @@ pub struct MangoGroup {
     pub dao_vault: Pubkey,
     pub srm_vault: Pubkey,
     pub msrm_vault: Pubkey,
+
+    pub padding: [u8; 64], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -683,7 +688,6 @@ impl MangoCache {
 }
 
 /// Used to store intermediate health calculations during program execution
-///
 pub struct HealthCache {
     pub active_assets: [bool; MAX_TOKENS],
     pub spot_healths: Vec<I80F48>,
@@ -899,7 +903,9 @@ pub struct MangoAccount {
 
     /// This account cannot do anything except go through `resolve_bankruptcy`
     pub is_bankrupt: bool,
-    pub padding: [u8; 6],
+    pub info: [u8; INFO_LEN],
+    /// padding for expansions
+    pub padding: [u8; 70],
 }
 
 impl MangoAccount {
@@ -1614,7 +1620,8 @@ pub struct PerpAccount {
     pub long_settled_funding: I80F48,
     pub short_settled_funding: I80F48,
     pub open_orders: PerpOpenOrders,
-    pub liquidity_points: I80F48,
+
+    pub mngo_accrued: u64,
 }
 
 impl PerpAccount {
@@ -1677,7 +1684,7 @@ impl PerpAccount {
 
     pub fn apply_incentives(
         &mut self,
-        perp_market: &PerpMarket,
+        perp_market: &mut PerpMarket,
 
         side: Side,
         price: i64,
@@ -1692,23 +1699,48 @@ impl PerpAccount {
             Side::Ask => min(best_initial, best_final),
         };
 
+        // TODO limit incentives to orders that were on book at least 5 seconds
+        let lmi = &mut perp_market.liquidity_mining_info;
         let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
-        let dist_factor = max(perp_market.max_depth_bps - dist_bps, ZERO_I80F48);
+        let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
 
         // TODO - check overflow possibilities here by throwing in reasonable large numbers
-        let points = dist_factor
-            * dist_factor
-            * I80F48::from_num(time_final - time_initial)
-            * I80F48::from_num(quantity)
-            * perp_market.scaler;
+        let mut points = dist_factor
+            .checked_fmul(dist_factor)
+            .unwrap()
+            .checked_fmul(I80F48::from_num(time_final - time_initial))
+            .unwrap()
+            .checked_fmul(I80F48::from_num(quantity))
+            .unwrap();
 
         // TODO OPT remove this sanity check if confident
         check!(!points.is_negative(), MangoErrorCode::MathError)?;
 
-        // Not necessary for now, but may come in useful later
-        // perp_market.total_liquidity_points += points;
+        let points_in_period = I80F48::from_num(lmi.mngo_left).checked_div(lmi.rate).unwrap();
 
-        self.liquidity_points += points;
+        if points >= points_in_period {
+            sol_log_compute_units();
+
+            self.mngo_accrued += lmi.mngo_left;
+            points -= points_in_period;
+
+            let rate_adj = I80F48::from_num(time_final - lmi.period_start)
+                .checked_div(I80F48::from_num(lmi.target_period_length))
+                .unwrap()
+                .clamp(MIN_RATE_ADJ, MAX_RATE_ADJ);
+
+            lmi.rate = lmi.rate.checked_fmul(rate_adj).unwrap();
+            lmi.period_start = time_final;
+            lmi.mngo_left = lmi.mngo_per_period;
+
+            sol_log_compute_units(); // To figure out how much rate adjust costs
+        }
+
+        let mngo_earned =
+            points.checked_fmul(lmi.rate).unwrap().to_num::<u64>().min(lmi.mngo_per_period); // limit mngo payout to max mngo in a period
+
+        self.mngo_accrued += mngo_earned;
+        lmi.mngo_left -= mngo_earned;
 
         Ok(())
     }
@@ -1849,9 +1881,31 @@ impl PerpAccount {
     }
 }
 
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+/// Information regarding market maker incentives for a perp market
+pub struct LiquidityMiningInfo {
+    /// Used to convert liquidity points to MNGO
+    pub rate: I80F48,
+
+    pub max_depth_bps: I80F48,
+
+    /// start timestamp of current liquidity incentive period; gets updated when mngo_left goes to 0
+    pub period_start: u64,
+
+    /// Target time length of a period in seconds
+    pub target_period_length: u64,
+
+    /// Paper MNGO left for this period
+    pub mngo_left: u64,
+
+    /// Total amount of MNGO allocated for current period
+    pub mngo_per_period: u64,
+}
+
 /// This will hold top level info about the perps market
 /// Likely all perps transactions on a market will be locked on this one because this will be passed in as writable
-#[derive(Copy, Clone, Pod, Loadable, Default)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct PerpMarket {
     pub meta_data: MetaData,
@@ -1873,11 +1927,7 @@ pub struct PerpMarket {
     pub seq_num: u64,
     pub fees_accrued: I80F48, // native quote currency
 
-    // Liquidity incentive params
-    pub max_depth_bps: I80F48,
-    pub scaler: I80F48,
-    pub total_liquidity_points: I80F48,
-    pub points_per_mngo: I80F48, // how many points equal 1 native MNGO
+    pub liquidity_mining_info: LiquidityMiningInfo,
 
     // mngo_vault holds mango tokens to be disbursed as liquidity incentives for this perp market
     pub mngo_vault: Pubkey,
@@ -1896,6 +1946,10 @@ impl PerpMarket {
         rent: &Rent,
         base_lot_size: i64,
         quote_lot_size: i64,
+        rate: I80F48,
+        max_depth_bps: I80F48,
+        target_period_length: u64,
+        mngo_per_period: u64,
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
@@ -1912,7 +1966,6 @@ impl PerpMarket {
         state.event_queue = *event_queue_ai.key;
         state.quote_lot_size = quote_lot_size;
         state.base_lot_size = base_lot_size;
-        state.points_per_mngo = ONE_I80F48;
 
         let vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
         check!(vault.owner == mango_group.signer_key, MangoErrorCode::InvalidOwner)?;
@@ -1921,7 +1974,17 @@ impl PerpMarket {
         state.mngo_vault = *mngo_vault_ai.key;
 
         let clock = Clock::get()?;
-        state.last_updated = clock.unix_timestamp as u64;
+        let period_start = clock.unix_timestamp as u64;
+        state.last_updated = period_start;
+
+        state.liquidity_mining_info = LiquidityMiningInfo {
+            rate,
+            max_depth_bps,
+            period_start,
+            target_period_length,
+            mngo_left: mngo_per_period,
+            mngo_per_period,
+        };
 
         Ok(state)
     }
