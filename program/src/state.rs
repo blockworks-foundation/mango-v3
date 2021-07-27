@@ -28,7 +28,7 @@ use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
 use crate::utils::{invert_side, remove_slop_mut, FastMath, FI80F48};
 
-pub const MAX_TOKENS: usize = 16;
+pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
 pub const MAX_NODE_BANKS: usize = 8;
 pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
