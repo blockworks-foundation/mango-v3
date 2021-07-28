@@ -35,7 +35,7 @@ sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
 
 
 ### Example Mango Client CLI commands to launch a new group from source/cli.ts in mango-client-v3
-### 
+###
 ### yarn cli init-group mango_test_v3.4 32WeJ46tuY6QEkgydqzHYU5j85UT9m1cPJwFxPjuSVCt DESVgJVGajEgKGXhb6XmqDHGz3VjdgP7rEVESBgxmroY EMjjdsqERN4wJUR9jMBax2pzqQPeGLNn5NeucbHpDUZK
 ### yarn cli add-oracle mango_test_v3.4 BTC
 ### yarn cli set-oracle mango_test_v3.4 BTC 40000000

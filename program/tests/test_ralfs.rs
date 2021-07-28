@@ -47,7 +47,7 @@ async fn place_perp_order_scenario(order_id: u64, order_side: Side) {
     let raw_order_size = 10000;
 
     let order_price = test.with_order_price(&quote_mint, &base_mint, base_price);
-    let order_size = test.with_order_size(&base_mint, raw_order_size);
+    let order_size = test.baseSizeNumberToLots(&base_mint, raw_order_size);
     let order_type = OrderType::Limit;
 
     let (mango_group_pk, mango_group) = test.with_mango_group().await;
@@ -127,8 +127,15 @@ async fn test_init_spot_markets() {
     // Arrange
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
+    // Supress some of the logs
+    solana_logger::setup_with_default(
+        "solana_rbpf::vm=info,\
+             solana_runtime::message_processor=debug,\
+             solana_runtime::system_instruction_processor=info,\
+             solana_program_test=info",
+    );
     // Disable all logs except error
-    solana_logger::setup_with("error");
+    // solana_logger::setup_with("error");
 
     let (mango_group_pk, _mango_group) = test.with_mango_group().await;
     test.add_oracles_to_mango_group(&mango_group_pk).await;
@@ -140,8 +147,15 @@ async fn test_place_spot_order() {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
+    // Supress some of the logs
+    solana_logger::setup_with_default(
+        "solana_rbpf::vm=info,\
+             solana_runtime::message_processor=debug,\
+             solana_runtime::system_instruction_processor=info,\
+             solana_program_test=info",
+    );
     // Disable all logs except error
-    solana_logger::setup_with("error");
+    // solana_logger::setup_with("error");
 
     let user_index: usize = 0;
     let mint_index: usize = 0;
@@ -177,8 +191,8 @@ async fn test_place_spot_order() {
     let order = NewOrderInstructionV3 {
         side: serum_dex::matching::Side::Bid,
         limit_price: NonZeroU64::new(base_price as u64).unwrap(),
-        max_coin_qty: NonZeroU64::new(1).unwrap(),
-        max_native_pc_qty_including_fees: NonZeroU64::new(base_price as u64).unwrap(),
+        max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
+        max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
         self_trade_behavior: SelfTradeBehavior::DecrementTake,
         order_type: serum_dex::matching::OrderType::Limit,
         client_order_id: 1000,
@@ -197,7 +211,6 @@ async fn test_place_spot_order() {
         order,
     )
     .await;
-
     // Assert
     mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
     assert_ne!(mango_account.spot_open_orders[0], Pubkey::default());
@@ -276,12 +289,12 @@ async fn test_worst_case_scenario() {
         let order = NewOrderInstructionV3 {
             side: serum_dex::matching::Side::Bid,
             limit_price: NonZeroU64::new(base_price as u64).unwrap(),
-            max_coin_qty: NonZeroU64::new(1).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(base_price as u64).unwrap(),
+            max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
             self_trade_behavior: SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: starting_order_id + mint_index as u64,
-            limit: std::u16::MAX,
+            limit: u16::MAX,
         };
         test.place_spot_order(
             &mango_group_pk,
@@ -308,7 +321,7 @@ async fn test_worst_case_scenario() {
 
         let order_side = Side::Bid;
         let order_price = test.with_order_price(&quote_mint, &base_mint, base_price);
-        let order_size = test.with_order_size(&base_mint, 1);
+        let order_size = test.baseSizeNumberToLots(&base_mint, 1);
         let order_type = OrderType::Limit;
 
         test.place_perp_order(
@@ -437,12 +450,12 @@ async fn test_worst_case_scenario_with_fractions() {
     let order = NewOrderInstructionV3 {
         side: serum_dex::matching::Side::Ask,
         limit_price: NonZeroU64::new(base_price as u64).unwrap(),
-        max_coin_qty: NonZeroU64::new(1).unwrap(),
-        max_native_pc_qty_including_fees: NonZeroU64::new(base_price as u64).unwrap(),
+        max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
+        max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
         self_trade_behavior: SelfTradeBehavior::DecrementTake,
         order_type: serum_dex::matching::OrderType::Limit,
         client_order_id: starting_order_id + mint_index as u64,
-        limit: std::u16::MAX,
+        limit: u16::MAX,
     };
     test.place_spot_order(
         &mango_group_pk,
@@ -567,15 +580,16 @@ async fn test_worst_case_scenario_with_fractions_x10() {
     // Step 7: Place a spot order ASK for each mint
     let starting_order_id = 1000;
     for mint_index in 0..num_orders {
+        let base_mint = test.with_mint(mint_index);
         let order = NewOrderInstructionV3 {
             side: serum_dex::matching::Side::Ask,
             limit_price: NonZeroU64::new(base_price as u64).unwrap(),
-            max_coin_qty: NonZeroU64::new(1).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(base_price as u64).unwrap(),
+            max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
             self_trade_behavior: SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: starting_order_id + mint_index as u64,
-            limit: std::u16::MAX,
+            limit: u16::MAX,
         };
         test.place_spot_order(
             &mango_group_pk,
