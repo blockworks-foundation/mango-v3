@@ -15,11 +15,9 @@ cd ~/blockworks-foundation/mango-v3/program
 mkdir target/devnet
 cargo build-bpf --features devnet --bpf-out-dir target/devnet
 
-
-#MANGO_PROGRAM_ID="viQTKtBmaGvx3nugHcvijedy9ApbDowqiGYq35qAJqq"
-MANGO_PROGRAM_ID="32WeJ46tuY6QEkgydqzHYU5j85UT9m1cPJwFxPjuSVCt"
-#solana program deploy target/deploy/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
-solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
+MANGO_PROGRAM_ID="EwG6vXKHmTPAS3K17CPu62AK3bdrrDJS3DibwUjv5ayT"
+#MANGO_PROGRAM_ID="32WeJ46tuY6QEkgydqzHYU5j85UT9m1cPJwFxPjuSVCt"
+solana program deploy target/deploy/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
 
 # serum dex
 VERSION=v1.6.9
@@ -30,7 +28,7 @@ cargo build-bpf --features devnet
 DEX_PROGRAM_ID=DESVgJVGajEgKGXhb6XmqDHGz3VjdgP7rEVESBgxmroY
 solana program deploy target/deploy/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID
 
-VERSION=v1.7.3
+VERSION=v1.7.8
 sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
 
 

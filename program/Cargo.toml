@@ -13,7 +13,7 @@ devnet = []
 solana-program = "^1.7.1"
 arrayref = "^0.3.6"
 serde = "^1.0.118"
-bs58 = "^0.3.1"
+bs58 = "0.4.0"
 bytemuck = "^1.4.1"
 bincode = "^1.3.1"
 fixed = { version = "^1.9.0", features = ["serde"] }
@@ -37,7 +37,13 @@ tarpc = { version = "^0.26.2", features = ["full"] }
 
 
 [profile.release]
-lto = true
+lto = "fat"
+codegen-units = 1
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1
 
 #[profile.test]
 #lto = true

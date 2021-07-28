@@ -1,6 +1,6 @@
 use crate::matching::{OrderType, Side};
-use crate::state::AssetType;
 use crate::state::MAX_PAIRS;
+use crate::state::{AssetType, INFO_LEN};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -180,12 +180,19 @@ pub enum MangoInstruction {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        liquidation_fee: I80F48,
         maker_fee: I80F48,
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
+        /// Starting rate for liquidity mining
+        rate: I80F48,
+        /// depth liquidity mining works for
         max_depth_bps: I80F48,
-        scaler: I80F48,
+        /// target length in seconds of one period
+        target_period_length: u64,
+        /// amount MNGO rewarded per period
+        mngo_per_period: u64,
     },
 
     /// Place an order on a perp market
@@ -262,6 +269,7 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction ():
     ///
     CancelSpotOrder {
+        // 20
         order: serum_dex::instruction::CancelOrderInstructionV2,
     },
 
@@ -416,6 +424,7 @@ pub enum MangoInstruction {
     /// 11. `[]` token_prog_ai - Token Program Account
     /// 12+... `[]` liqor_open_orders_ais - Liqor open orders accs
     ResolvePerpBankruptcy {
+        // 30
         liab_index: usize,
         max_liab_transfer: I80F48,
     },
@@ -440,6 +449,51 @@ pub enum MangoInstruction {
     /// 14+MAX_PAIRS... `[]` liab_node_bank_ais - Lib token node banks
     ResolveTokenBankruptcy {
         max_liab_transfer: I80F48,
+    },
+
+    /// Initialize open orders
+    ///
+    /// Accounts expected by this instruction (8):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[]` dex_prog_ai - program id of serum dex
+    /// 4. `[writable]` open_orders_ai - open orders for this market for this MangoAccount
+    /// 5. `[]` spot_market_ai - dex MarketState account
+    /// 6. `[]` signer_ai - Group Signer Account
+    /// 7. `[]` rent_ai - Rent sysvar account
+    InitSpotOpenOrders,
+
+    /// Redeem the mngo_accrued in a PerpAccount for MNGO in MangoAccount deposits
+    ///
+    /// Accounts expected by this instruction (11):
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` mango_account_ai - MangoAccount
+    /// 3. `[signer]` owner_ai - MangoAccount owner
+    /// 4. `[]` perp_market_ai - PerpMarket
+    /// 5. `[writable]` mngo_perp_vault_ai
+    /// 6. `[]` mngo_root_bank_ai
+    /// 7. `[writable]` mngo_node_bank_ai
+    /// 8. `[writable]` mngo_bank_vault_ai
+    /// 9. `[]` signer_ai - Group Signer Account
+    /// 10. `[]` token_prog_ai - SPL Token program id
+    RedeemMngo,
+
+    /// Add account info; useful for naming accounts
+    AddMangoAccountInfo {
+        info: [u8; INFO_LEN],
+    },
+
+    /// Deposit MSRM to reduce fees. *** add to client
+    DepositMsrm {
+        quantity: u64,
+    },
+
+    /// Withdraw MSRM *** add to client
+    WithdrawMsrm {
+        quantity: u64,
     },
 }
 
@@ -521,28 +575,34 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
-                let data_arr = array_ref![data, 0, 120];
+                let data_arr = array_ref![data, 0, 152];
                 let (
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    liquidation_fee,
                     maker_fee,
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
+                    rate,
                     max_depth_bps,
-                    scaler,
-                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 8, 8, 16, 16];
+                    target_period_length,
+                    mngo_per_period,
+                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8];
                 MangoInstruction::AddPerpMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
                     maker_fee: I80F48::from_le_bytes(*maker_fee),
                     taker_fee: I80F48::from_le_bytes(*taker_fee),
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
+                    rate: I80F48::from_le_bytes(*rate),
                     max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
-                    scaler: I80F48::from_le_bytes(*scaler),
+                    target_period_length: u64::from_le_bytes(*target_period_length),
+                    mngo_per_period: u64::from_le_bytes(*mngo_per_period),
                 }
             }
             12 => {
@@ -663,6 +723,12 @@ impl MangoInstruction {
                 MangoInstruction::ResolveTokenBankruptcy {
                     max_liab_transfer: I80F48::from_le_bytes(*data_arr),
                 }
+            }
+            32 => MangoInstruction::InitSpotOpenOrders,
+            33 => MangoInstruction::RedeemMngo,
+            34 => {
+                let info = array_ref![data, 0, INFO_LEN];
+                MangoInstruction::AddMangoAccountInfo { info: *info }
             }
             _ => {
                 return None;
@@ -867,12 +933,15 @@ pub fn add_perp_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    liquidation_fee: I80F48,
     maker_fee: I80F48,
     taker_fee: I80F48,
     base_lot_size: i64,
     quote_lot_size: i64,
+    rate: I80F48,
     max_depth_bps: I80F48,
-    scaler: I80F48,
+    target_period_length: u64,
+    mngo_per_period: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -888,12 +957,15 @@ pub fn add_perp_market(
         market_index,
         maint_leverage,
         init_leverage,
+        liquidation_fee,
         maker_fee,
         taker_fee,
         base_lot_size,
         quote_lot_size,
+        rate,
         max_depth_bps,
-        scaler,
+        target_period_length,
+        mngo_per_period,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -949,7 +1021,7 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
@@ -973,7 +1045,7 @@ pub fn cancel_perp_order(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
@@ -1132,6 +1204,93 @@ pub fn cache_perp_markets(
     accounts.extend(perp_market_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MangoInstruction::CachePerpMarkets;
     let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn init_spot_open_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    open_orders_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    signer_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*open_orders_pk, false),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
+    ];
+
+    let instr = MangoInstruction::InitSpotOpenOrders;
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn place_spot_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    dex_request_queue_pk: &Pubkey,
+    dex_event_queue_pk: &Pubkey,
+    dex_base_pk: &Pubkey,
+    dex_quote_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+    vault_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    msrm_or_srm_vault_pk: &Pubkey,
+    open_orders_pks: &[Pubkey],
+
+    market_index: usize, // used to determine which of the open orders accounts should be passed in write
+    order: serum_dex::instruction::NewOrderInstructionV3,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*dex_request_queue_pk, false),
+        AccountMeta::new(*dex_event_queue_pk, false),
+        AccountMeta::new(*dex_base_pk, false),
+        AccountMeta::new(*dex_quote_pk, false),
+        AccountMeta::new_readonly(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+        AccountMeta::new(*vault_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
+        AccountMeta::new_readonly(*msrm_or_srm_vault_pk, false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().enumerate().map(|(i, pk)| {
+        if i == market_index {
+            AccountMeta::new(*pk, false)
+        } else {
+            AccountMeta::new_readonly(*pk, false)
+        }
+    }));
+
+    let instr = MangoInstruction::PlaceSpotOrder { order };
+    let data = instr.pack();
+
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 

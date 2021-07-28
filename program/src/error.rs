@@ -97,6 +97,8 @@ pub enum MangoErrorCode {
     InsufficientLiquidity,
     #[error("MangoErrorCode::InvalidOrderId")]
     InvalidOrderId,
+    #[error("MangoErrorCode::InvalidOpenOrdersAccount")]
+    InvalidOpenOrdersAccount,
     #[error("MangoErrorCode::BeingLiquidated Invalid instruction while being liquidated")]
     BeingLiquidated,
 

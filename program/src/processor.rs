@@ -1,3 +1,4 @@
+use std::cell::RefMut;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
@@ -7,7 +8,7 @@ use arrayref::{array_ref, array_refs};
 use bytemuck::cast_ref;
 use fixed::types::I80F48;
 use mango_common::Loadable;
-use serum_dex::matching::Side as SerumSide;
+use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
@@ -30,14 +31,12 @@ use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
-    AssetType, DataType, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank,
-    PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
-    SpotMarketInfo, TokenInfo, DUST_THRESHOLD, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
+    AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData,
+    NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    SpotMarketInfo, TokenInfo, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
     ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
-use serum_dex::instruction::NewOrderInstructionV3;
-use std::cell::RefMut;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -358,16 +357,25 @@ impl Processor {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        liquidation_fee: I80F48,
         maker_fee: I80F48,
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
+        rate: I80F48, // starting rate for liquidity mining
         max_depth_bps: I80F48,
-        scaler: I80F48,
+        target_period_length: u64,
+        mngo_per_period: u64,
     ) -> MangoResult<()> {
         // params check
+        check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_leverage > init_leverage, MangoErrorCode::InvalidParam)?;
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(base_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(quote_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
-        check!(!scaler.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -389,28 +397,19 @@ impl Processor {
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
 
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::Default)?;
+        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
         check!(mango_group.oracles[market_index] != Pubkey::default(), MangoErrorCode::Default)?;
 
         // Make sure perp market at this index not already initialized
-        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::Default)?;
+        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
-        check!(
-            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
-            MangoErrorCode::Default
-        )?;
-
-        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::Default)?;
-
-        let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
-        let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
             maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
-            maint_liab_weight,
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
             liquidation_fee,
             maker_fee,
@@ -427,7 +426,8 @@ impl Processor {
 
         // Initialize the EventQueue
         // TODO: check that the event queue is reasonably large
-        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
+        let _event_queue =
+            EventQueue::load_and_init(event_queue_ai, program_id, &rent, maker_fee, taker_fee)?;
 
         // Now initialize the PerpMarket itself
         let _perp_market = PerpMarket::load_and_init(
@@ -442,6 +442,10 @@ impl Processor {
             &rent,
             base_lot_size,
             quote_lot_size,
+            rate,
+            max_depth_bps,
+            target_period_length,
+            mngo_per_period,
         )?;
 
         Ok(())
@@ -545,16 +549,13 @@ impl Processor {
             mango_group_ai,     // read
             mango_cache_ai,     // write
         ] = fixed_ais;
-
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
-
         for oracle_ai in oracle_ais.iter() {
             let i = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-
             mango_cache.price_cache[i] =
                 PriceCache { price: read_oracle(&mango_group, i, oracle_ai)?, last_update: now_ts };
         }
@@ -658,11 +659,6 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         // Safety checks
-        check_eq!(
-            &mango_group.tokens[token_index].root_bank,
-            root_bank_ai.key,
-            MangoErrorCode::Default
-        )?;
         check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         // First check all caches to make sure valid
@@ -711,6 +707,64 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    /// Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
+    fn init_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read
+            dex_prog_ai,            // read
+            open_orders_ai,         // write
+            spot_market_ai,         // read
+            signer_ai,              // read
+            rent_ai,                // read
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        {
+            // TODO OPT - Unnecessary check because serum dex also checks account flags 0
+            let open_orders = load_open_orders(open_orders_ai)?;
+
+            // Make sure this open orders account has not been initialized already
+            check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
+        }
+
+        // Make sure there isn't already an open orders account for this market
+        check!(
+            mango_account.spot_open_orders[market_index] == Pubkey::default(),
+            MangoErrorCode::Default
+        )?;
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_init_open_orders(
+            dex_prog_ai,
+            open_orders_ai,
+            signer_ai,
+            spot_market_ai,
+            rent_ai,
+            &[&signers_seeds],
+        )?;
+
+        mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
+
+        Ok(())
+    }
+
     // TODO - add serum dex fee discount functionality
     #[inline(never)]
     fn place_spot_order(
@@ -718,14 +772,14 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 23;
+        const NUM_FIXED: usize = 19;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
-            owner_ai,               // read
+            owner_ai,               // read & signer
             mango_cache_ai,         // read
             dex_prog_ai,            // read
             spot_market_ai,         // write
@@ -735,24 +789,20 @@ impl Processor {
             dex_event_queue_ai,     // write
             dex_base_ai,            // write
             dex_quote_ai,           // write
-            base_root_bank_ai,      // read
-            base_node_bank_ai,      // write
-            quote_root_bank_ai,     // read
-            quote_node_bank_ai,     // write
-            quote_vault_ai,         // write
-            base_vault_ai,          // write
+            root_bank_ai,           // read
+            node_bank_ai,           // write
+            vault_ai,               // write
             token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
-            dex_signer_ai,          // read
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
         // TODO OPT - reduce size of this transaction
-        // put node bank info into group +64 bytes
+        // put bank info into group +64 bytes
         // remove settle_funds +64 bytes
         // ask serum dex to use dynamic sysvars +32 bytes
-        // only send in open orders pubkeys we need +22 bytes
+        // only send in open orders pubkeys we need +54 bytes
         // shrink size of order instruction +10 bytes
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -768,83 +818,55 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
-        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
-        let token_index = mango_group
-            .find_root_bank_index(base_root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
-        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
-        check!(
-            base_root_bank.node_banks.contains(base_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        let token_index = match order.side {
+            serum_dex::matching::Side::Bid => QUOTE_INDEX,
+            serum_dex::matching::Side::Ask => market_index,
+        };
+
         check!(
-            quote_root_bank_ai.key == &mango_group.tokens[QUOTE_INDEX].root_bank,
+            &mango_group.tokens[token_index].root_bank == root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
-        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-        check!(
-            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
 
-        // Make sure the spot market is valid
-        check!(
-            &mango_group.spot_markets[token_index].spot_market == spot_market_ai.key,
-            MangoErrorCode::InvalidMarket
-        )?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-        // Adjust margin basket
-        mango_account.add_to_basket(token_index)?;
+        check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
+        // Adjust margin basket; this also makes this market an active asset
+        mango_account.add_to_basket(market_index)?;
+
+        // TODO - check open orders whereever they're sent in
         for i in 0..mango_group.num_oracles {
-            if !mango_account.in_margin_basket[i] {
-                continue;
-            }
-
-            let open_orders_ai = &open_orders_ais[i];
-            if i == token_index {
-                if mango_account.spot_open_orders[i] == Pubkey::default() {
-                    let open_orders = load_open_orders(open_orders_ai)?;
-                    check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
-                    mango_account.spot_open_orders[i] = *open_orders_ai.key;
-                } else {
-                    check_eq!(
-                        open_orders_ais[i].key,
-                        &mango_account.spot_open_orders[i],
-                        MangoErrorCode::Default
-                    )?;
-                    check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
-                }
-            } else {
+            if mango_account.in_margin_basket[i] {
                 check_eq!(
                     open_orders_ais[i].key,
                     &mango_account.spot_open_orders[i],
-                    MangoErrorCode::Default
+                    MangoErrorCode::InvalidOpenOrdersAccount
                 )?;
                 check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
             }
         }
 
+        // initialize the health cache with active assets
+        let mut health_cache = HealthCache::new(&mango_group, &mango_account, HealthType::Init);
+
         // First check all caches to make sure valid
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let mut active_assets = mango_account.get_active_assets(&mango_group);
-        active_assets[token_index] = true;
+
         check!(
-            mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
+            mango_cache.check_caches_valid(&mango_group, &health_cache.active_assets, now_ts),
             MangoErrorCode::Default
         )?;
 
-        let pre_health = mango_account.get_health(
-            &mango_group,
-            &mango_cache,
-            open_orders_ais,
-            &active_assets,
-            HealthType::Init,
-        )?;
+        // Calculate health
+        health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let pre_health = health_cache.health;
 
         // update the being_liquidated flag
         if mango_account.being_liquidated {
@@ -861,25 +883,16 @@ impl Processor {
         // TODO maybe check that root bank was updated recently
         // TODO maybe check oracle was updated recently
 
-        // this is to keep track of the amount of funds transferred
-        let (pre_base, pre_quote) = {
-            (
-                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
-                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
-            )
-        };
-        let vault_ai = match order.side {
-            SerumSide::Bid => quote_vault_ai,
-            SerumSide::Ask => base_vault_ai,
-        };
-
-        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        // TODO OPT - write a zero copy way to deserialize Account to reduce compute
+        // this is to keep track of how much funds were transferred out
+        let pre_amount = Account::unpack(&vault_ai.try_borrow_data()?)?.amount;
 
         // Send order to serum dex
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_new_order(
             dex_prog_ai,
             spot_market_ai,
-            &open_orders_ais[token_index],
+            &open_orders_ais[market_index],
             dex_request_queue_ai,
             dex_event_queue_ai,
             bids_ai,
@@ -895,58 +908,37 @@ impl Processor {
             order,
         )?;
 
-        // Settle funds for this market
-        invoke_settle_funds(
-            dex_prog_ai,
-            spot_market_ai,
-            &open_orders_ais[token_index],
-            signer_ai,
-            dex_base_ai,
-            dex_quote_ai,
-            base_vault_ai,
-            quote_vault_ai,
-            dex_signer_ai,
-            token_prog_ai,
-            &[&signers_seeds],
-        )?;
-
         // See if we can remove this market from margin
-        let open_orders = load_open_orders(&open_orders_ais[token_index])?;
-        mango_account.update_basket(token_index, &open_orders)?;
+        let open_orders = load_open_orders(&open_orders_ais[market_index])?;
+        mango_account.update_basket(market_index, &open_orders)?;
 
-        // TODO OPT - write a zero copy way to deserialize Account to reduce compute
-        let (post_base, post_quote) = {
-            (
-                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
-                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
-            )
-        };
-
-        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
-        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
-        checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut quote_node_bank,
-            &mut mango_account,
-            QUOTE_INDEX,
-            quote_change,
-        )?;
+        let post_amount = Account::unpack(&vault_ai.try_borrow_data()?)?.amount;
 
         checked_change_net(
             &mango_cache.root_bank_cache[token_index],
-            &mut base_node_bank,
+            &mut node_bank,
             &mut mango_account,
             token_index,
-            base_change,
+            I80F48::from_num(post_amount) - I80F48::from_num(pre_amount),
         )?;
 
-        let post_health = mango_account.get_health(
+        // Update the health where it may have changed
+        health_cache.update_spot_health(
             &mango_group,
             &mango_cache,
+            &mango_account,
             open_orders_ais,
-            &active_assets,
-            HealthType::Init,
+            market_index,
         )?;
+        health_cache.update_spot_health(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            open_orders_ais,
+            QUOTE_INDEX,
+        )?;
+
+        let post_health = health_cache.health;
 
         // If an account is in reduce_only mode, health must only go up
         check!(
@@ -961,6 +953,8 @@ impl Processor {
         accounts: &[AccountInfo],
         data: Vec<u8>,
     ) -> MangoResult<()> {
+        // TODO add param `ok_invalid_id` to return Ok() instead of Err if order id or client id invalid
+
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -1160,6 +1154,9 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
     ) -> MangoResult<()> {
+        check!(price > 0, MangoErrorCode::InvalidParam)?;
+        check!(quantity > 0, MangoErrorCode::InvalidParam)?;
+
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -1197,19 +1194,39 @@ impl Processor {
         }
 
         // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
-        check!(price > 0, MangoErrorCode::Default)?;
-        check!(quantity > 0, MangoErrorCode::Default)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let mut active_assets = mango_account.get_active_assets(&mango_group);
-        active_assets[market_index] = true;
+
+        // initialize the health cache with active assets
+        let mut health_cache = HealthCache::new(&mango_group, &mango_account, HealthType::Init);
+        health_cache.set_active_asset(market_index);
+
         check!(
-            mango_cache.check_caches_valid(&mango_group, &active_assets, now_ts),
-            MangoErrorCode::Default
+            mango_cache.check_caches_valid(&mango_group, &health_cache.active_assets, now_ts),
+            MangoErrorCode::InvalidCache
         )?;
+
+        // calculate init health
+        health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let pre_health = health_cache.health;
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
+
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
@@ -1228,16 +1245,19 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
         )?;
 
-        let health = mango_account.get_health(
+        health_cache.update_perp_health(
             &mango_group,
             &mango_cache,
-            open_orders_ais,
-            &active_assets,
-            HealthType::Init,
+            &mango_account,
+            market_index,
         )?;
-        check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        let post_health = health_cache.health;
 
-        Ok(())
+        // If an account is in reduce_only mode, health must only go up
+        check!(
+            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
     }
 
     #[inline(never)]
@@ -1252,7 +1272,7 @@ impl Processor {
             mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read, signer
-            perp_market_ai,     // read
+            perp_market_ai,     // write
             bids_ai,            // write
             asks_ai,            // write
         ] = accounts;
@@ -1265,7 +1285,8 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
@@ -1292,7 +1313,7 @@ impl Processor {
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         perp_account.open_orders.cancel_order(&order, order_id, side)?;
         perp_account.apply_incentives(
-            &perp_market,
+            &mut perp_market,
             side,
             order.price(),
             order.best_initial,
@@ -1302,7 +1323,6 @@ impl Processor {
             order.quantity,
         )?;
 
-        // convert
         Ok(())
     }
 
@@ -1319,10 +1339,13 @@ impl Processor {
             mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai,           // read, signer
-            perp_market_ai,     // read
+            perp_market_ai,     // write
             bids_ai,            // write
             asks_ai,            // write
         ] = accounts;
+
+        // TODO OPT put the liquidity incentive stuff in the bids and asks accounts so perp market
+        //  doesn't have to be passed in as write
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
@@ -1332,7 +1355,8 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
@@ -1348,7 +1372,7 @@ impl Processor {
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         perp_account.open_orders.cancel_order(&order, order_id, side)?;
         perp_account.apply_incentives(
-            &perp_market,
+            &mut perp_market,
             side,
             order.price(),
             order.best_initial,
@@ -1629,7 +1653,7 @@ impl Processor {
         check_eq!(
             &liqee_ma.spot_open_orders[market_index],
             open_orders_ai.key,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidOpenOrdersAccount
         )?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
@@ -1698,6 +1722,7 @@ impl Processor {
         }
 
         // Settle funds released by canceling open orders
+        // TODO OPT add a new ForceSettleFunds to save compute in this instruction
         invoke_settle_funds(
             dex_prog_ai,
             spot_market_ai,
@@ -1780,7 +1805,6 @@ impl Processor {
         check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-
         let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
         check!(
             mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
@@ -1835,14 +1859,14 @@ impl Processor {
 
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
-    /// Requires: `liab_index != asset_index`  
+    /// Requires: `liab_index != asset_index`
     fn liquidate_token_and_token(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
         // parameter checks
-        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
@@ -1853,12 +1877,12 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            asset_root_bank_ai,     // read    
-            asset_node_bank_ai,     // write    
-            liab_root_bank_ai,      // read    
-            liab_node_bank_ai,      // write    
+            asset_root_bank_ai,     // read
+            asset_node_bank_ai,     // write
+            liab_root_bank_ai,      // read
+            liab_node_bank_ai,      // write
         ] = fixed_ais;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -1887,44 +1911,47 @@ impl Processor {
         check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
         check!(asset_index != liab_index, MangoErrorCode::Default)?;
 
+        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
-            MangoErrorCode::Default
+            mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
+            MangoErrorCode::InvalidCache
         )?;
 
-        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
-        liqor_active_assets[asset_index] = true;
-        liqor_active_assets[liab_index] = true;
+        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        liqor_health_cache.set_active_asset(asset_index);
+        liqor_health_cache.set_active_asset(liab_index);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
+            mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO write more efficient
             MangoErrorCode::InvalidCache
         )?;
 
         // Make sure orders are cancelled for perps
         for i in 0..mango_group.num_oracles {
-            if liqee_active_assets[i] {
+            if maint_health_cache.active_assets[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
                 check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
-        let maint_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
-        )?;
 
         // TODO - optimization: consider calculating both healths at same time
-        let init_health = liqee_ma.get_health(
+        init_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqee_ma,
             liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Init,
         )?;
+        let init_health = init_health_cache.health;
+
+        maint_health_cache.update_health(
+            &mango_group,
+            &mango_cache,
+            &liqee_ma,
+            liqee_open_orders_ais,
+        )?;
+        let maint_health = maint_health_cache.health;
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2017,60 +2044,42 @@ impl Processor {
             asset_transfer,
         )?;
 
-        let liqor_health = liqor_ma.get_health(
+        liqor_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqor_ma,
             liqor_open_orders_ais,
-            &liqor_active_assets,
-            HealthType::Init,
         )?;
+        let liqor_health = liqor_health_cache.health;
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        let liqee_maint_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
-        )?;
+        // Update liqee's health where it may have changed
+        for &i in &[asset_index, liab_index] {
+            maint_health_cache.update_spot_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                liqee_open_orders_ais,
+                i,
+            )?;
+        }
+        let liqee_maint_health = maint_health_cache.health;
 
         if liqee_maint_health < ZERO_I80F48 {
-            // To start liquidating, make sure all orders that increase position are canceled
-            let assets_val = liqee_ma.get_assets_val(
-                &mango_group,
-                &mango_cache,
-                liqee_open_orders_ais,
-                &liqee_active_assets,
-                HealthType::Maint,
-            )?;
-
-            if assets_val < DUST_THRESHOLD {
-                // quote token can't pay off not quote liabs
-                // hence the liabs should be transferred to the liqor
-                // If insurance fund is depleted, ADL on every perp market that still has open positions
-                // Perhaps bankrupt accounts get put on event queue to be handled separately
-                liqee_ma.is_bankrupt = true;
-                // TODO - if bankrupt disallow deposits or make deposits change is_bankrupt status
-
-                /*
-                bankruptcy:
-                if account is bankrupt, allow liqor to transfer liabs to himself, and get USDC deposits from insurance fund
-                if insurance fund is depleted, either socialize loss or ADL
-                ADL:
-                if position is long
-                 */
-
-                // For tokens, insurance fund will pay
-            }
+            liqee_ma.is_bankrupt =
+                liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
-            let liqee_init_health = liqee_ma.get_health(
-                &mango_group,
-                &mango_cache,
-                liqee_open_orders_ais,
-                &liqee_active_assets,
-                HealthType::Init,
-            )?;
-
+            // TODO OPT No need to update this at end. Will be caught at beginning of another function
+            for &i in &[asset_index, liab_index] {
+                init_health_cache.update_spot_health(
+                    &mango_group,
+                    &mango_cache,
+                    &liqee_ma,
+                    liqee_open_orders_ais,
+                    i,
+                )?;
+            }
+            let liqee_init_health = init_health_cache.health;
             if liqee_init_health >= ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
             }
@@ -2091,7 +2100,8 @@ impl Processor {
         liab_index: usize,
         max_liab_transfer: I80F48,
     ) -> MangoResult<()> {
-        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(asset_type != liab_type, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
@@ -2102,10 +2112,10 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write    
+            liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
-            root_bank_ai,           // read    
-            node_bank_ai,           // write    
+            root_bank_ai,           // read
+            node_bank_ai,           // write
         ] = fixed_ais;
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -2119,47 +2129,51 @@ impl Processor {
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+
+        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
+            mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
             MangoErrorCode::Default
         )?;
 
-        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
-        liqor_active_assets[asset_index] = true;
-        liqor_active_assets[liab_index] = true;
+        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        liqor_health_cache.set_active_asset(asset_index);
+        liqor_health_cache.set_active_asset(liab_index);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
+            mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO OPT write more efficient
             MangoErrorCode::InvalidCache
         )?;
-        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::Default)?;
 
         // Make sure orders are cancelled for perps
         for i in 0..mango_group.num_oracles {
-            if liqee_active_assets[i] {
+            if maint_health_cache.active_assets[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
                 check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
-        let maint_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
-        )?;
 
-        // TODO - OPT consider calculating both healths at same time
-        let init_health = liqee_ma.get_health(
+        // TODO - optimization: consider calculating both healths at same time
+        init_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqee_ma,
             liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Init,
         )?;
+        let init_health = init_health_cache.health;
+
+        maint_health_cache.update_health(
+            &mango_group,
+            &mango_cache,
+            &liqee_ma,
+            liqee_open_orders_ais,
+        )?;
+        let maint_health = maint_health_cache.health;
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2173,9 +2187,8 @@ impl Processor {
             liqee_ma.being_liquidated = true;
         }
 
-        check!(asset_type != liab_type, MangoErrorCode::Default)?;
-
         if asset_type == AssetType::Token {
+            // we know asset_type != liab_type
             let asset_price = mango_cache.get_price(asset_index);
             let liab_price = ONE_I80F48;
             let bank_cache = &mango_cache.root_bank_cache[asset_index];
@@ -2245,6 +2258,21 @@ impl Processor {
                 asset_index,
                 asset_transfer,
             )?;
+
+            maint_health_cache.update_spot_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                liqee_open_orders_ais,
+                asset_index,
+            )?;
+
+            maint_health_cache.update_perp_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                liab_index,
+            )?;
         } else {
             let asset_price = ONE_I80F48;
             let liab_price = mango_cache.get_price(liab_index);
@@ -2310,54 +2338,57 @@ impl Processor {
 
             liqee_ma.perp_accounts[asset_index]
                 .transfer_quote_position(&mut liqor_ma.perp_accounts[asset_index], asset_transfer);
+
+            maint_health_cache.update_spot_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                liqee_open_orders_ais,
+                liab_index,
+            )?;
+
+            maint_health_cache.update_perp_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                asset_index,
+            )?;
         }
         let liqor_health = liqor_ma.get_health(
             &mango_group,
             &mango_cache,
             liqor_open_orders_ais,
-            &liqor_active_assets,
+            &liqor_health_cache.active_assets,
             HealthType::Init,
         )?;
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        let liqee_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Init,
-        )?;
-
-        if liqee_health < ZERO_I80F48 {
+        if maint_health_cache.health < ZERO_I80F48 {
             // To start liquidating, make sure all orders that increase position are canceled
-            let assets_val = liqee_ma.get_assets_val(
+            liqee_ma.is_bankrupt =
+                liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
+        } else {
+            let (spot_index, perp_index) = if asset_type == AssetType::Token {
+                (asset_index, liab_index)
+            } else {
+                (liab_index, asset_index)
+            };
+            init_health_cache.update_spot_health(
                 &mango_group,
                 &mango_cache,
+                &liqee_ma,
                 liqee_open_orders_ais,
-                &liqee_active_assets,
-                HealthType::Maint,
+                spot_index,
             )?;
 
-            if assets_val < DUST_THRESHOLD {
-                // quote token can't pay off not quote liabs
-                // hence the liabs should be transferred to the liqor
-                // If insurance fund is depleted, ADL on every perp market that still has open positions
-                // Perhaps bankrupt accounts get put on event queue to be handled separately
-                liqee_ma.is_bankrupt = true;
-                // TODO - if bankrupt disallow deposits or make deposits change is_bankrupt status
+            init_health_cache.update_perp_health(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                perp_index,
+            )?;
 
-                /*
-                bankruptcy:
-                if account is bankrupt, allow liqor to transfer liabs to himself, and get USDC deposits from insurance fund
-                if insurance fund is depleted, either socialize loss or ADL
-                ADL:
-                ADL doesn't make sense, can only socialize loss across all position holders
-                 */
-
-                // For tokens, insurance fund will pay
-            }
-        } else {
-            liqee_ma.being_liquidated = false;
+            liqee_ma.being_liquidated = init_health_cache.health < ZERO_I80F48;
         }
 
         Ok(())
@@ -2427,48 +2458,51 @@ impl Processor {
         let perp_market_info = &mango_group.perp_markets[market_index];
         check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
 
-        let now_ts = Clock::get()?.unix_timestamp as u64;
+        // Move funding into quote position. Not necessary to adjust funding settled after funding is moved
+        let cache = &mango_cache.perp_market_cache[market_index];
+        liqee_ma.perp_accounts[market_index].settle_funding(cache);
+        liqor_ma.perp_accounts[market_index].settle_funding(cache);
 
-        let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
-        liqee_active_assets[market_index] = true;
-        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
-        liqor_active_assets[market_index] = true;
+        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
+            mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
             MangoErrorCode::Default
         )?;
+
+        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        liqor_health_cache.set_active_asset(market_index);
         check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
+            mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO OPT write more efficient
             MangoErrorCode::InvalidCache
         )?;
 
         // Make sure orders are cancelled for perps
         for i in 0..mango_group.num_oracles {
-            if liqee_active_assets[i] {
+            if maint_health_cache.active_assets[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
                 check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
 
-        let maint_health = liqee_ma.get_health(
+        // TODO - optimization: consider calculating both healths at same time
+        init_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqee_ma,
             liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
         )?;
-        // Determine how much position can be taken from liqee to get him above init_health
-        let init_health = liqee_ma.get_health(
+        let init_health = init_health_cache.health;
+
+        maint_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqee_ma,
             liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Init,
         )?;
-        // TODO - account for being_liquidated case where liquidation has to happen over many instructions
-        // TODO - force cancel all orders that use margin first and check if account still liquidatable
-        // TODO - what happens if base position and quote position have same sign?
-        // TODO - what if base position is 0 but quote is negative. Perhaps settle that pnl first?
+        let maint_health = maint_health_cache.health;
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2482,13 +2516,13 @@ impl Processor {
             liqee_ma.being_liquidated = true;
         }
 
+        // TODO - account for being_liquidated case where liquidation has to happen over many instructions
+        // TODO - force cancel all orders that use margin first and check if account still liquidatable
+        // TODO - what happens if base position and quote position have same sign?
+        // TODO - what if base position is 0 but quote is negative. Perhaps settle that pnl first?
+
         let liqee_perp_account = &mut liqee_ma.perp_accounts[market_index];
         let liqor_perp_account = &mut liqor_ma.perp_accounts[market_index];
-
-        // Move funding into quote position. Not necessary to adjust funding settled after funding is moved
-        let cache = &mango_cache.perp_market_cache[market_index];
-        liqee_perp_account.settle_funding(cache);
-        liqor_perp_account.settle_funding(cache);
 
         let price = mango_cache.price_cache[market_index].price;
         let (base_transfer, quote_transfer) = if liqee_perp_account.base_position > 0 {
@@ -2536,44 +2570,36 @@ impl Processor {
 
         liqee_perp_account.transfer_quote_position(liqor_perp_account, quote_transfer);
 
-        let liqor_health = liqor_ma.get_health(
+        // Calculate the health of liqor and see if liqor is still valid
+        liqor_health_cache.update_health(
             &mango_group,
             &mango_cache,
+            &liqor_ma,
             liqor_open_orders_ais,
-            &liqor_active_assets,
-            HealthType::Init,
         )?;
+        check!(liqor_health_cache.health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
-
-        let liqee_health = liqee_ma.get_health(
+        //
+        maint_health_cache.update_perp_health(
             &mango_group,
             &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
+            &liqee_ma,
+            market_index,
         )?;
 
-        if liqee_health < ZERO_I80F48 {
+        if maint_health_cache.health < ZERO_I80F48 {
             // To start liquidating, make sure all orders that increase position are canceled
-            let assets_val = liqee_ma.get_assets_val(
+            liqee_ma.is_bankrupt =
+                liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
+        } else {
+            init_health_cache.update_perp_health(
                 &mango_group,
                 &mango_cache,
-                liqee_open_orders_ais,
-                &liqee_active_assets,
-                HealthType::Maint,
+                &liqee_ma,
+                market_index,
             )?;
-            if assets_val < DUST_THRESHOLD {
-                // Liquidation must now continue with the resolve_bankruptcy instruction
-                // TODO - an account can only go into bankruptcy if all base_positions are 0
-                liqee_ma.is_bankrupt = true;
-            }
-        } else {
+            liqee_ma.being_liquidated = init_health_cache.health < ZERO_I80F48;
         }
-        // TODO - if total assets val is less than dust, then insurance fund should pay into this account
-        // TODO - if insurance fund empty, ADL
-        // TODO - ADL should invalidate the MangoCache until it is updated again, then probably MangoCache should be passed in as writable
-        //  - it might be better to put an ADL account on event queue to be processed by Keeper
 
         Ok(())
     }
@@ -2714,18 +2740,7 @@ impl Processor {
             )?;
         }
 
-        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
-        let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
-        for i in 0..mango_group.num_oracles {
-            if liqee_active_assets[i]
-                && (liqee_ma.perp_accounts[i].quote_position.is_negative()
-                    || liqee_ma.borrows[i].is_positive())
-            {
-                is_bankrupt = true;
-                break;
-            }
-        }
-        liqee_ma.is_bankrupt = is_bankrupt;
+        liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
 
         Ok(())
     }
@@ -2863,7 +2878,7 @@ impl Processor {
                     NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
                 check!(
                     quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
-                    MangoErrorCode::Default
+                    MangoErrorCode::InvalidNodeBank
                 )?;
 
                 checked_add_net(
@@ -2916,18 +2931,7 @@ impl Processor {
             )?;
         }
 
-        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
-        let mut is_bankrupt = liqee_ma.borrows[QUOTE_INDEX].is_positive();
-        for i in 0..mango_group.num_oracles {
-            if liqee_active_assets[i]
-                && (liqee_ma.perp_accounts[i].quote_position.is_negative()
-                    || liqee_ma.borrows[i].is_positive())
-            {
-                is_bankrupt = true;
-                break;
-            }
-        }
-        liqee_ma.is_bankrupt = is_bankrupt;
+        liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
 
         Ok(())
     }
@@ -2946,7 +2950,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(
             mango_group.find_root_bank_index(root_bank_ai.key).is_some(),
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidRootBank
         )?;
         // TODO check root bank belongs to group in load functions
         let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
@@ -2954,7 +2958,7 @@ impl Processor {
         for i in 0..root_bank.num_node_banks - 1 {
             check!(
                 node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
-                MangoErrorCode::Default
+                MangoErrorCode::InvalidNodeBank
             )?;
         }
 
@@ -3000,13 +3004,6 @@ impl Processor {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
 
-                    // msg!(
-                    //     "FillEvent: {:?} {} {}",
-                    //     fill_event.side,
-                    //     fill_event.price,
-                    //     fill_event.quantity,
-                    // );
-
                     // handle self trade separately
                     if fill_event.maker == fill_event.taker {
                         let mut mango_account = match mango_account_ais
@@ -3027,33 +3024,6 @@ impl Processor {
                             &mut mango_account.perp_accounts[market_index],
                         )?;
                     } else {
-                        // msg!("taker: {}", fill_event.taker.to_string());
-                        // msg!("maker: {}", fill_event.maker.to_string());
-                        // let mut maker = match mango_account_ais
-                        //     .iter()
-                        //     .find(|ai| ai.key == &fill_event.maker)
-                        // {
-                        //     None => {
-                        //         msg!("Unable to find maker account");
-                        //         return Ok(());
-                        //     }
-                        //     Some(ai) => {
-                        //         MangoAccount::load_mut_checked(ai, program_id, mango_group_ai.key)?
-                        //     }
-                        // };
-                        // let mut taker = match mango_account_ais
-                        //     .iter()
-                        //     .find(|ai| ai.key == &fill_event.taker)
-                        // {
-                        //     None => {
-                        //         msg!("Unable to find taker account");
-                        //         return Ok(());
-                        //     }
-                        //     Some(ai) => {
-                        //         MangoAccount::load_mut_checked(ai, program_id, mango_group_ai.key)?
-                        //     }
-                        // };
-
                         let mut maker = match mango_account_ais
                             .binary_search_by_key(&fill_event.maker, |ai| *(ai.key))
                         {
@@ -3165,6 +3135,110 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    /// Settle the mngo_accrued in a PerpAccount for MNGO tokens
+    fn redeem_mngo(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 11;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_cache_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // read
+            mngo_perp_vault_ai, // write
+            mngo_root_bank_ai,  // read
+            mngo_node_bank_ai,  // write
+            mngo_bank_vault_ai, // write
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+        let mngo_index = mango_group
+            .find_root_bank_index(mngo_root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let mngo_bank_cache = &mango_cache.root_bank_cache[mngo_index];
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let perp_account = &mut mango_account.perp_accounts[market_index];
+
+        // Load the mngo banks
+        let root_bank = RootBank::load_checked(mngo_root_bank_ai, program_id)?;
+        check!(
+            root_bank.node_banks.contains(mngo_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let mut mngo_node_bank = NodeBank::load_mut_checked(mngo_node_bank_ai, program_id)?;
+        check_eq!(&mngo_node_bank.vault, mngo_bank_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        check!(mngo_perp_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
+
+        let mngo_perp_vault = Account::unpack(&mngo_perp_vault_ai.try_borrow_data()?)?;
+
+        let mngo = min(perp_account.mngo_accrued, mngo_perp_vault.amount);
+        perp_account.mngo_accrued -= mngo;
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            mngo_perp_vault_ai,
+            mngo_bank_vault_ai,
+            signer_ai,
+            &[&signers_seeds],
+            mngo,
+        )?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        check!(
+            now_ts <= mngo_bank_cache.last_update + mango_group.valid_interval,
+            MangoErrorCode::InvalidCache
+        )?;
+
+        checked_add_net(
+            mngo_bank_cache,
+            &mut mngo_node_bank,
+            &mut mango_account,
+            mngo_index,
+            I80F48::from_num(mngo),
+        )
+    }
+
+    #[inline(never)]
+    fn add_mango_account_info(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        info: [u8; INFO_LEN],
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read 
+            mango_account_ai,   // write
+            owner_ai            // signer
+        ] = accounts;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        mango_account.info = info;
+        Ok(())
+    }
+
     // ***
     #[inline(never)]
     #[allow(unused)]
@@ -3243,96 +3317,6 @@ impl Processor {
         mango_account.msrm_amount -= quantity;
 
         Ok(())
-    }
-
-    // ***
-    #[inline(never)]
-    #[allow(unused)]
-    /// Settle the liquidity points in a PerpAccount for MNGO tokens
-    fn redeem_liquidity_points(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        // For now there can be a fixed liquidity points to MNGO conversion
-        // mngo_vault must be set for this group
-        // can only withdraw up to what is avail in mngo vault
-        const NUM_FIXED: usize = 11;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [
-            mango_group_ai,     // read
-            mango_cache_ai,     // read
-            mango_account_ai,   // write
-            owner_ai,           // read, signer
-            perp_market_ai,     // read
-            mngo_perp_vault_ai, // write
-            mngo_root_bank_ai,  // read
-            mngo_node_bank_ai,  // write
-            mngo_bank_vault_ai, // write
-            signer_ai,          // read
-            token_prog_ai,      // read
-        ] = accounts;
-        check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
-
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        let market_index = mango_group
-            .find_perp_market_index(perp_market_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
-        let mngo_index = mango_group
-            .find_root_bank_index(mngo_root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
-
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let mngo_bank_cache = &mango_cache.root_bank_cache[mngo_index];
-
-        let mut mango_account =
-            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
-        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-
-        let perp_account = &mut mango_account.perp_accounts[market_index];
-
-        // Load the mngo banks
-        let root_bank = RootBank::load_checked(mngo_root_bank_ai, program_id)?;
-        check!(
-            root_bank.node_banks.contains(mngo_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        let mut mngo_node_bank = NodeBank::load_mut_checked(mngo_node_bank_ai, program_id)?;
-        check_eq!(&mngo_node_bank.vault, mngo_bank_vault_ai.key, MangoErrorCode::InvalidVault)?;
-
-        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        check!(mngo_perp_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
-
-        let mngo_perp_vault = Account::unpack(&mngo_perp_vault_ai.try_borrow_data()?)?;
-        let max_points = I80F48::from_num(mngo_perp_vault.amount) * perp_market.points_per_mngo;
-
-        let points = min(perp_account.liquidity_points, max_points);
-        let transfer_quantity =
-            (points / perp_market.points_per_mngo).checked_floor().unwrap().to_num::<u64>();
-
-        perp_account.liquidity_points -= points;
-
-        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
-        invoke_transfer(
-            token_prog_ai,
-            mngo_perp_vault_ai,
-            mngo_bank_vault_ai,
-            signer_ai,
-            &[&signers_seeds],
-            transfer_quantity,
-        )?;
-
-        let now_ts = Clock::get()?.unix_timestamp as u64;
-        check!(
-            now_ts <= mngo_bank_cache.last_update + mango_group.valid_interval,
-            MangoErrorCode::InvalidCache
-        )?;
-
-        checked_add_net(
-            mngo_bank_cache,
-            &mut mngo_node_bank,
-            &mut mango_account,
-            mngo_index,
-            I80F48::from_num(transfer_quantity),
-        )
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
@@ -3430,12 +3414,15 @@ impl Processor {
                 market_index,
                 maint_leverage,
                 init_leverage,
+                liquidation_fee,
                 maker_fee,
                 taker_fee,
                 base_lot_size,
                 quote_lot_size,
+                rate,
                 max_depth_bps,
-                scaler,
+                target_period_length,
+                mngo_per_period,
             } => {
                 msg!("Mango: AddPerpMarket");
                 Self::add_perp_market(
@@ -3444,12 +3431,15 @@ impl Processor {
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    liquidation_fee,
                     maker_fee,
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
+                    rate,
                     max_depth_bps,
-                    scaler,
+                    target_period_length,
+                    mngo_per_period,
                 )?;
             }
             MangoInstruction::PlacePerpOrder {
@@ -3494,7 +3484,7 @@ impl Processor {
             MangoInstruction::SetOracle { price } => {
                 // msg!("Mango: SetOracle {:?}", price);
                 msg!("Mango: SetOracle");
-                Self::set_oracle(program_id, accounts, price)?
+                Self::set_oracle(program_id, accounts, price)?;
             }
             MangoInstruction::SettlePnl { market_index } => {
                 msg!("Mango: SettlePnl");
@@ -3539,15 +3529,33 @@ impl Processor {
             }
             MangoInstruction::SettleFees => {
                 msg!("Mango: SettleFees");
-                Self::settle_fees(program_id, accounts)?
+                Self::settle_fees(program_id, accounts)?;
             }
             MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
                 msg!("Mango: ResolvePerpBankruptcy");
-                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)?
+                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)?;
             }
             MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
                 msg!("Mango: ResolveTokenBankruptcy");
-                Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)?
+                Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)?;
+            }
+            MangoInstruction::InitSpotOpenOrders => {
+                msg!("Mango: InitSpotOpenOrders");
+                Self::init_spot_open_orders(program_id, accounts)?;
+            }
+            MangoInstruction::RedeemMngo => {
+                msg!("Mango: RedeemMngo");
+                Self::redeem_mngo(program_id, accounts)?;
+            }
+            MangoInstruction::AddMangoAccountInfo { info } => {
+                msg!("Mango: AddMangoAccountInfo");
+                Self::add_mango_account_info(program_id, accounts, info)?;
+            }
+            MangoInstruction::DepositMsrm { .. } => {
+                todo!()
+            }
+            MangoInstruction::WithdrawMsrm { .. } => {
+                todo!()
             }
         }
 
@@ -3745,8 +3753,10 @@ fn checked_change_net(
 ) -> MangoResult<()> {
     if native_quantity.is_negative() {
         checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)
-    } else {
+    } else if native_quantity.is_positive() {
         checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)
+    } else {
+        Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
     }
 }
 
@@ -4030,6 +4040,37 @@ fn invoke_new_order<'a>(
         solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
     }
 }
+
+fn invoke_init_open_orders<'a>(
+    dex_prog_ai: &AccountInfo<'a>, // Have to add account of the program id
+    open_orders_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    spot_market_ai: &AccountInfo<'a>,
+    rent_ai: &AccountInfo<'a>,
+    signers_seeds: &[&[&[u8]]],
+) -> ProgramResult {
+    let data = serum_dex::instruction::MarketInstruction::InitOpenOrders.pack();
+    let instruction = Instruction {
+        program_id: *dex_prog_ai.key,
+        data,
+        accounts: vec![
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new_readonly(*spot_market_ai.key, false),
+            AccountMeta::new_readonly(*rent_ai.key, false),
+        ],
+    };
+
+    let account_infos = [
+        dex_prog_ai.clone(),
+        open_orders_ai.clone(),
+        signer_ai.clone(),
+        spot_market_ai.clone(),
+        rent_ai.clone(),
+    ];
+    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
+
 /*
 TODO
 check bankruptcy everywhere

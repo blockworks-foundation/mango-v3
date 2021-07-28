@@ -3,6 +3,7 @@ use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
 use bytemuck::Pod;
+use fixed::types::I80F48;
 use mango_macro::Pod;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_transmute::{self, trivial::TriviallyTransmutable};
@@ -143,6 +144,10 @@ pub struct EventQueueHeader {
     head: usize,
     count: usize,
     seq_num: usize,
+
+    // Added here for record-keeping
+    pub maker_fee: I80F48,
+    pub taker_fee: I80F48,
 }
 unsafe impl TriviallyTransmutable for EventQueueHeader {}
 
@@ -186,6 +191,8 @@ impl<'a> EventQueue<'a> {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         rent: &Rent,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
     ) -> MangoResult<Self> {
         // TODO: check for size
 
@@ -200,6 +207,9 @@ impl<'a> EventQueue<'a> {
 
         check!(!state.header.meta_data.is_initialized, MangoErrorCode::Default)?;
         state.header.meta_data = MetaData::new(DataType::EventQueue, 0, true);
+        state.header.maker_fee = maker_fee;
+        state.header.taker_fee = taker_fee;
+
         Ok(state)
     }
 }
