@@ -3727,7 +3727,7 @@ fn read_oracle(
             let value = I80F48::from_num(price_account.agg.price);
             let quote_adj =
                 I80F48::from_num(10u64.pow(
-                    quote_decimals.checked_sub(price_account.expo.abs() as u8).unwrap() as u32,
+                    price_account.expo.abs().checked_sub(quote_decimals as i32).unwrap() as u32,
                 ));
             let base_adj =
                 I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
