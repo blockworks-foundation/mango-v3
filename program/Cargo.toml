@@ -39,13 +39,11 @@ tarpc = { version = "^0.26.2", features = ["full"] }
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+[profile.release.build-override]
 opt-level = 3
 incremental = false
-
-#[profile.release.build-override]
-#opt-level = 3
-#incremental = false
-#codegen-units = 1
+codegen-units = 1
 
 #[profile.test]
 #lto = true
