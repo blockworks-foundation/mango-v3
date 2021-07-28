@@ -98,7 +98,7 @@ pub struct MangoProgramTestConfig {
 impl MangoProgramTestConfig {
     #[allow(dead_code)]
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 32 }
+        MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 }
     }
 }
 
@@ -803,8 +803,13 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub fn with_order_size(&mut self, base_mint: &MintConfig, quantity: i64) -> i64 {
-        return (quantity * base_mint.unit) / base_mint.base_lot;
+    pub fn baseSizeNumberToLots(&mut self, mint: &MintConfig, quantity: i64) -> i64 {
+        return (quantity * mint.unit) / mint.base_lot;
+    }
+
+    #[allow(dead_code)]
+    pub fn quoteSizeNumberToLots(&mut self, mint: &MintConfig, quantity: i64) -> i64 {
+        return (quantity * self.quote_mint.unit) / mint.quote_lot;
     }
 
     #[allow(dead_code)]
@@ -858,10 +863,13 @@ impl MangoProgramTest {
 
         let init_leverage = I80F48::from_num(10);
         let maint_leverage = init_leverage * 2;
+        let liquidation_fee = I80F48::from_num(0.025);
         let maker_fee = I80F48::from_num(0.01);
         let taker_fee = I80F48::from_num(0.01);
-        let max_depth_bps = I80F48::from_num(1);
-        let scaler = I80F48::from_num(1);
+        let rate = I80F48::from_num(1);
+        let max_depth_bps = I80F48::from_num(200);
+        let target_period_length = 3600;
+        let mngo_per_period = 11400;
 
         let instructions = [mango::instruction::add_perp_market(
             &mango_program_id,
@@ -875,12 +883,15 @@ impl MangoProgramTest {
             market_index,
             maint_leverage,
             init_leverage,
+            liquidation_fee,
             maker_fee,
             taker_fee,
             self.mints[mint_index].base_lot,
             self.mints[mint_index].quote_lot,
+            rate,
             max_depth_bps,
-            scaler,
+            target_period_length,
+            mngo_per_period,
         )
         .unwrap()];
 
