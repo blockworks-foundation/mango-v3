@@ -22,7 +22,7 @@ solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MA
 #solana program deploy target/deploy/mango.so --keypair $KEYPAIR --output json-compact
 
 # serum dex
-VERSION=v1.6.9
+VERSION=v1.6.18
 sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
 
 cd ~/blockworks-foundation/serum-dex/dex

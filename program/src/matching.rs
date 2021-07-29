@@ -419,7 +419,7 @@ impl BookSide {
         let key = self.free_list_head;
         let node = &mut self.nodes[key as usize];
 
-        // TODO: possibly unnecessary check here - remove if we need compute
+        // TODO OPT possibly unnecessary check here - remove if we need compute
         match NodeTag::try_from(node.tag) {
             Ok(NodeTag::FreeNode) => assert!(self.free_list_len > 1),
             Ok(NodeTag::LastFreeNode) => assert_eq!(self.free_list_len, 1),

@@ -189,10 +189,16 @@ impl Processor {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        liquidation_fee: I80F48,
         optimal_util: I80F48,
         optimal_rate: I80F48,
         max_rate: I80F48,
     ) -> MangoResult<()> {
+        check!(
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
+            MangoErrorCode::InvalidParam
+        )?;
+
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -208,10 +214,10 @@ impl Processor {
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
 
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidOwner)?;
 
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::Default)?;
+        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
         check!(mango_group.oracles[market_index] != Pubkey::default(), MangoErrorCode::Default)?;
@@ -244,25 +250,14 @@ impl Processor {
 
         // check leverage is reasonable
 
-        check!(
-            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
-            MangoErrorCode::Default
-        )?;
-
-        let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
-        let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
         mango_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
             maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
-            maint_liab_weight,
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
             liquidation_fee,
         };
-
-        // TODO needs to be moved into add_oracle
-        // let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
-        // mango_group.oracles[token_index] = *oracle_ai.key;
 
         let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
 
@@ -340,12 +335,10 @@ impl Processor {
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
         let oracle_type = determine_oracle_type(oracle_ai);
         check_eq!(oracle_type, OracleType::Stub, MangoErrorCode::Default)?;
-        // TODO verify oracle is really owned by this group (currently only checks program)
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
         let clock = Clock::get()?;
         oracle.last_update = clock.unix_timestamp as u64;
-        // TODO verify oracle is really owned by this group (currently only checks program)
         Ok(())
     }
 
@@ -3239,9 +3232,7 @@ impl Processor {
         Ok(())
     }
 
-    // ***
     #[inline(never)]
-    #[allow(unused)]
     fn deposit_msrm(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -3273,9 +3264,8 @@ impl Processor {
 
         Ok(())
     }
-    // ***
+
     #[inline(never)]
-    #[allow(unused)]
     fn withdraw_msrm(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -3357,6 +3347,7 @@ impl Processor {
                 market_index,
                 maint_leverage,
                 init_leverage,
+                liquidation_fee,
                 optimal_util,
                 optimal_rate,
                 max_rate,
@@ -3368,6 +3359,7 @@ impl Processor {
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    liquidation_fee,
                     optimal_util,
                     optimal_rate,
                     max_rate,
@@ -3551,11 +3543,13 @@ impl Processor {
                 msg!("Mango: AddMangoAccountInfo");
                 Self::add_mango_account_info(program_id, accounts, info)?;
             }
-            MangoInstruction::DepositMsrm { .. } => {
-                todo!()
+            MangoInstruction::DepositMsrm { quantity } => {
+                msg!("Mango: DepositMsrm");
+                Self::deposit_msrm(program_id, accounts, quantity)?;
             }
-            MangoInstruction::WithdrawMsrm { .. } => {
-                todo!()
+            MangoInstruction::WithdrawMsrm { quantity } => {
+                msg!("Mango: WithdrawMsrm");
+                Self::withdraw_msrm(program_id, accounts, quantity)?;
             }
         }
 

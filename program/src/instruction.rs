@@ -101,35 +101,18 @@ pub enum MangoInstruction {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        liquidation_fee: I80F48,
         optimal_util: I80F48,
         optimal_rate: I80F48,
         max_rate: I80F48,
     },
 
     /// DEPRECATED
-    /// Add a spot market to a mango account basket
-    ///
-    /// Accounts expected by this instruction (6)
-    ///
-    /// 0. `[]` mango_group_ai - TODO
-    /// 1. `[writable]` mango_account_ai - TODO
-    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
-    /// 3. `[]` spot_market_ai - TODO
     AddToBasket {
         market_index: usize,
     },
 
-    /// Borrow by incrementing MangoAccount.borrows given collateral ratio is below init_coll_rat
-    ///
-    /// Accounts expected by this instruction (4 + 2 * NUM_MARKETS):
-    ///
-    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
-    /// 1. `[writable]` mango_account_ai - the mango account for this user
-    /// 2. `[signer]` owner_ai - Solana account of owner of the MangoAccount
-    /// 3. `[]` mango_cache_ai - TODO
-    /// 4. `[]` root_bank_ai - Root bank owned by MangoGroup
-    /// 5. `[writable]` node_bank_ai - Node bank owned by RootBank
-    /// 6. `[]` clock_ai - Clock sysvar account
+    /// DEPRECATED - use Withdraw with allow_borrow = true
     Borrow {
         quantity: u64,
     },
@@ -233,6 +216,7 @@ pub enum MangoInstruction {
     /// 1. `[writable]` mango_cache_ai
     CachePerpMarkets,
 
+    /// Update funding related variables
     UpdateFunding,
 
     // TODO - remove this instruction before mainnet
@@ -283,14 +267,14 @@ pub enum MangoInstruction {
 
     /// Take two MangoAccounts and settle profits and losses between them for a perp market
     ///
-    /// Accounts expected: 6
+    /// Accounts expected (6):
     SettlePnl {
         market_index: usize,
     },
 
     /// Use this token's position and deposit to reduce borrows
     ///
-    /// Accounts expected by this instruction: 5
+    /// Accounts expected by this instruction (5):
     SettleBorrow {
         token_index: usize,
         quantity: u64,
@@ -482,16 +466,40 @@ pub enum MangoInstruction {
     RedeemMngo,
 
     /// Add account info; useful for naming accounts
+    ///
+    /// Accounts expected by this instruction (3):
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
     AddMangoAccountInfo {
         info: [u8; INFO_LEN],
     },
 
-    /// Deposit MSRM to reduce fees. *** add to client
+    /// Deposit MSRM to reduce fees. This MSRM is not at risk and is not used for any health calculations
+    ///
+    /// Accounts expected by this instruction (6):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[writable]` msrm_account_ai - MSRM token account
+    /// 4. `[writable]` msrm_vault_ai - MSRM vault owned by mango program
+    /// 5. `[]` token_prog_ai - SPL Token program id
     DepositMsrm {
         quantity: u64,
     },
 
-    /// Withdraw MSRM *** add to client
+    /// Withdraw the MSRM deposited
+    ///
+    /// Accounts expected by this instruction (7):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[writable]` msrm_account_ai - MSRM token account
+    /// 4. `[writable]` msrm_vault_ai - MSRM vault owned by mango program
+    /// 5. `[]` signer_ai - signer key of the MangoGroup
+    /// 6. `[]` token_prog_ai - SPL Token program id
     WithdrawMsrm {
         quantity: u64,
     },
@@ -534,25 +542,24 @@ impl MangoInstruction {
                     [1] => true,
                     _ => return None,
                 };
-                MangoInstruction::Withdraw {
-                    quantity: u64::from_le_bytes(*quantity),
-                    allow_borrow: allow_borrow,
-                }
+                MangoInstruction::Withdraw { quantity: u64::from_le_bytes(*quantity), allow_borrow }
             }
             4 => {
-                let data = array_ref![data, 0, 88];
+                let data = array_ref![data, 0, 104];
                 let (
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    liquidation_fee,
                     optimal_util,
                     optimal_rate,
                     max_rate,
-                ) = array_refs![data, 8, 16, 16, 16, 16, 16];
+                ) = array_refs![data, 8, 16, 16, 16, 16, 16, 16];
                 MangoInstruction::AddSpotMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
                     optimal_util: I80F48::from_le_bytes(*optimal_util),
                     optimal_rate: I80F48::from_le_bytes(*optimal_rate),
                     max_rate: I80F48::from_le_bytes(*max_rate),
@@ -730,6 +737,15 @@ impl MangoInstruction {
                 let info = array_ref![data, 0, INFO_LEN];
                 MangoInstruction::AddMangoAccountInfo { info: *info }
             }
+            35 => {
+                let quantity = array_ref![data, 0, 8];
+                MangoInstruction::DepositMsrm { quantity: u64::from_le_bytes(*quantity) }
+            }
+            36 => {
+                let quantity = array_ref![data, 0, 8];
+                MangoInstruction::WithdrawMsrm { quantity: u64::from_le_bytes(*quantity) }
+            }
+
             _ => {
                 return None;
             }
@@ -893,6 +909,7 @@ pub fn add_spot_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    liquidation_fee: I80F48,
     optimal_util: I80F48,
     optimal_rate: I80F48,
     max_rate: I80F48,
@@ -912,6 +929,7 @@ pub fn add_spot_market(
         market_index,
         maint_leverage,
         init_leverage,
+        liquidation_fee,
         optimal_util,
         optimal_rate,
         max_rate,
