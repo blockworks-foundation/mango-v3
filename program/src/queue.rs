@@ -183,7 +183,7 @@ impl<'a> EventQueue<'a> {
         perp_market: &PerpMarket,
     ) -> MangoResult<Self> {
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        check_eq!(&perp_market.event_queue, account.key, MangoErrorCode::Default)?;
+        check_eq!(&perp_market.event_queue, account.key, MangoErrorCode::InvalidAccount)?;
         Self::load_mut(account)
     }
 

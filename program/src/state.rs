@@ -218,7 +218,7 @@ impl MangoGroup {
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
-        self.oracles.iter().position(|pk| pk == oracle_pk) // TODO profile and optimize
+        self.oracles.iter().position(|pk| pk == oracle_pk) // TODO OPT profile
     }
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
         // TODO profile and optimize

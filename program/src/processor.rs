@@ -87,7 +87,7 @@ impl Processor {
         mango_group.valid_interval = valid_interval;
         mango_group.dex_program_id = *dex_prog_ai.key;
 
-        // TODO - make this a PDA
+        // TODO OPT make PDA
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
         check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
         check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
@@ -95,7 +95,7 @@ impl Processor {
         check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
         mango_group.dao_vault = *dao_vault_ai.key;
 
-        // TODO - make this a PDA
+        // TODO OPT make this a PDA
         if msrm_vault_ai.key != &Pubkey::default() {
             let msrm_vault = Account::unpack(&msrm_vault_ai.try_borrow_data()?)?;
             check!(msrm_vault.is_initialized(), MangoErrorCode::InvalidVault)?;
@@ -140,6 +140,10 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
+    fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        todo!()
+    }
     #[inline(never)]
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
     /// TODO make the mango account a derived address
@@ -325,16 +329,19 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-            mango_group_ai, // write
+            mango_group_ai, // read
             oracle_ai,      // write
             admin_ai        // read
         ] = accounts;
 
-        let mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(mango_group.find_oracle_index(oracle_ai.key).is_some(), MangoErrorCode::Default)?;
+
         let oracle_type = determine_oracle_type(oracle_ai);
         check_eq!(oracle_type, OracleType::Stub, MangoErrorCode::Default)?;
+
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
         let clock = Clock::get()?;

@@ -609,7 +609,7 @@ impl<'a> Book<'a> {
     ) -> MangoResult<()> {
         // TODO proper error handling
         // TODO handle the case where we run out of compute
-        // TODO test the order types
+        // TODO test the order types (@Lagzda)
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
             OrderType::ImmediateOrCancel => (false, false),
@@ -634,6 +634,7 @@ impl<'a> Book<'a> {
             let best_ask = self.asks.get_mut(best_ask_h).unwrap().as_leaf_mut().unwrap();
             let best_ask_price = best_ask.price();
 
+            // TODO remove before mainnet
             msg!("new_ask p={} bap={}", price, best_ask_price);
 
             if price < best_ask_price {
