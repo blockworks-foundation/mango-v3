@@ -27,6 +27,12 @@ use mango::{
     entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
 };
 
+use safe_transmute::{
+    guard::SingleManyGuard,
+    to_bytes::{transmute_one_to_bytes, transmute_to_bytes},
+    transmute_many, transmute_many_pedantic, transmute_one_pedantic,
+};
+
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
 
@@ -247,134 +253,6 @@ impl MangoProgramTest {
             }, // symbol: "BTC".to_string()
             MintConfig {
                 index: 15,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 16,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 17,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 18,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 19,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 20,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 21,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 22,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 23,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 24,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 25,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 26,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 27,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 28,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 29,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 30,
-                decimals: 6,
-                unit: 10i64.pow(6) as i64,
-                base_lot: 100 as i64,
-                quote_lot: 10 as i64,
-                pubkey: None,
-            }, // symbol: "BTC".to_string()
-            MintConfig {
-                index: 31,
                 decimals: 6,
                 unit: 10i64.pow(6) as i64,
                 base_lot: 0 as i64,
@@ -813,6 +691,11 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub fn priceNumberToLots(&mut self, mint: &MintConfig, price: i64) -> i64 {
+        return (price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot);
+    }
+
+    #[allow(dead_code)]
     pub async fn with_root_bank(
         &mut self,
         mango_group: &MangoGroup,
@@ -1070,6 +953,34 @@ impl MangoProgramTest {
             pc_vault: pc_vault,
             vault_signer_key: vault_signer_pk,
         })
+    }
+
+    pub async fn consume_events(
+        &mut self,
+        spot_market: MarketPubkeys,
+        open_orders: Vec<&Pubkey>,
+        user_index: usize,
+        mint_index: usize,
+    ) {
+        let serum_program_id = self.serum_program_id;
+        let coin_fee_receivable_account = self.with_user_token_account(user_index, mint_index);
+        let pc_fee_receivable_account = self.with_user_token_account(user_index, self.quote_index);
+
+        let instructions = [
+            serum_dex::instruction::consume_events(
+                &serum_program_id,
+                open_orders,
+                &spot_market.market,
+                &spot_market.event_q,
+                &coin_fee_receivable_account,
+                &pc_fee_receivable_account,
+                u16::MAX
+            )
+            .unwrap()
+        ];
+
+        self.process_transaction(&instructions, None).await.unwrap();
+
     }
 
     #[allow(dead_code)]
@@ -1394,6 +1305,69 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn settle_funds(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        mango_group: &MangoGroup,
+        mango_account_pk: &Pubkey,
+        mango_account: &MangoAccount,
+        mango_cache_pk: &Pubkey,
+        spot_market: MarketPubkeys,
+        oracle_pks: &[Pubkey],
+        user_index: usize,
+        mint_index: usize,
+    ) {
+        self.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks).await;
+        self.cache_all_root_banks(&mango_group, &mango_group_pk).await;
+
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (base_root_bank_pk, base_root_bank) =
+            self.with_root_bank(mango_group, mint_index).await;
+        let (base_node_bank_pk, base_node_bank) = self.with_node_bank(&base_root_bank, 0).await;
+        let (quote_root_bank_pk, quote_root_bank) =
+            self.with_root_bank(mango_group, self.quote_index).await;
+        let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
+
+        let (dex_signer_pk, _dex_signer_nonce) =
+            create_signer_key_and_nonce(&serum_program_id, &spot_market.market);
+
+        let instructions = [
+            mango::instruction::settle_funds(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_cache_pk,
+                &user.pubkey(),
+                &mango_account_pk,
+                &serum_program_id,
+                &spot_market.market,
+                &mango_account.spot_open_orders[mint_index],
+                &signer_pk,
+                &spot_market.coin_vault,
+                &spot_market.pc_vault,
+                &base_root_bank_pk,
+                &base_node_bank_pk,
+                &quote_root_bank_pk,
+                &quote_node_bank_pk,
+                &base_node_bank.vault,
+                &quote_node_bank.vault,
+                &dex_signer_pk,
+            )
+            .unwrap(),
+        ];
+
+        let signers = vec![&user];
+
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+
+    }
+
+    #[allow(dead_code)]
     pub async fn perform_deposit(
         &mut self,
         mango_group: &MangoGroup,
@@ -1478,6 +1452,19 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
+    pub async fn run_keeper(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        oracle_pks: &[Pubkey],
+        perp_market_pks: &[Pubkey],
+    ) {
+        self.advance_clock().await;
+        self.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks).await;
+        self.update_all_root_banks(&mango_group, &mango_group_pk, 0).await;
+        self.cache_all_root_banks(&mango_group, &mango_group_pk).await;
+        self.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
+    }
 }
 
 fn process_serum_instruction(
