@@ -115,7 +115,6 @@ async fn test_place_spot_order() {
         &mango_group,
         &mango_account_pk,
         &mango_account,
-        &mango_cache_pk,
         spot_markets[mint_index],
         &oracle_pks,
         user_index,
@@ -212,7 +211,6 @@ async fn test_match_spot_order() {
         &mango_group,
         &bidder_mango_account_pk,
         &bidder_mango_account,
-        &mango_cache_pk,
         spot_markets[mint_index],
         &oracle_pks,
         bidder_user_index,
@@ -240,7 +238,6 @@ async fn test_match_spot_order() {
         &mango_group,
         &asker_mango_account_pk,
         &asker_mango_account,
-        &mango_cache_pk,
         spot_markets[mint_index],
         &oracle_pks,
         asker_user_index,
@@ -253,18 +250,16 @@ async fn test_match_spot_order() {
     test.run_keeper(&mango_group, &mango_group_pk, &oracle_pks, &[]).await;
     bidder_mango_account = test.load_account::<MangoAccount>(bidder_mango_account_pk).await;
     asker_mango_account = test.load_account::<MangoAccount>(asker_mango_account_pk).await;
-    // NOTE: Dunno why but have to run multiple consume events for the deposits to update
-    for _i in 0..1 {
-        test.consume_events(
-            spot_markets[mint_index],
-            vec![
-                &bidder_mango_account.spot_open_orders[0],
-                &asker_mango_account.spot_open_orders[0],
-            ],
-            bidder_user_index,
-            mint_index,
-        ).await;
-    }
+
+    test.consume_events(
+        spot_markets[mint_index],
+        vec![
+            &bidder_mango_account.spot_open_orders[0],
+            &asker_mango_account.spot_open_orders[0],
+        ],
+        bidder_user_index,
+        mint_index,
+    ).await;
 
     // Step 5: Settle funds so that deposits get updated
     test.run_keeper(&mango_group, &mango_group_pk, &oracle_pks, &[]).await;
@@ -276,7 +271,6 @@ async fn test_match_spot_order() {
         &mango_group,
         &bidder_mango_account_pk,
         &bidder_mango_account,
-        &mango_cache_pk,
         spot_markets[mint_index],
         &oracle_pks,
         bidder_user_index,
@@ -288,7 +282,6 @@ async fn test_match_spot_order() {
         &mango_group,
         &asker_mango_account_pk,
         &asker_mango_account,
-        &mango_cache_pk,
         spot_markets[mint_index],
         &oracle_pks,
         asker_user_index,

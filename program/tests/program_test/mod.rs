@@ -541,26 +541,28 @@ impl MangoProgramTest {
         let quote_optimal_rate = I80F48::from_num(0.06);
         let quote_max_rate = I80F48::from_num(1.5);
 
-        let instructions = [mango::instruction::init_mango_group(
-            &mango_program_id,
-            &mango_group_pk,
-            &signer_pk,
-            &admin_pk,
-            &quote_mint_pk,
-            &quote_vault_pk,
-            &quote_node_bank_pk,
-            &quote_root_bank_pk,
-            &dao_vault_pk,
-            &msrm_vault_pk,
-            &mango_cache_pk,
-            &serum_program_id,
-            signer_nonce,
-            5,
-            quote_optimal_util,
-            quote_optimal_rate,
-            quote_max_rate,
-        )
-        .unwrap()];
+        let instructions = [
+            mango::instruction::init_mango_group(
+                &mango_program_id,
+                &mango_group_pk,
+                &signer_pk,
+                &admin_pk,
+                &quote_mint_pk,
+                &quote_vault_pk,
+                &quote_node_bank_pk,
+                &quote_root_bank_pk,
+                &dao_vault_pk,
+                &msrm_vault_pk,
+                &mango_cache_pk,
+                &serum_program_id,
+                signer_nonce,
+                5,
+                quote_optimal_util,
+                quote_optimal_rate,
+                quote_max_rate,
+            )
+            .unwrap()
+        ];
 
         self.process_transaction(&instructions, None).await.unwrap();
 
@@ -955,6 +957,7 @@ impl MangoProgramTest {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn consume_events(
         &mut self,
         spot_market: MarketPubkeys,
@@ -966,21 +969,21 @@ impl MangoProgramTest {
         let coin_fee_receivable_account = self.with_user_token_account(user_index, mint_index);
         let pc_fee_receivable_account = self.with_user_token_account(user_index, self.quote_index);
 
-        let instructions = [
-            serum_dex::instruction::consume_events(
-                &serum_program_id,
-                open_orders,
-                &spot_market.market,
-                &spot_market.event_q,
-                &coin_fee_receivable_account,
-                &pc_fee_receivable_account,
-                u16::MAX
-            )
-            .unwrap()
-        ];
-
-        self.process_transaction(&instructions, None).await.unwrap();
-
+        for open_order in open_orders {
+            let instructions = [
+                serum_dex::instruction::consume_events(
+                    &serum_program_id,
+                    vec![open_order],
+                    &spot_market.market,
+                    &spot_market.event_q,
+                    &coin_fee_receivable_account,
+                    &pc_fee_receivable_account,
+                    5,
+                )
+                .unwrap()
+            ];
+            self.process_transaction(&instructions, None).await.unwrap();
+        }
     }
 
     #[allow(dead_code)]
@@ -1218,7 +1221,6 @@ impl MangoProgramTest {
         mango_group: &MangoGroup,
         mango_account_pk: &Pubkey,
         mango_account: &MangoAccount,
-        mango_cache_pk: &Pubkey,
         spot_market: MarketPubkeys,
         oracle_pks: &[Pubkey],
         user_index: usize,
@@ -1278,7 +1280,7 @@ impl MangoProgramTest {
                 &mango_group_pk,
                 &mango_account_pk,
                 &user.pubkey(),
-                &mango_cache_pk,
+                &mango_group.mango_cache,
                 &serum_program_id,
                 &spot_market.market,
                 &spot_market.bids,
@@ -1311,7 +1313,6 @@ impl MangoProgramTest {
         mango_group: &MangoGroup,
         mango_account_pk: &Pubkey,
         mango_account: &MangoAccount,
-        mango_cache_pk: &Pubkey,
         spot_market: MarketPubkeys,
         oracle_pks: &[Pubkey],
         user_index: usize,
@@ -1341,7 +1342,7 @@ impl MangoProgramTest {
             mango::instruction::settle_funds(
                 &mango_program_id,
                 &mango_group_pk,
-                &mango_cache_pk,
+                &mango_group.mango_cache,
                 &user.pubkey(),
                 &mango_account_pk,
                 &serum_program_id,
@@ -1465,6 +1466,53 @@ impl MangoProgramTest {
         self.cache_all_root_banks(&mango_group, &mango_group_pk).await;
         self.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
     }
+
+    pub async fn perform_liquidate_token_and_token(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_group_pk: &Pubkey,
+        liqee_mango_account_pk: &Pubkey,
+        liqee_mango_account: &MangoAccount,
+        liqor_mango_account_pk: &Pubkey,
+        liqor_mango_account: &MangoAccount,
+        liqor_index: usize,
+        asset_index: usize,
+        liab_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
+
+        let (asset_root_bank_pk, asset_root_bank) = self.with_root_bank(mango_group, asset_index).await;
+        let (asset_node_bank_pk, asset_node_bank) = self.with_node_bank(&asset_root_bank, 0).await;
+
+        let (liab_root_bank_pk, liab_root_bank) = self.with_root_bank(mango_group, liab_index).await;
+        let (liab_node_bank_pk, liab_node_bank) = self.with_node_bank(&liab_root_bank, 0).await;
+
+        let max_liab_transfer = I80F48::from_num(10_000); // TODO: This needs to adapt to the situation probably
+
+        let instructions = vec![
+            mango::instruction::liquidate_token_and_token(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &liqee_mango_account_pk,
+                &liqor_mango_account_pk,
+                &liqor.pubkey(),
+                &asset_root_bank_pk,
+                &asset_node_bank_pk,
+                &liab_root_bank_pk,
+                &liab_node_bank_pk,
+                &liqee_mango_account.spot_open_orders,
+                &liqor_mango_account.spot_open_orders,
+                max_liab_transfer,
+            )
+            .unwrap(),
+        ];
+
+        self.process_transaction(&instructions, Some(&[&liqor])).await.unwrap();
+
+    }
+
 }
 
 fn process_serum_instruction(

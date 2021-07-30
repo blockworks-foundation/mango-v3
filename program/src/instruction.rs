@@ -1314,7 +1314,7 @@ pub fn settle_funds(
     quote_vault_pk: &Pubkey,
     dex_signer_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new_readonly(*mango_cache_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
@@ -1392,4 +1392,40 @@ pub fn set_oracle(
     let instr = MangoInstruction::SetOracle { price };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn liquidate_token_and_token(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    liqee_mango_account_pk: &Pubkey,
+    liqor_mango_account_pk: &Pubkey,
+    liqor_pk: &Pubkey,
+    asset_root_bank_pk: &Pubkey,
+    asset_node_bank_pk: &Pubkey,
+    liab_root_bank_pk: &Pubkey,
+    liab_node_bank_pk: &Pubkey,
+    liqee_open_orders_pks: &[Pubkey],
+    liqor_open_orders_pks: &[Pubkey],
+    max_liab_transfer: I80F48,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*liqee_mango_account_pk, false),
+        AccountMeta::new(*liqor_mango_account_pk, false),
+        AccountMeta::new_readonly(*liqor_pk, true),
+        AccountMeta::new_readonly(*asset_root_bank_pk, false),
+        AccountMeta::new(*asset_node_bank_pk, false),
+        AccountMeta::new_readonly(*liab_root_bank_pk, false),
+        AccountMeta::new(*liab_node_bank_pk, false),
+    ];
+
+    accounts.extend(liqee_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+
 }
