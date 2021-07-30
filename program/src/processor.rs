@@ -695,14 +695,14 @@ impl Processor {
             quantity,
         )?;
 
-        let health = mango_account.get_health(
+        let healths = mango_account.get_healths(
             &mango_group,
             &mango_cache,
             open_orders_ais,
             &active_assets,
-            HealthType::Init,
+            &vec![HealthType::Init],
         )?;
-        check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        check!(healths[0] >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
@@ -867,7 +867,7 @@ impl Processor {
 
         // Calculate health
         health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
-        let pre_health = health_cache.init_health;
+        let pre_health = health_cache.healths[0];
 
         // update the being_liquidated flag
         if mango_account.being_liquidated {
@@ -939,7 +939,7 @@ impl Processor {
             QUOTE_INDEX,
         )?;
 
-        let post_health = health_cache.init_health;
+        let post_health = health_cache.healths[0];
 
         // If an account is in reduce_only mode, health must only go up
         check!(
@@ -1215,7 +1215,7 @@ impl Processor {
 
         // calculate init health
         health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
-        let pre_health = health_cache.init_health;
+        let pre_health = health_cache.healths[0];
 
         // update the being_liquidated flag
         if mango_account.being_liquidated {
@@ -1253,7 +1253,7 @@ impl Processor {
             &mango_account,
             market_index,
         )?;
-        let post_health = health_cache.init_health;
+        let post_health = health_cache.healths[0];
 
         // If an account is in reduce_only mode, health must only go up
         check!(
@@ -1669,8 +1669,8 @@ impl Processor {
         )?;
 
         health_cache.update_health(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let maint_health = health_cache.maint_health;
-        let init_health = health_cache.init_health;
+        let init_health = health_cache.healths[0];
+        let maint_health = health_cache.healths[1];
 
         // Can only force cancel on an account already being liquidated
         if liqee_ma.being_liquidated {
@@ -1805,8 +1805,8 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
         health_cache.update_health(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let maint_health = health_cache.maint_health;
-        let init_health = health_cache.init_health;
+        let init_health = health_cache.healths[0];
+        let maint_health = health_cache.healths[1];
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -1921,8 +1921,8 @@ impl Processor {
 
         // TODO - optimization: consider calculating both healths at same time
         health_cache.update_health(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let init_health = health_cache.init_health;
-        let maint_health = health_cache.maint_health;
+        let init_health = health_cache.healths[0];
+        let maint_health = health_cache.healths[1];
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2021,7 +2021,7 @@ impl Processor {
             &liqor_ma,
             liqor_open_orders_ais,
         )?;
-        let liqor_health = liqor_health_cache.init_health;
+        let liqor_health = liqor_health_cache.healths[0];
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
         // Update liqee's health where it may have changed
@@ -2034,13 +2034,13 @@ impl Processor {
                 i,
             )?;
         }
-        let liqee_maint_health = health_cache.maint_health;
+        let liqee_maint_health = health_cache.healths[1];
 
         if liqee_maint_health < ZERO_I80F48 {
             liqee_ma.is_bankrupt =
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
-            let liqee_init_health = health_cache.init_health;
+            let liqee_init_health = health_cache.healths[0];
             if liqee_init_health >= ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
             }
@@ -2121,8 +2121,8 @@ impl Processor {
         }
 
         health_cache.update_health(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let init_health = health_cache.init_health;
-        let maint_health = health_cache.maint_health;
+        let init_health = health_cache.healths[0];
+        let maint_health = health_cache.healths[1];
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2293,16 +2293,16 @@ impl Processor {
 
             health_cache.update_perp_health(&mango_group, &mango_cache, &liqee_ma, asset_index)?;
         }
-        let liqor_health = liqor_ma.get_health(
+        let liqor_healths = liqor_ma.get_healths(
             &mango_group,
             &mango_cache,
             liqor_open_orders_ais,
             &liqor_health_cache.active_assets,
-            HealthType::Init,
+            &vec![HealthType::Init],
         )?;
-        check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        check!(liqor_healths[0] >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        if health_cache.maint_health < ZERO_I80F48 {
+        if health_cache.healths[1] < ZERO_I80F48 {
             // To start liquidating, make sure all orders that increase position are canceled
             liqee_ma.is_bankrupt =
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
@@ -2322,7 +2322,7 @@ impl Processor {
 
             health_cache.update_perp_health(&mango_group, &mango_cache, &liqee_ma, perp_index)?;
 
-            liqee_ma.being_liquidated = health_cache.init_health < ZERO_I80F48;
+            liqee_ma.being_liquidated = health_cache.healths[0] < ZERO_I80F48;
         }
 
         Ok(())
@@ -2424,8 +2424,8 @@ impl Processor {
 
         // TODO - optimization: consider calculating both healths at same time
         health_cache.update_health(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let init_health = health_cache.init_health;
-        let maint_health = health_cache.maint_health;
+        let init_health = health_cache.healths[0];
+        let maint_health = health_cache.healths[1];
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2500,17 +2500,17 @@ impl Processor {
             &liqor_ma,
             liqor_open_orders_ais,
         )?;
-        check!(liqor_health_cache.init_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        check!(liqor_health_cache.healths[0] >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
         //
         health_cache.update_perp_health(&mango_group, &mango_cache, &liqee_ma, market_index)?;
 
-        if health_cache.maint_health < ZERO_I80F48 {
+        if health_cache.healths[1] < ZERO_I80F48 {
             // To start liquidating, make sure all orders that increase position are canceled
             liqee_ma.is_bankrupt =
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
-            liqee_ma.being_liquidated = health_cache.init_health < ZERO_I80F48;
+            liqee_ma.being_liquidated = health_cache.healths[0] < ZERO_I80F48;
         }
 
         Ok(())
@@ -2626,14 +2626,14 @@ impl Processor {
             checked_add_net(bank_cache, &mut node_bank, &mut liqor_ma, QUOTE_INDEX, liab_transfer)?;
 
             // Make sure liqor is above init health
-            let liqor_health = liqor_ma.get_health(
+            let liqor_healths = liqor_ma.get_healths(
                 &mango_group,
                 &mango_cache,
                 liqor_open_orders_ais,
                 &liqor_active_assets,
-                HealthType::Init,
+                &vec![HealthType::Init],
             )?;
-            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+            check!(liqor_healths[0] >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
         }
 
         let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
@@ -2818,14 +2818,14 @@ impl Processor {
             )?;
 
             // Make sure liqor is above init health
-            let liqor_health = liqor_ma.get_health(
+            let liqor_healths = liqor_ma.get_healths(
                 &mango_group,
                 &mango_cache,
                 liqor_open_orders_ais,
                 &liqor_active_assets,
-                HealthType::Init,
+                &vec![HealthType::Init],
             )?;
-            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+            check!(liqor_healths[0] >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
         }
 
         if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
