@@ -761,9 +761,10 @@ impl HealthCache {
             )?
         };
 
-        for i in 0..self.num_health_types - 1 {
-            self.healths[i] += spot_healths[i] - self.spot_healths[token_index + i];
-            self.spot_healths[token_index + i] = spot_healths[i];
+        for i in 0..self.num_health_types {
+            let j = token_index * self.num_health_types + i;
+            self.healths[i] += spot_healths[i] - self.spot_healths[j];
+            self.spot_healths[token_index * self.num_health_types + i] = spot_healths[i];
         }
 
         Ok(())
@@ -786,9 +787,10 @@ impl HealthCache {
             mango_cache.perp_market_cache[market_index].short_funding,
         );
 
-        for i in 0..self.health_types.len() - 1 {
-            self.healths[market_index + i] += perp_healths[i] - self.perp_healths[market_index + i];
-            self.perp_healths[market_index + i] = perp_healths[i];
+        for i in 0..self.num_health_types {
+            self.healths[i] +=
+                perp_healths[i] - self.perp_healths[market_index * self.num_health_types + i];
+            self.perp_healths[market_index * self.num_health_types + i] = perp_healths[i];
         }
         Ok(())
     }
@@ -822,9 +824,10 @@ impl HealthCache {
                     &self.health_types,
                 )?;
 
-                for i in 0..self.health_types.len() - 1 {
-                    healths[i] += spot_healths[i] - self.spot_healths[asset_index + i];
-                    self.spot_healths[asset_index + i] = spot_healths[i];
+                for i in 0..self.num_health_types {
+                    healths[i] += spot_healths[i]
+                        - self.spot_healths[asset_index * self.num_health_types + i];
+                    self.spot_healths[asset_index * self.num_health_types + i] = spot_healths[i];
                 }
             }
 
@@ -838,9 +841,10 @@ impl HealthCache {
                     mango_cache.perp_market_cache[asset_index].short_funding,
                 );
 
-                for i in 0..self.health_types.len() - 1 {
-                    healths[i] += perp_healths[i] - self.perp_healths[asset_index + i];
-                    self.perp_healths[asset_index + i] = perp_healths[i];
+                for i in 0..self.num_health_types {
+                    healths[i] += perp_healths[i]
+                        - self.perp_healths[asset_index * self.num_health_types + i];
+                    self.perp_healths[asset_index * self.num_health_types + i] = perp_healths[i];
                 }
             }
             // msg!("get_health {} => {:?}", i, health);
@@ -1250,7 +1254,7 @@ impl MangoAccount {
                     mango_cache.perp_market_cache[asset_index].short_funding,
                 );
 
-                for i in 0..health_types.len() - 1 {
+                for i in 0..health_types.len() {
                     healths[i] += perp_healths[i]
                 }
             }
@@ -1673,7 +1677,7 @@ impl PerpAccount {
             - I80F48::from_num(base_change * perp_market_info.base_lot_size) * price;
         // TODO account for fees
         let mut healths = vec![initial_health; health_types.len()];
-        for i in 0..health_types.len() - 1 {
+        for i in 0..health_types.len() {
             let (asset_weight, liab_weight) = match health_types[i] {
                 HealthType::Maint => {
                     (perp_market_info.maint_asset_weight, perp_market_info.maint_liab_weight)
@@ -1728,7 +1732,7 @@ impl PerpAccount {
         // Account for unrealized funding payments
         // TODO make checked
         // TODO - consider force moving funding into the realized at start of every instruction
-        for i in 0..health_types.len() - 1 {
+        for i in 0..health_types.len() {
             let h =
                 if bids_healths[i] < asks_healths[i] { bids_healths[i] } else { asks_healths[i] };
             let x = if self.base_position > 0 { h - long_funding } else { h + short_funding };
