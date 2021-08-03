@@ -26,7 +26,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut, FastMath, FI80F48};
+use crate::utils::{invert_side, remove_slop_mut, FI80F48};
 
 pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -966,14 +966,14 @@ impl MangoAccount {
         root_bank_cache: &RootBankCache,
         token_i: usize,
     ) -> MangoResult<I80F48> {
-        self.deposits[token_i].checked_fmul(root_bank_cache.deposit_index).ok_or(math_err!())
+        self.deposits[token_i].checked_mul(root_bank_cache.deposit_index).ok_or(math_err!())
     }
     pub fn get_native_borrow(
         &self,
         root_bank_cache: &RootBankCache,
         token_i: usize,
     ) -> MangoResult<I80F48> {
-        self.borrows[token_i].checked_fmul(root_bank_cache.borrow_index).ok_or(math_err!())
+        self.borrows[token_i].checked_mul(root_bank_cache.borrow_index).ok_or(math_err!())
     }
 
     // TODO - Add unchecked versions to be used when we're confident
@@ -1060,23 +1060,23 @@ impl MangoAccount {
                 || self.spot_open_orders[market_index] == Pubkey::default()
             {
                 self.deposits[market_index]
-                    .checked_fmul(bank_cache.deposit_index)
+                    .checked_mul(bank_cache.deposit_index)
                     .unwrap()
-                    .checked_fmul(asset_weight)
+                    .checked_mul(asset_weight)
                     .unwrap()
-                    .checked_fmul(price)
+                    .checked_mul(price)
                     .unwrap()
             } else {
                 // TODO - confirm only checked open orders are sent in here
                 let open_orders = load_open_orders(open_orders_ai)?;
                 self.deposits[market_index]
-                    .checked_fmul(bank_cache.deposit_index)
+                    .checked_mul(bank_cache.deposit_index)
                     .unwrap()
                     .checked_add(I80F48::from_num(open_orders.native_coin_total))
                     .unwrap()
-                    .checked_fmul(asset_weight)
+                    .checked_mul(asset_weight)
                     .unwrap()
-                    .checked_fmul(price)
+                    .checked_mul(price)
                     .unwrap()
                     .checked_add(I80F48::from_num(
                         open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
@@ -1105,7 +1105,7 @@ impl MangoAccount {
     ) -> MangoResult<I80F48> {
         // TODO - OPT check if this fmul thing usually makes it better or worse in this case
         let mut assets_val = self.deposits[QUOTE_INDEX]
-            .checked_fmul(mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index)
+            .checked_mul(mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index)
             .unwrap();
 
         for i in 0..mango_group.num_oracles {
@@ -1166,6 +1166,7 @@ impl MangoAccount {
         let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
         let asks_base_net = base_net + base_free;
 
+        // TODO OPT - first verify this calculation is same as one below
         // let health = if bids_base_net.abs() > asks_base_net.abs() {
         //     if bids_base_net.is_positive() {
         //         bids_base_net * price * asset_weight + quote_free
@@ -1190,14 +1191,9 @@ impl MangoAccount {
             (asks_base_net * asks_weight + base_locked) * price + quote_free + quote_locked;
         // Pick the worse of the two possibilities
         sol_log_compute_units();
-        bids_health.min(asks_health)
+        // msg!("{:?} {:?}", bids_health.min(asks_health), health);
         // health
-        // base_net = 2
-        // base locked 10
-        // quote locked 20
-        // base free 1
-        // quote free 1
-        // price = 1
+        bids_health.min(asks_health)
     }
 
     #[inline(always)]
@@ -1242,9 +1238,9 @@ impl MangoAccount {
 
     fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
         if self.deposits[token_index].is_positive() {
-            self.deposits[token_index].fmul(bank_cache.deposit_index)
+            self.deposits[token_index].checked_mul(bank_cache.deposit_index).unwrap()
         } else if self.borrows[token_index].is_positive() {
-            -self.borrows[token_index].fmul(bank_cache.borrow_index)
+            -self.borrows[token_index].checked_mul(bank_cache.borrow_index).unwrap()
         } else {
             ZERO_I80F48
         }
@@ -1722,11 +1718,11 @@ impl PerpAccount {
 
         // TODO - check overflow possibilities here by throwing in reasonable large numbers
         let mut points = dist_factor
-            .checked_fmul(dist_factor)
+            .checked_mul(dist_factor)
             .unwrap()
-            .checked_fmul(I80F48::from_num(time_final - time_initial))
+            .checked_mul(I80F48::from_num(time_final - time_initial))
             .unwrap()
-            .checked_fmul(I80F48::from_num(quantity))
+            .checked_mul(I80F48::from_num(quantity))
             .unwrap();
 
         // TODO OPT remove this sanity check if confident
@@ -1745,7 +1741,7 @@ impl PerpAccount {
                 .unwrap()
                 .clamp(MIN_RATE_ADJ, MAX_RATE_ADJ);
 
-            lmi.rate = lmi.rate.checked_fmul(rate_adj).unwrap();
+            lmi.rate = lmi.rate.checked_mul(rate_adj).unwrap();
             lmi.period_start = time_final;
             lmi.mngo_left = lmi.mngo_per_period;
 
@@ -1753,7 +1749,7 @@ impl PerpAccount {
         }
 
         let mngo_earned =
-            points.checked_fmul(lmi.rate).unwrap().to_num::<u64>().min(lmi.mngo_per_period); // limit mngo payout to max mngo in a period
+            points.checked_mul(lmi.rate).unwrap().to_num::<u64>().min(lmi.mngo_per_period); // limit mngo payout to max mngo in a period
 
         self.mngo_accrued += mngo_earned;
         lmi.mngo_left -= mngo_earned;
@@ -1862,7 +1858,7 @@ impl PerpAccount {
         let base_position = I80F48::from_num(self.base_position);
         if self.base_position > ZERO_I80F48 {
             let quote_position = self.quote_position
-                - (long_funding - self.long_settled_funding).checked_fmul(base_position).unwrap();
+                - (long_funding - self.long_settled_funding).checked_mul(base_position).unwrap();
 
             if quote_position > ZERO_I80F48 {
                 base_position * asset_weight * price + quote_position
@@ -2097,7 +2093,7 @@ impl PerpMarket {
     /// Convert from the price stored on the book to the price used in value calculations
     pub fn lot_to_native_price(&self, price: i64) -> I80F48 {
         I80F48::from_num(price)
-            .checked_fmul(I80F48::from_num(self.quote_lot_size))
+            .checked_mul(I80F48::from_num(self.quote_lot_size))
             .unwrap()
             .checked_div(I80F48::from_num(self.base_lot_size))
             .unwrap()
