@@ -4,6 +4,7 @@ use crate::error::MangoResult;
 use crate::matching::Side;
 use fixed::types::I80F48;
 use solana_program::account_info::AccountInfo;
+use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::cell::RefMut;
@@ -145,7 +146,7 @@ fn mul_hi_lo(ah: i128, al: i128, bh: i128, bl: i128) -> i128 {
 }
 
 pub trait FastMath: Sized {
-    fn fmul(self, x: Self) -> Self;
+    fn fmul(&self, other: Self) -> Self;
     fn fdiv(self, x: Self) -> Self;
     fn fadd(self, x: Self) -> Self;
     fn fsub(self, x: Self) -> Self;
@@ -161,24 +162,26 @@ pub trait FastMath: Sized {
 
 impl FastMath for I80F48 {
     #[inline(always)]
-    fn fmul(self, x: Self) -> Self {
-        let n = self.to_bits().trailing_zeros();
+    fn fmul(&self, other: Self) -> Self {
+        let x = self.to_bits();
+        let y = other.to_bits();
+        let n = x.trailing_zeros();
         if n < 48 {
-            let m = min(48 - n, x.to_bits().trailing_zeros());
+            let m = min(48 - n, y.trailing_zeros());
 
             if n + m < 48 {
-                let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
+                let (r, over) = (x >> n).overflowing_mul(y >> m);
                 if over {
-                    self * x
+                    self * other
                     // Self::from_bits(fixmul(self.to_bits(), x.to_bits(), 48))
                 } else {
                     Self::from_bits(r >> (48 - m - n))
                 }
             } else {
-                Self::from_bits((self.to_bits() >> n) * (x.to_bits() >> m))
+                Self::from_bits((x >> n) * (y >> m))
             }
         } else {
-            Self::from_bits((self.to_bits() >> 48) * x.to_bits())
+            Self::from_bits((x >> 48) * y)
         }
     }
 

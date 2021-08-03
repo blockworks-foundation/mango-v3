@@ -755,15 +755,23 @@ impl HealthCache {
                 }
             };
 
-            mango_account
-                .fast_get_spot_health(
-                    mango_cache,
-                    token_index,
-                    &open_orders_ais[token_index],
-                    FI80F48::from_fixed(spot_asset_weight),
-                    FI80F48::from_fixed(spot_liab_weight),
-                )?
-                .to_fixed()
+            // mango_account
+            // .fast_get_spot_health(
+            //     mango_cache,
+            //     token_index,
+            //     &open_orders_ais[token_index],
+            //     FI80F48::from_fixed(spot_asset_weight),
+            //     FI80F48::from_fixed(spot_liab_weight),
+            // )?
+            // .to_fixed()
+
+            mango_account.get_spot_health(
+                mango_cache,
+                token_index,
+                &open_orders_ais[token_index],
+                spot_asset_weight,
+                spot_liab_weight,
+            )?
         };
 
         self.health += spot_health - self.spot_healths[token_index];
@@ -840,14 +848,14 @@ impl HealthCache {
 
             if !spot_market_info.is_empty() {
                 // let spot_health = mango_account
-                //     .fast_get_spot_health(
-                //         mango_cache,
-                //         i,
-                //         &open_orders_ais[i],
-                //         FI80F48::from_fixed(spot_asset_weight),
-                //         FI80F48::from_fixed(spot_liab_weight),
-                //     )?
-                //     .to_fixed();
+                // .fast_get_spot_health(
+                //     mango_cache,
+                //     i,
+                //     &open_orders_ais[i],
+                //     FI80F48::from_fixed(spot_asset_weight),
+                //     FI80F48::from_fixed(spot_liab_weight),
+                // )?
+                // .to_fixed();
 
                 let spot_health = mango_account.get_spot_health(
                     mango_cache,
@@ -1143,7 +1151,6 @@ impl MangoAccount {
         asset_weight: I80F48,
         liab_weight: I80F48,
     ) -> I80F48 {
-        sol_log_compute_units();
         let quote_free =
             I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
         let quote_locked =
@@ -1160,13 +1167,12 @@ impl MangoAccount {
         let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
 
         let bids_health = bids_base_net * price * bids_weight + quote_free;
-        sol_log_compute_units();
 
         // Simulate health if all asks are executed at current price *** update in client
         let asks_base_net = base_net + base_free;
         let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
         let asks_health: I80F48 =
-            (asks_base_net.fmul(asks_weight) + base_locked).fmul(price) + quote_free + quote_locked;
+            (asks_base_net * asks_weight + base_locked) * price + quote_free + quote_locked;
 
         // base_net = 2
         // base locked 10
@@ -1189,6 +1195,7 @@ impl MangoAccount {
         asset_weight: FI80F48,
         liab_weight: FI80F48,
     ) -> FI80F48 {
+        sol_log_compute_units();
         let quote_free =
             FI80F48::from_u64(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
         let quote_locked =
@@ -1213,6 +1220,7 @@ impl MangoAccount {
             .mul(price)
             .add(quote_free)
             .add(quote_locked);
+        sol_log_compute_units();
 
         bids_health.min(asks_health)
     }
@@ -1276,9 +1284,9 @@ impl MangoAccount {
             || self.spot_open_orders[market_index] == Pubkey::default()
         {
             if base_net.is_positive() {
-                base_net.fmul(asset_weight).fmul(price)
+                base_net * asset_weight * price
             } else {
-                base_net.fmul(liab_weight).fmul(price)
+                base_net * liab_weight * price
             }
         } else {
             let open_orders = load_open_orders(open_orders_ai)?;
