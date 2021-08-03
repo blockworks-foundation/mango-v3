@@ -1151,6 +1151,7 @@ impl MangoAccount {
         asset_weight: I80F48,
         liab_weight: I80F48,
     ) -> I80F48 {
+        sol_log_compute_units();
         let quote_free =
             I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
         let quote_locked =
@@ -1162,31 +1163,45 @@ impl MangoAccount {
         // TODO account for serum dex fees in these calculations
 
         // Simulate the health if all bids are executed at current price
-        let bids_base_net: I80F48 =
-            base_net + quote_locked.unsafe_div(price) + base_free + base_locked;
+        let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+        let asks_base_net = base_net + base_free;
+
+        // let health = if bids_base_net.abs() > asks_base_net.abs() {
+        //     if bids_base_net.is_positive() {
+        //         bids_base_net * price * asset_weight + quote_free
+        //     } else {
+        //         bids_base_net * price * liab_weight + quote_free
+        //     }
+        // } else {
+        //     if asks_base_net.is_positive() {
+        //         (asks_base_net * asset_weight + base_locked) * price + quote_free + quote_locked
+        //     } else {
+        //         (asks_base_net * liab_weight + base_locked) * price + quote_free + quote_locked
+        //     }
+        // };
+
         let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
 
         let bids_health = bids_base_net * price * bids_weight + quote_free;
 
         // Simulate health if all asks are executed at current price *** update in client
-        let asks_base_net = base_net + base_free;
         let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
         let asks_health: I80F48 =
             (asks_base_net * asks_weight + base_locked) * price + quote_free + quote_locked;
-
+        // Pick the worse of the two possibilities
+        sol_log_compute_units();
+        bids_health.min(asks_health)
+        // health
         // base_net = 2
         // base locked 10
         // quote locked 20
         // base free 1
         // quote free 1
         // price = 1
-
-        // Pick the worse of the two possibilities
-        sol_log_compute_units();
-        bids_health.min(asks_health)
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     fn fast_sim_spot_health(
         &self,
         open_orders: &serum_dex::state::OpenOrders,
@@ -1235,6 +1250,7 @@ impl MangoAccount {
         }
     }
 
+    #[allow(dead_code)]
     fn fast_get_spot_health(
         &self,
         mango_cache: &MangoCache,

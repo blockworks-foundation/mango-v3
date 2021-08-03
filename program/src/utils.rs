@@ -4,7 +4,6 @@ use crate::error::MangoResult;
 use crate::matching::Side;
 use fixed::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::cell::RefMut;

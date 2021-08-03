@@ -192,7 +192,10 @@ async fn test_place_spot_order() {
         side: serum_dex::matching::Side::Bid,
         limit_price: NonZeroU64::new(base_price as u64).unwrap(),
         max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
-        max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
+        max_native_pc_qty_including_fees: NonZeroU64::new(
+            test.quoteSizeNumberToLots(&base_mint, base_price) as u64,
+        )
+        .unwrap(),
         self_trade_behavior: SelfTradeBehavior::DecrementTake,
         order_type: serum_dex::matching::OrderType::Limit,
         client_order_id: 1000,
@@ -220,7 +223,11 @@ async fn test_place_spot_order() {
 #[tokio::test]
 async fn test_worst_case_scenario() {
     // Arrange
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
+    let config = MangoProgramTestConfig {
+        compute_limit: 200_000,
+        num_users: 2,
+        num_mints: MAX_TOKENS as u64,
+    };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
     solana_logger::setup_with_default(
@@ -290,7 +297,10 @@ async fn test_worst_case_scenario() {
             side: serum_dex::matching::Side::Bid,
             limit_price: NonZeroU64::new(base_price as u64).unwrap(),
             max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(
+                test.quoteSizeNumberToLots(&base_mint, base_price) as u64,
+            )
+            .unwrap(),
             self_trade_behavior: SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: starting_order_id + mint_index as u64,
@@ -442,7 +452,10 @@ async fn test_worst_case_scenario_with_fractions() {
     // Step 4: Check that lenders deposit is not a nice number anymore (!= 2 BTC)
     mango_cache = test.load_account::<MangoCache>(mango_cache_pk).await;
     lender_mango_account = test.load_account::<MangoAccount>(lender_mango_account_pk).await;
-    let lender_account_deposit = lender_mango_account.get_native_deposit(&mango_cache.root_bank_cache[0], 0).unwrap().to_string();
+    let lender_account_deposit = lender_mango_account
+        .get_native_deposit(&mango_cache.root_bank_cache[0], 0)
+        .unwrap()
+        .to_string();
     println!("Lender Deposits: {}", lender_account_deposit);
 
     // Step 5: Place a spot order for BTC
@@ -451,7 +464,10 @@ async fn test_worst_case_scenario_with_fractions() {
         side: serum_dex::matching::Side::Ask,
         limit_price: NonZeroU64::new(base_price as u64).unwrap(),
         max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
-        max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
+        max_native_pc_qty_including_fees: NonZeroU64::new(
+            test.quoteSizeNumberToLots(&base_mint, base_price) as u64,
+        )
+        .unwrap(),
         self_trade_behavior: SelfTradeBehavior::DecrementTake,
         order_type: serum_dex::matching::OrderType::Limit,
         client_order_id: starting_order_id + mint_index as u64,
@@ -574,7 +590,10 @@ async fn test_worst_case_scenario_with_fractions_x10() {
     // Step 6: Check that lenders deposit is not a nice number anymore (!= 2 BTC)
     mango_cache = test.load_account::<MangoCache>(mango_cache_pk).await;
     lender_mango_account = test.load_account::<MangoAccount>(lender_mango_account_pk).await;
-    let lender_account_deposit = lender_mango_account.get_native_deposit(&mango_cache.root_bank_cache[0], 0).unwrap().to_string();
+    let lender_account_deposit = lender_mango_account
+        .get_native_deposit(&mango_cache.root_bank_cache[0], 0)
+        .unwrap()
+        .to_string();
     // TODO: Assert all deposits > 10
 
     // Step 7: Place a spot order ASK for each mint
@@ -585,7 +604,10 @@ async fn test_worst_case_scenario_with_fractions_x10() {
             side: serum_dex::matching::Side::Ask,
             limit_price: NonZeroU64::new(base_price as u64).unwrap(),
             max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&base_mint, 1) as u64).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&base_mint, base_price) as u64).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(
+                test.quoteSizeNumberToLots(&base_mint, base_price) as u64,
+            )
+            .unwrap(),
             self_trade_behavior: SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: starting_order_id + mint_index as u64,
@@ -609,6 +631,9 @@ async fn test_worst_case_scenario_with_fractions_x10() {
     // Assert
     lender_mango_account = test.load_account::<MangoAccount>(lender_mango_account_pk).await;
     for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        assert_ne!(lender_mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
+        assert_ne!(
+            lender_mango_account.spot_open_orders[spot_open_orders_index],
+            Pubkey::default()
+        );
     }
 }

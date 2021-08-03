@@ -36,7 +36,7 @@ use crate::state::{
     SpotMarketInfo, TokenInfo, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
     ZERO_I80F48,
 };
-use crate::utils::{gen_signer_key, gen_signer_seeds, FastMath};
+use crate::utils::{gen_signer_key, gen_signer_seeds};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -3720,9 +3720,8 @@ fn read_oracle(
     let value = median.checked_div(units);
     */
     let quote_decimals: u8 = mango_group.tokens[QUOTE_INDEX].decimals;
-    let price: I80F48;
     let oracle_type = determine_oracle_type(oracle_ai);
-    match oracle_type {
+    let price = match oracle_type {
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
@@ -3734,12 +3733,19 @@ fn read_oracle(
                 .unwrap();
 
             let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
-            let bits = if decimals < 0 {
-                value.checked_div(decimal_adj).unwrap().to_bits() as u128
+            if decimals < 0 {
+                value.checked_div(decimal_adj).unwrap()
             } else {
-                value.checked_fmul(decimal_adj).unwrap().to_bits() as u128
-            };
-            price = I80F48::from_bits((bits & 0xffffffffffffffffffffff0000000000u128) as i128);
+                value.checked_mul(decimal_adj).unwrap()
+            }
+
+            // TODO OPT consider effect of not disregarding these bits
+            // let bits = if decimals < 0 {
+            //     value.checked_div(decimal_adj).unwrap().to_bits() as u128
+            // } else {
+            //     value.checked_fmul(decimal_adj).unwrap().to_bits() as u128
+            // };
+            // price = I80F48::from_bits((bits & 0xffffffffffffffffffffff0000000000u128) as i128);
 
             // let oracle_adj = if price_account.expo < 0 {
             //     ONE_I80F48.checked_div(I80F48::from_num(10u64.pow(price_account.expo.abs() as u32)))
@@ -3756,12 +3762,12 @@ fn read_oracle(
         }
         OracleType::Stub => {
             let oracle = StubOracle::load(oracle_ai)?;
-            price = I80F48::from_num(oracle.price);
+            I80F48::from_num(oracle.price)
         }
         OracleType::Unknown => {
             panic!("Unknown oracle");
         }
-    }
+    };
     Ok(price)
 }
 
