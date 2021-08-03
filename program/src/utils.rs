@@ -155,13 +155,16 @@ pub trait FastMath: Sized {
     fn checked_fdiv(self, x: Self) -> Option<Self>;
     fn checked_fadd(self, x: Self) -> Option<Self>;
     fn checked_fsub(self, x: Self) -> Option<Self>;
+
+    fn unsafe_div(self, x: Self) -> Self;
 }
 
 impl FastMath for I80F48 {
+    #[inline(always)]
     fn fmul(self, x: Self) -> Self {
-        let n = self.trailing_zeros();
+        let n = self.to_bits().trailing_zeros();
         if n < 48 {
-            let m = min(48 - n, x.trailing_zeros());
+            let m = min(48 - n, x.to_bits().trailing_zeros());
 
             if n + m < 48 {
                 let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
@@ -176,6 +179,22 @@ impl FastMath for I80F48 {
             }
         } else {
             Self::from_bits((self.to_bits() >> 48) * x.to_bits())
+        }
+    }
+
+    /// Only use this function if you know self and x are both positive
+    fn unsafe_div(self, x: Self) -> Self {
+        let n = self.leading_zeros();
+        if n < 48 {
+            let m = min(48 - n, x.trailing_zeros());
+            if n + m < 48 {
+                let r = (self.to_bits() << n) / (x.to_bits() >> m);
+                Self::from_bits(r << (48 - m - n))
+            } else {
+                Self::from_bits((self.to_bits() << n) / (x.to_bits() >> m))
+            }
+        } else {
+            Self::from_bits((self.to_bits() << n) / x.to_bits())
         }
     }
     fn fdiv(self, x: Self) -> Self {

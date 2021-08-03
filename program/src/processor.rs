@@ -36,7 +36,7 @@ use crate::state::{
     SpotMarketInfo, TokenInfo, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
     ZERO_I80F48,
 };
-use crate::utils::{gen_signer_key, gen_signer_seeds};
+use crate::utils::{gen_signer_key, gen_signer_seeds, FastMath};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -3726,13 +3726,33 @@ fn read_oracle(
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
-            let quote_adj =
-                I80F48::from_num(10u64.pow(
-                    price_account.expo.abs().checked_sub(quote_decimals as i32).unwrap() as u32,
-                ));
-            let base_adj =
-                I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
-            price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
+
+            let decimals = (quote_decimals as i32)
+                .checked_add(price_account.expo)
+                .unwrap()
+                .checked_sub(mango_group.tokens[token_index].decimals as i32)
+                .unwrap();
+
+            let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
+            let bits = if decimals < 0 {
+                value.checked_div(decimal_adj).unwrap().to_bits() as u128
+            } else {
+                value.checked_fmul(decimal_adj).unwrap().to_bits() as u128
+            };
+            price = I80F48::from_bits((bits & 0xffffffffffffffffffffff0000000000u128) as i128);
+
+            // let oracle_adj = if price_account.expo < 0 {
+            //     ONE_I80F48.checked_div(I80F48::from_num(10u64.pow(price_account.expo.abs() as u32)))
+            // } else {
+            //     I80F48::from_num(10u64.pow(price_account.expo as u32))
+            // };
+            // let quote_adj =
+            //     I80F48::from_num(10u64.pow(
+            //         price_account.expo.abs().checked_sub(quote_decimals as i32).unwrap() as u32,
+            //     ));
+            // let base_adj =
+            //     I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
+            // price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
         }
         OracleType::Stub => {
             let oracle = StubOracle::load(oracle_ai)?;
