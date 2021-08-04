@@ -53,7 +53,7 @@ async fn test_init_spot_markets() {
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
 
     // Act
-    test.add_oracles_to_mango_group(&mango_group_cookie.address.unwrap()).await;
+    test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
     let spot_market_cookies =
         mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1).await;
 
@@ -232,17 +232,17 @@ async fn test_match_spot_order() {
 
     let bidder_base_deposit =
         &mango_group_cookie.mango_accounts[bidder_user_index].mango_account.unwrap()
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap().to_string();
+        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
     let asker_base_deposit =
         &mango_group_cookie.mango_accounts[asker_user_index].mango_account.unwrap()
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap().to_string();
+        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
 
     let bidder_quote_deposit =
         &mango_group_cookie.mango_accounts[bidder_user_index].mango_account.unwrap()
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap().to_string();
+        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
     let asker_quote_deposit =
         &mango_group_cookie.mango_accounts[asker_user_index].mango_account.unwrap()
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap().to_string();
+        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
 
     assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(1000000).to_string());
     assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());

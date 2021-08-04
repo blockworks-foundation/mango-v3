@@ -38,9 +38,9 @@ pub struct MintCookie {
 
 pub struct MangoGroupCookie {
 
-    pub address: Option<Pubkey>,
+    pub address: Pubkey,
 
-    pub mango_group: Option<MangoGroup>,
+    pub mango_group: MangoGroup,
 
     pub mango_cache: MangoCache,
 
@@ -51,8 +51,6 @@ pub struct MangoGroupCookie {
     pub spot_markets: Vec<SpotMarketCookie>,
 
     pub perp_markets: Vec<PerpMarketCookie>,
-
-    pub quote_mint: Option<MintCookie>,
 
 }
 
@@ -111,9 +109,8 @@ impl MangoGroupCookie {
 
         let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
         let mango_cache = test.load_account::<MangoCache>(mango_group.mango_cache).await;
-        let quote_mint = test.with_mint(test.quote_index);
 
-        MangoGroupCookie { address: Some(mango_group_pk), mango_group: Some(mango_group), mango_cache: mango_cache, mango_accounts: vec![], spot_markets: vec![], perp_markets: vec![], quote_mint: Some(quote_mint) }
+        MangoGroupCookie { address: mango_group_pk, mango_group: mango_group, mango_cache: mango_cache, mango_accounts: vec![], spot_markets: vec![], perp_markets: vec![] }
     }
 
     #[allow(dead_code)]
@@ -123,11 +120,11 @@ impl MangoGroupCookie {
         num_users: usize,
         num_markets: usize,
     ) {
-        test.add_oracles_to_mango_group(&self.address.unwrap()).await;
+        test.add_oracles_to_mango_group(&self.address).await;
         self.mango_accounts = self.add_mango_accounts(test, num_users).await;
         self.spot_markets = self.add_spot_markets(test, num_markets).await;
         self.perp_markets = self.add_perp_markets(test, num_markets).await;
-        self.mango_group = Some(test.load_account::<MangoGroup>(self.address.unwrap()).await);
+        self.mango_group = test.load_account::<MangoGroup>(self.address).await;
     }
 
     #[allow(dead_code)]
@@ -180,11 +177,11 @@ impl MangoGroupCookie {
         let oracle_price = test.with_oracle_price(&mint, price);
         let mango_program_id = test.mango_program_id;
         let admin_pk = test.get_payer_pk();
-        let oracle_pk = self.mango_group.unwrap().oracles[oracle_index];
+        let oracle_pk = self.mango_group.oracles[oracle_index];
         let instructions = [
             mango::instruction::set_oracle(
                 &mango_program_id,
-                &self.address.unwrap(),
+                &self.address,
                 &oracle_pk,
                 &admin_pk,
                 oracle_price,
@@ -199,8 +196,8 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
     ) {
-        let mango_group = self.mango_group.unwrap();
-        let mango_group_pk = self.address.unwrap();
+        let mango_group = self.mango_group;
+        let mango_group_pk = self.address;
         let oracle_pks = mango_group.oracles.iter()
             .filter(|x| **x != Pubkey::default())
             .map(|x| *x).collect::<Vec<Pubkey>>();
@@ -227,7 +224,7 @@ pub struct MangoAccountCookie {
 }
 
 impl MangoAccountCookie {
-
+    // TODO: Maybe move deposit and withdraw here
     #[allow(dead_code)]
     pub fn default() -> Self {
         MangoAccountCookie { address: None, mango_account: None }
@@ -249,7 +246,7 @@ impl MangoAccountCookie {
         let instructions = [
             mango::instruction::init_mango_account(
                 &mango_program_id,
-                &mango_group_cookie.address.unwrap(),
+                &mango_group_cookie.address,
                 &mango_account_pk,
                 &user_pk,
             ).unwrap()
@@ -295,8 +292,8 @@ impl SpotMarketCookie {
         let mango_program_id = test.mango_program_id;
         let serum_program_id = test.serum_program_id;
 
-        let mango_group = mango_group_cookie.mango_group.unwrap();
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
 
         let mut spot_market_cookie =
             test.list_spot_market(mint_index).await;
@@ -411,7 +408,7 @@ impl PerpMarketCookie {
         mint_index: usize,
     ) -> Self {
         let mango_program_id = test.mango_program_id;
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group_pk = mango_group_cookie.address;
         let perp_market_pk = test.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
         let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);

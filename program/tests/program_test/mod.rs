@@ -508,83 +508,6 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn with_mango_group(&mut self) -> (Pubkey, MangoGroup) {
-        let mango_program_id = self.mango_program_id;
-        let serum_program_id = self.serum_program_id;
-
-        let mango_group_pk = self.create_account(size_of::<MangoGroup>(), &mango_program_id).await;
-        let mango_cache_pk = self.create_account(size_of::<MangoCache>(), &mango_program_id).await;
-        let (signer_pk, signer_nonce) =
-            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
-        let admin_pk = self.context.payer.pubkey();
-
-        let quote_mint_pk = self.mints[self.quote_index].pubkey.unwrap();
-        let quote_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
-        let quote_node_bank_pk =
-            self.create_account(size_of::<NodeBank>(), &mango_program_id).await;
-        let quote_root_bank_pk =
-            self.create_account(size_of::<RootBank>(), &mango_program_id).await;
-        let dao_vault_pk = self.create_token_account(&signer_pk, &quote_mint_pk).await;
-        let msrm_vault_pk = self.create_token_account(&signer_pk, &msrm_token::ID).await;
-
-        let quote_optimal_util = I80F48::from_num(0.7);
-        let quote_optimal_rate = I80F48::from_num(0.06);
-        let quote_max_rate = I80F48::from_num(1.5);
-
-        let instructions = [
-            mango::instruction::init_mango_group(
-                &mango_program_id,
-                &mango_group_pk,
-                &signer_pk,
-                &admin_pk,
-                &quote_mint_pk,
-                &quote_vault_pk,
-                &quote_node_bank_pk,
-                &quote_root_bank_pk,
-                &dao_vault_pk,
-                &msrm_vault_pk,
-                &mango_cache_pk,
-                &serum_program_id,
-                signer_nonce,
-                5,
-                quote_optimal_util,
-                quote_optimal_rate,
-                quote_max_rate,
-            )
-            .unwrap()
-        ];
-
-        self.process_transaction(&instructions, None).await.unwrap();
-
-        let mango_group = self.load_account::<MangoGroup>(mango_group_pk).await;
-        return (mango_group_pk, mango_group);
-    }
-
-    #[allow(dead_code)]
-    pub async fn with_mango_account(
-        &mut self,
-        mango_group_pk: &Pubkey,
-        user_index: usize,
-    ) -> (Pubkey, MangoAccount) {
-        let mango_program_id = self.mango_program_id;
-        let mango_account_pk =
-            self.create_account(size_of::<MangoAccount>(), &mango_program_id).await;
-        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let user_pk = user.pubkey();
-
-        let instructions = [mango::instruction::init_mango_account(
-            &mango_program_id,
-            &mango_group_pk,
-            &mango_account_pk,
-            &user_pk,
-        )
-        .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
-        let mango_account = self.load_account::<MangoAccount>(mango_account_pk).await;
-        return (mango_account_pk, mango_account);
-    }
-
-    #[allow(dead_code)]
     pub async fn with_mango_cache(
         &mut self,
         mango_group: &MangoGroup,
@@ -724,8 +647,8 @@ impl MangoProgramTest {
         order_type: OrderType,
     ) {
         let mango_program_id = self.mango_program_id;
-        let mango_group = mango_group_cookie.mango_group.unwrap();
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
         let perp_market = perp_market_cookie.perp_market.unwrap();
@@ -1068,8 +991,8 @@ impl MangoProgramTest {
 
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
-        let mango_group = mango_group_cookie.mango_group.unwrap();
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
         let mint_index = spot_market_cookie.mint.index;
@@ -1157,8 +1080,8 @@ impl MangoProgramTest {
     ) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
-        let mango_group = mango_group_cookie.mango_group.unwrap();
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
         let mint_index = spot_market_cookie.mint.index;
@@ -1217,8 +1140,8 @@ impl MangoProgramTest {
         amount: u64,
     ) {
         let mango_program_id = self.mango_program_id;
-        let mango_group = mango_group_cookie.mango_group.unwrap();
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
@@ -1262,8 +1185,8 @@ impl MangoProgramTest {
         allow_borrow: bool,
     ) {
         let mango_program_id = self.mango_program_id;
-        let mango_group = mango_group_cookie.mango_group.unwrap();
-        let mango_group_pk = mango_group_cookie.address.unwrap();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
 

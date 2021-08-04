@@ -30,11 +30,11 @@ async fn test_init_perp_markets() {
 
     // Act
     // Need to add oracles first in order to add perp_markets
-    test.add_oracles_to_mango_group(&mango_group_cookie.address.unwrap()).await;
+    test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
     let perp_market_cookies =
         mango_group_cookie.add_perp_markets(&mut test, config.num_mints - 1).await;
     mango_group_cookie.mango_group =
-        Some(test.load_account::<MangoGroup>(mango_group_cookie.address.unwrap()).await);
+        test.load_account::<MangoGroup>(mango_group_cookie.address).await;
     // Assert
     mango_group_cookie.run_keeper(&mut test).await;
 
