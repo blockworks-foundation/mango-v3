@@ -378,7 +378,7 @@ impl SpotMarketCookie {
     pub async fn settle_funds(
         &mut self,
         test: &mut MangoProgramTest,
-        mango_group_cookie: &MangoGroupCookie,
+        mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
     ) {
         test.settle_funds(
@@ -386,6 +386,9 @@ impl SpotMarketCookie {
             self,
             user_index,
         ).await;
+
+        mango_group_cookie.mango_accounts[user_index].mango_account =
+            Some(test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address.unwrap()).await);
     }
 }
 

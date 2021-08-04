@@ -216,14 +216,14 @@ async fn test_match_spot_order() {
     // Settling bidder
     spot_market_cookie.settle_funds(
         &mut test,
-        &mango_group_cookie,
+        &mut mango_group_cookie,
         bidder_user_index,
     ).await;
 
     // Settling asker
     spot_market_cookie.settle_funds(
         &mut test,
-        &mango_group_cookie,
+        &mut mango_group_cookie,
         asker_user_index,
     ).await;
 
