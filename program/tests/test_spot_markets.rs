@@ -135,7 +135,6 @@ async fn test_match_spot_order() {
     let bidder_user_index: usize = 0;
     let asker_user_index: usize = 1;
     let mint_index: usize = 0;
-    let base_mint = test.with_mint(mint_index);
     let base_price = 10_000;
 
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;

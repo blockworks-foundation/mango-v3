@@ -112,7 +112,7 @@ async fn test_place_perp_order() {
 }
 
 #[tokio::test]
-async fn test_worst_case_x() {
+async fn test_worst_case_v1() {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -200,7 +200,7 @@ async fn test_worst_case_x() {
 }
 
 #[tokio::test]
-async fn test_worst_case_scenario_with_fractions() {
+async fn test_worst_case_with_fractions() {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -287,7 +287,7 @@ async fn test_worst_case_scenario_with_fractions() {
 }
 
 #[tokio::test]
-async fn test_worst_case_scenario_with_fractions_x10() {
+async fn test_worst_case_with_fractions_x10() {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 11 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -319,7 +319,7 @@ async fn test_worst_case_scenario_with_fractions_x10() {
 
     // Step 2: Make deposits from 2 accounts (Borrower / Lender)
     let mut borrower_deposits = vec![0; config.num_mints];
-    let mut lender_deposits = vec![10; config.num_mints];
+    let lender_deposits = vec![10; config.num_mints];
     borrower_deposits[test.quote_index] = 110_000;
     let user_deposits = vec![
         (borrower_user_index, &borrower_deposits),

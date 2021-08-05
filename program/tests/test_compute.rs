@@ -22,7 +22,7 @@ async fn test_add_all_markets_to_mango_group() {
     let user_index = 0;
     println!("Performing deposit");
 
-    let mut default_user_deposits = vec![1000000; config.num_mints];
+    let default_user_deposits = vec![1000000; config.num_mints];
     let user_deposits = vec![
         (user_index, &default_user_deposits),
     ];

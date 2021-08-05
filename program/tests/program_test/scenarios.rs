@@ -1,5 +1,6 @@
 use crate::*;
 
+#[allow(dead_code)]
 pub async fn deposit_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
@@ -26,6 +27,7 @@ pub async fn deposit_scenario(
 
 }
 
+#[allow(dead_code)]
 pub async fn match_single_spot_order_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
@@ -33,6 +35,7 @@ pub async fn match_single_spot_order_scenario(
     asker_user_index: usize,
     mint_index: usize,
     price: u64,
+    // TODO: Allow order size selection
 ) {
 
     // Step 2: Place a bid for 1 BTC @ 10_000 USDC

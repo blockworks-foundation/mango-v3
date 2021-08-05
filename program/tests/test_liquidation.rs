@@ -1,16 +1,11 @@
 // Tests related to liquidations
 mod program_test;
-use mango::{matching::*, state::*};
+use mango::state::*;
 use program_test::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
-use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use fixed::types::I80F48;
-use std::num::NonZeroU64;
-use std::{mem::size_of, mem::size_of_val};
-
-use serum_dex::instruction::{NewOrderInstructionV3, SelfTradeBehavior};
 
 #[tokio::test]
 async fn test_spot_liquidation() {
@@ -32,13 +27,12 @@ async fn test_spot_liquidation() {
     let asker_user_index: usize = 1;
     let liqor_user_index: usize = 2;
     let mint_index: usize = 0;
-    let base_mint = test.with_mint(mint_index);
     let base_price = 15_000;
 
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
 
     // Act
-    // Step 1: Perform deposits (Bidder / Asker / Liqor)
+    // Step 1: Make deposits from 3 accounts (Bidder / Asker / Liqor)
     let mut bidder_deposits = vec![0; config.num_mints];
     let mut asker_deposits = vec![0; config.num_mints];
     let mut liqor_deposits = vec![0; config.num_mints];
