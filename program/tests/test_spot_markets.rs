@@ -96,13 +96,11 @@ async fn test_place_spot_order() {
     // Step 2: Place a spot order for BTC
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let starting_spot_order_id = 1000;
     let mut spot_market_cookie = mango_group_cookie.spot_markets[mint_index];
     spot_market_cookie.place_order(
         &mut test,
         &mut mango_group_cookie,
         user_index,
-        starting_spot_order_id + mint_index as u64,
         serum_dex::matching::Side::Bid,
         1,
         base_price,

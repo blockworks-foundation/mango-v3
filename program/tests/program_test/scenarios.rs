@@ -42,12 +42,10 @@ pub async fn match_single_spot_order_scenario(
     mango_group_cookie.run_keeper(test).await;
 
     let mut spot_market_cookie = mango_group_cookie.spot_markets[mint_index];
-    let starting_spot_order_id = 1000;
     spot_market_cookie.place_order(
         test,
         mango_group_cookie,
         bidder_user_index,
-        starting_spot_order_id as u64,
         serum_dex::matching::Side::Bid,
         1,
         price,
@@ -61,7 +59,6 @@ pub async fn match_single_spot_order_scenario(
         test,
         mango_group_cookie,
         asker_user_index,
-        starting_spot_order_id + 1 as u64,
         serum_dex::matching::Side::Ask,
         1,
         price,
