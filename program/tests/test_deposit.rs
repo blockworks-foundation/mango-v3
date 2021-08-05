@@ -57,7 +57,7 @@ async fn test_deposit_succeeds() {
     assert_eq!(mango_vault_balance, deposit_amount);
 
     let mango_account_deposit = test.with_mango_account_deposit(
-        &mango_group_cookie.mango_accounts[user_index].address.unwrap(),
+        &mango_group_cookie.mango_accounts[user_index].address,
         test.quote_index,
     ).await;
     assert_eq!(mango_account_deposit, deposit_amount);

@@ -658,10 +658,10 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
-        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
-        let perp_market = perp_market_cookie.perp_market.unwrap();
-        let perp_market_pk = perp_market_cookie.address.unwrap();
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
         let market_index = perp_market_cookie.mint.index;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
@@ -994,8 +994,8 @@ impl MangoProgramTest {
         let serum_program_id = self.serum_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
-        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let mint_index = spot_market_cookie.mint.index;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
@@ -1083,8 +1083,8 @@ impl MangoProgramTest {
         let serum_program_id = self.serum_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
-        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let mint_index = spot_market_cookie.mint.index;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
@@ -1143,7 +1143,7 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let user_token_account = self.with_user_token_account(user_index, mint_index);
@@ -1188,8 +1188,8 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
-        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address.unwrap();
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let user_token_account = self.with_user_token_account(user_index, mint_index);

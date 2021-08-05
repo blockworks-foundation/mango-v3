@@ -94,7 +94,7 @@ async fn place_perp_order_scenario(order_id: u64, order_side: Side) {
     // Assert
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
+    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
     let (client_order_id, _order_id, side) = mango_account.perp_accounts[mint_index]
         .open_orders
         .orders_with_client_ids()
@@ -202,7 +202,7 @@ async fn test_worst_case_scenario() {
     // Assert
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account.unwrap();
+    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
     for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
         assert_ne!(mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
     }
@@ -273,7 +273,7 @@ async fn test_worst_case_scenario_with_fractions() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     let lender_base_deposit =
-        &mango_group_cookie.mango_accounts[lender_user_index].mango_account.unwrap()
+        &mango_group_cookie.mango_accounts[lender_user_index].mango_account
         .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
     assert_ne!(lender_base_deposit.to_string(), I80F48::from_num(base_deposit_amount).to_string());
 
@@ -295,7 +295,7 @@ async fn test_worst_case_scenario_with_fractions() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     let lender_mango_account =
-        mango_group_cookie.mango_accounts[lender_user_index].mango_account.unwrap();
+        mango_group_cookie.mango_accounts[lender_user_index].mango_account;
     assert_ne!(lender_mango_account.spot_open_orders[mint_index], Pubkey::default());
 }
 
@@ -378,7 +378,7 @@ async fn test_worst_case_scenario_with_fractions_x10() {
         let base_mint = test.with_mint(mint_index);
         let base_deposit_amount = (10 * base_mint.unit) as u64;
         let lender_base_deposit =
-            &mango_group_cookie.mango_accounts[lender_user_index].mango_account.unwrap()
+            &mango_group_cookie.mango_accounts[lender_user_index].mango_account
             .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
         assert_ne!(lender_base_deposit.to_string(), I80F48::from_num(base_deposit_amount).to_string());
     }
@@ -402,7 +402,7 @@ async fn test_worst_case_scenario_with_fractions_x10() {
     // Assert
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let lender_mango_account = mango_group_cookie.mango_accounts[lender_user_index].mango_account.unwrap();
+    let lender_mango_account = mango_group_cookie.mango_accounts[lender_user_index].mango_account;
     for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
         assert_ne!(
             lender_mango_account.spot_open_orders[spot_open_orders_index],
@@ -410,5 +410,3 @@ async fn test_worst_case_scenario_with_fractions_x10() {
         );
     }
 }
-
-ls -v | cat -n | while read n f; do mv -n "$f" "H_$n.png"; done 

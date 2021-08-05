@@ -201,7 +201,7 @@ impl MangoGroupCookie {
         let oracle_pks = mango_group.oracles.iter()
             .filter(|x| **x != Pubkey::default())
             .map(|x| *x).collect::<Vec<Pubkey>>();
-        let perp_market_pks = self.perp_markets.iter().map(|x| x.address.unwrap()).collect::<Vec<Pubkey>>();
+        let perp_market_pks = self.perp_markets.iter().map(|x| x.address).collect::<Vec<Pubkey>>();
 
         test.advance_clock().await;
         test.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks[..]).await;
@@ -217,19 +217,14 @@ impl MangoGroupCookie {
 
 pub struct MangoAccountCookie {
 
-    pub address: Option<Pubkey>,
+    pub address: Pubkey,
 
-    pub mango_account: Option<MangoAccount>,
+    pub mango_account: MangoAccount,
 
 }
 
 impl MangoAccountCookie {
     // TODO: Maybe move deposit and withdraw here
-    #[allow(dead_code)]
-    pub fn default() -> Self {
-        MangoAccountCookie { address: None, mango_account: None }
-    }
-
     #[allow(dead_code)]
     pub async fn init(
         test: &mut MangoProgramTest,
@@ -253,7 +248,7 @@ impl MangoAccountCookie {
         ];
         test.process_transaction(&instructions, Some(&[&user])).await.unwrap();
         let mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-        MangoAccountCookie { address: Some(mango_account_pk), mango_account: Some(mango_account) }
+        MangoAccountCookie { address: mango_account_pk, mango_account: mango_account }
 
     }
 
@@ -371,7 +366,7 @@ impl SpotMarketCookie {
         ).await;
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
-            Some(test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address.unwrap()).await);
+            test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
     }
 
     pub async fn settle_funds(
@@ -387,16 +382,16 @@ impl SpotMarketCookie {
         ).await;
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
-            Some(test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address.unwrap()).await);
+            test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
     }
 }
 
 #[derive(Copy, Clone)]
 pub struct PerpMarketCookie {
 
-    pub address: Option<Pubkey>,
+    pub address: Pubkey,
 
-    pub perp_market: Option<PerpMarket>,
+    pub perp_market: PerpMarket,
 
     pub mint: MintCookie,
 
@@ -465,8 +460,8 @@ impl PerpMarketCookie {
 
         let perp_market = test.load_account::<PerpMarket>(perp_market_pk).await;
         PerpMarketCookie {
-            address: Some(perp_market_pk),
-            perp_market: Some(perp_market),
+            address: perp_market_pk,
+            perp_market: perp_market,
             mint: test.with_mint(mint_index),
         }
     }
@@ -496,7 +491,7 @@ impl PerpMarketCookie {
         ).await;
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
-            Some(test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address.unwrap()).await);
+            test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
 
     }
 
