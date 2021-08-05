@@ -2,6 +2,7 @@
 mod program_test;
 use program_test::*;
 use program_test::cookies::*;
+use program_test::scenarios::*;
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use fixed::types::I80F48;
@@ -81,14 +82,15 @@ async fn test_place_spot_order() {
 
     // Act
     // Step 1: Deposit 10_000 USDC into mango account
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    let deposit_amount = (base_price * test.quote_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
-        user_index,
-        test.quote_index,
-        deposit_amount,
+    let mut default_user_deposits = vec![0; config.num_mints];
+    default_user_deposits[test.quote_index] = base_price;
+    let user_deposits = vec![
+        (user_index, &default_user_deposits),
+    ];
+    deposit_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        user_deposits,
     ).await;
 
     // Step 2: Place a spot order for BTC
@@ -139,84 +141,27 @@ async fn test_match_spot_order() {
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
 
     // Act
-    // Step 1: Make deposits from 2 accounts (Bidder / Asker)
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    // Deposit 10_000 USDC as the bidder
-    let quote_deposit_amount = (10_000 * test.quote_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
-        bidder_user_index,
-        test.quote_index,
-        quote_deposit_amount,
+    let mut bidder_deposits = vec![0; config.num_mints];
+    let mut asker_deposits = vec![0; config.num_mints];
+    bidder_deposits[test.quote_index] = base_price;
+    asker_deposits[mint_index] = 1;
+    let user_deposits = vec![
+        (bidder_user_index, &bidder_deposits),
+        (asker_user_index, &asker_deposits),
+    ];
+    deposit_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        user_deposits,
     ).await;
 
-    // Deposit 1 BTC as the asker
-    let base_deposit_amount = (1 * base_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
+    match_single_spot_order_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        bidder_user_index,
         asker_user_index,
         mint_index,
-        base_deposit_amount,
-    ).await;
-
-    // Step 2: Place a bid for 1 BTC @ 10_000 USDC
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    let mut spot_market_cookie = mango_group_cookie.spot_markets[mint_index];
-    let starting_spot_order_id = 1000;
-    spot_market_cookie.place_order(
-        &mut test,
-        &mut mango_group_cookie,
-        bidder_user_index,
-        starting_spot_order_id as u64,
-        serum_dex::matching::Side::Bid,
-        1,
         base_price,
-    ).await;
-
-
-    // Step 3: Place an ask for 1 BTC @ 10_000 USDC
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    spot_market_cookie.place_order(
-        &mut test,
-        &mut mango_group_cookie,
-        asker_user_index,
-        starting_spot_order_id + 1 as u64,
-        serum_dex::matching::Side::Ask,
-        1,
-        base_price,
-    ).await;
-
-    // Step 4: Consume events
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    test.consume_events(
-        &spot_market_cookie,
-        vec![
-            &mango_group_cookie.mango_accounts[bidder_user_index].mango_account.spot_open_orders[0],
-            &mango_group_cookie.mango_accounts[asker_user_index].mango_account.spot_open_orders[0],
-        ],
-        bidder_user_index,
-        mint_index,
-    ).await;
-
-    // Step 5: Settle funds so that deposits get updated
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    // Settling bidder
-    spot_market_cookie.settle_funds(
-        &mut test,
-        &mut mango_group_cookie,
-        bidder_user_index,
-    ).await;
-
-    // Settling asker
-    spot_market_cookie.settle_funds(
-        &mut test,
-        &mut mango_group_cookie,
-        asker_user_index,
     ).await;
 
     // Assert

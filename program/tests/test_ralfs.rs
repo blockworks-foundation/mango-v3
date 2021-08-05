@@ -3,6 +3,7 @@ mod program_test;
 use mango::{matching::*, state::*};
 use program_test::*;
 use program_test::cookies::*;
+use program_test::scenarios::*;
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use std::num::NonZeroU64;
@@ -64,14 +65,15 @@ async fn place_perp_order_scenario(order_id: u64, order_side: Side) {
 
     // Act
     // Step 1: Deposit 10_000 USDC into mango account
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    let deposit_amount = (base_price * test.quote_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
-        user_index,
-        test.quote_index,
-        deposit_amount,
+    let mut default_user_deposits = vec![0; config.num_mints];
+    default_user_deposits[test.quote_index] = base_price;
+    let user_deposits = vec![
+        (user_index, &default_user_deposits),
+    ];
+    deposit_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        user_deposits,
     ).await;
 
     // Step 2: Place a perp order for 1 BTC @ 10_000
@@ -110,7 +112,7 @@ async fn test_place_perp_order() {
 }
 
 #[tokio::test]
-async fn test_worst_case_scenario() {
+async fn test_worst_case_x() {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -142,25 +144,16 @@ async fn test_worst_case_scenario() {
     }
 
     // Step 2: Deposit all tokens into mango account
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    for mint_index in 0..test.num_mints {
-        let mint = test.with_mint(mint_index);
-
-        // Deposit quote mint for the regular deposit * num_orders
-        let mint_deposit_amount = if mint_index == test.quote_index {
-            (base_price * test.quote_mint.unit) * (num_orders as u64)
-        } else {
-            1 * mint.unit
-        };
-
-        test.perform_deposit(
-            &mango_group_cookie,
-            user_index,
-            mint_index,
-            mint_deposit_amount as u64,
-        ).await;
-    }
+    let mut default_user_deposits = vec![1; config.num_mints];
+    default_user_deposits[test.quote_index] = base_price * num_orders as u64;
+    let user_deposits = vec![
+        (user_index, &default_user_deposits),
+    ];
+    deposit_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        user_deposits,
+    ).await;
 
     // Step 3: Place `num_orders` spot orders
     mango_group_cookie.run_keeper(&mut test).await;
@@ -235,23 +228,18 @@ async fn test_worst_case_scenario_with_fractions() {
     // Act
 
     // Step 1: Make deposits from 2 accounts (Borrower / Lender)
-    mango_group_cookie.run_keeper(&mut test).await;
-    // Deposit 100_000 USDC as the borrower
-    let quote_deposit_amount = (100_000 * test.quote_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
-        borrower_user_index,
-        test.quote_index,
-        quote_deposit_amount,
-    ).await;
-
-    // Deposit 10 BTC as the lender
-    let base_deposit_amount = (10 * base_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
-        lender_user_index,
-        mint_index,
-        base_deposit_amount,
+    let mut borrower_deposits = vec![0; config.num_mints];
+    let mut lender_deposits = vec![0; config.num_mints];
+    borrower_deposits[test.quote_index] = 100_000;
+    lender_deposits[mint_index] = 10;
+    let user_deposits = vec![
+        (borrower_user_index, &borrower_deposits),
+        (lender_user_index, &lender_deposits),
+    ];
+    deposit_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        user_deposits,
     ).await;
 
     // Step 2: Withdraw (with borrow) 1 BTC @ 10000 as the borrower
@@ -269,6 +257,8 @@ async fn test_worst_case_scenario_with_fractions() {
     // Step 3: Check that lenders deposit is not a nice number anymore (> 2 BTC)
     mango_group_cookie.run_keeper(&mut test).await;
 
+    let base_mint = test.with_mint(mint_index);
+    let base_deposit_amount = (lender_deposits[mint_index] * base_mint.unit) as u64;
     let lender_base_deposit =
         &mango_group_cookie.mango_accounts[lender_user_index].mango_account
         .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
@@ -327,32 +317,21 @@ async fn test_worst_case_scenario_with_fractions_x10() {
         mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
     }
 
-    // Step 2: Deposit 110_000 USDC as the borrower for collateral
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    let quote_deposit_amount = (110_000 * test.quote_mint.unit) as u64;
-    test.perform_deposit(
-        &mango_group_cookie,
-        borrower_user_index,
-        test.quote_index,
-        quote_deposit_amount,
+    // Step 2: Make deposits from 2 accounts (Borrower / Lender)
+    let mut borrower_deposits = vec![0; config.num_mints];
+    let mut lender_deposits = vec![10; config.num_mints];
+    borrower_deposits[test.quote_index] = 110_000;
+    let user_deposits = vec![
+        (borrower_user_index, &borrower_deposits),
+        (lender_user_index, &lender_deposits),
+    ];
+    deposit_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        user_deposits,
     ).await;
 
-    // Step 3: Deposit 10 of each mint as the lender
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        let base_mint = test.with_mint(mint_index);
-        let base_deposit_amount = (10 * base_mint.unit) as u64;
-        test.perform_deposit(
-            &mango_group_cookie,
-            lender_user_index,
-            mint_index,
-            base_deposit_amount,
-        ).await;
-    }
-
-    // Step 4: Withdraw (with borrow) 1 of each mint @ 10000 as the borrower
+    // Step 3: Withdraw (with borrow) 1 of each mint @ 10000 as the borrower
     mango_group_cookie.run_keeper(&mut test).await;
 
     for mint_index in 0..num_orders {
@@ -367,7 +346,7 @@ async fn test_worst_case_scenario_with_fractions_x10() {
         ).await;
     }
 
-    // Step 6: Check that lenders all 10 deposits are not a nice number anymore (> 2 mint)
+    // Step 4: Check that lenders all 10 deposits are not a nice number anymore (> 2 mint)
     mango_group_cookie.run_keeper(&mut test).await;
 
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
@@ -379,7 +358,7 @@ async fn test_worst_case_scenario_with_fractions_x10() {
         assert_ne!(lender_base_deposit.to_string(), I80F48::from_num(base_deposit_amount).to_string());
     }
 
-    // Step 7: Place a spot order ASK for each mint
+    // Step 5: Place a spot order ASK for each mint
     mango_group_cookie.run_keeper(&mut test).await;
 
     let starting_spot_order_id = 1000;

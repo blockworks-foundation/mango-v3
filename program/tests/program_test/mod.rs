@@ -29,6 +29,7 @@ use mango::{
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
 
+pub mod scenarios;
 pub mod cookies;
 use self::cookies::*;
 
@@ -1216,17 +1217,20 @@ impl MangoProgramTest {
     #[allow(dead_code)]
     pub async fn perform_liquidate_token_and_token(
         &mut self,
-        mango_group: &MangoGroup,
-        mango_group_pk: &Pubkey,
-        liqee_mango_account_pk: &Pubkey,
-        liqee_mango_account: &MangoAccount,
-        liqor_mango_account_pk: &Pubkey,
-        liqor_mango_account: &MangoAccount,
+        mango_group_cookie: &mut MangoGroupCookie,
+        liqee_index: usize,
         liqor_index: usize,
         asset_index: usize,
         liab_index: usize,
     ) {
         let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
+        let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;
+        let liqor_mango_account = mango_group_cookie.mango_accounts[liqor_index].mango_account;
+        let liqor_mango_account_pk = mango_group_cookie.mango_accounts[liqor_index].address;
+
         let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
 
         let (asset_root_bank_pk, asset_root_bank) = self.with_root_bank(&mango_group, asset_index).await;
@@ -1257,6 +1261,12 @@ impl MangoProgramTest {
         ];
 
         self.process_transaction(&instructions, Some(&[&liqor])).await.unwrap();
+
+        mango_group_cookie.mango_accounts[liqee_index].mango_account =
+            self.load_account::<MangoAccount>(liqee_mango_account_pk).await;
+
+        mango_group_cookie.mango_accounts[liqor_index].mango_account =
+            self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
 
     }
 

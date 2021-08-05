@@ -26,7 +26,7 @@ pub struct MintCookie {
 }
 
 pub struct MangoGroupCookie {
-
+    // TODO: Add a counter that can count order_ids incrementally
     pub address: Pubkey,
 
     pub mango_group: MangoGroup,
@@ -352,11 +352,14 @@ impl SpotMarketCookie {
         size: u64,
         price: u64,
     ) {
+        let limit_price = test.price_number_to_lots(&self.mint, price);
+        let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
+        let max_native_pc_qty_including_fees = test.quote_size_number_to_lots(&self.mint, size * limit_price);
         let order = serum_dex::instruction::NewOrderInstructionV3 {
             side: side, //serum_dex::matching::Side::Bid,
-            limit_price: NonZeroU64::new(test.price_number_to_lots(&self.mint, price)).unwrap(),
-            max_coin_qty: NonZeroU64::new(test.base_size_number_to_lots(&self.mint, size)).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(test.quote_size_number_to_lots(&self.mint, size * price) as u64).unwrap(),
+            limit_price: NonZeroU64::new(limit_price).unwrap(),
+            max_coin_qty: NonZeroU64::new(max_coin_qty).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(max_native_pc_qty_including_fees).unwrap(),
             self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: order_id,
