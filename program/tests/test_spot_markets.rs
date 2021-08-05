@@ -1,16 +1,10 @@
 // Tests related to spot markets
 mod program_test;
-use mango::{matching::*, state::*};
 use program_test::*;
 use program_test::cookies::*;
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
-use std::num::NonZeroU64;
 use fixed::types::I80F48;
-use std::{mem::size_of, mem::size_of_val};
-
-use serum_dex::instruction::{NewOrderInstructionV3, SelfTradeBehavior};
-
 
 #[tokio::test]
 async fn test_list_spot_market_on_serum() {
@@ -54,8 +48,7 @@ async fn test_init_spot_markets() {
 
     // Act
     test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
-    let spot_market_cookies =
-        mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1).await;
+    mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1).await;
 
     // Assert
     // TODO: Figure out how to assert
@@ -82,7 +75,6 @@ async fn test_place_spot_order() {
 
     let user_index: usize = 0;
     let mint_index: usize = 0;
-    let base_mint = test.with_mint(mint_index);
     let base_price = 10000;
 
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -237,12 +229,12 @@ async fn test_match_spot_order() {
         &mango_group_cookie.mango_accounts[asker_user_index].mango_account
         .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
 
-    let bidder_quote_deposit =
-        &mango_group_cookie.mango_accounts[bidder_user_index].mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
-    let asker_quote_deposit =
-        &mango_group_cookie.mango_accounts[asker_user_index].mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
+    // let bidder_quote_deposit =
+    //     &mango_group_cookie.mango_accounts[bidder_user_index].mango_account
+    //     .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
+    // let asker_quote_deposit =
+    //     &mango_group_cookie.mango_accounts[asker_user_index].mango_account
+    //     .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
 
     assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(1000000).to_string());
     assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());

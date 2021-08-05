@@ -7,7 +7,6 @@ use mango_common::Loadable;
 use solana_program::{
     account_info::AccountInfo,
     clock::{Clock, UnixTimestamp},
-    program_error::ProgramError,
     program_option::COption,
     program_pack::Pack,
     pubkey::*,
@@ -24,7 +23,7 @@ use solana_sdk::{
 use spl_token::{state::*, *};
 
 use mango::{
-    entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
+    entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*,
 };
 
 use serum_dex::instruction::NewOrderInstructionV3;
@@ -571,6 +570,7 @@ impl MangoProgramTest {
         oracle_pk: &Pubkey,
         oracle_price: I80F48,
     ) {
+
         let mango_program_id = self.mango_program_id;
         let instructions = [
             mango::instruction::set_oracle(
@@ -590,30 +590,21 @@ impl MangoProgramTest {
             .unwrap(),
         ];
         self.process_transaction(&instructions, None).await.unwrap();
+
     }
 
     #[allow(dead_code)]
-    pub fn with_order_price(
-        &mut self,
-        base_mint: &MintCookie,
-        price: u64,
-    ) -> u64 {
-        return ((price) * self.quote_mint.unit * base_mint.base_lot)
-            / (base_mint.unit * base_mint.quote_lot);
-    }
-
-    #[allow(dead_code)]
-    pub fn baseSizeNumberToLots(&mut self, mint: &MintCookie, quantity: u64) -> u64 {
+    pub fn base_size_number_to_lots(&mut self, mint: &MintCookie, quantity: u64) -> u64 {
         return (quantity * mint.unit) / mint.base_lot;
     }
 
     #[allow(dead_code)]
-    pub fn quoteSizeNumberToLots(&mut self, mint: &MintCookie, quantity: u64) -> u64 {
+    pub fn quote_size_number_to_lots(&mut self, mint: &MintCookie, quantity: u64) -> u64 {
         return (quantity * self.quote_mint.unit) / mint.quote_lot;
     }
 
     #[allow(dead_code)]
-    pub fn priceNumberToLots(&mut self, mint: &MintCookie, price: u64) -> u64 {
+    pub fn price_number_to_lots(&mut self, mint: &MintCookie, price: u64) -> u64 {
         return (price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot);
     }
 
@@ -630,6 +621,7 @@ impl MangoProgramTest {
         let root_bank_pk = mango_group.tokens[actual_mint_index].root_bank;
         let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
         return (root_bank_pk, root_bank);
+
     }
 
     #[allow(dead_code)]
@@ -638,9 +630,11 @@ impl MangoProgramTest {
         root_bank: &RootBank,
         bank_index: usize,
     ) -> (Pubkey, NodeBank) {
+
         let node_bank_pk = root_bank.node_banks[bank_index];
         let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
         return (node_bank_pk, node_bank);
+
     }
 
     #[allow(dead_code)]
@@ -655,6 +649,7 @@ impl MangoProgramTest {
         order_id: u64,
         order_type: OrderType,
     ) {
+
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -662,7 +657,6 @@ impl MangoProgramTest {
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let perp_market = perp_market_cookie.perp_market;
         let perp_market_pk = perp_market_cookie.address;
-        let market_index = perp_market_cookie.mint.index;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let instructions = [
@@ -1194,7 +1188,7 @@ impl MangoProgramTest {
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let user_token_account = self.with_user_token_account(user_index, mint_index);
 
-        let (signer_pk, signer_nonce) =
+        let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
 
         let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
@@ -1219,6 +1213,7 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
+    #[allow(dead_code)]
     pub async fn perform_liquidate_token_and_token(
         &mut self,
         mango_group: &MangoGroup,
@@ -1235,10 +1230,10 @@ impl MangoProgramTest {
         let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
 
         let (asset_root_bank_pk, asset_root_bank) = self.with_root_bank(&mango_group, asset_index).await;
-        let (asset_node_bank_pk, asset_node_bank) = self.with_node_bank(&asset_root_bank, 0).await;
+        let (asset_node_bank_pk, _asset_node_bank) = self.with_node_bank(&asset_root_bank, 0).await;
 
         let (liab_root_bank_pk, liab_root_bank) = self.with_root_bank(&mango_group, liab_index).await;
-        let (liab_node_bank_pk, liab_node_bank) = self.with_node_bank(&liab_root_bank, 0).await;
+        let (liab_node_bank_pk, _liab_node_bank) = self.with_node_bank(&liab_root_bank, 0).await;
 
         let max_liab_transfer = I80F48::from_num(10_000); // TODO: This needs to adapt to the situation probably
 

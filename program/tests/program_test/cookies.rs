@@ -2,38 +2,27 @@ use std::mem::size_of;
 use std::num::NonZeroU64;
 use fixed::types::I80F48;
 
+use solana_program::pubkey::Pubkey;
 use solana_sdk::{
-    instruction::Instruction,
     signature::{Keypair, Signer},
-    transaction::Transaction,
-    transport::TransportError,
-};
-use solana_program::{
-    account_info::AccountInfo,
-    clock::{Clock, UnixTimestamp},
-    program_error::ProgramError,
-    program_option::COption,
-    program_pack::Pack,
-    pubkey::*,
-    rent::*,
-    system_instruction, sysvar,
 };
 
 use mango::{
-    entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, queue::*, state::*, utils::*,
+    ids::*, matching::*, queue::*, state::*, utils::*,
 };
 
 use crate::*;
 
 #[derive(Copy, Clone)]
 pub struct MintCookie {
-    // pub symbol: String,
+
     pub index: usize,
     pub decimals: u8,
     pub unit: u64,
     pub base_lot: u64,
     pub quote_lot: u64,
     pub pubkey: Option<Pubkey>,
+
 }
 
 pub struct MangoGroupCookie {
@@ -60,6 +49,7 @@ impl MangoGroupCookie {
     pub async fn default(
         test: &mut MangoProgramTest,
     ) -> Self {
+
         let mango_program_id = test.mango_program_id;
         let serum_program_id = test.serum_program_id;
 
@@ -111,6 +101,7 @@ impl MangoGroupCookie {
         let mango_cache = test.load_account::<MangoCache>(mango_group.mango_cache).await;
 
         MangoGroupCookie { address: mango_group_pk, mango_group: mango_group, mango_cache: mango_cache, mango_accounts: vec![], spot_markets: vec![], perp_markets: vec![] }
+
     }
 
     #[allow(dead_code)]
@@ -120,11 +111,13 @@ impl MangoGroupCookie {
         num_users: usize,
         num_markets: usize,
     ) {
+
         test.add_oracles_to_mango_group(&self.address).await;
         self.mango_accounts = self.add_mango_accounts(test, num_users).await;
         self.spot_markets = self.add_spot_markets(test, num_markets).await;
         self.perp_markets = self.add_perp_markets(test, num_markets).await;
         self.mango_group = test.load_account::<MangoGroup>(self.address).await;
+
     }
 
     #[allow(dead_code)]
@@ -133,11 +126,13 @@ impl MangoGroupCookie {
         test: &mut MangoProgramTest,
         num_users: usize,
     ) -> Vec<MangoAccountCookie> {
+
         let mut mango_accounts = Vec::new();
         for i in 0..num_users {
             mango_accounts.push(MangoAccountCookie::init(test, self, i).await);
         }
         mango_accounts
+
     }
 
     #[allow(dead_code)]
@@ -145,12 +140,14 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
         num_markets: usize,
-    ) -> (Vec<PerpMarketCookie>) {
+    ) -> Vec<PerpMarketCookie> {
+
         let mut perp_markets = Vec::new();
         for i in 0..num_markets {
             perp_markets.push(PerpMarketCookie::init(test, self, i).await);
         }
         perp_markets
+
     }
 
     #[allow(dead_code)]
@@ -158,12 +155,14 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
         num_markets: usize,
-    ) -> (Vec<SpotMarketCookie>) {
+    ) -> Vec<SpotMarketCookie> {
+
         let mut spot_markets = Vec::new();
         for i in 0..num_markets {
             spot_markets.push(SpotMarketCookie::init(test, self, i).await);
         }
         spot_markets
+
     }
 
     #[allow(dead_code)]
@@ -173,6 +172,7 @@ impl MangoGroupCookie {
         oracle_index: usize,
         price: u64,
     ) {
+
         let mint = test.with_mint(oracle_index);
         let oracle_price = test.with_oracle_price(&mint, price);
         let mango_program_id = test.mango_program_id;
@@ -189,6 +189,7 @@ impl MangoGroupCookie {
             .unwrap(),
         ];
         test.process_transaction(&instructions, None).await.unwrap();
+
     }
 
     #[allow(dead_code)]
@@ -196,6 +197,7 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
     ) {
+
         let mango_group = self.mango_group;
         let mango_group_pk = self.address;
         let oracle_pks = mango_group.oracles.iter()
@@ -210,6 +212,7 @@ impl MangoGroupCookie {
         test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
         self.mango_cache =
             test.load_account::<MangoCache>(mango_group.mango_cache).await;
+
     }
 
 }
@@ -279,15 +282,16 @@ pub struct SpotMarketCookie {
 
 impl SpotMarketCookie {
 
+    #[allow(dead_code)]
     pub async fn init(
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         mint_index: usize,
     ) -> Self {
+
         let mango_program_id = test.mango_program_id;
         let serum_program_id = test.serum_program_id;
 
-        let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
 
         let mut spot_market_cookie =
@@ -337,6 +341,7 @@ impl SpotMarketCookie {
 
     }
 
+    #[allow(dead_code)]
     pub async fn place_order(
         &mut self,
         test: &mut MangoProgramTest,
@@ -349,9 +354,9 @@ impl SpotMarketCookie {
     ) {
         let order = serum_dex::instruction::NewOrderInstructionV3 {
             side: side, //serum_dex::matching::Side::Bid,
-            limit_price: NonZeroU64::new(price as u64).unwrap(),
-            max_coin_qty: NonZeroU64::new(test.baseSizeNumberToLots(&self.mint, size) as u64).unwrap(),
-            max_native_pc_qty_including_fees: NonZeroU64::new(test.quoteSizeNumberToLots(&self.mint, size * price) as u64).unwrap(),
+            limit_price: NonZeroU64::new(test.price_number_to_lots(&self.mint, price)).unwrap(),
+            max_coin_qty: NonZeroU64::new(test.base_size_number_to_lots(&self.mint, size)).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(test.quote_size_number_to_lots(&self.mint, size * price) as u64).unwrap(),
             self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: order_id,
@@ -367,14 +372,17 @@ impl SpotMarketCookie {
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
             test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
+
     }
 
+    #[allow(dead_code)]
     pub async fn settle_funds(
         &mut self,
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
     ) {
+
         test.settle_funds(
             &mango_group_cookie,
             self,
@@ -383,6 +391,7 @@ impl SpotMarketCookie {
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
             test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
+
     }
 }
 
@@ -399,11 +408,13 @@ pub struct PerpMarketCookie {
 
 impl PerpMarketCookie {
 
+    #[allow(dead_code)]
     pub async fn init(
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         mint_index: usize,
     ) -> Self {
+
         let mango_program_id = test.mango_program_id;
         let mango_group_pk = mango_group_cookie.address;
         let perp_market_pk = test.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
@@ -464,8 +475,10 @@ impl PerpMarketCookie {
             perp_market: perp_market,
             mint: test.with_mint(mint_index),
         }
+
     }
 
+    #[allow(dead_code)]
     pub async fn place_order(
         &mut self,
         test: &mut MangoProgramTest,
@@ -476,8 +489,9 @@ impl PerpMarketCookie {
         size: u64,
         price: u64,
     ) {
-        let order_size = test.baseSizeNumberToLots(&self.mint, size);
-        let order_price = test.with_order_price(&self.mint, price);
+
+        let order_size = test.base_size_number_to_lots(&self.mint, size);
+        let order_price = test.price_number_to_lots(&self.mint, price);
 
         test.place_perp_order(
             &mango_group_cookie,

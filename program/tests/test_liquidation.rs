@@ -102,9 +102,9 @@
 //
 //     let starting_order_id = 1000;
 //
-//     let limit_price = test.priceNumberToLots(&base_mint, base_price) as i64;
-//     let max_coin_qty = test.baseSizeNumberToLots(&base_mint, order_amount) as u64;
-//     let max_native_pc_qty_including_fees = test.quoteSizeNumberToLots(&base_mint, order_amount * limit_price) as u64;
+//     let limit_price = test.price_number_to_lots(&base_mint, base_price) as i64;
+//     let max_coin_qty = test.base_size_number_to_lots(&base_mint, order_amount) as u64;
+//     let max_native_pc_qty_including_fees = test.quote_size_number_to_lots(&base_mint, order_amount * limit_price) as u64;
 //
 //     let order = NewOrderInstructionV3 {
 //         side: serum_dex::matching::Side::Bid,

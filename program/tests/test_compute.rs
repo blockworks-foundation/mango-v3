@@ -1,6 +1,5 @@
 mod program_test;
 use solana_program_test::*;
-use mango::state::*;
 use program_test::*;
 use program_test::cookies::*;
 

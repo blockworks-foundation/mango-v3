@@ -1,10 +1,8 @@
 #![cfg(feature = "test-bpf")]
 // Tests related to depositing into mango group
 mod program_test;
-use fixed::types::I80F48;
 
 use solana_program_test::*;
-use mango::{state::*};
 use program_test::*;
 use program_test::cookies::*;
 

@@ -9,8 +9,6 @@ use std::num::NonZeroU64;
 use std::{mem::size_of, mem::size_of_val};
 use fixed::types::I80F48;
 
-use serum_dex::instruction::{NewOrderInstructionV3, SelfTradeBehavior};
-
 #[tokio::test]
 async fn test_init_perp_markets() {
     // Arrange
@@ -62,7 +60,6 @@ async fn place_perp_order_scenario(order_id: u64, order_side: Side) {
 
     let user_index: usize = 0;
     let mint_index: usize = 0;
-    let base_mint = test.with_mint(mint_index);
     let base_price = 10000;
 
     // Act
@@ -319,7 +316,6 @@ async fn test_worst_case_scenario_with_fractions_x10() {
 
     let borrower_user_index: usize = 0;
     let lender_user_index: usize = 1;
-    let mint_index: usize = 0;
     let num_orders: usize = test.num_mints - 1;
     let base_price = 10000;
 
