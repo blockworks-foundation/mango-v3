@@ -200,7 +200,7 @@ async fn test_worst_case_v1() {
 }
 
 #[tokio::test]
-async fn test_worst_case_with_fractions() {
+async fn test_worst_case_with_fractions_v1() {
     // Arrange
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -278,18 +278,41 @@ async fn test_worst_case_with_fractions() {
         1,
         base_price,
     ).await;
+
+    // Step 5: Place a perp order for BTC
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    let starting_perp_order_id = 2000;
+    let mut perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+    perp_market_cookie.place_order(
+        &mut test,
+        &mut mango_group_cookie,
+        lender_user_index,
+        starting_perp_order_id + mint_index as u64,
+        Side::Ask,
+        1,
+        base_price,
+    ).await;
+
     // Assert
     mango_group_cookie.run_keeper(&mut test).await;
 
     let lender_mango_account =
         mango_group_cookie.mango_accounts[lender_user_index].mango_account;
     assert_ne!(lender_mango_account.spot_open_orders[mint_index], Pubkey::default());
+    let (client_order_id, _order_id, side) = lender_mango_account.perp_accounts[mint_index]
+        .open_orders
+        .orders_with_client_ids()
+        .last()
+        .unwrap();
+    assert_eq!(client_order_id, NonZeroU64::new(2000 + mint_index as u64).unwrap());
+    assert_eq!(side, Side::Ask);
 }
 
 #[tokio::test]
-async fn test_worst_case_with_fractions_x10() {
+async fn test_worst_case_with_fractions_v2() {
     // Arrange
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 11 };
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
     solana_logger::setup_with_default(
@@ -362,7 +385,7 @@ async fn test_worst_case_with_fractions_x10() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     let starting_spot_order_id = 1000;
-    for mint_index in 0..num_orders {
+    for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
         let mut spot_market_cookie = mango_group_cookie.spot_markets[mint_index];
         spot_market_cookie.place_order(
             &mut test,
@@ -374,6 +397,24 @@ async fn test_worst_case_with_fractions_x10() {
             base_price,
         ).await;
     }
+
+    // Step 6: Place `num_orders` perp orders
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    let starting_perp_order_id = 2000;
+    for mint_index in 0..num_orders {
+        let mut perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+        perp_market_cookie.place_order(
+            &mut test,
+            &mut mango_group_cookie,
+            lender_user_index,
+            starting_perp_order_id + mint_index as u64,
+            Side::Ask,
+            1,
+            base_price,
+        ).await;
+    }
+
     // Assert
     mango_group_cookie.run_keeper(&mut test).await;
 
@@ -383,5 +424,15 @@ async fn test_worst_case_with_fractions_x10() {
             lender_mango_account.spot_open_orders[spot_open_orders_index],
             Pubkey::default()
         );
+    }
+    
+    for mint_index in 0..num_orders {
+        let (client_order_id, _order_id, side) = lender_mango_account.perp_accounts[mint_index]
+            .open_orders
+            .orders_with_client_ids()
+            .last()
+            .unwrap();
+        assert_eq!(client_order_id, NonZeroU64::new(2000 + mint_index as u64).unwrap());
+        assert_eq!(side, Side::Ask);
     }
 }

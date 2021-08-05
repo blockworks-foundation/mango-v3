@@ -352,9 +352,10 @@ impl SpotMarketCookie {
         size: u64,
         price: u64,
     ) {
+
         let limit_price = test.price_number_to_lots(&self.mint, price);
         let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
-        let max_native_pc_qty_including_fees = test.quote_size_number_to_lots(&self.mint, size * limit_price);
+        let max_native_pc_qty_including_fees = test.quote_size_number_to_lots(&self.mint, size * price);
         let order = serum_dex::instruction::NewOrderInstructionV3 {
             side: side, //serum_dex::matching::Side::Bid,
             limit_price: NonZeroU64::new(limit_price).unwrap(),
