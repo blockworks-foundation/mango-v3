@@ -91,6 +91,8 @@ pub enum MangoErrorCode {
     InsufficientHealth,
     #[error("MangoErrorCode::InvalidParam")]
     InvalidParam,
+    #[error("MangoErrorCode::InvalidAccount")]
+    InvalidAccount,
     #[error("MangoErrorCode::SignerNecessary")]
     SignerNecessary,
     #[error("MangoErrorCode::InsufficientLiquidity Not enough deposits in this node bank")]

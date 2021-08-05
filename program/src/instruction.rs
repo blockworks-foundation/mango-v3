@@ -18,17 +18,17 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected by this instruction (11):
     ///
-    /// 0. `[writable]` mango_group_ai - TODO
-    /// 1. `[]` signer_ai - TODO
-    /// 2. `[]` admin_ai - TODO
-    /// 3. `[]` quote_mint_ai - TODO
-    /// 4. `[]` quote_vault_ai - TODO
-    /// 5. `[writable]` quote_node_bank_ai - TODO
-    /// 6. `[writable]` quote_root_bank_ai - TODO
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[]` signer_ai
+    /// 2. `[]` admin_ai
+    /// 3. `[]` quote_mint_ai
+    /// 4. `[]` quote_vault_ai
+    /// 5. `[writable]` quote_node_bank_ai
+    /// 6. `[writable]` quote_root_bank_ai
     /// 7. `[]` dao_vault_ai - aka insurance fund
     /// 8. `[]` msrm_vault_ai - msrm deposits for fee discounts; can be Pubkey::default()
     /// 9. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
-    /// 10. `[]` dex_prog_ai - TODO
+    /// 10. `[]` dex_prog_ai
     InitMangoGroup {
         signer_nonce: u64,
         valid_interval: u64,
@@ -89,47 +89,30 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected by this instruction (8):
     ///
-    /// 0. `[writable]` mango_group_ai - TODO
-    /// 1. `[]` spot_market_ai - TODO
-    /// 2. `[]` dex_program_ai - TODO
-    /// 3. `[]` mint_ai - TODO
-    /// 4. `[writable]` node_bank_ai - TODO
-    /// 5. `[]` vault_ai - TODO
-    /// 6. `[writable]` root_bank_ai - TODO
-    /// 7. `[signer]` admin_ai - TODO
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[]` spot_market_ai
+    /// 2. `[]` dex_program_ai
+    /// 3. `[]` mint_ai
+    /// 4. `[writable]` node_bank_ai
+    /// 5. `[]` vault_ai
+    /// 6. `[writable]` root_bank_ai
+    /// 7. `[signer]` admin_ai
     AddSpotMarket {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        liquidation_fee: I80F48,
         optimal_util: I80F48,
         optimal_rate: I80F48,
         max_rate: I80F48,
     },
 
     /// DEPRECATED
-    /// Add a spot market to a mango account basket
-    ///
-    /// Accounts expected by this instruction (6)
-    ///
-    /// 0. `[]` mango_group_ai - TODO
-    /// 1. `[writable]` mango_account_ai - TODO
-    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
-    /// 3. `[]` spot_market_ai - TODO
     AddToBasket {
         market_index: usize,
     },
 
-    /// Borrow by incrementing MangoAccount.borrows given collateral ratio is below init_coll_rat
-    ///
-    /// Accounts expected by this instruction (4 + 2 * NUM_MARKETS):
-    ///
-    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
-    /// 1. `[writable]` mango_account_ai - the mango account for this user
-    /// 2. `[signer]` owner_ai - Solana account of owner of the MangoAccount
-    /// 3. `[]` mango_cache_ai - TODO
-    /// 4. `[]` root_bank_ai - Root bank owned by MangoGroup
-    /// 5. `[writable]` node_bank_ai - Node bank owned by RootBank
-    /// 6. `[]` clock_ai - Clock sysvar account
+    /// DEPRECATED - use Withdraw with allow_borrow = true
     Borrow {
         quantity: u64,
     },
@@ -151,8 +134,29 @@ pub enum MangoInstruction {
 
     /// Place an order on the Serum Dex using Mango account
     ///
-    /// Accounts expected by this instruction (23 + MAX_PAIRS):
-    ///
+    /// Accounts expected by this instruction (19 + MAX_PAIRS):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[signer]` owner_ai - owner of MangoAccount
+    /// 3. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 4. `[]` dex_prog_ai - serum dex program id
+    /// 5. `[writable]` spot_market_ai - serum dex MarketState account
+    /// 6. `[writable]` bids_ai - bids account for serum dex market
+    /// 7. `[writable]` asks_ai - asks account for serum dex market
+    /// 8. `[writable]` dex_request_queue_ai - request queue for serum dex market
+    /// 9. `[writable]` dex_event_queue_ai - event queue for serum dex market
+    /// 10. `[writable]` dex_base_ai - base currency serum dex market vault
+    /// 11. `[writable]` dex_quote_ai - quote currency serum dex market vault
+    /// 12. `[]` root_bank_ai - root bank of base currency if sell or quote currency if buy
+    /// 13. `[writable]` node_bank_ai - node bank of base currency if sell or quote currency if buy
+    /// 14. `[writable]` vault_ai - vault of the node bank
+    /// 15. `[]` token_prog_ai - SPL token program id
+    /// 16. `[]` signer_ai - signer key for this MangoGroup
+    /// 17. `[]` rent_ai - rent sysvar var
+    /// 18. `[]` msrm_or_srm_vault_ai - the msrm or srm vault in this MangoGroup. Can be zero key
+    /// 19+ `[writable]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
+    ///         index needs to be writable. Only OpenOrders in_margin_basket needs to be correct;
+    ///         remaining open orders can just be Pubkey::default() (the zero key)
     PlaceSpotOrder {
         order: serum_dex::instruction::NewOrderInstructionV3,
     },
@@ -169,13 +173,13 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected by this instruction (7):
     ///
-    /// 0. `[writable]` mango_group_ai - TODO
-    /// 1. `[writable]` perp_market_ai - TODO
-    /// 2. `[writable]` event_queue_ai - TODO
-    /// 3. `[writable]` bids_ai - TODO
-    /// 4. `[writable]` asks_ai - TODO
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[writable]` perp_market_ai
+    /// 2. `[writable]` event_queue_ai
+    /// 3. `[writable]` bids_ai
+    /// 4. `[writable]` asks_ai
     /// 5. `[]` mngo_vault_ai - the vault from which liquidity incentives will be paid out for this market
-    /// 6. `[signer]` admin_ai - TODO
+    /// 6. `[signer]` admin_ai
     AddPerpMarket {
         market_index: usize,
         maint_leverage: I80F48,
@@ -196,20 +200,21 @@ pub enum MangoInstruction {
     },
 
     /// Place an order on a perp market
-    /// Accounts expected by this instruction (6):
-    /// 0. `[]` mango_group_ai - TODO
-    /// 1. `[writable]` mango_account_ai - TODO
-    /// 2. `[signer]` owner_ai - TODO
-    /// 3. `[]` mango_cache_ai - TODO
-    /// 4. `[writable]` perp_market_ai - TODO
-    /// 5. `[writable]` bids_ai - TODO
-    /// 6. `[writable]` asks_ai - TODO
-    /// 7. `[writable]` event_queue_ai - TODO
+    /// Accounts expected by this instruction (8):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[signer]` owner_ai - owner of MangoAccount
+    /// 3. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 4. `[writable]` perp_market_ai
+    /// 5. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 6. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
     PlacePerpOrder {
         price: i64,
         quantity: i64,
         client_order_id: u64,
         side: Side,
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
         order_type: OrderType,
     },
 
@@ -233,9 +238,10 @@ pub enum MangoInstruction {
     /// 1. `[writable]` mango_cache_ai
     CachePerpMarkets,
 
+    /// Update funding related variables
     UpdateFunding,
 
-    // TODO - remove this instruction before mainnet
+    // TODO - remove this instruction before mainnet (reviewed)
     SetOracle {
         price: I80F48,
     },
@@ -283,14 +289,14 @@ pub enum MangoInstruction {
 
     /// Take two MangoAccounts and settle profits and losses between them for a perp market
     ///
-    /// Accounts expected: 6
+    /// Accounts expected (6):
     SettlePnl {
         market_index: usize,
     },
 
     /// Use this token's position and deposit to reduce borrows
     ///
-    /// Accounts expected by this instruction: 5
+    /// Accounts expected by this instruction (5):
     SettleBorrow {
         token_index: usize,
         quantity: u64,
@@ -482,16 +488,40 @@ pub enum MangoInstruction {
     RedeemMngo,
 
     /// Add account info; useful for naming accounts
+    ///
+    /// Accounts expected by this instruction (3):
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
     AddMangoAccountInfo {
         info: [u8; INFO_LEN],
     },
 
-    /// Deposit MSRM to reduce fees. *** add to client
+    /// Deposit MSRM to reduce fees. This MSRM is not at risk and is not used for any health calculations
+    ///
+    /// Accounts expected by this instruction (6):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[writable]` msrm_account_ai - MSRM token account
+    /// 4. `[writable]` msrm_vault_ai - MSRM vault owned by mango program
+    /// 5. `[]` token_prog_ai - SPL Token program id
     DepositMsrm {
         quantity: u64,
     },
 
-    /// Withdraw MSRM *** add to client
+    /// Withdraw the MSRM deposited
+    ///
+    /// Accounts expected by this instruction (7):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[writable]` msrm_account_ai - MSRM token account
+    /// 4. `[writable]` msrm_vault_ai - MSRM vault owned by mango program
+    /// 5. `[]` signer_ai - signer key of the MangoGroup
+    /// 6. `[]` token_prog_ai - SPL Token program id
     WithdrawMsrm {
         quantity: u64,
     },
@@ -534,25 +564,24 @@ impl MangoInstruction {
                     [1] => true,
                     _ => return None,
                 };
-                MangoInstruction::Withdraw {
-                    quantity: u64::from_le_bytes(*quantity),
-                    allow_borrow: allow_borrow,
-                }
+                MangoInstruction::Withdraw { quantity: u64::from_le_bytes(*quantity), allow_borrow }
             }
             4 => {
-                let data = array_ref![data, 0, 88];
+                let data = array_ref![data, 0, 104];
                 let (
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    liquidation_fee,
                     optimal_util,
                     optimal_rate,
                     max_rate,
-                ) = array_refs![data, 8, 16, 16, 16, 16, 16];
+                ) = array_refs![data, 8, 16, 16, 16, 16, 16, 16];
                 MangoInstruction::AddSpotMarket {
                     market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
                     optimal_util: I80F48::from_le_bytes(*optimal_util),
                     optimal_rate: I80F48::from_le_bytes(*optimal_rate),
                     max_rate: I80F48::from_le_bytes(*max_rate),
@@ -730,6 +759,15 @@ impl MangoInstruction {
                 let info = array_ref![data, 0, INFO_LEN];
                 MangoInstruction::AddMangoAccountInfo { info: *info }
             }
+            35 => {
+                let quantity = array_ref![data, 0, 8];
+                MangoInstruction::DepositMsrm { quantity: u64::from_le_bytes(*quantity) }
+            }
+            36 => {
+                let quantity = array_ref![data, 0, 8];
+                MangoInstruction::WithdrawMsrm { quantity: u64::from_le_bytes(*quantity) }
+            }
+
             _ => {
                 return None;
             }
@@ -893,6 +931,7 @@ pub fn add_spot_market(
     market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
+    liquidation_fee: I80F48,
     optimal_util: I80F48,
     optimal_rate: I80F48,
     max_rate: I80F48,
@@ -912,6 +951,7 @@ pub fn add_spot_market(
         market_index,
         maint_leverage,
         init_leverage,
+        liquidation_fee,
         optimal_util,
         optimal_rate,
         max_rate,

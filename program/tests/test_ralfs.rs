@@ -404,6 +404,11 @@ async fn test_worst_case_scenario_with_fractions_x10() {
 
     let lender_mango_account = mango_group_cookie.mango_accounts[lender_user_index].mango_account.unwrap();
     for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        assert_ne!(lender_mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
+        assert_ne!(
+            lender_mango_account.spot_open_orders[spot_open_orders_index],
+            Pubkey::default()
+        );
     }
 }
+
+ls -v | cat -n | while read n f; do mv -n "$f" "H_$n.png"; done 

@@ -37,7 +37,7 @@ tarpc = { version = "^0.26.2", features = ["full"] }
 
 
 [profile.release]
-lto = "fat"
+lto = true
 codegen-units = 1
 
 [profile.release.build-override]
@@ -47,8 +47,17 @@ codegen-units = 1
 
 #[profile.test]
 #lto = true
-#opt-level = 2
+#codegen-units = 1
+#
+#[profile.test.build-override]
+#opt-level = 3
+#incremental = false
+#codegen-units = 1
 
 [lib]
 name = "mango"
 crate-type = ["cdylib", "lib"]
+
+# Official Build Tools
+# solana-cli 1.7.9 (src:0707290b; feat:2045430982)
+# rustc 1.56.0-nightly (e3b1c12be 2021-08-02)

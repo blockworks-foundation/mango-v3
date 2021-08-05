@@ -1,12 +1,5 @@
 #![cfg(feature = "test-bpf")]
-#![feature(link_llvm_intrinsics)]
-extern "C" {
-    #[link_name = "llvm.smul.fix.i128"]
-    pub fn unsafe_fixmul(a: i128, b: i128, scale: i32) -> i128;
-}
-pub fn fixmul(a: i128, b: i128) -> i128 {
-    unsafe { unsafe_fixmul(a, b, 48) }
-}
+
 use fixed::types::I80F48;
 use mango::matching::{AnyNode, InnerNode, LeafNode};
 use mango::state::{MangoAccount, MangoCache, ONE_I80F48};
@@ -30,8 +23,8 @@ async fn test_i80f48() {
     println!("{:#0128b}", r.to_bits())
 }
 
-#[tokio::test]
-async fn test_fixmul() {
-    let y = I80F48::from_bits(fixmul(ONE_I80F48.to_bits(), ONE_I80F48.to_bits()));
-    println!("{}", y);
-}
+// #[tokio::test]
+// async fn test_fixmul() {
+//     let y = I80F48::from_bits(fixmul(ONE_I80F48.to_bits(), ONE_I80F48.to_bits()));
+//     println!("{}", y);
+// }

@@ -87,7 +87,7 @@ impl Processor {
         mango_group.valid_interval = valid_interval;
         mango_group.dex_program_id = *dex_prog_ai.key;
 
-        // TODO - make this a PDA
+        // TODO OPT make PDA
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
         check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
         check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
@@ -95,7 +95,7 @@ impl Processor {
         check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
         mango_group.dao_vault = *dao_vault_ai.key;
 
-        // TODO - make this a PDA
+        // TODO OPT make this a PDA
         if msrm_vault_ai.key != &Pubkey::default() {
             let msrm_vault = Account::unpack(&msrm_vault_ai.try_borrow_data()?)?;
             check!(msrm_vault.is_initialized(), MangoErrorCode::InvalidVault)?;
@@ -140,6 +140,10 @@ impl Processor {
         Ok(())
     }
 
+    #[allow(unused)]
+    fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        todo!()
+    }
     #[inline(never)]
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
     /// TODO make the mango account a derived address
@@ -189,10 +193,16 @@ impl Processor {
         market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
+        liquidation_fee: I80F48,
         optimal_util: I80F48,
         optimal_rate: I80F48,
         max_rate: I80F48,
     ) -> MangoResult<()> {
+        check!(
+            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
+            MangoErrorCode::InvalidParam
+        )?;
+
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -208,10 +218,10 @@ impl Processor {
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
 
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidOwner)?;
 
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::Default)?;
+        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
         check!(mango_group.oracles[market_index] != Pubkey::default(), MangoErrorCode::Default)?;
@@ -244,25 +254,14 @@ impl Processor {
 
         // check leverage is reasonable
 
-        check!(
-            init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
-            MangoErrorCode::Default
-        )?;
-
-        let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
-        let liquidation_fee = (maint_liab_weight - ONE_I80F48) / 2;
         mango_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
             maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
-            maint_liab_weight,
+            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
             init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
             liquidation_fee,
         };
-
-        // TODO needs to be moved into add_oracle
-        // let _oracle = flux_aggregator::state::Aggregator::load_initialized(&oracle_ai)?;
-        // mango_group.oracles[token_index] = *oracle_ai.key;
 
         let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
 
@@ -330,22 +329,23 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-            mango_group_ai, // write
+            mango_group_ai, // read
             oracle_ai,      // write
             admin_ai        // read
         ] = accounts;
 
-        let mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(mango_group.find_oracle_index(oracle_ai.key).is_some(), MangoErrorCode::Default)?;
+
         let oracle_type = determine_oracle_type(oracle_ai);
         check_eq!(oracle_type, OracleType::Stub, MangoErrorCode::Default)?;
-        // TODO verify oracle is really owned by this group (currently only checks program)
+
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
         let clock = Clock::get()?;
         oracle.last_update = clock.unix_timestamp as u64;
-        // TODO verify oracle is really owned by this group (currently only checks program)
         Ok(())
     }
 
@@ -3239,9 +3239,7 @@ impl Processor {
         Ok(())
     }
 
-    // ***
     #[inline(never)]
-    #[allow(unused)]
     fn deposit_msrm(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -3273,9 +3271,8 @@ impl Processor {
 
         Ok(())
     }
-    // ***
+
     #[inline(never)]
-    #[allow(unused)]
     fn withdraw_msrm(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -3357,6 +3354,7 @@ impl Processor {
                 market_index,
                 maint_leverage,
                 init_leverage,
+                liquidation_fee,
                 optimal_util,
                 optimal_rate,
                 max_rate,
@@ -3368,6 +3366,7 @@ impl Processor {
                     market_index,
                     maint_leverage,
                     init_leverage,
+                    liquidation_fee,
                     optimal_util,
                     optimal_rate,
                     max_rate,
@@ -3551,11 +3550,13 @@ impl Processor {
                 msg!("Mango: AddMangoAccountInfo");
                 Self::add_mango_account_info(program_id, accounts, info)?;
             }
-            MangoInstruction::DepositMsrm { .. } => {
-                todo!()
+            MangoInstruction::DepositMsrm { quantity } => {
+                msg!("Mango: DepositMsrm");
+                Self::deposit_msrm(program_id, accounts, quantity)?;
             }
-            MangoInstruction::WithdrawMsrm { .. } => {
-                todo!()
+            MangoInstruction::WithdrawMsrm { quantity } => {
+                msg!("Mango: WithdrawMsrm");
+                Self::withdraw_msrm(program_id, accounts, quantity)?;
             }
         }
 
@@ -3719,28 +3720,54 @@ fn read_oracle(
     let value = median.checked_div(units);
     */
     let quote_decimals: u8 = mango_group.tokens[QUOTE_INDEX].decimals;
-    let price: I80F48;
     let oracle_type = determine_oracle_type(oracle_ai);
-    match oracle_type {
+    let price = match oracle_type {
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
-            let quote_adj =
-                I80F48::from_num(10u64.pow(
-                    price_account.expo.abs().checked_sub(quote_decimals as i32).unwrap() as u32,
-                ));
-            let base_adj =
-                I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
-            price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
+
+            let decimals = (quote_decimals as i32)
+                .checked_add(price_account.expo)
+                .unwrap()
+                .checked_sub(mango_group.tokens[token_index].decimals as i32)
+                .unwrap();
+
+            let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
+            if decimals < 0 {
+                value.checked_div(decimal_adj).unwrap()
+            } else {
+                value.checked_mul(decimal_adj).unwrap()
+            }
+
+            // TODO OPT consider effect of not disregarding these bits
+            // let bits = if decimals < 0 {
+            //     value.checked_div(decimal_adj).unwrap().to_bits() as u128
+            // } else {
+            //     value.checked_fmul(decimal_adj).unwrap().to_bits() as u128
+            // };
+            // price = I80F48::from_bits((bits & 0xffffffffffffffffffffff0000000000u128) as i128);
+
+            // let oracle_adj = if price_account.expo < 0 {
+            //     ONE_I80F48.checked_div(I80F48::from_num(10u64.pow(price_account.expo.abs() as u32)))
+            // } else {
+            //     I80F48::from_num(10u64.pow(price_account.expo as u32))
+            // };
+            // let quote_adj =
+            //     I80F48::from_num(10u64.pow(
+            //         price_account.expo.abs().checked_sub(quote_decimals as i32).unwrap() as u32,
+            //     ));
+            // let base_adj =
+            //     I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
+            // price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
         }
         OracleType::Stub => {
             let oracle = StubOracle::load(oracle_ai)?;
-            price = I80F48::from_num(oracle.price);
+            I80F48::from_num(oracle.price)
         }
         OracleType::Unknown => {
             panic!("Unknown oracle");
         }
-    }
+    };
     Ok(price)
 }
 

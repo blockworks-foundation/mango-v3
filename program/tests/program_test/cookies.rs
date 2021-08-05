@@ -307,6 +307,7 @@ impl SpotMarketCookie {
         let node_bank_pk = test.create_account(size_of::<NodeBank>(), &mango_program_id).await;
         let root_bank_pk = test.create_account(size_of::<RootBank>(), &mango_program_id).await;
         let init_leverage = I80F48::from_num(10);
+        let liquidation_fee = I80F48::from_num(0.025);
         let maint_leverage = init_leverage * 2;
         let optimal_util = I80F48::from_num(0.7);
         let optimal_rate = I80F48::from_num(0.06);
@@ -328,6 +329,7 @@ impl SpotMarketCookie {
                 mint_index,
                 maint_leverage,
                 init_leverage,
+                liquidation_fee,
                 optimal_util,
                 optimal_rate,
                 max_rate,
