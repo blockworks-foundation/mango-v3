@@ -26,7 +26,8 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut, FI80F48};
+use crate::utils::{invert_side, remove_slop_mut, split_open_orders, FI80F48};
+use fixed::FixedI128;
 
 pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -685,6 +686,107 @@ impl MangoCache {
     }
 }
 
+pub struct HealthCache2 {
+    pub active_assets: [bool; MAX_TOKENS],
+
+    /// Vec of length MAX_PAIRS containing worst case spot vals; unweighted
+    spot: Vec<(I80F48, I80F48)>,
+    perp: Vec<(I80F48, I80F48)>,
+    quote: I80F48,
+
+    /// This will be zero until update_health is called for the first time
+    health: [Option<I80F48>; 2],
+}
+
+impl HealthCache2 {
+    pub fn new(mango_group: &MangoGroup, mango_account: &MangoAccount) -> Self {
+        let mut active_assets = [false; MAX_TOKENS];
+        active_assets[QUOTE_INDEX] = true;
+        for i in 0..mango_group.num_oracles {
+            active_assets[i] = mango_account.in_margin_basket[i]
+                || !mango_account.deposits[i].is_zero()
+                || !mango_account.borrows[i].is_zero()
+                || mango_account.perp_accounts[i].is_active();
+        }
+
+        Self {
+            active_assets,
+            spot: vec![(ZERO_I80F48, ZERO_I80F48); MAX_PAIRS],
+            perp: vec![(ZERO_I80F48, ZERO_I80F48); MAX_PAIRS],
+            quote: ZERO_I80F48,
+            health: [None; 2],
+        }
+    }
+
+    pub fn init_vals(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ais: &[AccountInfo; MAX_PAIRS],
+    ) -> MangoResult<()> {
+        self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
+        for i in 0..mango_group.num_oracles {
+            if !self.active_assets[i] {
+                continue;
+            }
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+            let price = mango_cache.price_cache[i].price;
+            if !spot_market_info.is_empty() {
+                self.spot[i] = mango_account.get_spot_val(
+                    &mango_cache.root_bank_cache[i],
+                    price,
+                    i,
+                    &open_orders_ais[i],
+                )?;
+            }
+
+            if !perp_market_info.is_empty() && mango_account.perp_accounts[i].is_active() {
+                self.perp[i] = mango_account.perp_accounts[i].get_val(
+                    perp_market_info,
+                    &mango_cache.perp_market_cache[i],
+                    price,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_health(&mut self, mango_group: &MangoGroup, health_type: HealthType) -> I80F48 {
+        match self.health[health_type as u8 as usize] {
+            None => {
+                // apply weights, cache result, return
+                let mut health = self.quote;
+                for i in 0..mango_group.num_oracles {
+                    let spot_market_info = &mango_group.spot_markets[i];
+                    let perp_market_info = &mango_group.perp_markets[i];
+
+                    let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
+                        match self.health_type {
+                            HealthType::Maint => (
+                                spot_market_info.maint_asset_weight,
+                                spot_market_info.maint_liab_weight,
+                                perp_market_info.maint_asset_weight,
+                                perp_market_info.maint_liab_weight,
+                            ),
+                            HealthType::Init => (
+                                spot_market_info.init_asset_weight,
+                                spot_market_info.init_liab_weight,
+                                perp_market_info.init_asset_weight,
+                                perp_market_info.init_liab_weight,
+                            ),
+                        };
+                    todo!()
+                }
+
+                ZERO_I80F48
+            }
+            Some(h) => h,
+        }
+    }
+}
+
 /// Used to store intermediate health calculations during program execution
 pub struct HealthCache {
     pub active_assets: [bool; MAX_TOKENS],
@@ -1043,105 +1145,6 @@ impl MangoAccount {
         Ok((assets, liabs))
     }
 
-    // TODO conform to new way of determining spot health
-    pub fn get_spot_val(
-        &self,
-        mango_cache: &MangoCache,
-        market_index: usize,
-        open_orders_ai: &AccountInfo,
-        asset_weight: I80F48,
-    ) -> MangoResult<I80F48> {
-        // TODO make checked
-        let bank_cache = &mango_cache.root_bank_cache[market_index];
-        let price = mango_cache.price_cache[market_index].price;
-
-        Ok(
-            if !self.in_margin_basket[market_index]
-                || self.spot_open_orders[market_index] == Pubkey::default()
-            {
-                self.deposits[market_index]
-                    .checked_mul(bank_cache.deposit_index)
-                    .unwrap()
-                    .checked_mul(asset_weight)
-                    .unwrap()
-                    .checked_mul(price)
-                    .unwrap()
-            } else {
-                // TODO - confirm only checked open orders are sent in here
-                let open_orders = load_open_orders(open_orders_ai)?;
-                self.deposits[market_index]
-                    .checked_mul(bank_cache.deposit_index)
-                    .unwrap()
-                    .checked_add(I80F48::from_num(open_orders.native_coin_total))
-                    .unwrap()
-                    .checked_mul(asset_weight)
-                    .unwrap()
-                    .checked_mul(price)
-                    .unwrap()
-                    .checked_add(I80F48::from_num(
-                        open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                    ))
-                    .unwrap()
-
-                //     (
-                //     (self.deposits[market_index] * bank_cache.deposit_index
-                //         + I80F48::from_num(open_orders.native_coin_total))
-                //         * asset_weight
-                //         * price,
-                // ) + I80F48::from_num(
-                //     open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                // )
-            },
-        )
-    }
-
-    pub fn get_assets_val(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        open_orders_ais: &[AccountInfo],
-        active_assets: &[bool; MAX_TOKENS],
-        health_type: HealthType,
-    ) -> MangoResult<I80F48> {
-        // TODO - OPT check if this fmul thing usually makes it better or worse in this case
-        let mut assets_val = self.deposits[QUOTE_INDEX]
-            .checked_mul(mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index)
-            .unwrap();
-
-        for i in 0..mango_group.num_oracles {
-            if !active_assets[i] {
-                continue;
-            }
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-
-            let (spot_weight, perp_weight) = match health_type {
-                HealthType::Maint => {
-                    (spot_market_info.maint_asset_weight, perp_market_info.maint_asset_weight)
-                }
-                HealthType::Init => {
-                    (spot_market_info.init_asset_weight, perp_market_info.init_asset_weight)
-                }
-            };
-
-            if !spot_market_info.is_empty() {
-                assets_val +=
-                    self.get_spot_val(mango_cache, i, &open_orders_ais[i], spot_weight)?;
-            }
-
-            if !perp_market_info.is_empty() && self.perp_accounts[i].is_active() {
-                assets_val += self.perp_accounts[i].get_assets_val(
-                    mango_cache.price_cache[i].price,
-                    perp_weight,
-                    mango_cache.perp_market_cache[i].long_funding,
-                    mango_cache.perp_market_cache[i].short_funding,
-                );
-            }
-        }
-
-        Ok(assets_val)
-    }
-
     #[inline(always)]
     fn sim_spot_health(
         &self,
@@ -1196,46 +1199,6 @@ impl MangoAccount {
         bids_health.min(asks_health)
     }
 
-    #[inline(always)]
-    #[allow(dead_code)]
-    fn fast_sim_spot_health(
-        &self,
-        open_orders: &serum_dex::state::OpenOrders,
-        base_net: FI80F48,
-        price: FI80F48,
-        asset_weight: FI80F48,
-        liab_weight: FI80F48,
-    ) -> FI80F48 {
-        sol_log_compute_units();
-        let quote_free =
-            FI80F48::from_u64(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
-        let quote_locked =
-            FI80F48::from_u64(open_orders.native_pc_total - open_orders.native_pc_free);
-        let base_free = FI80F48::from_u64(open_orders.native_coin_free);
-        let base_locked =
-            FI80F48::from_u64(open_orders.native_coin_total - open_orders.native_coin_free);
-
-        // Simulate the health if all bids are executed at current price
-        let bids_base_net = quote_locked.div(price).add(base_net).add(base_free).add(base_locked);
-        let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
-
-        let bids_health = bids_base_net.mul(bids_weight).mul(price).add(quote_free);
-        // TODO account for serum dex fees in these calculations
-
-        // Simulate health if all asks are executed at current price
-        let asks_base_net = base_net.add(base_free);
-        let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
-        let asks_health = asks_base_net
-            .mul(asks_weight)
-            .add(base_locked)
-            .mul(price)
-            .add(quote_free)
-            .add(quote_locked);
-        sol_log_compute_units();
-
-        bids_health.min(asks_health)
-    }
-
     fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
         if self.deposits[token_index].is_positive() {
             self.deposits[token_index].checked_mul(bank_cache.deposit_index).unwrap()
@@ -1246,34 +1209,35 @@ impl MangoAccount {
         }
     }
 
-    #[allow(dead_code)]
-    fn fast_get_spot_health(
+    /// Return the token value and quote token value for this market taking into account open order
+    /// but not doing asset weighting
+    #[inline(always)]
+    fn get_spot_val(
         &self,
-        mango_cache: &MangoCache,
+        bank_cache: &RootBankCache,
+        price: I80F48,
         market_index: usize,
         open_orders_ai: &AccountInfo,
-        asset_weight: FI80F48,
-        liab_weight: FI80F48,
-    ) -> MangoResult<FI80F48> {
-        let bank_cache = &mango_cache.root_bank_cache[market_index];
-        let price = FI80F48::from_fixed(mango_cache.price_cache[market_index].price);
-        let base_net = FI80F48::from_fixed(self.get_net(bank_cache, market_index));
-        let health = if !self.in_margin_basket[market_index]
-            || self.spot_open_orders[market_index] == Pubkey::default()
-        {
-            if base_net.is_positive() {
-                base_net.mul(asset_weight).mul(price)
-            } else {
-                base_net.mul(liab_weight).mul(price)
-            }
+    ) -> MangoResult<(I80F48, I80F48)> {
+        let base_net = self.get_net(bank_cache, market_index);
+        if !self.in_margin_basket[market_index] || *open_orders_ai.key == Pubkey::default() {
+            Ok((base_net * price, ZERO_I80F48))
         } else {
             let open_orders = load_open_orders(open_orders_ai)?;
+            let (quote_free, quote_locked, base_free, base_locked) =
+                split_open_orders(&open_orders);
 
-            self.fast_sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight)
-        };
-        Ok(health)
+            // Simulate the health if all bids are executed at current price
+            let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+            let asks_base_net = base_net + base_free;
+
+            if bids_base_net.abs() > asks_base_net.abs() {
+                Ok((bids_base_net * price, quote_free))
+            } else {
+                Ok((asks_base_net * price, base_locked * price + quote_free + quote_locked))
+            };
+        }
     }
-
     #[inline(always)]
     fn get_spot_health(
         &self,
@@ -1775,6 +1739,44 @@ impl PerpAccount {
         }
         self.long_settled_funding = cache.long_funding;
         self.short_settled_funding = cache.short_funding;
+    }
+
+    /// Get quote position adjusted for funding
+    pub fn get_quote_position(&self, pmc: &PerpMarketCache) -> I80F48 {
+        if self.base_position > 0 {
+            // TODO OPT use checked_fmul to not do the mul if one of these is zero
+            self.quote_position
+                - (pmc.long_funding - self.long_settled_funding)
+                    * I80F48::from_num(self.base_position)
+        } else if self.base_position < 0 {
+            self.quote_position
+                - (pmc.short_funding - self.short_settled_funding)
+                    * I80F48::from_num(self.base_position)
+        } else {
+            self.quote_position
+        }
+    }
+
+    /// Return (base_val, quote_val) unweighted
+    pub fn get_val(
+        &self,
+        pmi: &PerpMarketInfo,
+        pmc: &PerpMarketCache,
+        price: I80F48,
+    ) -> MangoResult<(I80F48, I80F48)> {
+        let bids_base_net = self.base_position + self.open_orders.bids_quantity;
+        let asks_base_net = self.base_position - self.open_orders.asks_quantity;
+        if bids_base_net.abs() > asks_base_net.abs() {
+            let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
+            let quote = self.get_quote_position(pmc)
+                - I80F48::from_num(self.open_orders.bids_quantity * pmi.base_lot_size) * price;
+            Ok((base, quote))
+        } else {
+            let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
+            let quote = self.get_quote_position(pmc)
+                + I80F48::from_num(self.open_orders.asks_quantity * pmi.base_lot_size) * price;
+            Ok((base, quote))
+        }
     }
 
     /// Return the health factor if position changed by `base_change` at current prices

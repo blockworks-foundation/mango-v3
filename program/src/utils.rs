@@ -56,6 +56,19 @@ pub fn invert_side(side: Side) -> Side {
     }
 }
 
+/// Return (quote_free, quote_locked, base_free, base_locked) in I80F48
+#[inline(always)]
+pub fn split_open_orders(
+    open_orders: &serum_dex::state::OpenOrders,
+) -> (I80F48, I80F48, I80F48, I80F48) {
+    (
+        I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued),
+        I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free),
+        I80F48::from_num(open_orders.native_coin_free),
+        I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free),
+    )
+}
+
 #[derive(Copy, Clone)]
 pub struct FI80F48(i128);
 impl FI80F48 {
