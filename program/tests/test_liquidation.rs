@@ -29,7 +29,7 @@ async fn test_spot_liquidation() {
     let mint_index: usize = 0;
     let base_price = 15_000;
 
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
     // Act
     // Step 1: Make deposits from 3 accounts (Bidder / Asker / Liqor)
@@ -76,7 +76,7 @@ async fn test_spot_liquidation() {
     assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
 
     // Step 4: Change the oracle price so that bidder becomes liqee
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 15).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, (base_price / 15) as f64).await;
 
     // Step 5: Perform a coulple liquidations
     for _ in 0..5 {

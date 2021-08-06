@@ -78,7 +78,7 @@ async fn test_place_spot_order() {
     let mint_index: usize = 0;
     let base_price = 10000;
 
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
     // Act
     // Step 1: Deposit 10_000 USDC into mango account
@@ -135,7 +135,7 @@ async fn test_match_spot_order() {
     let mint_index: usize = 0;
     let base_price = 10_000;
 
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
     // Act
     let mut bidder_deposits = vec![0; config.num_mints];

@@ -139,7 +139,7 @@ async fn test_worst_case_v1() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+        mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
     }
 
     // Step 2: Deposit all tokens into mango account
@@ -218,7 +218,7 @@ async fn test_worst_case_with_fractions_v1() {
     let base_mint = test.with_mint(mint_index);
     let base_price = 10000;
 
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
     // Act
 
@@ -328,13 +328,13 @@ async fn test_worst_case_with_fractions_v2() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+        mango_group_cookie.set_oracle(&mut test, mint_index, 10000.0000000001).await;
     }
 
     // Step 2: Make deposits from 2 accounts (Borrower / Lender)
     let mut borrower_deposits = vec![0; config.num_mints];
     let lender_deposits = vec![10; config.num_mints];
-    borrower_deposits[test.quote_index] = 110_000;
+    borrower_deposits[test.quote_index] = 120_000;
     let user_deposits = vec![
         (borrower_user_index, &borrower_deposits),
         (lender_user_index, &lender_deposits),
