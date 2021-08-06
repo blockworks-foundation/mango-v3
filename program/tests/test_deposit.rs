@@ -10,7 +10,7 @@ use program_test::cookies::*;
 
 #[tokio::test]
 async fn test_deposit_succeeds() {
-    // Arrange
+    // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
@@ -33,7 +33,7 @@ async fn test_deposit_succeeds() {
     let user_token_account = test.with_user_token_account(user_index, test.quote_index);
     let initial_balance = test.get_token_balance(user_token_account).await;
 
-    // Act
+    // === Act ===
     mango_group_cookie.run_keeper(&mut test).await;
 
     test.perform_deposit(
@@ -43,7 +43,7 @@ async fn test_deposit_succeeds() {
         deposit_amount,
     ).await;
 
-    // Assert
+    // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
     let post_balance = test.get_token_balance(user_token_account).await;

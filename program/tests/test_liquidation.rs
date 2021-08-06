@@ -8,8 +8,8 @@ use solana_program_test::*;
 use fixed::types::I80F48;
 
 #[tokio::test]
-async fn test_spot_liquidation() {
-    // Arrange
+async fn test_token_and_token_liquidation() {
+    // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 3, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
@@ -23,33 +23,27 @@ async fn test_spot_liquidation() {
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
 
+    // General parameters
     let bidder_user_index: usize = 0;
     let asker_user_index: usize = 1;
     let liqor_user_index: usize = 2;
     let mint_index: usize = 0;
     let base_price = 15_000;
 
+    // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
-    // Act
-    // Step 1: Make deposits from 3 accounts (Bidder / Asker / Liqor)
-    let mut bidder_deposits = vec![0; config.num_mints];
-    let mut asker_deposits = vec![0; config.num_mints];
-    let mut liqor_deposits = vec![0; config.num_mints];
-    bidder_deposits[test.quote_index] = 10_000;
-    asker_deposits[mint_index] = 1;
-    asker_deposits[test.quote_index] = 10_000;
-    liqor_deposits[test.quote_index] = 10_000;
+    // Deposit amounts
     let user_deposits = vec![
-        (bidder_user_index, &bidder_deposits),
-        (asker_user_index, &asker_deposits),
-        (liqor_user_index, &liqor_deposits),
+        (bidder_user_index, test.quote_index, 10_000),
+        (asker_user_index, mint_index, 1),
+        (asker_user_index, test.quote_index, 10_000),
+        (liqor_user_index, test.quote_index, 10_000),
     ];
-    deposit_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        user_deposits,
-    ).await;
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place and match an order for 1 BTC @ 15_000
     match_single_spot_order_scenario(
@@ -90,7 +84,7 @@ async fn test_spot_liquidation() {
         ).await;
     }
 
-    // Assert
+    // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
     let bidder_base_deposit =

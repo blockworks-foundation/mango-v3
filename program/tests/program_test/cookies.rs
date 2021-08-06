@@ -26,7 +26,7 @@ pub struct MintCookie {
 }
 
 pub struct MangoGroupCookie {
-    // TODO: Add a counter that can count order_ids incrementally
+    
     pub address: Pubkey,
 
     pub mango_group: MangoGroup,
@@ -225,6 +225,10 @@ impl MangoGroupCookie {
         test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
         self.mango_cache =
             test.load_account::<MangoCache>(mango_group.mango_cache).await;
+        for user_index in 0..self.mango_accounts.len() {
+            self.mango_accounts[user_index].mango_account =
+                test.load_account::<MangoAccount>(self.mango_accounts[user_index].address).await;
+        }
 
     }
 
