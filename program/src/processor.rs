@@ -509,8 +509,9 @@ impl Processor {
         )
     }
 
-    #[allow(unused)]
+    // TODO create client functions and instruction.rs
     #[inline(never)]
+    #[allow(unused)]
     /// Change the shape of the interest rate function
     fn set_rate_params(
         program_id: &Pubkey,
@@ -1476,7 +1477,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         // TODO
@@ -1556,7 +1556,7 @@ impl Processor {
             signer_ai,
             &[&signers_seeds],
             settlement.to_num(),
-        );
+        )?;
 
         // Decrement deposits on mango account
         checked_sub_net(
@@ -1841,8 +1841,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused)]
-
     /// Liquidator takes some of borrows at token at `liab_index` and receives some deposits from
     /// the token at `asset_index`
     /// Requires: `liab_index != asset_index`
@@ -1895,50 +1893,71 @@ impl Processor {
         let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
         let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
         check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
-        check!(asset_index != liab_index, MangoErrorCode::Default)?;
-
-        let mut init_health_cache = OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
-        let mut maint_health_cache =
-            OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+        check!(asset_index != liab_index, MangoErrorCode::InvalidParam)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
-            MangoErrorCode::InvalidCache
-        )?;
+        let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![], vec![]);
+        let liqor_active_assets =
+            UserActiveAssets::new(&mango_group, &liqor_ma, vec![asset_index, liab_index], vec![]);
 
-        let mut liqor_health_cache = OldHealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
-        liqor_health_cache.set_active_asset(asset_index);
-        liqor_health_cache.set_active_asset(liab_index);
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO write more efficient
-            MangoErrorCode::InvalidCache
+        mango_cache.check_valid(
+            &mango_group,
+            &UserActiveAssets::merge(&liqee_active_assets, &liqor_active_assets),
+            now_ts,
         )?;
 
         // Make sure orders are cancelled for perps
         for i in 0..mango_group.num_oracles {
-            if maint_health_cache.active_assets[i] {
+            if liqee_active_assets.perps[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
                 check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
 
-        // TODO - optimization: consider calculating both healths at same time
-        init_health_cache.update_health(
-            &mango_group,
-            &mango_cache,
-            &liqee_ma,
-            liqee_open_orders_ais,
-        )?;
-        let init_health = init_health_cache.health;
+        let mut health_cache = HealthCache::new(liqee_active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
+        // let mut init_health_cache = OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        // let mut maint_health_cache =
+        //     OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+        //
+        // check!(
+        //     mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
+        //     MangoErrorCode::InvalidCache
+        // )?;
 
-        maint_health_cache.update_health(
-            &mango_group,
-            &mango_cache,
-            &liqee_ma,
-            liqee_open_orders_ais,
-        )?;
-        let maint_health = maint_health_cache.health;
+        // let mut liqor_health_cache = OldHealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        // liqor_health_cache.set_active_asset(asset_index);
+        // liqor_health_cache.set_active_asset(liab_index);
+        // check!(
+        //     mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO write more efficient
+        //     MangoErrorCode::InvalidCache
+        // )?;
+
+        // for i in 0..mango_group.num_oracles {
+        //     if maint_health_cache.active_assets[i] {
+        //         let oo = &liqee_ma.perp_accounts[i].open_orders;
+        //         check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
+        //     }
+        // }
+
+        // // TODO - optimization: consider calculating both healths at same time
+        // init_health_cache.update_health(
+        //     &mango_group,
+        //     &mango_cache,
+        //     &liqee_ma,
+        //     liqee_open_orders_ais,
+        // )?;
+        // let init_health = init_health_cache.health;
+        //
+        // maint_health_cache.update_health(
+        //     &mango_group,
+        //     &mango_cache,
+        //     &liqee_ma,
+        //     liqee_open_orders_ais,
+        // )?;
+        // let maint_health = maint_health_cache.health;
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2031,42 +2050,71 @@ impl Processor {
             asset_transfer,
         )?;
 
-        liqor_health_cache.update_health(
+        let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+        liqor_health_cache.init_vals(
             &mango_group,
             &mango_cache,
             &liqor_ma,
             liqor_open_orders_ais,
         )?;
-        let liqor_health = liqor_health_cache.health;
+        let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
         // Update liqee's health where it may have changed
         for &i in &[asset_index, liab_index] {
-            maint_health_cache.update_spot_health(
-                &mango_group,
-                &mango_cache,
-                &liqee_ma,
-                liqee_open_orders_ais,
-                i,
-            )?;
+            if i == QUOTE_INDEX {
+                health_cache.update_quote(&mango_cache, &liqee_ma);
+            } else {
+                health_cache.update_spot_val(
+                    &mango_group,
+                    &mango_cache,
+                    &liqee_ma,
+                    &liqee_open_orders_ais[i],
+                    i,
+                )?;
+            }
         }
-        let liqee_maint_health = maint_health_cache.health;
+        let liqee_maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
+
+        // liqor_health_cache.update_health(
+        //     &mango_group,
+        //     &mango_cache,
+        //     &liqor_ma,
+        //     liqor_open_orders_ais,
+        // )?;
+        // let liqor_health = liqor_health_cache.health;
+        // check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+
+        // Update liqee's health where it may have changed
+        // for &i in &[asset_index, liab_index] {
+        //     maint_health_cache.update_spot_health(
+        //         &mango_group,
+        //         &mango_cache,
+        //         &liqee_ma,
+        //         liqee_open_orders_ais,
+        //         i,
+        //     )?;
+        // }
+        // let liqee_maint_health = maint_health_cache.health;
 
         if liqee_maint_health < ZERO_I80F48 {
             liqee_ma.is_bankrupt =
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
             // TODO OPT No need to update this at end. Will be caught at beginning of another function
-            for &i in &[asset_index, liab_index] {
-                init_health_cache.update_spot_health(
-                    &mango_group,
-                    &mango_cache,
-                    &liqee_ma,
-                    liqee_open_orders_ais,
-                    i,
-                )?;
-            }
-            let liqee_init_health = init_health_cache.health;
+            // for &i in &[asset_index, liab_index] {
+            //     init_health_cache.update_spot_health(
+            //         &mango_group,
+            //         &mango_cache,
+            //         &liqee_ma,
+            //         liqee_open_orders_ais,
+            //         i,
+            //     )?;
+            // }
+            // let liqee_init_health = init_health_cache.health;
+
+            let liqee_init_health = health_cache.get_health(&mango_group, HealthType::Init);
+
             if liqee_init_health >= ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
             }

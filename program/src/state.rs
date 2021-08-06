@@ -748,8 +748,16 @@ impl UserActiveAssets {
                 && mango_account.perp_accounts[i].is_active();
         }
 
-        spot_extra.iter().for_each(|&i| spot[i] = true);
-        perps_extra.iter().for_each(|&i| perps[i] = true);
+        spot_extra.iter().for_each(|&i| {
+            if i != QUOTE_INDEX {
+                spot[i] = true
+            }
+        });
+        perps_extra.iter().for_each(|&i| {
+            if i != QUOTE_INDEX {
+                perps[i] = true
+            }
+        });
 
         Self { spot, perps }
     }
