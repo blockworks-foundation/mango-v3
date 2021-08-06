@@ -26,8 +26,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut, split_open_orders, FI80F48};
-use fixed::FixedI128;
+use crate::utils::{invert_side, remove_slop_mut, split_open_orders};
 
 pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -73,6 +72,9 @@ pub enum DataType {
     EventQueue,
 }
 
+const NUM_HEALTHS: usize = 2;
+#[repr(usize)]
+#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
 pub enum HealthType {
     Maint,
     Init,
@@ -627,6 +629,42 @@ impl MangoCache {
         Ok(mango_cache)
     }
 
+    pub fn check_valid(
+        &self,
+        mango_group: &MangoGroup,
+        active_assets: &UserActiveAssets,
+        now_ts: u64,
+    ) -> MangoResult<()> {
+        let valid_interval = mango_group.valid_interval;
+        check!(
+            now_ts <= self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval,
+            MangoErrorCode::InvalidRootBankCache
+        )?;
+
+        for i in 0..mango_group.num_oracles {
+            if active_assets.spot[i] || active_assets.perps[i] {
+                check!(
+                    now_ts <= self.price_cache[i].last_update + valid_interval,
+                    MangoErrorCode::InvalidPriceCache
+                )?;
+            }
+
+            if active_assets.spot[i] {
+                check!(
+                    now_ts <= self.root_bank_cache[i].last_update + valid_interval,
+                    MangoErrorCode::InvalidRootBankCache
+                )?;
+            }
+
+            if active_assets.perps[i] {
+                check!(
+                    now_ts <= self.perp_market_cache[i].last_update + valid_interval,
+                    MangoErrorCode::InvalidRootBankCache
+                )?;
+            }
+        }
+        Ok(())
+    }
     // TODO - only check caches are valid if balances are non-zero
     pub fn check_caches_valid(
         &self,
@@ -686,8 +724,52 @@ impl MangoCache {
     }
 }
 
-pub struct HealthCache2 {
-    pub active_assets: [bool; MAX_TOKENS],
+pub struct UserActiveAssets {
+    pub spot: [bool; MAX_PAIRS],
+    pub perps: [bool; MAX_PAIRS],
+}
+
+impl UserActiveAssets {
+    pub fn new(
+        mango_group: &MangoGroup,
+        mango_account: &MangoAccount,
+        spot_extra: Vec<usize>,
+        perps_extra: Vec<usize>,
+    ) -> Self {
+        let mut spot = [false; MAX_PAIRS];
+        let mut perps = [false; MAX_PAIRS];
+        for i in 0..mango_group.num_oracles {
+            spot[i] = !mango_group.spot_markets[i].is_empty()
+                && (mango_account.in_margin_basket[i]
+                    || !mango_account.deposits[i].is_zero()
+                    || !mango_account.borrows[i].is_zero());
+
+            perps[i] = !mango_group.perp_markets[i].is_empty()
+                && mango_account.perp_accounts[i].is_active();
+        }
+
+        spot_extra.iter().for_each(|&i| spot[i] = true);
+        perps_extra.iter().for_each(|&i| perps[i] = true);
+
+        Self { spot, perps }
+    }
+
+    pub fn merge(a: &Self, b: &Self) -> Self {
+        let mut spot = [false; MAX_PAIRS];
+        let mut perps = [false; MAX_PAIRS];
+        for i in 0..MAX_PAIRS {
+            spot[i] = a.spot[i] || b.spot[i];
+            perps[i] = a.perps[i] || b.perps[i];
+        }
+        Self { spot, perps }
+    }
+}
+
+pub struct HealthCache {
+    // pub active_assets: [bool; MAX_TOKENS],
+    // pub active_spot: [bool; MAX_PAIRS],
+    // pub active_perps: [bool; MAX_PAIRS],
+    pub active_assets: UserActiveAssets,
 
     /// Vec of length MAX_PAIRS containing worst case spot vals; unweighted
     spot: Vec<(I80F48, I80F48)>,
@@ -698,23 +780,14 @@ pub struct HealthCache2 {
     health: [Option<I80F48>; 2],
 }
 
-impl HealthCache2 {
-    pub fn new(mango_group: &MangoGroup, mango_account: &MangoAccount) -> Self {
-        let mut active_assets = [false; MAX_TOKENS];
-        active_assets[QUOTE_INDEX] = true;
-        for i in 0..mango_group.num_oracles {
-            active_assets[i] = mango_account.in_margin_basket[i]
-                || !mango_account.deposits[i].is_zero()
-                || !mango_account.borrows[i].is_zero()
-                || mango_account.perp_accounts[i].is_active();
-        }
-
+impl HealthCache {
+    pub fn new(active_assets: UserActiveAssets) -> Self {
         Self {
             active_assets,
             spot: vec![(ZERO_I80F48, ZERO_I80F48); MAX_PAIRS],
             perp: vec![(ZERO_I80F48, ZERO_I80F48); MAX_PAIRS],
             quote: ZERO_I80F48,
-            health: [None; 2],
+            health: [None; NUM_HEALTHS],
         }
     }
 
@@ -727,26 +800,20 @@ impl HealthCache2 {
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
-            if !self.active_assets[i] {
-                continue;
-            }
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-            let price = mango_cache.price_cache[i].price;
-            if !spot_market_info.is_empty() {
+            if self.active_assets.spot[i] {
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
-                    price,
+                    mango_cache.price_cache[i].price,
                     i,
                     &open_orders_ais[i],
                 )?;
             }
 
-            if !perp_market_info.is_empty() && mango_account.perp_accounts[i].is_active() {
+            if self.active_assets.perps[i] {
                 self.perp[i] = mango_account.perp_accounts[i].get_val(
-                    perp_market_info,
+                    &mango_group.perp_markets[i],
                     &mango_cache.perp_market_cache[i],
-                    price,
+                    mango_cache.price_cache[i].price,
                 )?;
             }
         }
@@ -754,16 +821,17 @@ impl HealthCache2 {
     }
 
     pub fn get_health(&mut self, mango_group: &MangoGroup, health_type: HealthType) -> I80F48 {
-        match self.health[health_type as u8 as usize] {
+        let health_index = health_type as usize;
+        match self.health[health_index] {
             None => {
-                // apply weights, cache result, return
+                // apply weights, cache result, return health
                 let mut health = self.quote;
                 for i in 0..mango_group.num_oracles {
                     let spot_market_info = &mango_group.spot_markets[i];
                     let perp_market_info = &mango_group.perp_markets[i];
 
                     let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
-                        match self.health_type {
+                        match health_type {
                             HealthType::Maint => (
                                 spot_market_info.maint_asset_weight,
                                 spot_market_info.maint_liab_weight,
@@ -777,18 +845,142 @@ impl HealthCache2 {
                                 perp_market_info.init_liab_weight,
                             ),
                         };
-                    todo!()
+
+                    if self.active_assets.spot[i] {
+                        let (base, quote) = self.spot[i];
+                        if base.is_negative() {
+                            health += base * spot_liab_weight + quote;
+                        } else {
+                            health += base * spot_asset_weight + quote
+                        }
+                    }
+
+                    if self.active_assets.perps[i] {
+                        let (base, quote) = self.perp[i];
+                        if base.is_negative() {
+                            health += base * perp_liab_weight + quote;
+                        } else {
+                            health += base * perp_asset_weight + quote
+                        }
+                    }
                 }
 
-                ZERO_I80F48
+                self.health[health_index] = Some(health);
+                health
             }
             Some(h) => h,
         }
     }
+
+    pub fn update_quote(&mut self, mango_cache: &MangoCache, mango_account: &MangoAccount) {
+        let quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
+        for i in 0..NUM_HEALTHS {
+            if let Some(h) = self.health[i] {
+                self.health[i] = Some(h + quote - self.quote);
+            }
+        }
+        self.quote = quote;
+    }
+    pub fn update_spot_val(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ai: &AccountInfo,
+        market_index: usize,
+    ) -> MangoResult<()> {
+        let (base, quote) = mango_account.get_spot_val(
+            &mango_cache.root_bank_cache[market_index],
+            mango_cache.price_cache[market_index].price,
+            market_index,
+            open_orders_ai,
+        )?;
+
+        let (prev_base, prev_quote) = self.spot[market_index];
+
+        for i in 0..NUM_HEALTHS {
+            if let Some(h) = self.health[i] {
+                let health_type: HealthType = HealthType::try_from_primitive(i).unwrap();
+                let smi = &mango_group.spot_markets[market_index];
+
+                let (asset_weight, liab_weight) = match health_type {
+                    HealthType::Maint => (smi.maint_asset_weight, smi.maint_liab_weight),
+                    HealthType::Init => (smi.init_asset_weight, smi.init_liab_weight),
+                };
+
+                // Get health from val
+                let prev_spot_health = if prev_base.is_negative() {
+                    prev_base * liab_weight + prev_quote
+                } else {
+                    prev_base * asset_weight + prev_quote
+                };
+
+                let curr_spot_health = if base.is_negative() {
+                    base * liab_weight + quote
+                } else {
+                    base * asset_weight + quote
+                };
+
+                self.health[i] = Some(h + curr_spot_health - prev_spot_health);
+            }
+        }
+
+        self.spot[market_index] = (base, quote);
+
+        Ok(())
+    }
+
+    /// Update perp val and then update the healths
+    pub fn update_perp_val(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        market_index: usize,
+    ) -> MangoResult<()> {
+        let (base, quote) = mango_account.perp_accounts[market_index].get_val(
+            &mango_group.perp_markets[market_index],
+            &mango_cache.perp_market_cache[market_index],
+            mango_cache.price_cache[market_index].price,
+        )?;
+
+        let (prev_base, prev_quote) = self.perp[market_index];
+
+        for i in 0..NUM_HEALTHS {
+            if let Some(h) = self.health[i] {
+                let health_type: HealthType = HealthType::try_from_primitive(i).unwrap();
+                let pmi = &mango_group.perp_markets[market_index];
+
+                let (asset_weight, liab_weight) = match health_type {
+                    HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
+                    HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+                };
+
+                // Get health from val
+                let prev_perp_health = if prev_base.is_negative() {
+                    prev_base * liab_weight + prev_quote
+                } else {
+                    prev_base * asset_weight + prev_quote
+                };
+
+                let curr_perp_health = if base.is_negative() {
+                    base * liab_weight + quote
+                } else {
+                    base * asset_weight + quote
+                };
+
+                self.health[i] = Some(h + curr_perp_health - prev_perp_health);
+            }
+        }
+
+        self.perp[market_index] = (base, quote);
+
+        Ok(())
+    }
 }
 
 /// Used to store intermediate health calculations during program execution
-pub struct HealthCache {
+pub struct OldHealthCache {
     pub active_assets: [bool; MAX_TOKENS],
     pub spot_healths: Vec<I80F48>,
     pub perp_healths: Vec<I80F48>,
@@ -799,7 +991,7 @@ pub struct HealthCache {
     pub health: I80F48,
 }
 
-impl HealthCache {
+impl OldHealthCache {
     pub fn new(
         mango_group: &MangoGroup,
         mango_account: &MangoAccount,
@@ -1235,7 +1427,7 @@ impl MangoAccount {
                 Ok((bids_base_net * price, quote_free))
             } else {
                 Ok((asks_base_net * price, base_locked * price + quote_free + quote_locked))
-            };
+            }
         }
     }
     #[inline(always)]

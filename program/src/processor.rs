@@ -32,9 +32,9 @@ use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData,
-    NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
-    SpotMarketInfo, TokenInfo, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
-    ZERO_I80F48,
+    NodeBank, OldHealthCache, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank,
+    RootBankCache, SpotMarketInfo, TokenInfo, UserActiveAssets, INFO_LEN, MAX_NODE_BANKS,
+    MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -853,20 +853,13 @@ impl Processor {
             }
         }
 
-        // initialize the health cache with active assets
-        let mut health_cache = HealthCache::new(&mango_group, &mango_account, HealthType::Init);
-
-        // First check all caches to make sure valid
+        let active_assets = UserActiveAssets::new(&mango_group, &mango_account, vec![], vec![]);
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &health_cache.active_assets, now_ts),
-            MangoErrorCode::Default
-        )?;
-
-        // Calculate health
-        health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
-        let pre_health = health_cache.health;
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
         // update the being_liquidated flag
         if mango_account.being_liquidated {
@@ -922,23 +915,16 @@ impl Processor {
             I80F48::from_num(post_amount) - I80F48::from_num(pre_amount),
         )?;
 
-        // Update the health where it may have changed
-        health_cache.update_spot_health(
+        // Update health for tokens that may have changed
+        health_cache.update_quote(&mango_cache, &mango_account);
+        health_cache.update_spot_val(
             &mango_group,
             &mango_cache,
             &mango_account,
-            open_orders_ais,
+            &open_orders_ais[market_index],
             market_index,
         )?;
-        health_cache.update_spot_health(
-            &mango_group,
-            &mango_cache,
-            &mango_account,
-            open_orders_ais,
-            QUOTE_INDEX,
-        )?;
-
-        let post_health = health_cache.health;
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
 
         // If an account is in reduce_only mode, health must only go up
         check!(
@@ -1203,7 +1189,7 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
 
         // initialize the health cache with active assets
-        let mut health_cache = HealthCache::new(&mango_group, &mango_account, HealthType::Init);
+        let mut health_cache = OldHealthCache::new(&mango_group, &mango_account, HealthType::Init);
         health_cache.set_active_asset(market_index);
 
         check!(
@@ -1387,7 +1373,6 @@ impl Processor {
 
     #[inline(never)]
     /// Take two MangoAccount and settle quote currency pnl between them
-    #[allow(unused)]
     fn settle_pnl(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1494,6 +1479,7 @@ impl Processor {
     #[allow(unused)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        // TODO
         const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1911,8 +1897,9 @@ impl Processor {
         check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
         check!(asset_index != liab_index, MangoErrorCode::Default)?;
 
-        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
-        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+        let mut init_health_cache = OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache =
+            OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         check!(
@@ -1920,7 +1907,7 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
 
-        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        let mut liqor_health_cache = OldHealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
         liqor_health_cache.set_active_asset(asset_index);
         liqor_health_cache.set_active_asset(liab_index);
         check!(
@@ -2133,8 +2120,9 @@ impl Processor {
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
 
-        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
-        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+        let mut init_health_cache = OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache =
+            OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         check!(
@@ -2142,7 +2130,7 @@ impl Processor {
             MangoErrorCode::Default
         )?;
 
-        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        let mut liqor_health_cache = OldHealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
         liqor_health_cache.set_active_asset(asset_index);
         liqor_health_cache.set_active_asset(liab_index);
         check!(
@@ -2463,8 +2451,9 @@ impl Processor {
         liqee_ma.perp_accounts[market_index].settle_funding(cache);
         liqor_ma.perp_accounts[market_index].settle_funding(cache);
 
-        let mut init_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
-        let mut maint_health_cache = HealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
+        let mut init_health_cache = OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
+        let mut maint_health_cache =
+            OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         check!(
@@ -2472,7 +2461,7 @@ impl Processor {
             MangoErrorCode::Default
         )?;
 
-        let mut liqor_health_cache = HealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
+        let mut liqor_health_cache = OldHealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
         liqor_health_cache.set_active_asset(market_index);
         check!(
             mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO OPT write more efficient
@@ -3003,6 +2992,8 @@ impl Processor {
             match EventType::try_from(event.event_type).map_err(|_| throw!())? {
                 EventType::Fill => {
                     let fill_event: &FillEvent = cast_ref(event);
+
+                    // TODO add msg! for FillEvent
 
                     // handle self trade separately
                     if fill_event.maker == fill_event.taker {

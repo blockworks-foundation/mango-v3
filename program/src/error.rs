@@ -103,6 +103,12 @@ pub enum MangoErrorCode {
     InvalidOpenOrdersAccount,
     #[error("MangoErrorCode::BeingLiquidated Invalid instruction while being liquidated")]
     BeingLiquidated,
+    #[error("MangoErrorCode::InvalidRootBankCache")]
+    InvalidRootBankCache,
+    #[error("MangoErrorCode::InvalidPriceCache")]
+    InvalidPriceCache,
+    #[error("MangoErrorCode::InvalidPerpMarketCache")]
+    InvalidPerpMarketCache,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
