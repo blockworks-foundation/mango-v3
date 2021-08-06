@@ -26,7 +26,7 @@ pub struct MintCookie {
 }
 
 pub struct MangoGroupCookie {
-    // TODO: Add a counter that can count order_ids incrementally
+    
     pub address: Pubkey,
 
     pub mango_group: MangoGroup,
@@ -40,6 +40,10 @@ pub struct MangoGroupCookie {
     pub spot_markets: Vec<SpotMarketCookie>,
 
     pub perp_markets: Vec<PerpMarketCookie>,
+
+    pub current_spot_order_id: u64,
+
+    pub current_perp_order_id: u64,
 
 }
 
@@ -100,7 +104,16 @@ impl MangoGroupCookie {
         let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
         let mango_cache = test.load_account::<MangoCache>(mango_group.mango_cache).await;
 
-        MangoGroupCookie { address: mango_group_pk, mango_group: mango_group, mango_cache: mango_cache, mango_accounts: vec![], spot_markets: vec![], perp_markets: vec![] }
+        MangoGroupCookie {
+            address: mango_group_pk,
+            mango_group: mango_group,
+            mango_cache: mango_cache,
+            mango_accounts: vec![],
+            spot_markets: vec![],
+            perp_markets: vec![],
+            current_spot_order_id: 0,
+            current_perp_order_id: 10_000,
+        }
 
     }
 
@@ -170,7 +183,7 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
         oracle_index: usize,
-        price: u64,
+        price: f64,
     ) {
 
         let mint = test.with_mint(oracle_index);
@@ -212,6 +225,10 @@ impl MangoGroupCookie {
         test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
         self.mango_cache =
             test.load_account::<MangoCache>(mango_group.mango_cache).await;
+        for user_index in 0..self.mango_accounts.len() {
+            self.mango_accounts[user_index].mango_account =
+                test.load_account::<MangoAccount>(self.mango_accounts[user_index].address).await;
+        }
 
     }
 
@@ -347,14 +364,18 @@ impl SpotMarketCookie {
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
-        order_id: u64,
         side: serum_dex::matching::Side,
         size: u64,
         price: u64,
     ) {
+
         let limit_price = test.price_number_to_lots(&self.mint, price);
         let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
-        let max_native_pc_qty_including_fees = test.quote_size_number_to_lots(&self.mint, size * limit_price);
+        let max_native_pc_qty_including_fees = match side {
+            serum_dex::matching::Side::Bid => self.mint.quote_lot * limit_price * max_coin_qty,
+            serum_dex::matching::Side::Ask => std::u64::MAX
+        };
+
         let order = serum_dex::instruction::NewOrderInstructionV3 {
             side: side, //serum_dex::matching::Side::Bid,
             limit_price: NonZeroU64::new(limit_price).unwrap(),
@@ -362,7 +383,7 @@ impl SpotMarketCookie {
             max_native_pc_qty_including_fees: NonZeroU64::new(max_native_pc_qty_including_fees).unwrap(),
             self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
             order_type: serum_dex::matching::OrderType::Limit,
-            client_order_id: order_id,
+            client_order_id: mango_group_cookie.current_spot_order_id,
             limit: u16::MAX,
         };
 
@@ -375,6 +396,7 @@ impl SpotMarketCookie {
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
             test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
+        mango_group_cookie.current_spot_order_id += 1;
 
     }
 
@@ -487,7 +509,6 @@ impl PerpMarketCookie {
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
-        order_id: u64,
         side: mango::matching::Side,
         size: u64,
         price: u64,
@@ -503,12 +524,13 @@ impl PerpMarketCookie {
             side,
             order_size,
             order_price,
-            order_id,
+            mango_group_cookie.current_perp_order_id,
             mango::matching::OrderType::Limit,
         ).await;
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
             test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
+        mango_group_cookie.current_perp_order_id += 1;
 
     }
 

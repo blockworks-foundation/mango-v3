@@ -557,7 +557,7 @@ impl MangoProgramTest {
     pub fn with_oracle_price(
         &mut self,
         base_mint: &MintCookie,
-        price: u64,
+        price: f64,
     ) -> I80F48 {
         return I80F48::from_num(price) * I80F48::from_num(self.quote_mint.unit)
             / I80F48::from_num(base_mint.unit);

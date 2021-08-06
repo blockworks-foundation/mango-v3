@@ -6,7 +6,7 @@ use program_test::scenarios::*;
 
 #[tokio::test]
 async fn test_add_all_markets_to_mango_group() {
-    // Arrange
+    // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 1, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
     solana_logger::setup_with_default(
@@ -22,14 +22,11 @@ async fn test_add_all_markets_to_mango_group() {
     let user_index = 0;
     println!("Performing deposit");
 
-    let default_user_deposits = vec![1000000; config.num_mints];
-    let user_deposits = vec![
-        (user_index, &default_user_deposits),
-    ];
-    deposit_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        user_deposits,
-    ).await;
+    let mut user_deposits = vec![];
+    for mint_index in 0..config.num_mints {
+        user_deposits.push((user_index, mint_index, 1000000));
+    }
+
+    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
 }

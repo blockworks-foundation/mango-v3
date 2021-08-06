@@ -9,7 +9,7 @@ use fixed::types::I80F48;
 
 #[tokio::test]
 async fn test_list_spot_market_on_serum() {
-    // Arrange
+    // === Arrange ===
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
@@ -23,9 +23,9 @@ async fn test_list_spot_market_on_serum() {
     // solana_logger::setup_with("error");
 
     let mint_index: usize = 0;
-    // Act
+    // === Act ===
     let spot_market_cookie = test.list_spot_market(mint_index).await;
-    // Assert
+    // === Assert ===
     println!("Serum Market PK: {}", spot_market_cookie.market.to_string());
     // Todo: Figure out how to assert this
 }
@@ -33,7 +33,7 @@ async fn test_list_spot_market_on_serum() {
 #[tokio::test]
 async fn test_init_spot_markets() {
 
-    // Arrange
+    // === Arrange ===
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
@@ -47,18 +47,18 @@ async fn test_init_spot_markets() {
     // solana_logger::setup_with("error");
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
 
-    // Act
+    // === Act ===
     test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
     mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1).await;
 
-    // Assert
+    // === Assert ===
     // TODO: Figure out how to assert
 
 }
 
 #[tokio::test]
 async fn test_place_spot_order() {
-    // Arrange
+    // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
@@ -74,41 +74,32 @@ async fn test_place_spot_order() {
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
 
+    // General parameters
     let user_index: usize = 0;
     let mint_index: usize = 0;
     let base_price = 10000;
 
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
-    // Act
-    // Step 1: Deposit 10_000 USDC into mango account
-    let mut default_user_deposits = vec![0; config.num_mints];
-    default_user_deposits[test.quote_index] = base_price;
+    // Deposit amounts
     let user_deposits = vec![
-        (user_index, &default_user_deposits),
+        (user_index, test.quote_index, base_price),
     ];
-    deposit_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        user_deposits,
-    ).await;
 
-    // Step 2: Place a spot order for BTC
-    mango_group_cookie.run_keeper(&mut test).await;
+    // Spot Orders
+    let user_spot_orders = vec![
+        (user_index, mint_index, serum_dex::matching::Side::Bid, 1, base_price),
+    ];
 
-    let starting_spot_order_id = 1000;
-    let mut spot_market_cookie = mango_group_cookie.spot_markets[mint_index];
-    spot_market_cookie.place_order(
-        &mut test,
-        &mut mango_group_cookie,
-        user_index,
-        starting_spot_order_id + mint_index as u64,
-        serum_dex::matching::Side::Bid,
-        1,
-        base_price,
-    ).await;
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
-    // Assert
+    // Step 2: Place spot orders
+    place_spot_order_scenario(&mut test, &mut mango_group_cookie, user_spot_orders).await;
+
+    // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
     let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
@@ -118,7 +109,7 @@ async fn test_place_spot_order() {
 
 #[tokio::test]
 async fn test_match_spot_order() {
-    // Arrange
+    // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
@@ -128,32 +119,36 @@ async fn test_match_spot_order() {
              solana_runtime::system_instruction_processor=info,\
              solana_program_test=info",
     );
+    // Disable all logs except error
+    // solana_logger::setup_with("error");
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
 
+    // General parameters
     let bidder_user_index: usize = 0;
     let asker_user_index: usize = 1;
     let mint_index: usize = 0;
     let base_price = 10_000;
 
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
 
-    // Act
-    let mut bidder_deposits = vec![0; config.num_mints];
-    let mut asker_deposits = vec![0; config.num_mints];
-    bidder_deposits[test.quote_index] = base_price;
-    asker_deposits[mint_index] = 1;
+    // Deposit amounts
     let user_deposits = vec![
-        (bidder_user_index, &bidder_deposits),
-        (asker_user_index, &asker_deposits),
+        (bidder_user_index, test.quote_index, base_price),
+        (asker_user_index, mint_index, 1),
     ];
+
+    // === Act ===
+    // Step 1: Make deposits
     deposit_scenario(
         &mut test,
         &mut mango_group_cookie,
         user_deposits,
     ).await;
 
+    // Step 2: Place and match spot order
     match_single_spot_order_scenario(
         &mut test,
         &mut mango_group_cookie,
@@ -163,7 +158,7 @@ async fn test_match_spot_order() {
         base_price,
     ).await;
 
-    // Assert
+    // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
     let bidder_base_deposit =
