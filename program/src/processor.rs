@@ -1549,7 +1549,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused)]
     fn force_cancel_spot_orders(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1597,31 +1596,33 @@ impl Processor {
         let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
         check!(liqee_ma.in_margin_basket[market_index], MangoErrorCode::Default)?;
 
-        let open_orders_ai = &liqee_open_orders_ais[market_index];
-
-        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
         check_eq!(
             &mango_group.tokens[market_index].root_bank,
             base_root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
+        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
         let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
         check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
         check_eq!(
             &mango_group.tokens[QUOTE_INDEX].root_bank,
             quote_root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
-
-        check_eq!(
-            &liqee_ma.spot_open_orders[market_index],
-            open_orders_ai.key,
-            MangoErrorCode::InvalidOpenOrdersAccount
-        )?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
@@ -1660,9 +1661,8 @@ impl Processor {
             liqee_ma.being_liquidated = true;
         }
 
-        // TODO - check open orders are valid
-
         // Cancel orders up to the limit
+        let open_orders_ai = &liqee_open_orders_ais[market_index];
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_cancel_orders(
             open_orders_ai,
@@ -1739,7 +1739,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused)]
     fn force_cancel_perp_orders(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -1752,7 +1751,7 @@ impl Processor {
         let [
             mango_group_ai,         // read
             mango_cache_ai,         // read
-            perp_market_ai,         // write
+            perp_market_ai,         // read
             bids_ai,                // write
             asks_ai,                // write
             liqee_mango_account_ai, // write
@@ -1766,8 +1765,7 @@ impl Processor {
         check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
 
-        let mut perp_market =
-            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
         let perp_market_info = &mango_group.perp_markets[market_index];
         check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
@@ -1782,28 +1780,6 @@ impl Processor {
         health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
-
-        // let mut liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
-        // check!(
-        //     mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
-        //     MangoErrorCode::InvalidCache
-        // )?;
-        //
-        // let maint_health = liqee_ma.get_health(
-        //     &mango_group,
-        //     &mango_cache,
-        //     liqee_open_orders_ais,
-        //     &liqee_active_assets,
-        //     HealthType::Maint,
-        // )?;
-        // // Determine how much position can be taken from liqee to get him above init_health
-        // let init_health = liqee_ma.get_health(
-        //     &mango_group,
-        //     &mango_cache,
-        //     liqee_open_orders_ais,
-        //     &liqee_active_assets,
-        //     HealthType::Init,
-        // )?;
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2110,10 +2086,7 @@ impl Processor {
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
-                check!(
-                    oo.bids_quantity == 0 && oo.asks_quantity == 0,
-                    MangoErrorCode::NotLiquidatable
-                )?;
+                check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
 

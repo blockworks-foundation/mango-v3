@@ -334,7 +334,7 @@ pub enum MangoInstruction {
     /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS)
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` mango_cache_ai - MangoCache
-    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 2. `[]` perp_market_ai - PerpMarket
     /// 3. `[writable]` bids_ai - Bids acc
     /// 4. `[writable]` asks_ai - Asks acc
     /// 5. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
@@ -1467,5 +1467,4 @@ pub fn liquidate_token_and_token(
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
-
 }
