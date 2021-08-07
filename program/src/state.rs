@@ -1650,6 +1650,22 @@ impl MangoAccount {
         }
         true
     }
+
+    pub fn check_open_orders(
+        &self,
+        mango_group: &MangoGroup,
+        open_orders_ais: &[AccountInfo; MAX_PAIRS],
+    ) -> MangoResult<()> {
+        for i in 0..mango_group.num_oracles {
+            check_eq!(
+                open_orders_ais[i].key,
+                &self.spot_open_orders[i],
+                MangoErrorCode::InvalidOpenOrdersAccount
+            )?;
+            check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
