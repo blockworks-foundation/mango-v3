@@ -1657,12 +1657,14 @@ impl MangoAccount {
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> MangoResult<()> {
         for i in 0..mango_group.num_oracles {
-            check_eq!(
-                open_orders_ais[i].key,
-                &self.spot_open_orders[i],
-                MangoErrorCode::InvalidOpenOrdersAccount
-            )?;
-            check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+            if self.in_margin_basket[i] {
+                check_eq!(
+                    open_orders_ais[i].key,
+                    &self.spot_open_orders[i],
+                    MangoErrorCode::InvalidOpenOrdersAccount
+                )?;
+                check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+            }
         }
         Ok(())
     }
