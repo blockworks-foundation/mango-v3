@@ -1,14 +1,13 @@
-use solana_program_test::*;
-
-use mango::state::*;
-use program_test::*;
-
 mod program_test;
+use solana_program_test::*;
+use program_test::*;
+use program_test::cookies::*;
+use program_test::scenarios::*;
 
 #[tokio::test]
 async fn test_add_all_markets_to_mango_group() {
-    // Arrange
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 1, num_mints: 32 };
+    // === Arrange ===
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 1, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
     solana_logger::setup_with_default(
         "solana_rbpf::vm=info,\
@@ -17,26 +16,17 @@ async fn test_add_all_markets_to_mango_group() {
              solana_program_test=info",
     );
 
-    let (mango_group_pk, _mango_group) = test.with_mango_group().await;
-    test.add_oracles_to_mango_group(&mango_group_pk).await;
-    test.add_spot_markets_to_mango_group(&mango_group_pk).await;
-
-    let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
 
     let user_index = 0;
-    let (mango_account_pk, _mango_account) =
-        test.with_mango_account(&mango_group_pk, user_index).await;
     println!("Performing deposit");
 
-    for i in 0..test.num_mints {
-        test.perform_deposit(
-            &mango_group,
-            &mango_group_pk,
-            &mango_account_pk,
-            user_index,
-            i,
-            1000000,
-        )
-        .await;
+    let mut user_deposits = vec![];
+    for mint_index in 0..config.num_mints {
+        user_deposits.push((user_index, mint_index, 1000000));
     }
+
+    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+
 }
