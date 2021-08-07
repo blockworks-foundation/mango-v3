@@ -18,15 +18,15 @@ pub struct MintCookie {
 
     pub index: usize,
     pub decimals: u8,
-    pub unit: u64,
-    pub base_lot: u64,
-    pub quote_lot: u64,
+    pub unit: f64,
+    pub base_lot: f64,
+    pub quote_lot: f64,
     pub pubkey: Option<Pubkey>,
 
 }
 
 pub struct MangoGroupCookie {
-    
+
     pub address: Pubkey,
 
     pub mango_group: MangoGroup,
@@ -365,14 +365,14 @@ impl SpotMarketCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         side: serum_dex::matching::Side,
-        size: u64,
-        price: u64,
+        size: f64,
+        price: f64,
     ) {
 
         let limit_price = test.price_number_to_lots(&self.mint, price);
         let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
         let max_native_pc_qty_including_fees = match side {
-            serum_dex::matching::Side::Bid => self.mint.quote_lot * limit_price * max_coin_qty,
+            serum_dex::matching::Side::Bid => self.mint.quote_lot as u64 * limit_price * max_coin_qty,
             serum_dex::matching::Side::Ask => std::u64::MAX
         };
 
@@ -510,8 +510,8 @@ impl PerpMarketCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         side: mango::matching::Side,
-        size: u64,
-        price: u64,
+        size: f64,
+        price: f64,
     ) {
 
         let order_size = test.base_size_number_to_lots(&self.mint, size);

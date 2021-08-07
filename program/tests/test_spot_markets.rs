@@ -77,10 +77,11 @@ async fn test_place_spot_order() {
     // General parameters
     let user_index: usize = 0;
     let mint_index: usize = 0;
-    let base_price = 10000;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
 
     // Set oracles
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
 
     // Deposit amounts
     let user_deposits = vec![
@@ -89,7 +90,7 @@ async fn test_place_spot_order() {
 
     // Spot Orders
     let user_spot_orders = vec![
-        (user_index, mint_index, serum_dex::matching::Side::Bid, 1, base_price),
+        (user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
     ];
 
     // === Act ===
@@ -129,15 +130,15 @@ async fn test_match_spot_order() {
     let bidder_user_index: usize = 0;
     let asker_user_index: usize = 1;
     let mint_index: usize = 0;
-    let base_price = 10_000;
+    let base_price: f64 = 10_000.0;
 
     // Set oracles
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
 
     // Deposit amounts
     let user_deposits = vec![
         (bidder_user_index, test.quote_index, base_price),
-        (asker_user_index, mint_index, 1),
+        (asker_user_index, mint_index, 1.0),
     ];
 
     // === Act ===

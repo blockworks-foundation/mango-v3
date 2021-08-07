@@ -1,10 +1,25 @@
 use crate::*;
 
 #[allow(dead_code)]
+pub fn arrange_deposit_all_scenario(
+    test: &mut MangoProgramTest,
+    user_index: usize,
+    mint_amount: f64,
+    quote_amount: f64,
+) -> Vec<(usize, usize, f64)> {
+    let mut user_deposits = Vec::new();
+    for mint_index in 0..test.num_mints - 1 {
+        user_deposits.push((user_index, mint_index, mint_amount));
+    }
+    user_deposits.push((user_index, test.quote_index, quote_amount));
+    return user_deposits;
+}
+
+#[allow(dead_code)]
 pub async fn deposit_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
-    deposits: Vec<(usize, usize, u64)>,
+    deposits: Vec<(usize, usize, f64)>,
 ) {
 
     mango_group_cookie.run_keeper(test).await;
@@ -20,13 +35,14 @@ pub async fn deposit_scenario(
             deposit_amount,
         ).await;
     }
+
 }
 
 #[allow(dead_code)]
 pub async fn withdraw_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
-    withdraws: Vec<(usize, usize, u64, bool)>,
+    withdraws: Vec<(usize, usize, f64, bool)>,
 ) {
 
     mango_group_cookie.run_keeper(test).await;
@@ -43,13 +59,14 @@ pub async fn withdraw_scenario(
             allow_borrow,
         ).await;
     }
+
 }
 
 #[allow(dead_code)]
 pub async fn place_spot_order_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
-    spot_orders: Vec<(usize, usize, serum_dex::matching::Side, u64, u64)>,
+    spot_orders: Vec<(usize, usize, serum_dex::matching::Side, f64, f64)>,
 ) {
 
     mango_group_cookie.run_keeper(test).await;
@@ -73,7 +90,7 @@ pub async fn place_spot_order_scenario(
 pub async fn place_perp_order_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
-    perp_orders: Vec<(usize, usize, mango::matching::Side, u64, u64)>,
+    perp_orders: Vec<(usize, usize, mango::matching::Side, f64, f64)>,
 ) {
 
     mango_group_cookie.run_keeper(test).await;
@@ -102,8 +119,9 @@ pub async fn match_single_spot_order_scenario(
     bidder_user_index: usize,
     asker_user_index: usize,
     mint_index: usize,
-    price: u64,
+    price: f64,
     // TODO: Allow order size selection
+    // TODO: Allow this fn to be specified in vec params similar to x_order_scenario
 ) {
 
     // Step 2: Place a bid for 1 BTC @ 10_000 USDC
@@ -115,7 +133,7 @@ pub async fn match_single_spot_order_scenario(
         mango_group_cookie,
         bidder_user_index,
         serum_dex::matching::Side::Bid,
-        1,
+        1.0,
         price,
     ).await;
 
@@ -128,7 +146,7 @@ pub async fn match_single_spot_order_scenario(
         mango_group_cookie,
         asker_user_index,
         serum_dex::matching::Side::Ask,
-        1,
+        1.0,
         price,
     ).await;
 

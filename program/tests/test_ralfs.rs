@@ -62,7 +62,7 @@ async fn place_perp_order(order_side: Side) {
     // General parameters
     let user_index: usize = 0;
     let mint_index: usize = 0;
-    let base_price = 10000;
+    let base_price: f64 = 10_000.0;
 
     // Deposit amounts
     let user_deposits = vec![
@@ -71,7 +71,7 @@ async fn place_perp_order(order_side: Side) {
 
     // Perp Orders
     let user_perp_orders = vec![
-        (user_index, mint_index, order_side, 1, base_price),
+        (user_index, mint_index, order_side, 1.0, base_price),
     ];
 
     // === Act ===
@@ -123,28 +123,29 @@ async fn test_worst_case_v1() {
     // General parameters
     let num_orders: usize = test.num_mints - 1;
     let user_index: usize = 0;
-    let base_price = 10000;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
 
     // Set oracles
     for mint_index in 0..num_orders {
-        mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
+        mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
     }
 
     // Deposit amounts
     let user_deposits = vec![
-        (user_index, test.quote_index, base_price * num_orders as u64),
+        (user_index, test.quote_index, base_price * num_orders as f64),
     ];
 
     // Spot Orders
     let mut user_spot_orders = vec![];
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        user_spot_orders.push((user_index, mint_index, serum_dex::matching::Side::Bid, 1, base_price));
+        user_spot_orders.push((user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price));
     }
 
     // Perp Orders
     let mut user_perp_orders = vec![];
     for mint_index in 0..num_orders {
-        user_perp_orders.push((user_index, mint_index, mango::matching::Side::Bid, 1, base_price));
+        user_perp_orders.push((user_index, mint_index, mango::matching::Side::Bid, base_size, base_price));
     }
 
     // === Act ===
@@ -189,7 +190,10 @@ async fn test_worst_case_v2() {
     let borrower_user_index: usize = 0;
     let lender_user_index: usize = 1;
     let num_orders: usize = test.num_mints - 1;
-    let base_price = 10000;
+    let base_price: f64 = 10_000.0;
+    let base_deposit_size: f64 = 10.0;
+    let base_withdraw_size: f64 = 1.0;
+    let base_order_size: f64 = 1.0;
 
     // Set oracles
     for mint_index in 0..num_orders {
@@ -198,28 +202,26 @@ async fn test_worst_case_v2() {
 
     // Deposit amounts
     let mut user_deposits = vec![
-        (borrower_user_index, test.quote_index, 2 * base_price * num_orders as u64), // NOTE: If depositing exact amount throws insufficient
+        (borrower_user_index, test.quote_index, 2.0 * base_price * num_orders as f64), // NOTE: If depositing exact amount throws insufficient
     ];
-    for mint_index in 0..num_orders {
-        user_deposits.push((lender_user_index, mint_index, 10));
-    }
+    user_deposits.extend(arrange_deposit_all_scenario(&mut test, lender_user_index, base_deposit_size, 0.0));
 
     // Withdraw amounts
     let mut user_withdraws = vec![];
     for mint_index in 0..num_orders {
-        user_withdraws.push((borrower_user_index, mint_index, 1, true));
+        user_withdraws.push((borrower_user_index, mint_index, base_withdraw_size, true));
     }
 
     // Spot Orders
     let mut user_spot_orders = vec![];
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        user_spot_orders.push((lender_user_index, mint_index, serum_dex::matching::Side::Ask, 1, base_price));
+        user_spot_orders.push((lender_user_index, mint_index, serum_dex::matching::Side::Ask, base_order_size, base_price));
     }
 
     // Perp Orders
     let mut user_perp_orders = vec![];
     for mint_index in 0..num_orders {
-        user_perp_orders.push((lender_user_index, mint_index, mango::matching::Side::Ask, 1, base_price));
+        user_perp_orders.push((lender_user_index, mint_index, mango::matching::Side::Ask, base_order_size, base_price));
     }
 
 
@@ -235,7 +237,7 @@ async fn test_worst_case_v2() {
 
     for mint_index in 0..num_orders {
         let base_mint = test.with_mint(mint_index);
-        let base_deposit_amount = (10 * base_mint.unit) as u64;
+        let base_deposit_amount = (base_deposit_size * base_mint.unit) as u64;
         let lender_base_deposit =
             &mango_group_cookie.mango_accounts[lender_user_index].mango_account
             .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
