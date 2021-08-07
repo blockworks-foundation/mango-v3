@@ -733,8 +733,7 @@ impl UserActiveAssets {
     pub fn new(
         mango_group: &MangoGroup,
         mango_account: &MangoAccount,
-        spot_extra: Vec<usize>,
-        perps_extra: Vec<usize>,
+        extra: Vec<(AssetType, usize)>,
     ) -> Self {
         let mut spot = [false; MAX_PAIRS];
         let mut perps = [false; MAX_PAIRS];
@@ -747,17 +746,27 @@ impl UserActiveAssets {
             perps[i] = !mango_group.perp_markets[i].is_empty()
                 && mango_account.perp_accounts[i].is_active();
         }
+        extra.iter().for_each(|(at, i)| match at {
+            AssetType::Token => {
+                if *i != QUOTE_INDEX {
+                    spot[*i] = true;
+                }
+            }
+            AssetType::Perp => {
+                perps[*i] = true;
+            }
+        });
 
-        spot_extra.iter().for_each(|&i| {
-            if i != QUOTE_INDEX {
-                spot[i] = true
-            }
-        });
-        perps_extra.iter().for_each(|&i| {
-            if i != QUOTE_INDEX {
-                perps[i] = true
-            }
-        });
+        // spot_extra.iter().for_each(|&i| {
+        //     if i != QUOTE_INDEX {
+        //         spot[i] = true
+        //     }
+        // });
+        // perps_extra.iter().for_each(|&i| {
+        //     if i != QUOTE_INDEX {
+        //         perps[i] = true
+        //     }
+        // });
 
         Self { spot, perps }
     }
@@ -889,6 +898,8 @@ impl HealthCache {
         }
         self.quote = quote;
     }
+
+    /// Note market_index < QUOTE_INDEX
     pub fn update_spot_val(
         &mut self,
         mango_group: &MangoGroup,
@@ -936,6 +947,28 @@ impl HealthCache {
         self.spot[market_index] = (base, quote);
 
         Ok(())
+    }
+
+    /// Sends to update_quote if QUOTE_INDEX, else sends to update_spot_val
+    pub fn update_token_val(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ais: &[AccountInfo; MAX_PAIRS],
+        token_index: usize,
+    ) -> MangoResult<()> {
+        if token_index == QUOTE_INDEX {
+            Ok(self.update_quote(mango_cache, mango_account))
+        } else {
+            self.update_spot_val(
+                mango_group,
+                mango_cache,
+                mango_account,
+                &open_orders_ais[token_index],
+                token_index,
+            )
+        }
     }
 
     /// Update perp val and then update the healths
