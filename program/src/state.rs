@@ -1668,8 +1668,7 @@ impl MangoAccount {
     /// Note entering bankruptcy is calculated differently from exiting bankruptcy because of
     /// possible rounding issues and dust
     pub fn check_exit_bankruptcy(&self, mango_group: &MangoGroup) -> bool {
-        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
-        //      Maybe replace these checks with DUST_THRESHOLD instead
+        // TODO Maybe replace these checks with DUST_THRESHOLD instead
         if self.borrows[QUOTE_INDEX].is_positive() {
             return false;
         }

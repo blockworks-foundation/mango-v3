@@ -1625,28 +1625,15 @@ impl Processor {
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
-            MangoErrorCode::InvalidCache
-        )?;
 
-        let maint_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Maint,
-        )?;
+        let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
 
-        // TODO - optimization: consider calculating both healths at same time
-        let init_health = liqee_ma.get_health(
-            &mango_group,
-            &mango_cache,
-            liqee_open_orders_ais,
-            &liqee_active_assets,
-            HealthType::Init,
-        )?;
+        mango_cache.check_valid(&mango_group, &liqee_active_assets, now_ts)?;
+
+        let mut health_cache = HealthCache::new(liqee_active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
         // Can only force cancel on an account already being liquidated
         if liqee_ma.being_liquidated {
@@ -1996,17 +1983,13 @@ impl Processor {
 
         // Update liqee's health where it may have changed
         for &i in &[asset_index, liab_index] {
-            if i == QUOTE_INDEX {
-                health_cache.update_quote(&mango_cache, &liqee_ma);
-            } else {
-                health_cache.update_spot_val(
-                    &mango_group,
-                    &mango_cache,
-                    &liqee_ma,
-                    &liqee_open_orders_ais[i],
-                    i,
-                )?;
-            }
+            health_cache.update_token_val(
+                &mango_group,
+                &mango_cache,
+                &liqee_ma,
+                liqee_open_orders_ais,
+                i,
+            )?;
         }
         let liqee_maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
         if liqee_maint_health < ZERO_I80F48 {
@@ -2288,7 +2271,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused)]
     /// Reduce some of the base position in exchange for quote position in this market
     /// Transfer will not exceed abs(base_position)
     /// Example:
@@ -2358,47 +2340,29 @@ impl Processor {
         liqee_ma.perp_accounts[market_index].settle_funding(cache);
         liqor_ma.perp_accounts[market_index].settle_funding(cache);
 
-        let mut init_health_cache = OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Init);
-        let mut maint_health_cache =
-            OldHealthCache::new(&mango_group, &liqee_ma, HealthType::Maint);
-
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &init_health_cache.active_assets, now_ts),
-            MangoErrorCode::Default
+        let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
+        let liqor_active_assets =
+            UserActiveAssets::new(&mango_group, &liqor_ma, vec![(AssetType::Perp, market_index)]);
+
+        mango_cache.check_valid(
+            &mango_group,
+            &UserActiveAssets::merge(&liqee_active_assets, &liqor_active_assets),
+            now_ts,
         )?;
 
-        let mut liqor_health_cache = OldHealthCache::new(&mango_group, &liqor_ma, HealthType::Init);
-        liqor_health_cache.set_active_asset(market_index);
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_health_cache.active_assets, now_ts), // TODO OPT write more efficient
-            MangoErrorCode::InvalidCache
-        )?;
-
-        // Make sure orders are cancelled for perps
+        // Make sure orders are cancelled for perps and check orders
         for i in 0..mango_group.num_oracles {
-            if maint_health_cache.active_assets[i] {
+            if liqee_active_assets.perps[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
                 check!(oo.bids_quantity == 0 && oo.asks_quantity == 0, MangoErrorCode::Default)?;
             }
         }
 
-        // TODO - optimization: consider calculating both healths at same time
-        init_health_cache.update_health(
-            &mango_group,
-            &mango_cache,
-            &liqee_ma,
-            liqee_open_orders_ais,
-        )?;
-        let init_health = init_health_cache.health;
-
-        maint_health_cache.update_health(
-            &mango_group,
-            &mango_cache,
-            &liqee_ma,
-            liqee_open_orders_ais,
-        )?;
-        let maint_health = maint_health_cache.health;
+        let mut health_cache = HealthCache::new(liqee_active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
         if liqee_ma.being_liquidated {
             if init_health > ZERO_I80F48 {
@@ -2412,8 +2376,6 @@ impl Processor {
             liqee_ma.being_liquidated = true;
         }
 
-        // TODO - account for being_liquidated case where liquidation has to happen over many instructions
-        // TODO - force cancel all orders that use margin first and check if account still liquidatable
         // TODO - what happens if base position and quote position have same sign?
         // TODO - what if base position is 0 but quote is negative. Perhaps settle that pnl first?
 
@@ -2466,42 +2428,32 @@ impl Processor {
 
         liqee_perp_account.transfer_quote_position(liqor_perp_account, quote_transfer);
 
+        health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, market_index)?;
+
         // Calculate the health of liqor and see if liqor is still valid
-        liqor_health_cache.update_health(
+        let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+        liqor_health_cache.init_vals(
             &mango_group,
             &mango_cache,
             &liqor_ma,
             liqor_open_orders_ais,
         )?;
-        check!(liqor_health_cache.health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
+        check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
-        //
-        maint_health_cache.update_perp_health(
-            &mango_group,
-            &mango_cache,
-            &liqee_ma,
-            market_index,
-        )?;
-
-        if maint_health_cache.health < ZERO_I80F48 {
-            // To start liquidating, make sure all orders that increase position are canceled
+        let liqee_maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
+        if liqee_maint_health < ZERO_I80F48 {
             liqee_ma.is_bankrupt =
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
-            init_health_cache.update_perp_health(
-                &mango_group,
-                &mango_cache,
-                &liqee_ma,
-                market_index,
-            )?;
-            liqee_ma.being_liquidated = init_health_cache.health < ZERO_I80F48;
+            let liqee_init_health = health_cache.get_health(&mango_group, HealthType::Init);
+            liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
         }
 
         Ok(())
     }
 
     #[inline(never)]
-    #[allow(unused)]
     /// Claim insurance fund and then socialize loss
     fn resolve_perp_bankruptcy(
         program_id: &Pubkey,
@@ -2518,8 +2470,8 @@ impl Processor {
         //  just add 1bp fee
 
         // Do parameter checks
-        check!(liab_index < QUOTE_INDEX, MangoErrorCode::Default)?;
-        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+        check!(liab_index < QUOTE_INDEX, MangoErrorCode::InvalidParam)?;
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 12;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
@@ -2536,9 +2488,10 @@ impl Processor {
             vault_ai,               // write
             dao_vault_ai,           // write
             signer_ai,              // read
-            perp_market_ai,         // read
+            perp_market_ai,         // write
             token_prog_ai,          // read
         ] = fixed_ais;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_cache =
@@ -2559,43 +2512,32 @@ impl Processor {
             &mango_group.tokens[QUOTE_INDEX].root_bank == root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
+
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::Default)?;
         check!(vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
-            MangoErrorCode::InvalidCache
-        )?;
+        let liqor_active_assets =
+            UserActiveAssets::new(&mango_group, &liqor_ma, vec![(AssetType::Perp, liab_index)]);
 
-        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
-        liqor_active_assets[liab_index] = true;
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
-            MangoErrorCode::InvalidCache
-        )?;
+        mango_cache.check_valid(&mango_group, &liqor_active_assets, now_ts)?;
 
         check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
         let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
 
         let bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
-        check!(
-            liqee_ma.perp_accounts[liab_index].quote_position.is_negative(),
-            MangoErrorCode::Default
-        )?;
+        let quote_pos = liqee_ma.perp_accounts[liab_index].quote_position;
+        check!(quote_pos.is_negative(), MangoErrorCode::Default)?;
 
         let liab_transfer_u64 = max_liab_transfer
-            .min(-liqee_ma.perp_accounts[liab_index].quote_position)
-            .checked_ceil()
+            .min(-quote_pos) // minimum of what liqor wants and what liqee has
+            .checked_ceil() // round up and convert to native quote token
             .unwrap()
             .to_num::<u64>()
-            .min(dao_vault.amount);
+            .min(dao_vault.amount); // take min of what ins. fund has
 
         if liab_transfer_u64 != 0 {
-            check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
-            check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
@@ -2610,27 +2552,31 @@ impl Processor {
                 .transfer_quote_position(&mut liqor_ma.perp_accounts[liab_index], -liab_transfer);
             checked_add_net(bank_cache, &mut node_bank, &mut liqor_ma, QUOTE_INDEX, liab_transfer)?;
 
-            // Make sure liqor is above init health
-            let liqor_health = liqor_ma.get_health(
+            // Make sure liqor is above init cond.
+            let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+            liqor_health_cache.init_vals(
                 &mango_group,
                 &mango_cache,
+                &liqor_ma,
                 liqor_open_orders_ais,
-                &liqor_active_assets,
-                HealthType::Init,
             )?;
-            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+            let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
+            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
         }
 
         let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
+        // If we transferred everything out of dao_vault, dao vault is empty
+        // and if quote position is still negative
         if liab_transfer_u64 == dao_vault.amount && quote_position.is_negative() {
             // insurance fund empty so socialize loss
-            let mut perp_market =
-                PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
             check!(
                 &mango_group.perp_markets[liab_index].perp_market == perp_market_ai.key,
-                MangoErrorCode::Default
+                MangoErrorCode::InvalidMarket
             )?;
+            let mut perp_market =
+                PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
+            // TODO - log this
             perp_market.socialize_loss(
                 &mut liqee_ma.perp_accounts[liab_index],
                 &mut mango_cache.perp_market_cache[liab_index],
@@ -2643,7 +2589,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(unused)]
     /// Claim insurance fund and then socialize loss
     fn resolve_token_bankruptcy(
         program_id: &Pubkey,
@@ -2679,6 +2624,8 @@ impl Processor {
             liab_node_bank_ai,      // write
             token_prog_ai,          // read
         ] = fixed_ais;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -2703,18 +2650,10 @@ impl Processor {
         check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let liqee_active_assets = liqee_ma.get_active_assets(&mango_group);
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqee_active_assets, now_ts),
-            MangoErrorCode::InvalidCache
-        )?;
+        let liqor_active_assets =
+            UserActiveAssets::new(&mango_group, &liqor_ma, vec![(AssetType::Token, liab_index)]);
 
-        let mut liqor_active_assets = liqor_ma.get_active_assets(&mango_group);
-        liqor_active_assets[liab_index] = true;
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &liqor_active_assets, now_ts), // TODO write more efficient
-            MangoErrorCode::InvalidCache
-        )?;
+        mango_cache.check_valid(&mango_group, &liqor_active_assets, now_ts)?;
 
         // Load the dao vault (insurance fund)
         check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
@@ -2732,7 +2671,6 @@ impl Processor {
 
         let liab_bank_cache = &mango_cache.root_bank_cache[liab_index];
         let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
-        let borrows_val = native_borrows * liab_price;
 
         let insured_liabs = I80F48::from_num(dao_vault.amount) * liab_fee / liab_price;
         let liab_transfer = max_liab_transfer.min(native_borrows).min(insured_liabs);
@@ -2744,7 +2682,6 @@ impl Processor {
             .min(dao_vault.amount);
 
         if dao_transfer != 0 {
-            check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
@@ -2757,7 +2694,7 @@ impl Processor {
             )?;
             let liab_transfer = I80F48::from_num(dao_transfer) * liab_fee / liab_price;
 
-            if (liab_index == QUOTE_INDEX) {
+            if liab_index == QUOTE_INDEX {
                 checked_add_net(
                     &mango_cache.root_bank_cache[QUOTE_INDEX],
                     &mut liab_node_bank,
@@ -2804,19 +2741,19 @@ impl Processor {
             )?;
 
             // Make sure liqor is above init health
-            let liqor_health = liqor_ma.get_health(
+            let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+            liqor_health_cache.init_vals(
                 &mango_group,
                 &mango_cache,
+                &liqor_ma,
                 liqor_open_orders_ais,
-                &liqor_active_assets,
-                HealthType::Init,
             )?;
-            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+            let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
+            check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
         }
 
         if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
             // insurance fund empty so socialize loss
-            let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
             // TODO - log this
             liab_root_bank.socialize_loss(
                 program_id,
