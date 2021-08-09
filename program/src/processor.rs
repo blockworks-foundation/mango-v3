@@ -5,7 +5,7 @@ use std::mem::size_of;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
-use bytemuck::cast_ref;
+use bytemuck::{cast, cast_ref};
 use fixed::types::I80F48;
 use mango_common::Loadable;
 use serum_dex::instruction::NewOrderInstructionV3;
@@ -28,7 +28,7 @@ use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
-use crate::queue::{EventQueue, EventType, FillEvent, OutEvent};
+use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AssetType, DataType,
     HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank,
@@ -2299,8 +2299,8 @@ impl Processor {
         // TODO - find a way to send in open orders accounts
         // liqor passes in his own account and the liqee mango account
         // position is transfered to the liqor at favorable rate
-
-        const NUM_FIXED: usize = 6;
+        check!(base_transfer_request != 0, MangoErrorCode::InvalidParam)?;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
             array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
@@ -2309,6 +2309,7 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             perp_market_ai,         // write
+            event_queue_ai,         // write  ***
             liqee_mango_account_ai, // write
             liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
@@ -2334,6 +2335,8 @@ impl Processor {
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
         let perp_market_info = &mango_group.perp_markets[market_index];
         check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+        let mut event_queue: EventQueue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
         // Move funding into quote position. Not necessary to adjust funding settled after funding is moved
         let cache = &mango_cache.perp_market_cache[market_index];
@@ -2351,7 +2354,7 @@ impl Processor {
             now_ts,
         )?;
 
-        // Make sure orders are cancelled for perps and check orders
+        // Make sure orders are cancelled for perps before liquidation
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
                 let oo = &liqee_ma.perp_accounts[i].open_orders;
@@ -2384,7 +2387,7 @@ impl Processor {
 
         let price = mango_cache.price_cache[market_index].price;
         let (base_transfer, quote_transfer) = if liqee_perp_account.base_position > 0 {
-            check!(base_transfer_request > 0, MangoErrorCode::Default)?;
+            check!(base_transfer_request > 0, MangoErrorCode::InvalidParam)?;
 
             // TODO - verify this calculation is accurate
             let max_transfer: I80F48 = -init_health
@@ -2402,8 +2405,9 @@ impl Processor {
                 * (ONE_I80F48 - perp_market_info.liquidation_fee);
 
             (base_transfer, quote_transfer)
-        } else if liqee_perp_account.base_position < 0 {
-            check!(base_transfer_request < 0, MangoErrorCode::Default)?;
+        } else {
+            // We know it liqee_perp_account.base_position < 0
+            check!(base_transfer_request < 0, MangoErrorCode::InvalidParam)?;
 
             // TODO verify calculations are accurate
             let max_transfer: I80F48 = -init_health
@@ -2419,8 +2423,6 @@ impl Processor {
                 * (ONE_I80F48 + perp_market_info.liquidation_fee);
 
             (base_transfer, quote_transfer)
-        } else {
-            return Err(throw!());
         };
 
         liqee_perp_account.change_base_position(&mut perp_market, -base_transfer);
@@ -2428,7 +2430,15 @@ impl Processor {
 
         liqee_perp_account.transfer_quote_position(liqor_perp_account, quote_transfer);
 
-        health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, market_index)?;
+        // Log this to EventQueue
+        let liquidate_event = LiquidateEvent::new(
+            *liqee_mango_account_ai.key,
+            *liqor_mango_account_ai.key,
+            price,
+            base_transfer,
+            perp_market_info.liquidation_fee,
+        );
+        event_queue.push_back(cast(liquidate_event)).unwrap();
 
         // Calculate the health of liqor and see if liqor is still valid
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
@@ -2441,6 +2451,7 @@ impl Processor {
         let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
+        health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, market_index)?;
         let liqee_maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
         if liqee_maint_health < ZERO_I80F48 {
             liqee_ma.is_bankrupt =
@@ -2925,6 +2936,7 @@ impl Processor {
                         out_event.quantity,
                     )?;
                 }
+                EventType::Liquidate => {}
             }
 
             // consume this event

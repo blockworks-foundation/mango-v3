@@ -219,6 +219,7 @@ impl<'a> EventQueue<'a> {
 pub enum EventType {
     Fill,
     Out,
+    Liquidate,
 }
 
 const EVENT_SIZE: usize = 152;
@@ -327,5 +328,40 @@ impl OutEvent {
     }
 }
 
+#[derive(Copy, Clone, Debug, Pod)]
+#[repr(C)]
+/// Liquidation for the PerpMarket this EventQueue is for
+pub struct LiquidateEvent {
+    pub event_type: u8,
+    padding0: [u8; 7],
+    pub liqee: Pubkey,
+    pub liqor: Pubkey,
+    pub price: I80F48,           // oracle price at the time of liquidation
+    pub quantity: i64,           // number of contracts that were moved from liqee to liqor
+    pub liquidation_fee: I80F48, // liq fee for this earned for this market
+    padding1: [u8; EVENT_SIZE - 112],
+}
+unsafe impl TriviallyTransmutable for LiquidateEvent {}
+impl LiquidateEvent {
+    pub fn new(
+        liqee: Pubkey,
+        liqor: Pubkey,
+        price: I80F48,
+        quantity: i64,
+        liquidation_fee: I80F48,
+    ) -> Self {
+        Self {
+            event_type: EventType::Out.into(),
+            padding0: [0u8; 7],
+            liqee,
+            liqor,
+            price,
+            quantity,
+            liquidation_fee,
+            padding1: [0u8; EVENT_SIZE - 112],
+        }
+    }
+}
 const_assert_eq!(size_of::<AnyEvent>(), size_of::<FillEvent>());
 const_assert_eq!(size_of::<AnyEvent>(), size_of::<OutEvent>());
+const_assert_eq!(size_of::<AnyEvent>(), size_of::<LiquidateEvent>());
