@@ -1,4 +1,3 @@
-// Tests related to spot markets
 mod program_test;
 use program_test::*;
 use program_test::cookies::*;
@@ -98,7 +97,7 @@ async fn test_place_spot_order() {
     deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place spot orders
-    place_spot_order_scenario(&mut test, &mut mango_group_cookie, user_spot_orders).await;
+    place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders).await;
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
@@ -131,6 +130,7 @@ async fn test_match_spot_order() {
     let asker_user_index: usize = 1;
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -141,23 +141,20 @@ async fn test_match_spot_order() {
         (asker_user_index, mint_index, 1.0),
     ];
 
+    // Matched Spot Orders
+    let matched_spot_orders = vec![
+        vec![
+            (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
+            (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
+        ],
+    ];
+
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        user_deposits,
-    ).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place and match spot order
-    match_single_spot_order_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        bidder_user_index,
-        asker_user_index,
-        mint_index,
-        base_price,
-    ).await;
+    match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;

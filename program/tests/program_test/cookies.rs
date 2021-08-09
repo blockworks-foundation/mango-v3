@@ -13,6 +13,9 @@ use mango::{
 
 use crate::*;
 
+pub const STARTING_SPOT_ORDER_ID: u64 = 0;
+pub const STARTING_PERP_ORDER_ID: u64 = 10_000;
+
 #[derive(Copy, Clone)]
 pub struct MintCookie {
 
@@ -44,6 +47,8 @@ pub struct MangoGroupCookie {
     pub current_spot_order_id: u64,
 
     pub current_perp_order_id: u64,
+
+    pub users_with_oo_spot: Vec<Vec<usize>>,
 
 }
 
@@ -111,8 +116,9 @@ impl MangoGroupCookie {
             mango_accounts: vec![],
             spot_markets: vec![],
             perp_markets: vec![],
-            current_spot_order_id: 0,
-            current_perp_order_id: 10_000,
+            current_spot_order_id: STARTING_SPOT_ORDER_ID,
+            current_perp_order_id: STARTING_PERP_ORDER_ID,
+            users_with_oo_spot: vec![Vec::new(); test.num_mints - 1],
         }
 
     }
@@ -230,6 +236,41 @@ impl MangoGroupCookie {
                 test.load_account::<MangoAccount>(self.mango_accounts[user_index].address).await;
         }
 
+    }
+
+    #[allow(dead_code)]
+    pub async fn consume_and_settle(
+        &mut self,
+        test: &mut MangoProgramTest,
+    ) {
+        for spot_market_index in 0..self.users_with_oo_spot.len() {
+            let users_with_oo_spot = &self.users_with_oo_spot[spot_market_index];
+            if users_with_oo_spot.len() > 0 {
+                let spot_market_cookie = self.spot_markets[spot_market_index];
+                let mut open_orders = Vec::new();
+                for user_index in users_with_oo_spot {
+                    open_orders.push(&self.mango_accounts[*user_index].mango_account.spot_open_orders[spot_market_index]);
+                }
+                test.consume_events(
+                    &spot_market_cookie,
+                    open_orders,
+                    0, // TODO: Change coin_fee_receivable_account, pc_fee_receivable_account to owner of test
+                ).await;
+            }
+        }
+
+        self.run_keeper(test).await;
+
+        for spot_market_index in 0..self.users_with_oo_spot.len() {
+            let users_with_oo_spot = &self.users_with_oo_spot[spot_market_index];
+            if users_with_oo_spot.len() > 0 {
+                let spot_market_cookie = self.spot_markets[spot_market_index];
+                for user_index in users_with_oo_spot {
+                    test.settle_funds(self, &spot_market_cookie, *user_index).await;
+                }
+            }
+        }
+        // TODO: Clean out users_with_oo_spot
     }
 
 }

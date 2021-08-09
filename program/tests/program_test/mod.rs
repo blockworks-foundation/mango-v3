@@ -804,10 +804,9 @@ impl MangoProgramTest {
         spot_market_cookie: &SpotMarketCookie,
         open_orders: Vec<&Pubkey>,
         user_index: usize,
-        mint_index: usize,
     ) {
         let serum_program_id = self.serum_program_id;
-        let coin_fee_receivable_account = self.with_user_token_account(user_index, mint_index);
+        let coin_fee_receivable_account = self.with_user_token_account(user_index, spot_market_cookie.mint.index);
         let pc_fee_receivable_account = self.with_user_token_account(user_index, self.quote_index);
 
         for open_order in open_orders {

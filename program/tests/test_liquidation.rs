@@ -29,6 +29,7 @@ async fn test_token_and_token_liquidation() {
     let liqor_user_index: usize = 2;
     let mint_index: usize = 0;
     let base_price: f64 = 15_000.0;
+    let base_size: f64 = 1.0;
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -41,19 +42,20 @@ async fn test_token_and_token_liquidation() {
         (liqor_user_index, test.quote_index, 10_000.0),
     ];
 
+    // Matched Spot Orders
+    let matched_spot_orders = vec![
+        vec![
+            (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
+            (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
+        ],
+    ];
+
     // === Act ===
     // Step 1: Make deposits
     deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place and match an order for 1 BTC @ 15_000
-    match_single_spot_order_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        bidder_user_index,
-        asker_user_index,
-        mint_index,
-        base_price,
-    ).await;
+    match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
 
     // Step 3: Assert that the order has been matched and the bidder has 1 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;

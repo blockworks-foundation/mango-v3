@@ -1,4 +1,3 @@
-// Tests related to placing orders on a perp market
 mod program_test;
 use mango::{matching::*, state::*};
 use program_test::*;
@@ -7,100 +6,7 @@ use program_test::scenarios::*;
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use std::num::NonZeroU64;
-use std::{mem::size_of, mem::size_of_val};
 use fixed::types::I80F48;
-
-#[tokio::test]
-async fn test_init_perp_markets() {
-    // === Arrange ===
-    let config = MangoProgramTestConfig::default();
-    let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // Disable all logs except error
-    // solana_logger::setup_with("error");
-
-    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
-
-    // === Act ===
-    // Need to add oracles first in order to add perp_markets
-    test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
-    let perp_market_cookies =
-        mango_group_cookie.add_perp_markets(&mut test, config.num_mints - 1).await;
-    mango_group_cookie.mango_group =
-        test.load_account::<MangoGroup>(mango_group_cookie.address).await;
-    // === Assert ===
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    for perp_market_cookie in perp_market_cookies {
-        assert_eq!(size_of_val(&perp_market_cookie.perp_market), size_of::<PerpMarket>());
-    }
-}
-
-async fn place_perp_order(order_side: Side) {
-    // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
-    let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // // Disable all logs except error
-    // solana_logger::setup_with("error");
-
-    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
-    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
-
-    // General parameters
-    let user_index: usize = 0;
-    let mint_index: usize = 0;
-    let base_price: f64 = 10_000.0;
-
-    // Deposit amounts
-    let user_deposits = vec![
-        (user_index, test.quote_index, base_price),
-    ];
-
-    // Perp Orders
-    let user_perp_orders = vec![
-        (user_index, mint_index, order_side, 1.0, base_price),
-    ];
-
-    // === Act ===
-    // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
-
-    // Step 2: Place perp orders
-    place_perp_order_scenario(&mut test, &mut mango_group_cookie, user_perp_orders).await;
-
-    // === Assert ===
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
-    let (client_order_id, _order_id, side) = mango_account.perp_accounts[mint_index]
-        .open_orders
-        .orders_with_client_ids()
-        .last()
-        .unwrap();
-    assert_eq!(client_order_id, NonZeroU64::new(10_000).unwrap());
-    assert_eq!(side, order_side);
-}
-
-#[tokio::test]
-async fn test_place_perp_order() {
-    // Scenario 1
-    place_perp_order(Side::Bid).await;
-    // Scenario 2
-    place_perp_order(Side::Ask).await;
-}
 
 #[tokio::test]
 async fn test_worst_case_v1() {
@@ -153,10 +59,10 @@ async fn test_worst_case_v1() {
     deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place spot orders
-    place_spot_order_scenario(&mut test, &mut mango_group_cookie, user_spot_orders).await;
+    place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders).await;
 
     // Step 3: Place perp orders
-    place_perp_order_scenario(&mut test, &mut mango_group_cookie, user_perp_orders).await;
+    place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
@@ -202,7 +108,7 @@ async fn test_worst_case_v2() {
 
     // Deposit amounts
     let mut user_deposits = vec![
-        (borrower_user_index, test.quote_index, 2.0 * base_price * num_orders as f64), // NOTE: If depositing exact amount throws insufficient
+        (borrower_user_index, test.quote_index, 2.0 * base_price * base_order_size * num_orders as f64), // NOTE: If depositing exact amount throws insufficient
     ];
     user_deposits.extend(arrange_deposit_all_scenario(&mut test, lender_user_index, base_deposit_size, 0.0));
 
@@ -245,10 +151,10 @@ async fn test_worst_case_v2() {
     }
 
     // Step 4: Place spot orders
-    place_spot_order_scenario(&mut test, &mut mango_group_cookie, user_spot_orders).await;
+    place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders).await;
 
     // Step 5: Place perp orders
-    place_perp_order_scenario(&mut test, &mut mango_group_cookie, user_perp_orders).await;
+    place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
