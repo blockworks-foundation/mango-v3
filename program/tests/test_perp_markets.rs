@@ -3,9 +3,10 @@ use mango::{matching::*, state::*};
 use program_test::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
+use program_test::assertions::*;
 use solana_program_test::*;
-use std::num::NonZeroU64;
 use std::{mem::size_of, mem::size_of_val};
+use fixed::types::I80F48;
 
 #[tokio::test]
 async fn test_init_perp_markets() {
@@ -85,17 +86,74 @@ async fn test_place_perp_order() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
-    let perp_open_orders =
-        mango_account.perp_accounts[mint_index].open_orders.orders_with_client_ids().collect::<Vec<(NonZeroU64, i128, Side)>>();
+    assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
 
-    assert_eq!(&perp_open_orders.len(), &user_perp_orders.len());
+}
 
-    for i in 0..user_perp_orders.len() {
-        let (_, _, arranged_order_side, _, _) = user_perp_orders[i];
-        let (client_order_id, _order_id, side) = perp_open_orders[i];
-        assert_eq!(client_order_id, NonZeroU64::new(STARTING_PERP_ORDER_ID + i as u64).unwrap());
-        assert_eq!(side, arranged_order_side);
-    }
+#[tokio::test]
+async fn test_match_perp_order() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let mut test = MangoProgramTest::start_new(&config).await;
+    // Supress some of the logs
+    solana_logger::setup_with_default(
+        "solana_rbpf::vm=info,\
+             solana_runtime::message_processor=debug,\
+             solana_runtime::system_instruction_processor=info,\
+             solana_program_test=info",
+    );
+    // Disable all logs except error
+    // solana_logger::setup_with("error");
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let bidder_user_index: usize = 0;
+    let asker_user_index: usize = 1;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Deposit amounts
+    let user_deposits = vec![
+        (bidder_user_index, test.quote_index, base_price),
+        (asker_user_index, mint_index, 1.0),
+    ];
+
+    // Matched Spot Orders
+    let matched_perp_orders = vec![
+        vec![
+            (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
+            (asker_user_index, mint_index, mango::matching::Side::Ask, base_size, base_price),
+        ],
+    ];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+
+    // Step 2: Place and match spot order
+    match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    let base_mint = test.with_mint(mint_index);
+    let base_position = base_size * base_mint.base_lot;
+    let quote_position = I80F48::from_num(base_size * base_price * test.quote_mint.unit);
+
+    let bidder_base_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
+    let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    let asker_base_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
+    let asker_quote_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
+
+    assert!(bidder_base_position >= base_position);
+    assert!(bidder_quote_position <= quote_position);
+    assert!(asker_base_position <= base_position);
+    // assert!(asker_quote_position <= quote_position); // TODO Figure this out...
 
 }

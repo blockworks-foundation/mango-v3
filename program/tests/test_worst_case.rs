@@ -1,11 +1,10 @@
 mod program_test;
-use mango::{matching::*, state::*};
+use mango::{state::*};
 use program_test::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
-use solana_program::pubkey::Pubkey;
+use program_test::assertions::*;
 use solana_program_test::*;
-use std::num::NonZeroU64;
 use fixed::types::I80F48;
 
 #[tokio::test]
@@ -67,11 +66,10 @@ async fn test_worst_case_v1() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
-    for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        assert_ne!(mango_account.spot_open_orders[spot_open_orders_index], Pubkey::default());
-    }
-    // TODO: more assertions
+    assert_open_spot_orders(&mango_group_cookie, &user_spot_orders);
+
+    assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
+
 }
 
 #[tokio::test]
@@ -159,21 +157,8 @@ async fn test_worst_case_v2() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let lender_mango_account = mango_group_cookie.mango_accounts[lender_user_index].mango_account;
-    for spot_open_orders_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        assert_ne!(
-            lender_mango_account.spot_open_orders[spot_open_orders_index],
-            Pubkey::default()
-        );
-    }
+    assert_open_spot_orders(&mango_group_cookie, &user_spot_orders);
 
-    for mint_index in 0..num_orders {
-        let (client_order_id, _order_id, side) = lender_mango_account.perp_accounts[mint_index]
-            .open_orders
-            .orders_with_client_ids()
-            .last()
-            .unwrap();
-        assert_eq!(client_order_id, NonZeroU64::new(10_000 + mint_index as u64).unwrap());
-        assert_eq!(side, Side::Ask);
-    }
+    assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
+
 }

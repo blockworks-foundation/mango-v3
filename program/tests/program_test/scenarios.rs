@@ -83,7 +83,7 @@ pub async fn place_spot_order_scenario(
             order_price,
         ).await;
 
-        mango_group_cookie.users_with_oo_spot[market_index].push(user_index);
+        mango_group_cookie.users_with_spot_event[market_index].push(user_index);
 
     }
 
@@ -109,6 +109,9 @@ pub async fn place_perp_order_scenario(
             order_size,
             order_price,
         ).await;
+
+        mango_group_cookie.users_with_perp_event[market_index].push(user_index);
+
     }
 
 }
@@ -124,7 +127,26 @@ pub async fn match_spot_order_scenario(
     for matched_spot_order in matched_spot_orders {
         place_spot_order_scenario(test, mango_group_cookie, matched_spot_order).await;
         mango_group_cookie.run_keeper(test).await;
-        mango_group_cookie.consume_and_settle(test).await;
+        mango_group_cookie.consume_spot_events(test).await;
+        mango_group_cookie.run_keeper(test).await;
+        mango_group_cookie.settle_spot_funds(test, matched_spot_order).await; // TODO: Is this necessary to test matching
+    }
+
+}
+
+#[allow(dead_code)]
+pub async fn match_perp_order_scenario(
+    test: &mut MangoProgramTest,
+    mango_group_cookie: &mut MangoGroupCookie,
+    matched_perp_orders: &Vec<Vec<(usize, usize, mango::matching::Side, f64, f64)>>,
+) {
+
+    for matched_perp_order in matched_perp_orders {
+        place_perp_order_scenario(test, mango_group_cookie, matched_perp_order).await;
+        mango_group_cookie.run_keeper(test).await;
+        mango_group_cookie.consume_perp_events(test).await;
+        mango_group_cookie.run_keeper(test).await;
+        // mango_group_cookie.settle_perp_funds(test, matched_perp_order).await; // TODO: Is this necessary to test matching
     }
 
 }

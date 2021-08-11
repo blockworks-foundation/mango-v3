@@ -31,6 +31,7 @@ use solana_program::entrypoint::ProgramResult;
 
 pub mod scenarios;
 pub mod cookies;
+pub mod assertions;
 use self::cookies::*;
 
 trait AddPacked {
@@ -342,7 +343,6 @@ impl MangoProgramTest {
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
         mints = mints[..num_mints].to_vec();
-        // TODO: Add the 32nd mint as the quote mint
 
         Self {
             context,
@@ -685,6 +685,84 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn consume_perp_events(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        mango_account_pks: &mut Vec<Pubkey>,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let instructions = [
+            consume_events(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.event_queue,
+                &mut mango_account_pks[..],
+                3,
+            ).unwrap(),
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
+    // pub fn get_pnl(
+    //     &mut self,
+    //     mango_group_cookie: &MangoGroupCookie,
+    //     perp_market_cookie: &PerpMarketCookie,
+    //     user_index: usize,
+    // ) {
+    //     let mango_cache = mango_group_cookie.mango_cache;
+    //     let mint = perp_market_cookie.mint;
+    //     let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+    //     let perp_account = mango_account.perp_accounts[mint.index];
+    //     let price = mango_cache.price_cache[mint.index].price;
+    //     return I80F48::from_num(perp_account.base_position) * I80F48::from_num(mint.base_lot) *
+    //         price +
+    //         I80F48::from_num(perp_account.quote_position);
+    // }
+
+    #[allow(dead_code)]
+    pub async fn settle_perp_funds(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_a_index: usize,
+        user_b_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account_a_pk = mango_group_cookie.mango_accounts[user_a_index].address;
+        let mango_account_b_pk = mango_group_cookie.mango_accounts[user_b_index].address;
+        let mango_cache_pk = mango_group.mango_cache;
+        let market_index = perp_market_cookie.mint.index;
+        let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, self.quote_index).await;
+        let (node_bank_pk, _node_bank) = self.with_node_bank(&root_bank, 0).await;
+
+        let instructions = [
+            settle_pnl(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_a_pk,
+                &mango_account_b_pk,
+                &mango_cache_pk,
+                &root_bank_pk,
+                &node_bank_pk,
+                market_index,
+            ).unwrap(),
+        ];
+
+        self.process_transaction(&instructions, None).await.unwrap();
+
+    }
+
+    #[allow(dead_code)]
     pub fn create_dex_account(&mut self, unpadded_len: usize) -> (Keypair, Instruction) {
         let serum_program_id = self.serum_program_id;
         let key = Keypair::new();
@@ -799,7 +877,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn consume_events(
+    pub async fn consume_spot_events(
         &mut self,
         spot_market_cookie: &SpotMarketCookie,
         open_orders: Vec<&Pubkey>,
@@ -1067,7 +1145,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn settle_funds(
+    pub async fn settle_spot_funds(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         spot_market_cookie: &SpotMarketCookie,
