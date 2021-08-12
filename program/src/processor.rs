@@ -426,8 +426,7 @@ impl Processor {
 
         // Initialize the EventQueue
         // TODO: check that the event queue is reasonably large
-        let _event_queue =
-            EventQueue::load_and_init(event_queue_ai, program_id, &rent, maker_fee, taker_fee)?;
+        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
 
         // Now initialize the PerpMarket itself
         let _perp_market = PerpMarket::load_and_init(
@@ -1201,6 +1200,7 @@ impl Processor {
         book.new_order(
             &mut event_queue,
             &mut perp_market,
+            &mango_group.perp_markets[market_index],
             &mut mango_account,
             mango_account_ai.key,
             market_index,
@@ -2309,7 +2309,7 @@ impl Processor {
             mango_group_ai,         // read
             mango_cache_ai,         // read
             perp_market_ai,         // write
-            event_queue_ai,         // write  ***
+            event_queue_ai,         // write
             liqee_mango_account_ai, // write
             liqor_mango_account_ai, // write
             liqor_ai,               // read, signer
@@ -2432,6 +2432,8 @@ impl Processor {
 
         // Log this to EventQueue
         let liquidate_event = LiquidateEvent::new(
+            now_ts,
+            event_queue.header.seq_num,
             *liqee_mango_account_ai.key,
             *liqor_mango_account_ai.key,
             price,

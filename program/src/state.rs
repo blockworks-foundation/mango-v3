@@ -1857,7 +1857,7 @@ impl PerpAccount {
         info: &PerpMarketInfo,
         fill: &FillEvent,
     ) -> MangoResult<()> {
-        let (base_change, quote_change) = fill.base_quote_change(fill.side);
+        let (base_change, quote_change) = fill.base_quote_change(fill.taker_side);
         self.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
         let fees = quote.abs() * info.taker_fee;
@@ -1873,7 +1873,7 @@ impl PerpAccount {
         info: &PerpMarketInfo,
         fill: &FillEvent,
     ) -> MangoResult<()> {
-        let side = invert_side(fill.side);
+        let side = invert_side(fill.taker_side);
         let (base_change, quote_change) = fill.base_quote_change(side);
         self.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
@@ -1888,7 +1888,7 @@ impl PerpAccount {
             fill.price,
             fill.best_initial,
             fill.price,
-            fill.timestamp,
+            fill.maker_timestamp,
             Clock::get()?.unix_timestamp as u64,
             fill.quantity,
         )?;

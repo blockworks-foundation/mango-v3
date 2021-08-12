@@ -143,11 +143,7 @@ pub struct EventQueueHeader {
     pub meta_data: MetaData,
     head: usize,
     count: usize,
-    seq_num: usize,
-
-    // Added here for record-keeping
-    pub maker_fee: I80F48,
-    pub taker_fee: I80F48,
+    pub seq_num: usize,
 }
 unsafe impl TriviallyTransmutable for EventQueueHeader {}
 
@@ -191,8 +187,6 @@ impl<'a> EventQueue<'a> {
         account: &'a AccountInfo,
         program_id: &Pubkey,
         rent: &Rent,
-        maker_fee: I80F48,
-        taker_fee: I80F48,
     ) -> MangoResult<Self> {
         // TODO: check for size
 
@@ -207,8 +201,6 @@ impl<'a> EventQueue<'a> {
 
         check!(!state.header.meta_data.is_initialized, MangoErrorCode::Default)?;
         state.header.meta_data = MetaData::new(DataType::EventQueue, 0, true);
-        state.header.maker_fee = maker_fee;
-        state.header.taker_fee = taker_fee;
 
         Ok(state)
     }
@@ -222,7 +214,7 @@ pub enum EventType {
     Liquidate,
 }
 
-const EVENT_SIZE: usize = 152;
+const EVENT_SIZE: usize = 200;
 #[derive(Copy, Clone, Debug, Pod)]
 #[repr(C)]
 pub struct AnyEvent {
@@ -235,23 +227,28 @@ unsafe impl TriviallyTransmutable for AnyEvent {}
 #[repr(C)]
 pub struct FillEvent {
     pub event_type: u8,
-    pub side: Side, // side from the taker's POV
+    pub taker_side: Side, // side from the taker's POV
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
     pub padding: [u8; 4],
+    pub timestamp: u64,
+    pub seq_num: usize, // note: usize same as u64
+
     pub maker: Pubkey,
     pub maker_order_id: i128,
     pub maker_client_order_id: u64,
+    pub maker_fee: I80F48,
 
     // The best bid/ask at the time the maker order was placed. Used for liquidity incentives
     pub best_initial: i64,
 
     // Timestamp of when the maker order was placed; copied over from the LeafNode
-    pub timestamp: u64,
+    pub maker_timestamp: u64,
 
     pub taker: Pubkey,
     pub taker_order_id: i128,
     pub taker_client_order_id: u64,
+    pub taker_fee: I80F48,
 
     pub price: i64,
     pub quantity: i64, // number of quote lots
@@ -260,35 +257,43 @@ unsafe impl TriviallyTransmutable for FillEvent {}
 
 impl FillEvent {
     pub fn new(
-        side: Side,
+        taker_side: Side,
         maker_slot: u8,
         maker_out: bool,
+        timestamp: u64,
+        seq_num: usize,
         maker: Pubkey,
         maker_order_id: i128,
         maker_client_order_id: u64,
+        maker_fee: I80F48,
         best_initial: i64,
-        timestamp: u64,
+        maker_timestamp: u64,
 
         taker: Pubkey,
         taker_order_id: i128,
         taker_client_order_id: u64,
+        taker_fee: I80F48,
         price: i64,
         quantity: i64,
     ) -> FillEvent {
         Self {
             event_type: EventType::Fill as u8,
-            side,
+            taker_side,
             maker_slot,
             maker_out,
             padding: [0u8; 4],
+            timestamp,
+            seq_num,
             maker,
             maker_order_id,
             maker_client_order_id,
+            maker_fee,
             best_initial,
-            timestamp,
+            maker_timestamp,
             taker,
             taker_order_id,
             taker_client_order_id,
+            taker_fee,
             price,
             quantity,
         }
@@ -309,21 +314,32 @@ pub struct OutEvent {
     pub side: Side,
     pub slot: u8,
     padding0: [u8; 5],
+    pub timestamp: u64,
+    pub seq_num: usize,
     pub owner: Pubkey,
     pub quantity: i64,
-    padding1: [u8; EVENT_SIZE - 48],
+    padding1: [u8; EVENT_SIZE - 64],
 }
 unsafe impl TriviallyTransmutable for OutEvent {}
 impl OutEvent {
-    pub fn new(side: Side, slot: u8, quantity: i64, owner: Pubkey) -> Self {
+    pub fn new(
+        side: Side,
+        slot: u8,
+        timestamp: u64,
+        seq_num: usize,
+        owner: Pubkey,
+        quantity: i64,
+    ) -> Self {
         Self {
             event_type: EventType::Out.into(),
             side,
             slot,
             padding0: [0; 5],
+            timestamp,
+            seq_num,
             owner,
             quantity,
-            padding1: [0; EVENT_SIZE - 48],
+            padding1: [0; EVENT_SIZE - 64],
         }
     }
 }
@@ -334,16 +350,20 @@ impl OutEvent {
 pub struct LiquidateEvent {
     pub event_type: u8,
     padding0: [u8; 7],
+    pub timestamp: u64,
+    pub seq_num: usize,
     pub liqee: Pubkey,
     pub liqor: Pubkey,
     pub price: I80F48,           // oracle price at the time of liquidation
     pub quantity: i64,           // number of contracts that were moved from liqee to liqor
     pub liquidation_fee: I80F48, // liq fee for this earned for this market
-    padding1: [u8; EVENT_SIZE - 112],
+    padding1: [u8; EVENT_SIZE - 128],
 }
 unsafe impl TriviallyTransmutable for LiquidateEvent {}
 impl LiquidateEvent {
     pub fn new(
+        timestamp: u64,
+        seq_num: usize,
         liqee: Pubkey,
         liqor: Pubkey,
         price: I80F48,
@@ -353,12 +373,14 @@ impl LiquidateEvent {
         Self {
             event_type: EventType::Out.into(),
             padding0: [0u8; 7],
+            timestamp,
+            seq_num,
             liqee,
             liqor,
             price,
             quantity,
             liquidation_fee,
-            padding1: [0u8; EVENT_SIZE - 112],
+            padding1: [0u8; EVENT_SIZE - 128],
         }
     }
 }
