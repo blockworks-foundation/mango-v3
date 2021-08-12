@@ -1,6 +1,6 @@
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::queue::{EventQueue, FillEvent, OutEvent};
-use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpOpenOrders};
+use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, PerpOpenOrders};
 use bytemuck::{cast, cast_mut, cast_ref};
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
@@ -556,6 +556,7 @@ impl<'a> Book<'a> {
         &mut self,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
@@ -570,6 +571,7 @@ impl<'a> Book<'a> {
             Side::Bid => self.new_bid(
                 event_queue,
                 market,
+                info,
                 mango_account,
                 mango_account_pk,
                 market_index,
@@ -582,6 +584,7 @@ impl<'a> Book<'a> {
             Side::Ask => self.new_ask(
                 event_queue,
                 market,
+                info,
                 mango_account,
                 mango_account_pk,
                 market_index,
@@ -598,6 +601,7 @@ impl<'a> Book<'a> {
         &mut self,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
@@ -609,7 +613,6 @@ impl<'a> Book<'a> {
     ) -> MangoResult<()> {
         // TODO proper error handling
         // TODO handle the case where we run out of compute
-        // TODO test the order types (@Lagzda)
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
             OrderType::ImmediateOrCancel => (false, false),
@@ -634,9 +637,6 @@ impl<'a> Book<'a> {
             let best_ask = self.asks.get_mut(best_ask_h).unwrap().as_leaf_mut().unwrap();
             let best_ask_price = best_ask.price();
 
-            // TODO remove before mainnet
-            msg!("new_ask p={} bap={}", price, best_ask_price);
-
             if price < best_ask_price {
                 break;
             } else if post_only {
@@ -651,14 +651,18 @@ impl<'a> Book<'a> {
                 Side::Bid,
                 best_ask.owner_slot,
                 maker_out,
+                now_ts,
+                event_queue.header.seq_num,
                 best_ask.owner,
                 best_ask.key,
                 best_ask.client_order_id,
+                info.maker_fee,
                 best_ask.best_initial,
                 best_ask.timestamp,
                 *mango_account_pk,
                 order_id,
                 client_order_id,
+                info.taker_fee,
                 best_ask_price,
                 match_quantity,
             );
@@ -679,8 +683,14 @@ impl<'a> Book<'a> {
                 let min_bid_handle = self.bids.find_min().unwrap();
                 let min_bid = self.bids.get(min_bid_handle).unwrap().as_leaf().unwrap();
                 check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
-                let event =
-                    OutEvent::new(Side::Bid, min_bid.owner_slot, min_bid.quantity, min_bid.owner);
+                let event = OutEvent::new(
+                    Side::Bid,
+                    min_bid.owner_slot,
+                    now_ts,
+                    event_queue.header.seq_num,
+                    min_bid.owner,
+                    min_bid.quantity,
+                );
                 event_queue.push_back(cast(event)).unwrap();
 
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
@@ -717,6 +727,7 @@ impl<'a> Book<'a> {
         &mut self,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
@@ -751,7 +762,6 @@ impl<'a> Book<'a> {
             let best_bid = self.bids.get_mut(best_bid_h).unwrap().as_leaf_mut().unwrap();
             let best_bid_price = best_bid.price();
 
-            msg!("new_ask p={} bbp={}", price, best_bid_price);
             if price > best_bid_price {
                 break;
             } else if post_only {
@@ -767,14 +777,18 @@ impl<'a> Book<'a> {
                 Side::Ask,
                 best_bid.owner_slot,
                 maker_out,
+                now_ts,
+                event_queue.header.seq_num,
                 best_bid.owner,
                 best_bid.key,
                 best_bid.client_order_id,
+                info.maker_fee,
                 best_bid.best_initial,
                 best_bid.timestamp,
                 *mango_account_pk,
                 order_id,
                 client_order_id,
+                info.taker_fee,
                 best_bid_price,
                 match_quantity,
             );
@@ -815,8 +829,14 @@ impl<'a> Book<'a> {
                 let max_ask_handle = self.asks.find_min().unwrap();
                 let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
                 check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
-                let event =
-                    OutEvent::new(Side::Ask, max_ask.owner_slot, max_ask.quantity, max_ask.owner);
+                let event = OutEvent::new(
+                    Side::Ask,
+                    max_ask.owner_slot,
+                    now_ts,
+                    event_queue.header.seq_num,
+                    max_ask.owner,
+                    max_ask.quantity,
+                );
                 event_queue.push_back(cast(event)).unwrap();
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
