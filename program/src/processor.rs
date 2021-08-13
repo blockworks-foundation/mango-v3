@@ -2031,6 +2031,17 @@ impl Processor {
             }
         }
 
+        msg!(
+            "liquidate_token_and_token: {{ asset_index: {}, liab_index: {}, asset_transfer: {}, liab_transfer: {}, asset_price: {}, liab_price: {}, bankruptcy: {} }}",
+            asset_index,
+            liab_index,
+            asset_transfer,
+            actual_liab_transfer,
+            asset_price,
+            liab_price,
+            liqee_ma.is_bankrupt,
+        );
+
         Ok(())
     }
 
@@ -2222,6 +2233,17 @@ impl Processor {
                 &liqee_ma,
                 liab_index,
             )?;
+            msg!(
+                "liquidate_token_and_perp: {{ asset_index: {}, liab_index: {}, asset_type: \"{:?}\", liab_type: \"{:?}\", asset_price: {}, liab_price: {}, asset_transfer: {}, actual_liab_transfer: {} }}",
+                asset_index,
+                liab_index,
+                asset_type,
+                liab_type,
+                asset_price,
+                liab_price,
+                asset_transfer,
+                actual_liab_transfer,
+            );
         } else {
             let asset_price = ONE_I80F48;
             let liab_price = mango_cache.get_price(liab_index);
@@ -2302,6 +2324,18 @@ impl Processor {
                 &liqee_ma,
                 asset_index,
             )?;
+
+            msg!(
+                "liquidate_token_and_perp: {{ asset_index: {}, liab_index: {}, asset_type: \"{:?}\", liab_type: \"{:?}\", asset_price: {}, liab_price: {}, asset_transfer: {}, actual_liab_transfer: {} }}",
+                asset_index,
+                liab_index,
+                asset_type,
+                liab_type,
+                asset_price,
+                liab_price,
+                asset_transfer,
+                actual_liab_transfer,
+            );
         }
         let liqor_health = liqor_ma.get_health(
             &mango_group,
@@ -2553,6 +2587,13 @@ impl Processor {
             liqee_ma.being_liquidated = init_health_cache.health < ZERO_I80F48;
         }
 
+        msg!(
+            "liquidate_perp_market: {{ market_index: {}, base_transfer: {}, quote_transfer: {}, bankruptcy: {} }}",
+            market_index,
+            base_transfer,
+            quote_transfer,
+            liqee_ma.is_bankrupt,
+        );
         Ok(())
     }
 
@@ -2675,6 +2716,11 @@ impl Processor {
                 HealthType::Init,
             )?;
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+            msg!(
+                "perp_bankruptcy: {{ liab_index: {}, dao_transfer:{} }}",
+                liab_index,
+                liab_transfer_u64
+            );
         }
 
         let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
@@ -2691,6 +2737,11 @@ impl Processor {
                 &mut liqee_ma.perp_accounts[liab_index],
                 &mut mango_cache.perp_market_cache[liab_index],
             )?;
+            msg!(
+                "perp_socialized_loss: {{ liab_index: {}, socialized_loss:{} }}",
+                liab_index,
+                quote_position / (I80F48::from_num(perp_market.open_interest))
+            );
         }
 
         liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
@@ -2868,12 +2919,16 @@ impl Processor {
                 HealthType::Init,
             )?;
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientHealth)?;
+            msg!(
+                "token_bankruptcy: {{ liab_index: {}, dao_transfer:{} }}",
+                liab_index,
+                dao_transfer
+            );
         }
 
         if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
             // insurance fund empty so socialize loss
             let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
-            // TODO - log this
             liab_root_bank.socialize_loss(
                 program_id,
                 liab_index,
@@ -2883,6 +2938,11 @@ impl Processor {
                 &mut liab_node_bank,
                 liab_node_bank_ai.key,
             )?;
+            msg!(
+                "token_socialized_loss: {{ liab_index: {}, native_borrows:{} }}",
+                liab_index,
+                native_borrows
+            );
         }
 
         liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
