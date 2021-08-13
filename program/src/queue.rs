@@ -371,7 +371,7 @@ impl LiquidateEvent {
         liquidation_fee: I80F48,
     ) -> Self {
         Self {
-            event_type: EventType::Out.into(),
+            event_type: EventType::Liquidate.into(),
             padding0: [0u8; 7],
             timestamp,
             seq_num,
