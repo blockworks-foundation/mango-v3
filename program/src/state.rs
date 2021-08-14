@@ -1640,24 +1640,26 @@ impl MangoAccount {
     ) -> bool {
         // TODO - consider using DUST_THRESHOLD
         // TODO - what if asset_weight == 0 for some asset? should it still be counted
-        if self.deposits[QUOTE_INDEX].is_positive() {
+        if self.deposits[QUOTE_INDEX] > DUST_THRESHOLD {
             return false;
         }
 
         for i in 0..mango_group.num_oracles {
-            if self.deposits[i].is_positive() {
+            if self.deposits[i] > DUST_THRESHOLD {
                 return false;
             }
-            let open_orders = load_open_orders(&open_orders_ais[i]).unwrap();
-            if open_orders.native_pc_total > 0 || open_orders.native_coin_total > 0 {
-                return false;
-            }
-            let pa = &self.perp_accounts[i];
-            // We know the bids and asks are empty to even be inside the liquidate function
-            // So no need to check that
-            // TODO - what if there's unsettled funding for a short position which turns this positive?
-            if pa.quote_position.is_positive() || pa.base_position.is_positive() {
-                return false;
+            if open_orders_ais[i].key != &Pubkey::default() {
+                let open_orders = load_open_orders(&open_orders_ais[i]).unwrap();
+                if open_orders.native_pc_total > 0 || open_orders.native_coin_total > 0 {
+                    return false;
+                }
+                let pa = &self.perp_accounts[i];
+                // We know the bids and asks are empty to even be inside the liquidate function
+                // So no need to check that
+                // TODO - what if there's unsettled funding for a short position which turns this positive?
+                if pa.quote_position.is_positive() || pa.base_position.is_positive() {
+                    return false;
+                }
             }
         }
         true
@@ -1668,8 +1670,9 @@ impl MangoAccount {
     /// Note entering bankruptcy is calculated differently from exiting bankruptcy because of
     /// possible rounding issues and dust
     pub fn check_exit_bankruptcy(&self, mango_group: &MangoGroup) -> bool {
-        // TODO Maybe replace these checks with DUST_THRESHOLD instead
-        if self.borrows[QUOTE_INDEX].is_positive() {
+        // TODO - consider if account above bankruptcy because assets have been boosted due to rounding
+        //      Maybe replace these checks with DUST_THRESHOLD instead
+        if self.borrows[QUOTE_INDEX] > DUST_THRESHOLD {
             return false;
         }
 
