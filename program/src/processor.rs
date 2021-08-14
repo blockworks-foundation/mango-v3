@@ -2500,7 +2500,7 @@ impl Processor {
             "liquidate_perp_market: {{ market_index: {}, base_transfer: {}, quote_transfer: {}, bankruptcy: {} }}",
             market_index,
             base_transfer,
-            quote_transfer,
+            quote_transfer.to_num::<f64>(),
             liqee_ma.is_bankrupt,
         );
         Ok(())
