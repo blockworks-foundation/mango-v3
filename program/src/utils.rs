@@ -172,87 +172,87 @@ pub trait FastMath: Sized {
     fn unsafe_div(self, x: Self) -> Self;
 }
 
-impl FastMath for I80F48 {
-    #[inline(always)]
-    fn fmul(&self, other: Self) -> Self {
-        let x = self.to_bits();
-        let y = other.to_bits();
-        let n = x.trailing_zeros();
-        if n < 48 {
-            let m = min(48 - n, y.trailing_zeros());
-
-            if n + m < 48 {
-                let (r, over) = (x >> n).overflowing_mul(y >> m);
-                if over {
-                    self * other
-                    // Self::from_bits(fixmul(self.to_bits(), x.to_bits(), 48))
-                } else {
-                    Self::from_bits(r >> (48 - m - n))
-                }
-            } else {
-                Self::from_bits((x >> n) * (y >> m))
-            }
-        } else {
-            Self::from_bits((x >> 48) * y)
-        }
-    }
-
-    /// Only use this function if you know self and x are both positive
-    fn unsafe_div(self, x: Self) -> Self {
-        let n = self.leading_zeros();
-        if n < 48 {
-            let m = min(48 - n, x.trailing_zeros());
-            if n + m < 48 {
-                let r = (self.to_bits() << n) / (x.to_bits() >> m);
-                Self::from_bits(r << (48 - m - n))
-            } else {
-                Self::from_bits((self.to_bits() << n) / (x.to_bits() >> m))
-            }
-        } else {
-            Self::from_bits((self.to_bits() << n) / x.to_bits())
-        }
-    }
-    fn fdiv(self, x: Self) -> Self {
-        self / x
-    }
-
-    fn fadd(self, x: Self) -> Self {
-        self + x
-    }
-
-    fn fsub(self, x: Self) -> Self {
-        self - x
-    }
-    #[inline(always)]
-    fn checked_fmul(self, x: Self) -> Option<Self> {
-        let n = self.trailing_zeros();
-        if n < 48 {
-            let m = min(48 - n, x.trailing_zeros());
-
-            if n + m < 48 {
-                let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
-                if over {
-                    self.checked_mul(x)
-                } else {
-                    Some(Self::from_bits(r >> (48 - m - n)))
-                }
-            } else {
-                (self.to_bits() >> n).checked_mul(x.to_bits() >> m).map(Self::from_bits)
-            }
-        } else {
-            (self.to_bits() >> 48).checked_mul(x.to_bits()).map(Self::from_bits)
-        }
-    }
-
-    fn checked_fdiv(self, x: Self) -> Option<Self> {
-        self.checked_div(x)
-    }
-
-    fn checked_fadd(self, x: Self) -> Option<Self> {
-        self.checked_add(x)
-    }
-
-    fn checked_fsub(self, x: Self) -> Option<Self> {
-        self.checked_sub(x)
-    }
-}
+// impl FastMath for I80F48 {
+//     #[inline(always)]
+//     fn fmul(&self, other: Self) -> Self {
+//         let x = self.to_bits();
+//         let y = other.to_bits();
+//         let n = x.trailing_zeros();
+//         if n < 48 {
+//             let m = min(48 - n, y.trailing_zeros());
+//
+//             if n + m < 48 {
+//                 let (r, over) = (x >> n).overflowing_mul(y >> m);
+//                 if over {
+//                     self * other
+//                     // Self::from_bits(fixmul(self.to_bits(), x.to_bits(), 48))
+//                 } else {
+//                     Self::from_bits(r >> (48 - m - n))
+//                 }
+//             } else {
+//                 Self::from_bits((x >> n) * (y >> m))
+//             }
+//         } else {
+//             Self::from_bits((x >> 48) * y)
+//         }
+//     }
+//
+//     /// Only use this function if you know self and x are both positive
+//     fn unsafe_div(self, x: Self) -> Self {
+//         let n = self.leading_zeros();
+//         if n < 48 {
+//             let m = min(48 - n, x.trailing_zeros());
+//             if n + m < 48 {
+//                 let r = (self.to_bits() << n) / (x.to_bits() >> m);
+//                 Self::from_bits(r << (48 - m - n))
+//             } else {
+//                 Self::from_bits((self.to_bits() << n) / (x.to_bits() >> m))
+//             }
+//         } else {
+//             Self::from_bits((self.to_bits() << n) / x.to_bits())
+//         }
+//     }
+//     fn fdiv(self, x: Self) -> Self {
+//         self / x
+//     }
+//
+//     fn fadd(self, x: Self) -> Self {
+//         self + x
+//     }
+//
+//     fn fsub(self, x: Self) -> Self {
+//         self - x
+//     }
+//     #[inline(always)]
+//     fn checked_fmul(self, x: Self) -> Option<Self> {
+//         let n = self.trailing_zeros();
+//         if n < 48 {
+//             let m = min(48 - n, x.trailing_zeros());
+//
+//             if n + m < 48 {
+//                 let (r, over) = (self.to_bits() >> n).overflowing_mul(x.to_bits() >> m);
+//                 if over {
+//                     self.checked_mul(x)
+//                 } else {
+//                     Some(Self::from_bits(r >> (48 - m - n)))
+//                 }
+//             } else {
+//                 (self.to_bits() >> n).checked_mul(x.to_bits() >> m).map(Self::from_bits)
+//             }
+//         } else {
+//             (self.to_bits() >> 48).checked_mul(x.to_bits()).map(Self::from_bits)
+//         }
+//     }
+//
+//     fn checked_fdiv(self, x: Self) -> Option<Self> {
+//         self.checked_div(x)
+//     }
+//
+//     fn checked_fadd(self, x: Self) -> Option<Self> {
+//         self.checked_add(x)
+//     }
+//
+//     fn checked_fsub(self, x: Self) -> Option<Self> {
+//         self.checked_sub(x)
+//     }
+// }

@@ -334,7 +334,7 @@ pub enum MangoInstruction {
     /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS)
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` mango_cache_ai - MangoCache
-    /// 2. `[writable]` perp_market_ai - PerpMarket
+    /// 2. `[]` perp_market_ai - PerpMarket
     /// 3. `[writable]` bids_ai - Bids acc
     /// 4. `[writable]` asks_ai - Asks acc
     /// 5. `[writable]` liqee_mango_account_ai - Liqee MangoAccount
@@ -384,15 +384,16 @@ pub enum MangoInstruction {
 
     /// Reduce some of the base position in exchange for quote position in this market
     ///
-    /// Accounts expected: 6 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
+    /// Accounts expected: 7 + Liqee open orders accounts (MAX_PAIRS) + Liqor open orders accounts (MAX_PAIRS)
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` mango_cache_ai - MangoCache
     /// 2. `[writable]` perp_market_ai - PerpMarket
-    /// 3. `[writable]` liqee_mango_account_ai - MangoAccount
-    /// 4. `[writable]` liqor_mango_account_ai - MangoAccount
-    /// 5. `[signer]` liqor_ai - Liqor Account
-    /// 6+... `[]` liqee_open_orders_ais - Liqee open orders accs
-    /// 6+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    /// 3. `[writable]` event_queue_ai - EventQueue
+    /// 4. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 5. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 6. `[signer]` liqor_ai - Liqor Account
+    /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 7+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidatePerpMarket {
         base_transfer_request: i64,
     },
@@ -1467,5 +1468,4 @@ pub fn liquidate_token_and_token(
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
-
 }
