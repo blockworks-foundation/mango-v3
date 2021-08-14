@@ -31,10 +31,10 @@ use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AssetType, DataType,
-    HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank,
-    OldHealthCache, PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank,
-    RootBankCache, SpotMarketInfo, TokenInfo, UserActiveAssets, INFO_LEN, MAX_NODE_BANKS,
-    MAX_PAIRS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
+    PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
+    TokenInfo, UserActiveAssets, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS, ONE_I80F48, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -1166,20 +1166,19 @@ impl Processor {
         let market_index = mango_group
             .find_perp_market_index(perp_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &mango_account,
+            vec![(AssetType::Perp, market_index)],
+        );
+
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
-        // initialize the health cache with active assets
-        let mut health_cache = OldHealthCache::new(&mango_group, &mango_account, HealthType::Init);
-        health_cache.set_active_asset(market_index);
-
-        check!(
-            mango_cache.check_caches_valid(&mango_group, &health_cache.active_assets, now_ts),
-            MangoErrorCode::InvalidCache
-        )?;
-
-        // calculate init health
-        health_cache.update_health(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
-        let pre_health = health_cache.health;
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
         // update the being_liquidated flag
         if mango_account.being_liquidated {
@@ -1209,17 +1208,11 @@ impl Processor {
             quantity,
             order_type,
             client_order_id,
-            Clock::get()?.unix_timestamp as u64,
+            now_ts,
         )?;
 
-        health_cache.update_perp_health(
-            &mango_group,
-            &mango_cache,
-            &mango_account,
-            market_index,
-        )?;
-        let post_health = health_cache.health;
-
+        health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
         // If an account is in reduce_only mode, health must only go up
         check!(
             post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
@@ -2496,6 +2489,7 @@ impl Processor {
             liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
         }
 
+        // TODO make this more efficient
         msg!(
             "liquidate_perp_market: {{ market_index: {}, base_transfer: {}, quote_transfer: {}, bankruptcy: {} }}",
             market_index,

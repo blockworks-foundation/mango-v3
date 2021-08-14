@@ -756,18 +756,6 @@ impl UserActiveAssets {
                 perps[*i] = true;
             }
         });
-
-        // spot_extra.iter().for_each(|&i| {
-        //     if i != QUOTE_INDEX {
-        //         spot[i] = true
-        //     }
-        // });
-        // perps_extra.iter().for_each(|&i| {
-        //     if i != QUOTE_INDEX {
-        //         perps[i] = true
-        //     }
-        // });
-
         Self { spot, perps }
     }
 
@@ -2323,7 +2311,7 @@ impl PerpMarket {
             (Some(bid), Some(ask)) => {
                 // calculate mid-market rate
                 let book_price = self.lot_to_native_price((bid + ask) / 2);
-                min(max((book_price / index_price) - ONE_I80F48, MIN_FUNDING), MAX_FUNDING)
+                (book_price / index_price - ONE_I80F48).clamp(MIN_FUNDING, MAX_FUNDING)
             }
             (Some(_bid), None) => MAX_FUNDING,
             (None, Some(_ask)) => MIN_FUNDING,
@@ -2332,10 +2320,13 @@ impl PerpMarket {
 
         // TODO TEST consider what happens if time_factor is very small. Can funding_delta == 0 when diff != 0?
         let time_factor = I80F48::from_num(now_ts - self.last_updated) / DAY;
-        let funding_delta: I80F48 = diff
-            * time_factor
-            * I80F48::from_num(self.base_lot_size)  // TODO check cost of conversion op
-            * index_price;
+        let funding_delta: I80F48 = index_price
+            .checked_mul(diff)
+            .unwrap()
+            .checked_mul(I80F48::from_num(self.base_lot_size))
+            .unwrap()
+            .checked_mul(time_factor)
+            .unwrap();
 
         self.long_funding += funding_delta;
         self.short_funding += funding_delta;
