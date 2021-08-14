@@ -1999,10 +1999,10 @@ impl Processor {
             "liquidate_token_and_token: {{ asset_index: {}, liab_index: {}, asset_transfer: {}, liab_transfer: {}, asset_price: {}, liab_price: {}, bankruptcy: {} }}",
             asset_index,
             liab_index,
-            asset_transfer,
-            actual_liab_transfer,
-            asset_price,
-            liab_price,
+            asset_transfer.to_num::<f64>(),
+            actual_liab_transfer.to_num::<f64>(),
+            asset_price.to_num::<f64>(),
+            liab_price.to_num::<f64>(),
             liqee_ma.is_bankrupt,
         );
 
@@ -2181,10 +2181,10 @@ impl Processor {
                 liab_index,
                 asset_type,
                 liab_type,
-                asset_price,
-                liab_price,
-                asset_transfer,
-                actual_liab_transfer,
+                asset_price.to_num::<f64>(),
+                liab_price.to_num::<f64>(),
+                asset_transfer.to_num::<f64>(),
+                actual_liab_transfer.to_num::<f64>(),
             );
         } else {
             let asset_price = ONE_I80F48;
@@ -2267,10 +2267,10 @@ impl Processor {
                 liab_index,
                 asset_type,
                 liab_type,
-                asset_price,
-                liab_price,
-                asset_transfer,
-                actual_liab_transfer,
+                asset_price.to_num::<f64>(),
+                liab_price.to_num::<f64>(),
+                asset_transfer.to_num::<f64>(),
+                actual_liab_transfer.to_num::<f64>(),
             );
         }
 
@@ -2637,7 +2637,7 @@ impl Processor {
             msg!(
                 "perp_socialized_loss: {{ liab_index: {}, socialized_loss:{} }}",
                 liab_index,
-                quote_position / (I80F48::from_num(perp_market.open_interest))
+                (quote_position / (I80F48::from_num(perp_market.open_interest))).to_num::<f64>()
             );
         }
 
@@ -2830,7 +2830,7 @@ impl Processor {
             msg!(
                 "token_socialized_loss: {{ liab_index: {}, native_borrows:{} }}",
                 liab_index,
-                native_borrows
+                native_borrows.to_num::<f64>()
             );
         }
 
