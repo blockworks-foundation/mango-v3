@@ -218,13 +218,16 @@ pub enum MangoInstruction {
         order_type: OrderType,
     },
 
+    // ***
     CancelPerpOrderByClientId {
         client_order_id: u64,
+        invalid_id_ok: bool,
     },
 
+    // ***
     CancelPerpOrder {
         order_id: i128,
-        side: Side,
+        invalid_id_ok: bool,
     },
 
     ConsumeEvents {
@@ -648,17 +651,22 @@ impl MangoInstruction {
                 }
             }
             13 => {
-                let data_arr = array_ref![data, 0, 8];
+                // ***
+                let data_arr = array_ref![data, 0, 9];
+                let (client_order_id, invalid_id_ok) = array_refs![data_arr, 8, 1];
+
                 MangoInstruction::CancelPerpOrderByClientId {
-                    client_order_id: u64::from_le_bytes(*data_arr),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    invalid_id_ok: invalid_id_ok[0] != 0,
                 }
             }
             14 => {
+                // ***
                 let data_arr = array_ref![data, 0, 17];
-                let (order_id, side) = array_refs![data_arr, 16, 1];
+                let (order_id, invalid_id_ok) = array_refs![data_arr, 16, 1];
                 MangoInstruction::CancelPerpOrder {
                     order_id: i128::from_le_bytes(*order_id),
-                    side: Side::try_from_primitive(side[0]).ok()?,
+                    invalid_id_ok: invalid_id_ok[0] != 0,
                 }
             }
             15 => {
@@ -1066,7 +1074,9 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    let instr = MangoInstruction::CancelPerpOrderByClientId { client_order_id };
+    // TODO - add in invalid_id_ok
+    let instr =
+        MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok: false };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1080,7 +1090,6 @@ pub fn cancel_perp_order(
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
     order_id: i128,
-    side: Side,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1090,7 +1099,8 @@ pub fn cancel_perp_order(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    let instr = MangoInstruction::CancelPerpOrder { order_id, side };
+    // TODO - add in invalid_id_ok
+    let instr = MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok: false };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
