@@ -774,7 +774,7 @@ impl Processor {
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 19;
+        const NUM_FIXED: usize = 23;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
@@ -791,12 +791,16 @@ impl Processor {
             dex_event_queue_ai,     // write
             dex_base_ai,            // write
             dex_quote_ai,           // write
-            root_bank_ai,           // read
-            node_bank_ai,           // write
-            vault_ai,               // write
+            base_root_bank_ai,      // read
+            base_node_bank_ai,      // write
+            base_vault_ai,          // write
+            quote_root_bank_ai,      // read
+            quote_node_bank_ai,      // write
+            quote_vault_ai,          // write
             token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
+            dex_signer_ai,          // read
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
@@ -830,15 +834,28 @@ impl Processor {
         };
 
         check!(
-            &mango_group.tokens[token_index].root_bank == root_bank_ai.key,
+            &mango_group.tokens[token_index].root_bank == base_root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
-        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
 
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
-        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
 
-        check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         // Adjust margin basket; this also makes this market an active asset
         mango_account.add_to_basket(market_index)?;
@@ -868,8 +885,17 @@ impl Processor {
         // TODO maybe check oracle was updated recently
 
         // TODO OPT - write a zero copy way to deserialize Account to reduce compute
-        // this is to keep track of how much funds were transferred out
-        let pre_amount = Account::unpack(&vault_ai.try_borrow_data()?)?.amount;
+        // this is to keep track of the amount of funds transferred
+        let (pre_base, pre_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )
+        };
+        let vault_ai = match order.side {
+            serum_dex::matching::Side::Bid => quote_vault_ai,
+            serum_dex::matching::Side::Ask => base_vault_ai,
+        };
 
         // Send order to serum dex
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
@@ -892,18 +918,49 @@ impl Processor {
             order,
         )?;
 
+        // Settle funds for this market
+        invoke_settle_funds(
+            dex_prog_ai,
+            spot_market_ai,
+            &open_orders_ais[token_index],
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            base_vault_ai,
+            quote_vault_ai,
+            dex_signer_ai,
+            token_prog_ai,
+            &[&signers_seeds],
+        )?;
+
         // See if we can remove this market from margin
         let open_orders = load_open_orders(&open_orders_ais[market_index])?;
         mango_account.update_basket(market_index, &open_orders)?;
 
-        let post_amount = Account::unpack(&vault_ai.try_borrow_data()?)?.amount;
+        let (post_base, post_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )
+        };
+
+        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
+        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
+
+        checked_change_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &mut quote_node_bank,
+            &mut mango_account,
+            QUOTE_INDEX,
+            quote_change,
+        )?;
 
         checked_change_net(
             &mango_cache.root_bank_cache[token_index],
-            &mut node_bank,
+            &mut base_node_bank,
             &mut mango_account,
             token_index,
-            I80F48::from_num(post_amount) - I80F48::from_num(pre_amount),
+            base_change,
         )?;
 
         // Update health for tokens that may have changed
