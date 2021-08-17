@@ -42,6 +42,7 @@ const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
 pub const MAX_PERP_OPEN_ORDERS: usize = 64;
 pub const FREE_ORDER_SLOT: u8 = u8::MAX; // TODO add check to prevent markets more than 255
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -1009,7 +1010,6 @@ impl HealthCache {
     }
 }
 
-pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MangoAccount {
@@ -1134,39 +1134,6 @@ impl MangoAccount {
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
             MangoErrorCode::MathError
         )
-    }
-
-    pub fn get_token_assets_liabs(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        open_orders_ais: &[AccountInfo],
-    ) -> MangoResult<([I80F48; MAX_TOKENS], [I80F48; MAX_TOKENS])> {
-        let mut assets = [ZERO_I80F48; MAX_TOKENS];
-        let mut liabs = [ZERO_I80F48; MAX_TOKENS];
-
-        assets[QUOTE_INDEX] =
-            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
-        liabs[QUOTE_INDEX] =
-            mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
-
-        for i in 0..mango_group.num_oracles {
-            if !self.in_margin_basket[i] || self.spot_open_orders[i] == Pubkey::default() {
-                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i];
-            } else {
-                // TODO make sure open orders account is checked for validity before passing in here
-                let open_orders = load_open_orders(&open_orders_ais[i])?;
-                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i]
-                    + I80F48::from_num(open_orders.native_coin_total);
-                assets[QUOTE_INDEX] += I80F48::from_num(
-                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                );
-            }
-
-            liabs[i] = mango_cache.root_bank_cache[i].borrow_index * self.borrows[i];
-        }
-
-        Ok((assets, liabs))
     }
 
     fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
@@ -1463,15 +1430,6 @@ impl MangoAccount {
         }
         None
     }
-    // pub fn client_id_to_slot(&self, market_index: usize, client_id: u64) -> Option<usize> {
-    //     let market_index = market_index as u8;
-    //     for i in 0..MAX_PERP_OPEN_ORDERS {
-    //         if self.order_market[i] == market_index && self.client_order_ids[i] == client_id {
-    //             return Some(i);
-    //         }
-    //     }
-    //     None
-    // }
 }
 
 #[derive(Copy, Clone, Pod)]

@@ -16,13 +16,13 @@ mkdir target/devnet
 cargo build-bpf --features devnet --bpf-out-dir target/devnet
 
 # nightly
-#MANGO_PROGRAM_ID="EwG6vXKHmTPAS3K17CPu62AK3bdrrDJS3DibwUjv5ayT"
+MANGO_PROGRAM_ID="EwG6vXKHmTPAS3K17CPu62AK3bdrrDJS3DibwUjv5ayT"
 
 # devnet.1
-MANGO_PROGRAM_ID="5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
+#MANGO_PROGRAM_ID="5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
 #MANGO_PROGRAM_ID="32WeJ46tuY6QEkgydqzHYU5j85UT9m1cPJwFxPjuSVCt"
 solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
-#solana program deploy target/deploy/mango.so --keypair $KEYPAIR --output json-compact
+#solana program deploy target/devnet/mango.so --keypair $KEYPAIR --output json-compact
 
 # serum dex
 VERSION=v1.6.18
@@ -33,7 +33,7 @@ cargo build-bpf --features devnet
 DEX_PROGRAM_ID=DESVgJVGajEgKGXhb6XmqDHGz3VjdgP7rEVESBgxmroY
 solana program deploy target/deploy/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID
 
-VERSION=v1.7.9
+VERSION=v1.7.10
 sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
 
 
