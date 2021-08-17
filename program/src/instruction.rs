@@ -134,7 +134,7 @@ pub enum MangoInstruction {
 
     /// Place an order on the Serum Dex using Mango account
     ///
-    /// Accounts expected by this instruction (19 + MAX_PAIRS):
+    /// Accounts expected by this instruction (23 + MAX_PAIRS):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2. `[signer]` owner_ai - owner of MangoAccount
@@ -147,14 +147,18 @@ pub enum MangoInstruction {
     /// 9. `[writable]` dex_event_queue_ai - event queue for serum dex market
     /// 10. `[writable]` dex_base_ai - base currency serum dex market vault
     /// 11. `[writable]` dex_quote_ai - quote currency serum dex market vault
-    /// 12. `[]` root_bank_ai - root bank of base currency if sell or quote currency if buy
-    /// 13. `[writable]` node_bank_ai - node bank of base currency if sell or quote currency if buy
-    /// 14. `[writable]` vault_ai - vault of the node bank
-    /// 15. `[]` token_prog_ai - SPL token program id
-    /// 16. `[]` signer_ai - signer key for this MangoGroup
-    /// 17. `[]` rent_ai - rent sysvar var
-    /// 18. `[]` msrm_or_srm_vault_ai - the msrm or srm vault in this MangoGroup. Can be zero key
-    /// 19+ `[writable]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
+    /// 12. `[]` base_root_bank_ai - root bank of base currency
+    /// 13. `[writable]` base_node_bank_ai - node bank of base currency
+    /// 14. `[writable]` base_vault_ai - vault of the basenode bank
+    /// 15. `[]` quote_root_bank_ai - root bank of quote currency
+    /// 16. `[writable]` quote_node_bank_ai - node bank of quote currency
+    /// 17. `[writable]` quote_vault_ai - vault of the quote node bank
+    /// 18. `[]` token_prog_ai - SPL token program id
+    /// 19. `[]` signer_ai - signer key for this MangoGroup
+    /// 20. `[]` rent_ai - rent sysvar var
+    /// 21. `[]` dex_signer_key - signer for serum dex
+    /// 22. `[]` msrm_or_srm_vault_ai - the msrm or srm vault in this MangoGroup. Can be zero key
+    /// 23+ `[writable]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
     ///         index needs to be writable. Only OpenOrders in_margin_basket needs to be correct;
     ///         remaining open orders can just be Pubkey::default() (the zero key)
     PlaceSpotOrder {
