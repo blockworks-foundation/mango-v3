@@ -1026,14 +1026,8 @@ impl MangoProgramTest {
             }
         }
 
-        let (root_pk, node_pk, vault_pk) = match order.side {
-            serum_dex::matching::Side::Bid => {
-                (quote_root_bank_pk, quote_node_bank_pk, quote_node_bank.vault)
-            }
-            serum_dex::matching::Side::Ask => {
-                (mint_root_bank_pk, mint_node_bank_pk, mint_node_bank.vault)
-            }
-        };
+        let (dex_signer_pk, _dex_signer_nonce) =
+            create_signer_key_and_nonce(&serum_program_id, &spot_market_cookie.market);
 
         let instructions = [
             mango::instruction::place_spot_order(
@@ -1050,10 +1044,14 @@ impl MangoProgramTest {
                 &spot_market_cookie.event_q,
                 &spot_market_cookie.coin_vault,
                 &spot_market_cookie.pc_vault,
-                &root_pk,
-                &node_pk,
-                &vault_pk,
+                &mint_root_bank_pk,
+                &mint_node_bank_pk,
+                &mint_node_bank.vault,
+                &quote_root_bank_pk,
+                &quote_node_bank_pk,
+                &quote_node_bank.vault,
                 &signer_pk,
+                &dex_signer_pk,
                 &mango_group.msrm_vault,
                 &open_orders_pks, // oo ais
                 mint_index,
