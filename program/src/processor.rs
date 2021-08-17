@@ -819,13 +819,8 @@ impl Processor {
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        let token_index = match order.side {
-            serum_dex::matching::Side::Bid => QUOTE_INDEX,
-            serum_dex::matching::Side::Ask => market_index,
-        };
-
         check!(
-            &mango_group.tokens[token_index].root_bank == base_root_bank_ai.key,
+            &mango_group.tokens[market_index].root_bank == base_root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
@@ -839,6 +834,11 @@ impl Processor {
         check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
 
         check!(
             quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
@@ -913,7 +913,7 @@ impl Processor {
         invoke_settle_funds(
             dex_prog_ai,
             spot_market_ai,
-            &open_orders_ais[token_index],
+            &open_orders_ais[market_index],
             signer_ai,
             dex_base_ai,
             dex_quote_ai,
@@ -947,10 +947,10 @@ impl Processor {
         )?;
 
         checked_change_net(
-            &mango_cache.root_bank_cache[token_index],
+            &mango_cache.root_bank_cache[market_index],
             &mut base_node_bank,
             &mut mango_account,
-            token_index,
+            market_index,
             base_change,
         )?;
 
