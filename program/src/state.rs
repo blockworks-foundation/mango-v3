@@ -2,7 +2,6 @@ use std::cell::{Ref, RefMut};
 use std::cmp::{max, min};
 use std::convert::identity;
 use std::mem::size_of;
-use std::num::NonZeroU64;
 
 use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
 use enumflags2::BitFlags;
@@ -41,6 +40,9 @@ pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGr
 const MAX_RATE_ADJ: I80F48 = I80F48!(4); // TODO make this part of PerpMarket if we want per market flexibility
 const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
+pub const MAX_PERP_OPEN_ORDERS: usize = 64;
+pub const FREE_ORDER_SLOT: u8 = u8::MAX; // TODO add check to prevent markets more than 255
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -1008,211 +1010,6 @@ impl HealthCache {
     }
 }
 
-/// Used to store intermediate health calculations during program execution
-pub struct OldHealthCache {
-    pub active_assets: [bool; MAX_TOKENS],
-    pub spot_healths: Vec<I80F48>,
-    pub perp_healths: Vec<I80F48>,
-
-    pub health_type: HealthType,
-
-    /// This will be zero until update_health is called for the first time
-    pub health: I80F48,
-}
-
-impl OldHealthCache {
-    pub fn new(
-        mango_group: &MangoGroup,
-        mango_account: &MangoAccount,
-        health_type: HealthType,
-    ) -> Self {
-        let mut active_assets = [false; MAX_TOKENS];
-        active_assets[QUOTE_INDEX] = true;
-        for i in 0..mango_group.num_oracles {
-            active_assets[i] = mango_account.in_margin_basket[i]
-                || !mango_account.deposits[i].is_zero()
-                || !mango_account.borrows[i].is_zero()
-                || mango_account.perp_accounts[i].is_active();
-        }
-
-        Self {
-            active_assets,
-            spot_healths: vec![ZERO_I80F48; MAX_TOKENS],
-            perp_healths: vec![ZERO_I80F48; MAX_PAIRS],
-            health_type,
-            health: ZERO_I80F48,
-        }
-    }
-
-    pub fn set_active_asset(&mut self, token_index: usize) {
-        self.active_assets[token_index] = true;
-    }
-
-    /// Update one of the spot healths; QUOTE_INDEX is invalid
-    pub fn update_spot_health(
-        &mut self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        mango_account: &MangoAccount,
-        open_orders_ais: &[AccountInfo; MAX_PAIRS],
-        token_index: usize,
-    ) -> MangoResult<()> {
-        if !self.active_assets[token_index] {
-            return Ok(());
-        }
-
-        let spot_health = if token_index == QUOTE_INDEX {
-            mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX)
-        } else {
-            let spot_market_info = &mango_group.spot_markets[token_index];
-            if spot_market_info.is_empty() {
-                return Ok(());
-            }
-
-            let (spot_asset_weight, spot_liab_weight) = match self.health_type {
-                HealthType::Maint => {
-                    (spot_market_info.maint_asset_weight, spot_market_info.maint_liab_weight)
-                }
-                HealthType::Init => {
-                    (spot_market_info.init_asset_weight, spot_market_info.init_liab_weight)
-                }
-            };
-
-            // mango_account
-            // .fast_get_spot_health(
-            //     mango_cache,
-            //     token_index,
-            //     &open_orders_ais[token_index],
-            //     FI80F48::from_fixed(spot_asset_weight),
-            //     FI80F48::from_fixed(spot_liab_weight),
-            // )?
-            // .to_fixed()
-
-            mango_account.get_spot_health(
-                mango_cache,
-                token_index,
-                &open_orders_ais[token_index],
-                spot_asset_weight,
-                spot_liab_weight,
-            )?
-        };
-
-        self.health += spot_health - self.spot_healths[token_index];
-        self.spot_healths[token_index] = spot_health;
-
-        Ok(())
-    }
-
-    /// Update one of the perp healths, recalculate total health
-    pub fn update_perp_health(
-        &mut self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        mango_account: &MangoAccount,
-        market_index: usize,
-    ) -> MangoResult<()> {
-        let perp_market_info = &mango_group.perp_markets[market_index];
-        let (perp_asset_weight, perp_liab_weight) = match self.health_type {
-            HealthType::Maint => {
-                (perp_market_info.maint_asset_weight, perp_market_info.maint_liab_weight)
-            }
-            HealthType::Init => {
-                (perp_market_info.init_asset_weight, perp_market_info.init_liab_weight)
-            }
-        };
-
-        let perp_health = mango_account.perp_accounts[market_index].get_health(
-            perp_market_info,
-            mango_cache.price_cache[market_index].price,
-            perp_asset_weight,
-            perp_liab_weight,
-            mango_cache.perp_market_cache[market_index].long_funding,
-            mango_cache.perp_market_cache[market_index].short_funding,
-        );
-        self.health += perp_health - self.perp_healths[market_index];
-        self.perp_healths[market_index] = perp_health;
-        Ok(())
-    }
-
-    pub fn update_health(
-        &mut self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        mango_account: &MangoAccount,
-        open_orders_ais: &[AccountInfo; MAX_PAIRS],
-    ) -> MangoResult<()> {
-        self.spot_healths[QUOTE_INDEX] =
-            mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        let mut health = self.spot_healths[QUOTE_INDEX];
-
-        for i in 0..mango_group.num_oracles {
-            if !self.active_assets[i] {
-                continue;
-            }
-
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-
-            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
-                match self.health_type {
-                    HealthType::Maint => (
-                        spot_market_info.maint_asset_weight,
-                        spot_market_info.maint_liab_weight,
-                        perp_market_info.maint_asset_weight,
-                        perp_market_info.maint_liab_weight,
-                    ),
-                    HealthType::Init => (
-                        spot_market_info.init_asset_weight,
-                        spot_market_info.init_liab_weight,
-                        perp_market_info.init_asset_weight,
-                        perp_market_info.init_liab_weight,
-                    ),
-                };
-
-            if !spot_market_info.is_empty() {
-                // let spot_health = mango_account
-                // .fast_get_spot_health(
-                //     mango_cache,
-                //     i,
-                //     &open_orders_ais[i],
-                //     FI80F48::from_fixed(spot_asset_weight),
-                //     FI80F48::from_fixed(spot_liab_weight),
-                // )?
-                // .to_fixed();
-
-                let spot_health = mango_account.get_spot_health(
-                    mango_cache,
-                    i,
-                    &open_orders_ais[i],
-                    spot_asset_weight,
-                    spot_liab_weight,
-                )?;
-                health += spot_health;
-                self.spot_healths[i] = spot_health;
-            }
-
-            if mango_account.perp_accounts[i].is_active() && !perp_market_info.is_empty() {
-                let perp_health = mango_account.perp_accounts[i].get_health(
-                    perp_market_info,
-                    mango_cache.price_cache[i].price,
-                    perp_asset_weight,
-                    perp_liab_weight,
-                    mango_cache.perp_market_cache[i].long_funding,
-                    mango_cache.perp_market_cache[i].short_funding,
-                );
-                health += perp_health;
-                self.perp_healths[i] = perp_health;
-            }
-            // msg!("get_health {} => {:?}", i, health);
-        }
-
-        self.health = health;
-
-        Ok(())
-    }
-}
-
-pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct MangoAccount {
@@ -1232,7 +1029,13 @@ pub struct MangoAccount {
     // Perps related data
     pub perp_accounts: [PerpAccount; MAX_PAIRS],
 
+    pub order_market: [u8; MAX_PERP_OPEN_ORDERS],
+    pub order_side: [Side; MAX_PERP_OPEN_ORDERS],
+    pub orders: [i128; MAX_PERP_OPEN_ORDERS],
+    pub client_order_ids: [u64; MAX_PERP_OPEN_ORDERS],
+
     pub msrm_amount: u64,
+
     /// This account cannot open new positions or borrow until `init_health >= 0`
     pub being_liquidated: bool,
 
@@ -1333,93 +1136,6 @@ impl MangoAccount {
         )
     }
 
-    pub fn get_token_assets_liabs(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        open_orders_ais: &[AccountInfo],
-    ) -> MangoResult<([I80F48; MAX_TOKENS], [I80F48; MAX_TOKENS])> {
-        let mut assets = [ZERO_I80F48; MAX_TOKENS];
-        let mut liabs = [ZERO_I80F48; MAX_TOKENS];
-
-        assets[QUOTE_INDEX] =
-            mango_cache.root_bank_cache[QUOTE_INDEX].deposit_index * self.deposits[QUOTE_INDEX];
-        liabs[QUOTE_INDEX] =
-            mango_cache.root_bank_cache[QUOTE_INDEX].borrow_index * self.borrows[QUOTE_INDEX];
-
-        for i in 0..mango_group.num_oracles {
-            if !self.in_margin_basket[i] || self.spot_open_orders[i] == Pubkey::default() {
-                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i];
-            } else {
-                // TODO make sure open orders account is checked for validity before passing in here
-                let open_orders = load_open_orders(&open_orders_ais[i])?;
-                assets[i] = mango_cache.root_bank_cache[i].deposit_index * self.deposits[i]
-                    + I80F48::from_num(open_orders.native_coin_total);
-                assets[QUOTE_INDEX] += I80F48::from_num(
-                    open_orders.native_pc_total + open_orders.referrer_rebates_accrued,
-                );
-            }
-
-            liabs[i] = mango_cache.root_bank_cache[i].borrow_index * self.borrows[i];
-        }
-
-        Ok((assets, liabs))
-    }
-
-    #[inline(always)]
-    fn sim_spot_health(
-        &self,
-        open_orders: &serum_dex::state::OpenOrders,
-        base_net: I80F48,
-        price: I80F48,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-    ) -> I80F48 {
-        sol_log_compute_units();
-        let quote_free =
-            I80F48::from_num(open_orders.native_pc_free + open_orders.referrer_rebates_accrued);
-        let quote_locked =
-            I80F48::from_num(open_orders.native_pc_total - open_orders.native_pc_free);
-        let base_free = I80F48::from_num(open_orders.native_coin_free);
-        let base_locked =
-            I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free);
-
-        // TODO account for serum dex fees in these calculations
-
-        // Simulate the health if all bids are executed at current price
-        let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
-        let asks_base_net = base_net + base_free;
-
-        // TODO OPT - first verify this calculation is same as one below
-        // let health = if bids_base_net.abs() > asks_base_net.abs() {
-        //     if bids_base_net.is_positive() {
-        //         bids_base_net * price * asset_weight + quote_free
-        //     } else {
-        //         bids_base_net * price * liab_weight + quote_free
-        //     }
-        // } else {
-        //     if asks_base_net.is_positive() {
-        //         (asks_base_net * asset_weight + base_locked) * price + quote_free + quote_locked
-        //     } else {
-        //         (asks_base_net * liab_weight + base_locked) * price + quote_free + quote_locked
-        //     }
-        // };
-
-        let bids_weight = if bids_base_net.is_positive() { asset_weight } else { liab_weight };
-
-        let bids_health = bids_base_net * price * bids_weight + quote_free;
-
-        // Simulate health if all asks are executed at current price *** update in client
-        let asks_weight = if asks_base_net.is_positive() { asset_weight } else { liab_weight };
-        let asks_health: I80F48 =
-            (asks_base_net * asks_weight + base_locked) * price + quote_free + quote_locked;
-        // Pick the worse of the two possibilities
-        sol_log_compute_units();
-        // msg!("{:?} {:?}", bids_health.min(asks_health), health);
-        // health
-        bids_health.min(asks_health)
-    }
-
     fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
         if self.deposits[token_index].is_positive() {
             self.deposits[token_index].checked_mul(bank_cache.deposit_index).unwrap()
@@ -1458,125 +1174,6 @@ impl MangoAccount {
                 Ok((asks_base_net * price, base_locked * price + quote_free + quote_locked))
             }
         }
-    }
-    #[inline(always)]
-    fn get_spot_health(
-        &self,
-        mango_cache: &MangoCache,
-        market_index: usize,
-        open_orders_ai: &AccountInfo,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-    ) -> MangoResult<I80F48> {
-        // TODO make checked
-        let bank_cache = &mango_cache.root_bank_cache[market_index];
-        let price = mango_cache.price_cache[market_index].price;
-
-        // Note, only one of deposits and borrows are positive
-        // let base_net: I80F48 = self.deposits[market_index] * bank_cache.deposit_index
-        //     - self.borrows[market_index] * bank_cache.borrow_index;
-
-        let base_net = self.get_net(bank_cache, market_index);
-        let health = if !self.in_margin_basket[market_index]
-            || self.spot_open_orders[market_index] == Pubkey::default()
-        {
-            if base_net.is_positive() {
-                base_net * asset_weight * price
-            } else {
-                base_net * liab_weight * price
-            }
-        } else {
-            let open_orders = load_open_orders(open_orders_ai)?;
-            self.sim_spot_health(&open_orders, base_net, price, asset_weight, liab_weight)
-        };
-
-        // msg!("spot health {:?}", health);
-
-        Ok(health)
-    }
-
-    /// Must validate the caches before
-    #[inline(never)]
-    pub fn get_health(
-        &self,
-        mango_group: &MangoGroup,
-        mango_cache: &MangoCache,
-        spot_open_orders_ais: &[AccountInfo],
-        active_assets: &[bool; MAX_TOKENS],
-        health_type: HealthType,
-    ) -> MangoResult<I80F48> {
-        let mut health = self.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        for i in 0..mango_group.num_oracles {
-            if !active_assets[i] {
-                continue;
-            }
-
-            let spot_market_info = &mango_group.spot_markets[i];
-            let perp_market_info = &mango_group.perp_markets[i];
-
-            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
-                match health_type {
-                    HealthType::Maint => (
-                        spot_market_info.maint_asset_weight,
-                        spot_market_info.maint_liab_weight,
-                        perp_market_info.maint_asset_weight,
-                        perp_market_info.maint_liab_weight,
-                    ),
-                    HealthType::Init => (
-                        spot_market_info.init_asset_weight,
-                        spot_market_info.init_liab_weight,
-                        perp_market_info.init_asset_weight,
-                        perp_market_info.init_liab_weight,
-                    ),
-                };
-
-            if !spot_market_info.is_empty() {
-                let spot_health = self.get_spot_health(
-                    mango_cache,
-                    i,
-                    &spot_open_orders_ais[i],
-                    spot_asset_weight,
-                    spot_liab_weight,
-                )?;
-                // let spot_health = self
-                //     .fast_get_spot_health(
-                //         mango_cache,
-                //         i,
-                //         &spot_open_orders_ais[i],
-                //         FI80F48::from_fixed(spot_asset_weight),
-                //         FI80F48::from_fixed(spot_liab_weight),
-                //     )?
-                //     .to_fixed();
-                health += spot_health;
-            }
-
-            if self.perp_accounts[i].is_active() && !perp_market_info.is_empty() {
-                health += self.perp_accounts[i].get_health(
-                    perp_market_info,
-                    mango_cache.price_cache[i].price,
-                    perp_asset_weight,
-                    perp_liab_weight,
-                    mango_cache.perp_market_cache[i].long_funding,
-                    mango_cache.perp_market_cache[i].short_funding,
-                );
-            }
-            // msg!("get_health {} => {:?}", i, health);
-        }
-
-        Ok(health)
-    }
-
-    /// Return an array of bools that are true if any part of token, spot or perps for that index are nonzero
-    pub fn get_active_assets(&self, mango_group: &MangoGroup) -> [bool; MAX_TOKENS] {
-        let mut active_assets = [false; MAX_TOKENS];
-        active_assets[QUOTE_INDEX] = true;
-        for i in 0..mango_group.num_oracles {
-            active_assets[i] = self.in_margin_basket[i]
-                || !self.deposits[i].is_zero()
-                || !self.borrows[i].is_zero()
-                || self.perp_accounts[i].is_active();
-        }
-        active_assets
     }
 
     /// Add a market to margin basket
@@ -1691,189 +1288,101 @@ impl MangoAccount {
         }
         Ok(())
     }
-}
 
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct PerpOpenOrders {
-    pub bids_quantity: i64, // total contracts in sell orders
-    pub asks_quantity: i64, // total quote currency in buy orders
-    pub is_free_bits: u32,
-    pub is_bid_bits: u32,
-    pub orders: [i128; 32],
-    pub client_order_ids: [u64; 32],
-}
-
-impl PerpOpenOrders {
-    pub fn next_order_slot(self) -> u8 {
-        self.is_free_bits.trailing_zeros() as u8
+    /// *** Below are methods related to the perps open orders ***
+    pub fn next_order_slot(&self) -> Option<usize> {
+        self.order_market.iter().position(|&i| i == FREE_ORDER_SLOT)
     }
 
-    pub fn remove_order(&mut self, side: Side, slot: u8, quantity: i64) -> MangoResult<()> {
-        let slot_mask = 1u32 << slot;
-        // TODO OPT - remove this check if we're confident
-        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
-
-        // accounting
-        match side {
-            Side::Bid => {
-                self.bids_quantity -= quantity;
-            }
-            Side::Ask => {
-                self.asks_quantity -= quantity;
-            }
-        }
-
-        // release space
-        self.is_free_bits |= slot_mask;
-        self.orders[slot as usize] = 0i128;
-        self.client_order_ids[slot as usize] = 0u64;
-        Ok(())
-    }
-    pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MangoResult<()> {
-        check!(self.is_free_bits != 0, MangoErrorCode::TooManyOpenOrders)?;
-        let slot = self.next_order_slot();
-        let slot_mask = 1u32 << slot;
+    /// Add a perp order for the market_index
+    pub fn add_order(
+        &mut self,
+        market_index: usize,
+        side: Side,
+        order: &LeafNode,
+    ) -> MangoResult<()> {
         match side {
             Side::Bid => {
                 // TODO make checked
-                self.is_bid_bits |= slot_mask;
-                self.bids_quantity += order.quantity;
+                self.perp_accounts[market_index].bids_quantity += order.quantity;
             }
             Side::Ask => {
-                self.is_bid_bits &= !slot_mask;
-                self.asks_quantity += order.quantity;
+                self.perp_accounts[market_index].asks_quantity += order.quantity;
             }
         };
-
-        self.is_free_bits &= !slot_mask;
-        self.orders[slot as usize] = order.key;
-        self.client_order_ids[slot as usize] = order.client_order_id;
+        let slot = order.owner_slot as usize;
+        self.order_market[slot] = market_index as u8;
+        self.order_side[slot] = side;
+        self.orders[slot] = order.key;
+        self.client_order_ids[slot] = order.client_order_id;
         Ok(())
     }
 
-    pub fn cancel_order(
-        &mut self,
-        order: &LeafNode,
-        order_id: i128,
-        side: Side,
-    ) -> MangoResult<()> {
-        // input verification
-        let slot = order.owner_slot;
-        let slot_mask = 1u32 << slot;
-        check_eq!(0u32, slot_mask & self.is_free_bits, MangoErrorCode::Default)?;
-        check_eq!(Some(side), self.slot_side(slot), MangoErrorCode::Default)?;
-        check_eq!(order_id, self.orders[slot as usize], MangoErrorCode::Default)?;
+    ///
+    pub fn remove_order(&mut self, slot: usize, quantity: i64) -> MangoResult<()> {
+        check!(self.order_market[slot] != FREE_ORDER_SLOT, MangoErrorCode::Default)?;
+        let market_index = self.order_market[slot] as usize;
 
         // accounting
-        match side {
+        match self.order_side[slot] {
             Side::Bid => {
-                self.bids_quantity -= order.quantity;
+                self.perp_accounts[market_index].bids_quantity -= quantity;
             }
             Side::Ask => {
-                self.asks_quantity -= order.quantity;
+                self.perp_accounts[market_index].asks_quantity -= quantity;
             }
         }
 
         // release space
-        self.is_free_bits |= slot_mask;
-        self.orders[slot as usize] = 0i128;
-        self.client_order_ids[slot as usize] = 0u64;
+        self.order_market[slot] = FREE_ORDER_SLOT;
 
+        // TODO OPT - remove these; unnecessary
+        self.order_side[slot] = Side::Bid;
+        self.orders[slot] = 0i128;
+        self.client_order_ids[slot] = 0u64;
         Ok(())
     }
 
-    #[inline]
-    fn iter_filled_slots(&self) -> impl Iterator<Item = u8> {
-        struct Iter {
-            bits: u32,
-        }
-        impl Iterator for Iter {
-            type Item = u8;
-            #[inline(always)]
-            fn next(&mut self) -> Option<Self::Item> {
-                if self.bits == 0 {
-                    None
-                } else {
-                    let next = self.bits.trailing_zeros();
-                    let mask = 1u32 << next;
-                    self.bits &= !mask;
-                    Some(next as u8)
-                }
-            }
-        }
-        Iter { bits: !self.is_free_bits }
-    }
-
-    #[inline]
-    pub fn slot_side(&self, slot: u8) -> Option<Side> {
-        let slot_mask = 1u32 << slot;
-        if self.is_free_bits & slot_mask != 0 {
-            None
-        } else if self.is_bid_bits & slot_mask != 0 {
-            Some(Side::Bid)
-        } else {
-            Some(Side::Ask)
-        }
-    }
-
-    #[inline]
-    pub fn orders_with_client_ids(&self) -> impl Iterator<Item = (NonZeroU64, i128, Side)> + '_ {
-        self.iter_filled_slots().filter_map(move |slot| {
-            let client_order_id = NonZeroU64::new(self.client_order_ids[slot as usize])?;
-            let order_id = self.orders[slot as usize];
-            let side = self.slot_side(slot).unwrap();
-            Some((client_order_id, order_id, side))
-        })
-    }
-}
-
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct PerpAccount {
-    pub base_position: i64,     // measured in base lots
-    pub quote_position: I80F48, // measured in native quote
-
-    pub long_settled_funding: I80F48,
-    pub short_settled_funding: I80F48,
-    pub open_orders: PerpOpenOrders,
-
-    pub mngo_accrued: u64,
-}
-
-impl PerpAccount {
     pub fn execute_taker(
         &mut self,
+        market_index: usize,
         perp_market: &mut PerpMarket,
         info: &PerpMarketInfo,
+        cache: &PerpMarketCache,
         fill: &FillEvent,
     ) -> MangoResult<()> {
+        let pa = &mut self.perp_accounts[market_index];
+        pa.settle_funding(cache);
         let (base_change, quote_change) = fill.base_quote_change(fill.taker_side);
-        self.change_base_position(perp_market, base_change);
+        pa.remove_taker_trade(base_change, quote_change);
+        pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
         let fees = quote.abs() * info.taker_fee;
         perp_market.fees_accrued += fees;
-        self.quote_position += quote - fees;
-        // msg!("taker base pos {} quote pos {:?}", self.base_position, self.quote_position);
+        pa.quote_position += quote - fees;
         Ok(())
     }
 
     pub fn execute_maker(
         &mut self,
+        market_index: usize,
         perp_market: &mut PerpMarket,
         info: &PerpMarketInfo,
+        cache: &PerpMarketCache,
         fill: &FillEvent,
     ) -> MangoResult<()> {
+        let pa = &mut self.perp_accounts[market_index];
+        pa.settle_funding(cache);
+
         let side = invert_side(fill.taker_side);
         let (base_change, quote_change) = fill.base_quote_change(side);
-        self.change_base_position(perp_market, base_change);
+        pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
-        let fees = quote.abs() * info.taker_fee;
+        let fees = quote.abs() * info.maker_fee;
         perp_market.fees_accrued += fees;
-        self.quote_position += quote - fees;
-        // msg!("maker base pos {} quote pos {:?}", self.base_position, self.quote_position);
+        pa.quote_position += quote - fees;
 
-        self.apply_incentives(
+        pa.apply_incentives(
             perp_market,
             side,
             fill.price,
@@ -1885,18 +1394,75 @@ impl PerpAccount {
         )?;
 
         if fill.maker_out {
-            self.open_orders.remove_order(side, fill.maker_slot, base_change.abs())
+            self.remove_order(fill.maker_slot as usize, base_change.abs())
         } else {
             match side {
                 Side::Bid => {
-                    self.open_orders.bids_quantity -= base_change.abs();
+                    pa.bids_quantity -= base_change.abs();
                 }
                 Side::Ask => {
-                    self.open_orders.asks_quantity -= base_change.abs();
+                    pa.asks_quantity -= base_change.abs();
                 }
             }
             Ok(())
         }
+    }
+
+    pub fn find_order_with_client_id(
+        &self,
+        market_index: usize,
+        client_id: u64,
+    ) -> Option<(i128, Side)> {
+        let market_index = market_index as u8;
+        for i in 0..MAX_PERP_OPEN_ORDERS {
+            if self.order_market[i] == market_index && self.client_order_ids[i] == client_id {
+                return Some((self.orders[i], self.order_side[i]));
+            }
+        }
+        None
+    }
+    pub fn find_order_side(&self, market_index: usize, order_id: i128) -> Option<Side> {
+        let market_index = market_index as u8;
+        for i in 0..MAX_PERP_OPEN_ORDERS {
+            if self.order_market[i] == market_index && self.orders[i] == order_id {
+                return Some(self.order_side[i]);
+            }
+        }
+        None
+    }
+}
+
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct PerpAccount {
+    pub base_position: i64,     // measured in base lots
+    pub quote_position: I80F48, // measured in native quote
+
+    pub long_settled_funding: I80F48,
+    pub short_settled_funding: I80F48,
+
+    // *** orders related info
+    pub bids_quantity: i64, // total contracts in sell orders
+    pub asks_quantity: i64, // total quote currency in buy orders
+
+    /// Amount that's on EventQueue waiting to be processed
+    pub taker_base: i64,
+    pub taker_quote: i64,
+
+    pub mngo_accrued: u64,
+}
+
+impl PerpAccount {
+    /// Add taker trade after it has been matched but before it has been process on EventQueue
+    pub fn add_taker_trade(&mut self, base_change: i64, quote_change: i64) {
+        // TODO make checked? estimate chances of overflow here
+        self.taker_base += base_change;
+        self.taker_quote += quote_change;
+    }
+    /// Remove taker trade after it has been processed on EventQueue
+    pub fn remove_taker_trade(&mut self, base_change: i64, quote_change: i64) {
+        self.taker_base -= base_change;
+        self.taker_quote -= quote_change;
     }
 
     pub fn apply_incentives(
@@ -2005,126 +1571,30 @@ impl PerpAccount {
         pmc: &PerpMarketCache,
         price: I80F48,
     ) -> MangoResult<(I80F48, I80F48)> {
-        let bids_base_net = self.base_position + self.open_orders.bids_quantity;
-        let asks_base_net = self.base_position - self.open_orders.asks_quantity;
+        let bids_base_net = self.base_position + self.taker_base + self.bids_quantity;
+        let asks_base_net = self.base_position + self.taker_base - self.asks_quantity;
         if bids_base_net.abs() > asks_base_net.abs() {
             let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
             let quote = self.get_quote_position(pmc)
-                - I80F48::from_num(self.open_orders.bids_quantity * pmi.base_lot_size) * price;
+                + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
+                - I80F48::from_num(self.bids_quantity * pmi.base_lot_size) * price;
             Ok((base, quote))
         } else {
             let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
             let quote = self.get_quote_position(pmc)
-                + I80F48::from_num(self.open_orders.asks_quantity * pmi.base_lot_size) * price;
+                + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
+                + I80F48::from_num(self.asks_quantity * pmi.base_lot_size) * price;
             Ok((base, quote))
-        }
-    }
-
-    /// Return the health factor if position changed by `base_change` at current prices
-    fn sim_position_health(
-        &self,
-        perp_market_info: &PerpMarketInfo,
-        price: I80F48,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-        base_change: i64,
-    ) -> I80F48 {
-        // TODO make checked
-        let new_base = self.base_position + base_change;
-        // TODO account for fees
-        let mut health = self.quote_position
-            - I80F48::from_num(base_change * perp_market_info.base_lot_size) * price;
-        if new_base > 0 {
-            health +=
-                I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * asset_weight;
-        } else {
-            health +=
-                I80F48::from_num(new_base * perp_market_info.base_lot_size) * price * liab_weight;
-        }
-
-        // msg!("sim_position_health price={:?} new_base={} health={:?}", price, new_base, health);
-
-        health
-    }
-
-    pub fn get_health(
-        &self,
-        perp_market_info: &PerpMarketInfo,
-        price: I80F48,
-        asset_weight: I80F48,
-        liab_weight: I80F48,
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> I80F48 {
-        // TODO make sure bids and asks quantity are updated on FillEvent
-
-        // Account for orders that are expansionary
-        let bids_health = self.sim_position_health(
-            perp_market_info,
-            price,
-            asset_weight,
-            liab_weight,
-            self.open_orders.bids_quantity,
-        );
-
-        let asks_health = self.sim_position_health(
-            perp_market_info,
-            price,
-            asset_weight,
-            liab_weight,
-            -self.open_orders.asks_quantity,
-        );
-
-        // Pick the worse of the two simulated health
-        let h = if bids_health < asks_health { bids_health } else { asks_health };
-
-        // Account for unrealized funding payments
-        // TODO make checked
-        // TODO - consider force moving funding into the realized at start of every instruction
-        let x = if self.base_position > 0 {
-            h - (long_funding - self.long_settled_funding) * I80F48::from_num(self.base_position)
-        } else {
-            h + (short_funding - self.short_settled_funding) * I80F48::from_num(self.base_position)
-        };
-        // msg!("perp health {:?}", x);
-        x
-    }
-
-    /// Returns value of assets, excludes open orders
-    pub fn get_assets_val(
-        &self,
-        price: I80F48,
-        asset_weight: I80F48,
-        long_funding: I80F48,
-        short_funding: I80F48,
-    ) -> I80F48 {
-        let base_position = I80F48::from_num(self.base_position);
-        if self.base_position > ZERO_I80F48 {
-            let quote_position = self.quote_position
-                - (long_funding - self.long_settled_funding).checked_mul(base_position).unwrap();
-
-            if quote_position > ZERO_I80F48 {
-                base_position * asset_weight * price + quote_position
-            } else {
-                base_position * asset_weight * price
-            }
-        } else {
-            let quote_position =
-                self.quote_position + (short_funding - self.short_settled_funding) * base_position;
-
-            if quote_position > ZERO_I80F48 {
-                quote_position
-            } else {
-                ZERO_I80F48
-            }
         }
     }
 
     pub fn is_active(&self) -> bool {
         self.base_position != 0
             || !self.quote_position.is_zero()
-            || self.open_orders.bids_quantity != 0
-            || self.open_orders.asks_quantity != 0
+            || self.bids_quantity != 0
+            || self.asks_quantity != 0
+            || self.taker_base != 0
+            || self.taker_quote != 0
 
         // Note funding only applies if base position not 0
     }
@@ -2361,38 +1831,6 @@ impl PerpMarket {
         cache.short_funding = self.short_funding;
         cache.long_funding = self.long_funding;
 
-        Ok(())
-    }
-
-    /// Execute a trade between the maker and taker accounts
-    /// base_change is from the taker's perspective; maker's base_change will be -base_change
-    pub fn execute_trade(
-        &mut self,
-        cache: &PerpMarketCache,
-        info: &PerpMarketInfo,
-        fill: &FillEvent,
-        maker: &mut PerpAccount,
-        taker: &mut PerpAccount,
-    ) -> MangoResult<()> {
-        maker.settle_funding(cache);
-        taker.settle_funding(cache);
-
-        taker.execute_taker(self, info, fill)?;
-        maker.execute_maker(self, info, fill)?;
-
-        Ok(())
-    }
-
-    pub fn execute_self_trade(
-        &mut self,
-        cache: &PerpMarketCache,
-        info: &PerpMarketInfo,
-        fill: &FillEvent,
-        perp_account: &mut PerpAccount,
-    ) -> MangoResult<()> {
-        perp_account.settle_funding(cache);
-        perp_account.execute_taker(self, info, fill)?;
-        perp_account.execute_maker(self, info, fill)?;
         Ok(())
     }
 }

@@ -1,6 +1,8 @@
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::queue::{EventQueue, FillEvent, OutEvent};
-use crate::state::{DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, PerpOpenOrders};
+use crate::state::{
+    DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, MAX_PERP_OPEN_ORDERS,
+};
 use bytemuck::{cast, cast_mut, cast_ref};
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
@@ -552,6 +554,7 @@ impl<'a> Book<'a> {
         Some(self.asks.get_min()?.price())
     }
 
+    #[inline(never)]
     pub fn new_order(
         &mut self,
         event_queue: &mut EventQueue,
@@ -597,6 +600,7 @@ impl<'a> Book<'a> {
         }
     }
 
+    #[inline(never)]
     fn new_bid(
         &mut self,
         event_queue: &mut EventQueue,
@@ -612,7 +616,7 @@ impl<'a> Book<'a> {
         now_ts: u64,
     ) -> MangoResult<()> {
         // TODO proper error handling
-        // TODO handle the case where we run out of compute
+        // TODO handle the case where we run out of compute (right now just fails)
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
             OrderType::ImmediateOrCancel => (false, false),
@@ -646,6 +650,9 @@ impl<'a> Book<'a> {
             let match_quantity = rem_quantity.min(best_ask.quantity);
             rem_quantity -= match_quantity;
             best_ask.quantity -= match_quantity;
+
+            mango_account.perp_accounts[market_index]
+                .add_taker_trade(match_quantity, -match_quantity * price);
             let maker_out = best_ask.quantity == 0;
             let fill = FillEvent::new(
                 Side::Bid,
@@ -696,10 +703,11 @@ impl<'a> Book<'a> {
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
-            let oo = &mut mango_account.perp_accounts[market_index].open_orders;
-
+            let owner_slot = mango_account
+                .next_order_slot()
+                .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
             let new_bid = LeafNode::new(
-                oo.next_order_slot(),
+                owner_slot as u8,
                 order_id,
                 *mango_account_pk,
                 rem_quantity,
@@ -715,14 +723,15 @@ impl<'a> Book<'a> {
                 rem_quantity,
                 price
             );
-            oo.add_order(Side::Bid, &new_bid)?;
+
+            mango_account.add_order(market_index, Side::Bid, &new_bid)?;
         }
 
         Ok(())
     }
 
     // TODO implement self trade behavior
-
+    #[inline(never)]
     pub fn new_ask(
         &mut self,
         event_queue: &mut EventQueue,
@@ -771,6 +780,8 @@ impl<'a> Book<'a> {
             let match_quantity = rem_quantity.min(best_bid.quantity);
             rem_quantity -= match_quantity;
             best_bid.quantity -= match_quantity;
+            mango_account.perp_accounts[market_index]
+                .add_taker_trade(-match_quantity, match_quantity * price);
             let maker_out = best_bid.quantity == 0;
 
             let fill = FillEvent::new(
@@ -793,25 +804,6 @@ impl<'a> Book<'a> {
                 match_quantity,
             );
 
-            // let fill = FillEvent {
-            //     event_type: EventType::Fill as u8,
-            //     side: Side::Ask,
-            //     maker_slot: best_bid.owner_slot,
-            //     maker_out,
-            //     padding: [0u8; 4],
-            //     maker: best_bid.owner,
-            //     maker_order_id: best_bid.key,
-            //     maker_client_order_id: best_bid.client_order_id,
-            //     best_initial: best_bid.best_initial,
-            //     timestamp: best_bid.timestamp,
-            //     taker: *mango_account_pk,
-            //     taker_order_id: order_id,
-            //     taker_client_order_id: client_order_id,
-            //     price: best_bid_price,
-            //     quantity: match_quantity,
-            //     maker_fee: ZERO_I80F48,
-            //     taker_fee: ZERO_I80F48
-            // };
             event_queue.push_back(cast(fill)).unwrap();
 
             // now either best_bid.quantity == 0 or rem_quantity == 0 or both
@@ -841,10 +833,11 @@ impl<'a> Book<'a> {
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
 
-            let oo = &mut mango_account.perp_accounts[market_index].open_orders;
-
+            let owner_slot = mango_account
+                .next_order_slot()
+                .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
             let new_ask = LeafNode::new(
-                oo.next_order_slot(),
+                owner_slot as u8,
                 order_id,
                 *mango_account_pk,
                 rem_quantity,
@@ -861,7 +854,7 @@ impl<'a> Book<'a> {
             );
 
             let _result = self.asks.insert_leaf(&new_ask)?;
-            oo.add_order(Side::Ask, &new_ask)?;
+            mango_account.add_order(market_index, Side::Ask, &new_ask)?;
         }
 
         Ok(())
@@ -869,48 +862,31 @@ impl<'a> Book<'a> {
 
     pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
         match side {
-            Side::Bid => self.bids.remove_by_key(order_id).ok_or(throw!()),
-            Side::Ask => self.asks.remove_by_key(order_id).ok_or(throw!()),
+            Side::Bid => {
+                self.bids.remove_by_key(order_id).ok_or(throw_err!(MangoErrorCode::InvalidOrderId))
+            }
+            Side::Ask => {
+                self.asks.remove_by_key(order_id).ok_or(throw_err!(MangoErrorCode::InvalidOrderId))
+            }
         }
-
-        // let order = book_side.remove_by_key(order_id).ok_or(throw_err!(MangoErrorCode::Default))?;
-        //
-        // let book_side = match side {
-        //     Side::Bid => self.bids.deref_mut(),
-        //     Side::Ask => self.asks.deref_mut(),
-        // };
-        //
-        // // TODO OPT - remove this check if
-        // check_eq!(order.owner, *mango_account_pk, MangoErrorCode::Default)?;
-        //
-        // oo.cancel_order(&order, order_id, side)?;
-        //
-        // // TODO *** - apply liquidity incentives
-        //
-        // Ok(())
     }
 
     /// Used by force cancel so does not need to give liquidity incentives
     pub fn cancel_all(
         &mut self,
-        open_orders: &mut PerpOpenOrders,
+        mango_account: &mut MangoAccount,
+        market_index: usize,
         mut limit: u8,
     ) -> MangoResult<()> {
-        for i in 0..32 {
-            let slot_mask = 1u32 << i;
-            if open_orders.is_free_bits & slot_mask != 0 {
-                // means slot is free
+        let market_index = market_index as u8;
+        for i in 0..MAX_PERP_OPEN_ORDERS {
+            if mango_account.order_market[i] != market_index {
+                // means slot is free or belongs to different perp market
                 continue;
             }
-            let order_id = open_orders.orders[i];
-            if open_orders.is_bid_bits & slot_mask != 0 {
-                let order = self.bids.remove_by_key(order_id).ok_or(throw!())?;
-                open_orders.cancel_order(&order, order_id, Side::Bid)?;
-            } else {
-                let order = self.asks.remove_by_key(order_id).ok_or(throw!())?;
-                open_orders.cancel_order(&order, order_id, Side::Ask)?;
-            }
-
+            let order_id = mango_account.orders[i];
+            let order = self.cancel_order(order_id, mango_account.order_side[i])?;
+            mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
             limit -= 1;
             if limit == 0 {
                 break;
