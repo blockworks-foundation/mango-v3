@@ -16,10 +16,10 @@ mkdir target/devnet
 cargo build-bpf --features devnet --bpf-out-dir target/devnet
 
 # nightly
-MANGO_PROGRAM_ID="EwG6vXKHmTPAS3K17CPu62AK3bdrrDJS3DibwUjv5ayT"
+#MANGO_PROGRAM_ID="EwG6vXKHmTPAS3K17CPu62AK3bdrrDJS3DibwUjv5ayT"
 
 # devnet.1
-#MANGO_PROGRAM_ID="5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
+MANGO_PROGRAM_ID="5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
 #MANGO_PROGRAM_ID="32WeJ46tuY6QEkgydqzHYU5j85UT9m1cPJwFxPjuSVCt"
 solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
 #solana program deploy target/devnet/mango.so --keypair $KEYPAIR --output json-compact

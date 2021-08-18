@@ -652,7 +652,7 @@ impl<'a> Book<'a> {
             best_ask.quantity -= match_quantity;
 
             mango_account.perp_accounts[market_index]
-                .add_taker_trade(match_quantity, -match_quantity * price);
+                .add_taker_trade(match_quantity, -match_quantity * best_ask_price);
             let maker_out = best_ask.quantity == 0;
             let fill = FillEvent::new(
                 Side::Bid,
@@ -781,7 +781,7 @@ impl<'a> Book<'a> {
             rem_quantity -= match_quantity;
             best_bid.quantity -= match_quantity;
             mango_account.perp_accounts[market_index]
-                .add_taker_trade(-match_quantity, match_quantity * price);
+                .add_taker_trade(-match_quantity, match_quantity * best_bid_price);
             let maker_out = best_bid.quantity == 0;
 
             let fill = FillEvent::new(
@@ -885,8 +885,15 @@ impl<'a> Book<'a> {
                 continue;
             }
             let order_id = mango_account.orders[i];
-            let order = self.cancel_order(order_id, mango_account.order_side[i])?;
-            mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+            match self.cancel_order(order_id, mango_account.order_side[i]) {
+                Ok(order) => {
+                    mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+                }
+                Err(_) => {
+                    // If it's not on the book, then it has been matched and only Keeper can remove
+                }
+            };
+
             limit -= 1;
             if limit == 0 {
                 break;
