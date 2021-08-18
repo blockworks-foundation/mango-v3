@@ -37,6 +37,7 @@ use crate::state::{
     MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use switchboard_program::FastRoundResultAccountData;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -3710,7 +3711,7 @@ fn read_oracle(
         OracleType::Switchboard => {
             // TODO do decimal fixes for cases where base decimals != quote decimals
             let result =
-                switchboard_program::fast_parse_switchboard_result(&oracle_ai.try_borrow_data()?);
+                FastRoundResultAccountData::deserialize(&oracle_ai.try_borrow_data()?).unwrap();
             I80F48::from_num(result.result.result)
         }
         OracleType::Unknown => {
