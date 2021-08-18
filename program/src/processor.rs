@@ -303,7 +303,10 @@ impl Processor {
         let oracle_type = determine_oracle_type(oracle_ai);
         match oracle_type {
             OracleType::Pyth => {
-                msg!("OracleType: got pyth"); // Do nothing really cause all that's needed is storing the pkey
+                msg!("OracleType:Pyth"); // Do nothing really cause all that's needed is storing the pkey
+            }
+            OracleType::Switchboard => {
+                msg!("OracleType::Switchboard");
             }
             OracleType::Stub | OracleType::Unknown => {
                 msg!("OracleType: got unknown or stub");
@@ -3703,6 +3706,12 @@ fn read_oracle(
         OracleType::Stub => {
             let oracle = StubOracle::load(oracle_ai)?;
             I80F48::from_num(oracle.price)
+        }
+        OracleType::Switchboard => {
+            // TODO do decimal fixes for cases where base decimals != quote decimals
+            let result =
+                switchboard_program::fast_parse_switchboard_result(&oracle_ai.try_borrow_data()?);
+            I80F48::from_num(result.result.result)
         }
         OracleType::Unknown => {
             panic!("Unknown oracle");

@@ -28,6 +28,7 @@ flux-aggregator = { version = "^0.1", git = "https://github.com/blockworks-found
 safe-transmute = "^0.11.1"
 mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
+switchboard-program = "0.1.49"
 
 [dev-dependencies]
 solana-sdk = "^1.7.1"
