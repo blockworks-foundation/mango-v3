@@ -3712,7 +3712,19 @@ fn read_oracle(
             // TODO do decimal fixes for cases where base decimals != quote decimals
             let result =
                 FastRoundResultAccountData::deserialize(&oracle_ai.try_borrow_data()?).unwrap();
-            I80F48::from_num(result.result.result)
+            let value = I80F48::from_num(result.result.result);
+            let decimals = (quote_decimals as i32)
+                .checked_sub(mango_group.tokens[token_index].decimals as i32)
+                .unwrap();
+            if decimals < 0 {
+                let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
+                value.checked_div(decimal_adj).unwrap()
+            } else if decimals > 0 {
+                let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
+                value.checked_mul(decimal_adj).unwrap()
+            } else {
+                value
+            }
         }
         OracleType::Unknown => {
             panic!("Unknown oracle");
