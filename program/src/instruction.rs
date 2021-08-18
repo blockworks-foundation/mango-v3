@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 pub enum MangoInstruction {
     /// Initialize a group of lending pools that can be cross margined
     ///
-    /// Accounts expected by this instruction (11):
+    /// Accounts expected by this instruction (12):
     ///
     /// 0. `[writable]` mango_group_ai
     /// 1. `[]` signer_ai
@@ -27,8 +27,9 @@ pub enum MangoInstruction {
     /// 6. `[writable]` quote_root_bank_ai
     /// 7. `[]` dao_vault_ai - aka insurance fund
     /// 8. `[]` msrm_vault_ai - msrm deposits for fee discounts; can be Pubkey::default()
-    /// 9. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
-    /// 10. `[]` dex_prog_ai
+    /// 9. `[]` fees_vault_ai - vault owned by Mango DAO token governance to receive fees
+    /// 10. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
+    /// 11. `[]` dex_prog_ai
     InitMangoGroup {
         signer_nonce: u64,
         valid_interval: u64,
@@ -415,7 +416,7 @@ pub enum MangoInstruction {
     /// 4. `[]` root_bank_ai - RootBank
     /// 5. `[writable]` node_bank_ai - NodeBank
     /// 6. `[writable]` bank_vault_ai - ?
-    /// 7. `[writable]` dao_vault_ai - DAO Vault
+    /// 7. `[writable]` fees_vault_ai - fee vault owned by mango DAO token governance
     /// 8. `[]` signer_ai - Group Signer Account
     /// 9. `[signer]` admin_ai - Group Admin Account
     /// 10. `[]` token_prog_ai - Token Program Account
@@ -845,8 +846,9 @@ pub fn init_mango_group(
     quote_vault_pk: &Pubkey,
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
-    dao_vault_pk: &Pubkey,
+    insurance_vault_pk: &Pubkey,
     msrm_vault_pk: &Pubkey, // send in Pubkey:default() if not using this feature
+    fees_vault_pk: &Pubkey,
     mango_cache_ai: &Pubkey,
     dex_program_pk: &Pubkey,
 
@@ -864,8 +866,9 @@ pub fn init_mango_group(
         AccountMeta::new_readonly(*quote_vault_pk, false),
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
-        AccountMeta::new_readonly(*dao_vault_pk, false),
+        AccountMeta::new_readonly(*insurance_vault_pk, false),
         AccountMeta::new_readonly(*msrm_vault_pk, false),
+        AccountMeta::new_readonly(*fees_vault_pk, false),
         AccountMeta::new(*mango_cache_ai, false),
         AccountMeta::new_readonly(*dex_program_pk, false),
     ];

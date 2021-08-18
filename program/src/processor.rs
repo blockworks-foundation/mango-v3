@@ -54,7 +54,7 @@ impl Processor {
         quote_optimal_rate: I80F48,
         quote_max_rate: I80F48,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 11;
+        const NUM_FIXED: usize = 12; // ***
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -65,8 +65,9 @@ impl Processor {
             quote_vault_ai,     // read
             quote_node_bank_ai, // write
             quote_root_bank_ai, // write
-            dao_vault_ai,       // read
+            insurance_vault_ai, // read
             msrm_vault_ai,      // read
+            fees_vault_ai,      // read ***
             mango_cache_ai,     // write
             dex_prog_ai         // read
         ] = accounts;
@@ -76,7 +77,7 @@ impl Processor {
             rent.is_exempt(mango_group_ai.lamports(), size_of::<MangoGroup>()),
             MangoErrorCode::GroupNotRentExempt
         )?;
-        let mut mango_group = MangoGroup::load_mut(mango_group_ai)?;
+        let mut mango_group: RefMut<MangoGroup> = MangoGroup::load_mut(mango_group_ai)?;
         check!(!mango_group.meta_data.is_initialized, MangoErrorCode::Default)?;
 
         check!(
@@ -89,12 +90,18 @@ impl Processor {
         mango_group.dex_program_id = *dex_prog_ai.key;
 
         // TODO OPT make PDA
-        let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
-        check!(dao_vault.is_initialized(), MangoErrorCode::Default)?;
-        check_eq!(dao_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
-        check_eq!(&dao_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
-        check_eq!(dao_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
-        mango_group.dao_vault = *dao_vault_ai.key;
+        let insurance_vault = Account::unpack(&insurance_vault_ai.try_borrow_data()?)?;
+        check!(insurance_vault.is_initialized(), MangoErrorCode::Default)?;
+        check_eq!(insurance_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
+        check_eq!(&insurance_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
+        check_eq!(insurance_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
+        mango_group.insurance_vault = *insurance_vault_ai.key;
+
+        let fees_vault = Account::unpack(&fees_vault_ai.try_borrow_data()?)?;
+        check!(fees_vault.is_initialized(), MangoErrorCode::Default)?;
+        check_eq!(&fees_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
+        check_eq!(fees_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
+        mango_group.fees_vault = *fees_vault_ai.key;
 
         // TODO OPT make this a PDA
         if msrm_vault_ai.key != &Pubkey::default() {
@@ -1517,7 +1524,6 @@ impl Processor {
     #[inline(never)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        // TODO
         const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1528,12 +1534,19 @@ impl Processor {
             root_bank_ai,       // read
             node_bank_ai,       // write
             bank_vault_ai,      // write
-            dao_vault_ai,       // write
+            fees_vault_ai,      // write *** 
             signer_ai,          // read
             admin_ai,           // read, signer
             token_prog_ai,      // read
         ] = accounts;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(fees_vault_ai.key == &mango_group.fees_vault, MangoErrorCode::InvalidVault)?;
+        check!(admin_ai.key == &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
@@ -1541,10 +1554,6 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-
-        check!(admin_ai.key == &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
-        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         match mango_group.find_root_bank_index(root_bank_ai.key) {
             None => return Err(throw_err!(MangoErrorCode::InvalidRootBank)),
@@ -1584,13 +1593,12 @@ impl Processor {
         perp_market.fees_accrued -= settlement;
         pa.quote_position += settlement;
 
-        // Transfer quote token from bank vault to dao vault
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
+        // Transfer quote token from bank vault to fees vault owned by Mango DAO
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
             bank_vault_ai,
-            dao_vault_ai,
+            fees_vault_ai,
             signer_ai,
             &[&signers_seeds],
             settlement.to_num(),
@@ -2599,7 +2607,7 @@ impl Processor {
             root_bank_ai,           // read
             node_bank_ai,           // write
             vault_ai,               // write
-            dao_vault_ai,           // write
+            insurance_vault_ai,     // write
             signer_ai,              // read
             perp_market_ai,         // write
             token_prog_ai,          // read
@@ -2636,8 +2644,11 @@ impl Processor {
 
         mango_cache.check_valid(&mango_group, &liqor_active_assets, now_ts)?;
 
-        check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
-        let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
+        check!(
+            insurance_vault_ai.key == &mango_group.insurance_vault,
+            MangoErrorCode::InvalidVault
+        )?;
+        let insurance_vault = Account::unpack(&insurance_vault_ai.try_borrow_data()?)?;
 
         let bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
         let quote_pos = liqee_ma.perp_accounts[liab_index].quote_position;
@@ -2648,13 +2659,13 @@ impl Processor {
             .checked_ceil() // round up and convert to native quote token
             .unwrap()
             .to_num::<u64>()
-            .min(dao_vault.amount); // take min of what ins. fund has
+            .min(insurance_vault.amount); // take min of what ins. fund has
 
         if liab_transfer_u64 != 0 {
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
-                dao_vault_ai,
+                insurance_vault_ai,
                 vault_ai,
                 signer_ai,
                 &[&signers_seeds],
@@ -2677,16 +2688,16 @@ impl Processor {
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
             msg!(
-                "perp_bankruptcy: {{ liab_index: {}, dao_transfer:{} }}",
+                "perp_bankruptcy: {{ liab_index: {}, insurance_transfer:{} }}",
                 liab_index,
                 liab_transfer_u64
             );
         }
 
         let quote_position = liqee_ma.perp_accounts[liab_index].quote_position;
-        // If we transferred everything out of dao_vault, dao vault is empty
+        // If we transferred everything out of insurance_vault, insurance vault is empty
         // and if quote position is still negative
-        if liab_transfer_u64 == dao_vault.amount && quote_position.is_negative() {
+        if liab_transfer_u64 == insurance_vault.amount && quote_position.is_negative() {
             // insurance fund empty so socialize loss
             check!(
                 &mango_group.perp_markets[liab_index].perp_market == perp_market_ai.key,
@@ -2742,7 +2753,7 @@ impl Processor {
             quote_root_bank_ai,     // read
             quote_node_bank_ai,     // write
             quote_vault_ai,         // write
-            dao_vault_ai,           // write
+            insurance_vault_ai,     // write
             signer_ai,              // read
             liab_root_bank_ai,      // write
             liab_node_bank_ai,      // write
@@ -2779,9 +2790,12 @@ impl Processor {
 
         mango_cache.check_valid(&mango_group, &liqor_active_assets, now_ts)?;
 
-        // Load the dao vault (insurance fund)
-        check!(dao_vault_ai.key == &mango_group.dao_vault, MangoErrorCode::InvalidVault)?;
-        let dao_vault = Account::unpack(&dao_vault_ai.try_borrow_data()?)?;
+        // Load the insurance vault (insurance fund)
+        check!(
+            insurance_vault_ai.key == &mango_group.insurance_vault,
+            MangoErrorCode::InvalidVault
+        )?;
+        let insurance_vault = Account::unpack(&insurance_vault_ai.try_borrow_data()?)?;
 
         // Make sure there actually exist liabs here
         check!(liqee_ma.borrows[liab_index].is_positive(), MangoErrorCode::Default)?;
@@ -2796,27 +2810,27 @@ impl Processor {
         let liab_bank_cache = &mango_cache.root_bank_cache[liab_index];
         let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
 
-        let insured_liabs = I80F48::from_num(dao_vault.amount) * liab_fee / liab_price;
+        let insured_liabs = I80F48::from_num(insurance_vault.amount) * liab_fee / liab_price;
         let liab_transfer = max_liab_transfer.min(native_borrows).min(insured_liabs);
 
-        let dao_transfer = (liab_transfer * liab_price / liab_fee)
+        let insurance_transfer = (liab_transfer * liab_price / liab_fee)
             .checked_ceil()
             .unwrap()
             .to_num::<u64>()
-            .min(dao_vault.amount);
+            .min(insurance_vault.amount);
 
-        if dao_transfer != 0 {
+        if insurance_transfer != 0 {
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
-                dao_vault_ai,
+                insurance_vault_ai,
                 quote_vault_ai,
                 signer_ai,
                 &[&signers_seeds],
-                dao_transfer,
+                insurance_transfer,
             )?;
-            let liab_transfer = I80F48::from_num(dao_transfer) * liab_fee / liab_price;
+            let liab_transfer = I80F48::from_num(insurance_transfer) * liab_fee / liab_price;
 
             if liab_index == QUOTE_INDEX {
                 checked_add_net(
@@ -2824,7 +2838,7 @@ impl Processor {
                     &mut liab_node_bank,
                     &mut liqor_ma,
                     QUOTE_INDEX,
-                    I80F48::from_num(dao_transfer),
+                    I80F48::from_num(insurance_transfer),
                 )?;
             } else {
                 // Load the bank for quote token
@@ -2845,7 +2859,7 @@ impl Processor {
                     &mut quote_node_bank,
                     &mut liqor_ma,
                     QUOTE_INDEX,
-                    I80F48::from_num(dao_transfer),
+                    I80F48::from_num(insurance_transfer),
                 )?;
             }
 
@@ -2875,13 +2889,15 @@ impl Processor {
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
             msg!(
-                "token_bankruptcy details: {{ \"liab_index\": {}, \"dao_transfer\": {} }}",
+                "token_bankruptcy details: {{ \"liab_index\": {}, \"insurance_transfer\": {} }}",
                 liab_index,
-                dao_transfer
+                insurance_transfer
             );
         }
 
-        if dao_transfer == dao_vault.amount && liqee_ma.borrows[liab_index].is_positive() {
+        if insurance_transfer == insurance_vault.amount
+            && liqee_ma.borrows[liab_index].is_positive()
+        {
             // insurance fund empty so socialize loss
             let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
             liab_root_bank.socialize_loss(

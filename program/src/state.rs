@@ -180,12 +180,13 @@ pub struct MangoGroup {
     pub mango_cache: Pubkey,
     pub valid_interval: u64,
 
-    // DAO vault is funded by the Mango DAO with USDC and can be withdrawn by the DAO
-    pub dao_vault: Pubkey,
+    // insurance vault is funded by the Mango DAO with USDC and can be withdrawn by the DAO
+    pub insurance_vault: Pubkey,
     pub srm_vault: Pubkey,
     pub msrm_vault: Pubkey,
+    pub fees_vault: Pubkey,
 
-    pub padding: [u8; 64], // padding used for future expansions
+    pub padding: [u8; 32], // padding used for future expansions
 }
 
 impl MangoGroup {
