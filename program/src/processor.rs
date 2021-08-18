@@ -565,12 +565,13 @@ impl Processor {
             oracle_prices.push(oracle_price.to_num::<f64>());
         }
 
-        msg!("cache_prices details: {{ \
+        msg!(
+            "cache_prices details: {{ \
             \"oracle_indexes\": {:?}, \
             \"oracle_prices\": {:?}
         }}",
-        oracle_indexes,
-        oracle_prices
+            oracle_indexes,
+            oracle_prices
         );
 
         Ok(())
@@ -1916,8 +1917,7 @@ impl Processor {
         // Make sure orders are cancelled for perps and check orders
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
-                let pa = &liqee_ma.perp_accounts[i];
-                check!(pa.bids_quantity == 0 && pa.asks_quantity == 0, MangoErrorCode::Default)?;
+                check!(liqee_ma.perp_accounts[i].is_liquidatable(), MangoErrorCode::Default)?;
             }
         }
 
@@ -2048,7 +2048,8 @@ impl Processor {
             }
         }
 
-        msg!("liquidate_token_and_token details: {{ \
+        msg!(
+            "liquidate_token_and_token details: {{ \
             \"asset_index\": {}, \
             \"liab_index\": {}, \
             \"asset_transfer\": {}, \
@@ -2057,13 +2058,13 @@ impl Processor {
             \"liab_price\": {}, \
             \"bankruptcy\": {}
         }}",
-        asset_index,
-        liab_index,
-        asset_transfer.to_num::<f64>(),
-        actual_liab_transfer.to_num::<f64>(),
-        asset_price.to_num::<f64>(),
-        liab_price.to_num::<f64>(),
-        liqee_ma.is_bankrupt
+            asset_index,
+            liab_index,
+            asset_transfer.to_num::<f64>(),
+            actual_liab_transfer.to_num::<f64>(),
+            asset_price.to_num::<f64>(),
+            liab_price.to_num::<f64>(),
+            liqee_ma.is_bankrupt
         );
 
         Ok(())
@@ -2132,8 +2133,7 @@ impl Processor {
         // Make sure orders are cancelled for perps and check orders
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
-                let pa = &liqee_ma.perp_accounts[i];
-                check!(pa.bids_quantity == 0 && pa.asks_quantity == 0, MangoErrorCode::Default)?;
+                check!(liqee_ma.perp_accounts[i].is_liquidatable(), MangoErrorCode::Default)?;
             }
         }
 
@@ -2239,7 +2239,6 @@ impl Processor {
             )?;
 
             health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, liab_index)?;
-
         } else {
             asset_price = ONE_I80F48;
             liab_price = mango_cache.get_price(liab_index);
@@ -2317,7 +2316,6 @@ impl Processor {
             health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, asset_index)?;
         }
 
-
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
         liqor_health_cache.init_vals(
             &mango_group,
@@ -2337,7 +2335,8 @@ impl Processor {
             liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
         }
 
-        msg!("liquidate_token_and_perp details: {{ \
+        msg!(
+            "liquidate_token_and_perp details: {{ \
             \"asset_index\": {}, \
             \"liab_index\": {}, \
             \"asset_type\": \"{:?}\", \
@@ -2347,14 +2346,14 @@ impl Processor {
             \"asset_transfer\": {}, \
             \"actual_liab_transfer\": {}
         }}",
-        asset_index,
-        liab_index,
-        asset_type,
-        liab_type,
-        asset_price.to_num::<f64>(),
-        liab_price.to_num::<f64>(),
-        asset_transfer.to_num::<f64>(),
-        actual_liab_transfer.to_num::<f64>()
+            asset_index,
+            liab_index,
+            asset_type,
+            liab_type,
+            asset_price.to_num::<f64>(),
+            liab_price.to_num::<f64>(),
+            asset_transfer.to_num::<f64>(),
+            actual_liab_transfer.to_num::<f64>()
         );
 
         Ok(())
@@ -2430,8 +2429,6 @@ impl Processor {
 
         // Move funding into quote position. Not necessary to adjust funding settled after funding is moved
         let cache = &mango_cache.perp_market_cache[market_index];
-        liqee_ma.perp_accounts[market_index].settle_funding(cache);
-        liqor_ma.perp_accounts[market_index].settle_funding(cache);
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
@@ -2443,12 +2440,13 @@ impl Processor {
             &UserActiveAssets::merge(&liqee_active_assets, &liqor_active_assets),
             now_ts,
         )?;
+        liqee_ma.perp_accounts[market_index].settle_funding(cache);
+        liqor_ma.perp_accounts[market_index].settle_funding(cache);
 
         // Make sure orders are cancelled for perps before liquidation
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
-                let pa = &liqee_ma.perp_accounts[i];
-                check!(pa.bids_quantity == 0 && pa.asks_quantity == 0, MangoErrorCode::Default)?;
+                check!(liqee_ma.perp_accounts[i].is_liquidatable(), MangoErrorCode::Default)?;
             }
         }
 
@@ -3682,13 +3680,6 @@ fn read_oracle(
     token_index: usize,
     oracle_ai: &AccountInfo,
 ) -> MangoResult<I80F48> {
-    /* TODO abstract different oracle programs
-    let aggregator = flux_aggregator::state::Aggregator::load_initialized(oracle_ai)?;
-    let answer = flux_aggregator::read_median(oracle_ai)?;
-    let median = I80F48::from(answer.median);
-    let units = I80F48::from(10u64.pow(aggregator.config.decimals));
-    let value = median.checked_div(units);
-    */
     let quote_decimals: u8 = mango_group.tokens[QUOTE_INDEX].decimals;
     let oracle_type = determine_oracle_type(oracle_ai);
     let price = match oracle_type {
@@ -3708,27 +3699,6 @@ fn read_oracle(
             } else {
                 value.checked_mul(decimal_adj).unwrap()
             }
-
-            // TODO OPT consider effect of not disregarding these bits
-            // let bits = if decimals < 0 {
-            //     value.checked_div(decimal_adj).unwrap().to_bits() as u128
-            // } else {
-            //     value.checked_fmul(decimal_adj).unwrap().to_bits() as u128
-            // };
-            // price = I80F48::from_bits((bits & 0xffffffffffffffffffffff0000000000u128) as i128);
-
-            // let oracle_adj = if price_account.expo < 0 {
-            //     ONE_I80F48.checked_div(I80F48::from_num(10u64.pow(price_account.expo.abs() as u32)))
-            // } else {
-            //     I80F48::from_num(10u64.pow(price_account.expo as u32))
-            // };
-            // let quote_adj =
-            //     I80F48::from_num(10u64.pow(
-            //         price_account.expo.abs().checked_sub(quote_decimals as i32).unwrap() as u32,
-            //     ));
-            // let base_adj =
-            //     I80F48::from_num(10u64.pow(mango_group.tokens[token_index].decimals as u32));
-            // price = quote_adj.checked_div(base_adj).unwrap().checked_mul(value).unwrap();
         }
         OracleType::Stub => {
             let oracle = StubOracle::load(oracle_ai)?;

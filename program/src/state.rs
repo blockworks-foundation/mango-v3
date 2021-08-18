@@ -1604,6 +1604,14 @@ impl PerpAccount {
         self.quote_position -= quantity;
         other.quote_position += quantity;
     }
+
+    /// All orders must be canceled and there must be no unprocessed FillEvents for this PerpAccount
+    pub fn is_liquidatable(&self) -> bool {
+        self.bids_quantity == 0
+            && self.asks_quantity == 0
+            && self.taker_quote == 0
+            && self.taker_base == 0
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
