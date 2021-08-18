@@ -550,11 +550,29 @@ impl Processor {
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
+        let mut oracle_indexes = Vec::new();
+        let mut oracle_prices = Vec::new();
+
         for oracle_ai in oracle_ais.iter() {
-            let i = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-            mango_cache.price_cache[i] =
-                PriceCache { price: read_oracle(&mango_group, i, oracle_ai)?, last_update: now_ts };
+            let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
+            let oracle_price = read_oracle(&mango_group, oracle_index, oracle_ai)?;
+
+            mango_cache.price_cache[oracle_index] =
+                PriceCache { price: oracle_price, last_update: now_ts };
+
+            oracle_indexes.push(oracle_index);
+            oracle_prices.push(oracle_price.to_num::<f64>());
         }
+
+        msg!("cache_prices details: {{ \
+            \"oracle_indexes\": {:?}, \
+            \"oracle_prices\": {:?}
+        }}",
+        oracle_indexes,
+        oracle_prices
+        );
+
         Ok(())
     }
 
@@ -2030,15 +2048,22 @@ impl Processor {
             }
         }
 
-        msg!(
-            "liquidate_token_and_token: {{ asset_index: {}, liab_index: {}, asset_transfer: {}, liab_transfer: {}, asset_price: {}, liab_price: {}, bankruptcy: {} }}",
-            asset_index,
-            liab_index,
-            asset_transfer.to_num::<f64>(),
-            actual_liab_transfer.to_num::<f64>(),
-            asset_price.to_num::<f64>(),
-            liab_price.to_num::<f64>(),
-            liqee_ma.is_bankrupt,
+        msg!("liquidate_token_and_token details: {{ \
+            \"asset_index\": {}, \
+            \"liab_index\": {}, \
+            \"asset_transfer\": {}, \
+            \"liab_transfer\": {}, \
+            \"asset_price\": {}, \
+            \"liab_price\": {}, \
+            \"bankruptcy\": {}
+        }}",
+        asset_index,
+        liab_index,
+        asset_transfer.to_num::<f64>(),
+        actual_liab_transfer.to_num::<f64>(),
+        asset_price.to_num::<f64>(),
+        liab_price.to_num::<f64>(),
+        liqee_ma.is_bankrupt
         );
 
         Ok(())
@@ -2129,10 +2154,14 @@ impl Processor {
             liqee_ma.being_liquidated = true;
         }
 
+        let asset_price: I80F48;
+        let liab_price: I80F48;
+        let asset_transfer: I80F48;
+        let actual_liab_transfer: I80F48;
         if asset_type == AssetType::Token {
             // we know asset_type != liab_type
-            let asset_price = mango_cache.get_price(asset_index);
-            let liab_price = ONE_I80F48;
+            asset_price = mango_cache.get_price(asset_index);
+            liab_price = ONE_I80F48;
             let bank_cache = &mango_cache.root_bank_cache[asset_index];
             check!(liqee_ma.deposits[asset_index].is_positive(), MangoErrorCode::Default)?;
             check!(liab_index != QUOTE_INDEX, MangoErrorCode::Default)?;
@@ -2170,7 +2199,7 @@ impl Processor {
             // Max liab transferred to reach asset_i == 0
             let asset_implied_liab_transfer =
                 native_deposits * asset_price * liab_fee / (liab_price * asset_fee);
-            let actual_liab_transfer = min(
+            actual_liab_transfer = min(
                 min(min(deficit_max_liab, native_borrows), max_liab_transfer),
                 asset_implied_liab_transfer,
             );
@@ -2180,7 +2209,7 @@ impl Processor {
                 -actual_liab_transfer,
             );
 
-            let asset_transfer =
+            asset_transfer =
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
             // Transfer collater into liqor
@@ -2210,20 +2239,10 @@ impl Processor {
             )?;
 
             health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, liab_index)?;
-            msg!(
-                "liquidate_token_and_perp: {{ asset_index: {}, liab_index: {}, asset_type: \"{:?}\", liab_type: \"{:?}\", asset_price: {}, liab_price: {}, asset_transfer: {}, actual_liab_transfer: {} }}",
-                asset_index,
-                liab_index,
-                asset_type,
-                liab_type,
-                asset_price.to_num::<f64>(),
-                liab_price.to_num::<f64>(),
-                asset_transfer.to_num::<f64>(),
-                actual_liab_transfer.to_num::<f64>(),
-            );
+
         } else {
-            let asset_price = ONE_I80F48;
-            let liab_price = mango_cache.get_price(liab_index);
+            asset_price = ONE_I80F48;
+            liab_price = mango_cache.get_price(liab_index);
             check!(
                 mango_group.find_root_bank_index(root_bank_ai.key).unwrap() == liab_index,
                 MangoErrorCode::InvalidRootBank
@@ -2258,12 +2277,12 @@ impl Processor {
             // Max liab transferred to reach asset_i == 0
             let asset_implied_liab_transfer =
                 native_deposits * asset_price * liab_fee / (liab_price * asset_fee);
-            let actual_liab_transfer = min(
+            actual_liab_transfer = min(
                 min(min(deficit_max_liab, native_borrows), max_liab_transfer),
                 asset_implied_liab_transfer,
             );
 
-            let asset_transfer =
+            asset_transfer =
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
             // Transfer collater into liqor
@@ -2296,18 +2315,8 @@ impl Processor {
             )?;
 
             health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, asset_index)?;
-            msg!(
-                "liquidate_token_and_perp: {{ asset_index: {}, liab_index: {}, asset_type: \"{:?}\", liab_type: \"{:?}\", asset_price: {}, liab_price: {}, asset_transfer: {}, actual_liab_transfer: {} }}",
-                asset_index,
-                liab_index,
-                asset_type,
-                liab_type,
-                asset_price.to_num::<f64>(),
-                liab_price.to_num::<f64>(),
-                asset_transfer.to_num::<f64>(),
-                actual_liab_transfer.to_num::<f64>(),
-            );
         }
+
 
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
         liqor_health_cache.init_vals(
@@ -2327,6 +2336,26 @@ impl Processor {
             let liqee_init_health = health_cache.get_health(&mango_group, HealthType::Init);
             liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
         }
+
+        msg!("liquidate_token_and_perp details: {{ \
+            \"asset_index\": {}, \
+            \"liab_index\": {}, \
+            \"asset_type\": \"{:?}\", \
+            \"liab_type\": \"{:?}\", \
+            \"asset_price\": {}, \
+            \"liab_price\": {}, \
+            \"asset_transfer\": {}, \
+            \"actual_liab_transfer\": {}
+        }}",
+        asset_index,
+        liab_index,
+        asset_type,
+        liab_type,
+        asset_price.to_num::<f64>(),
+        liab_price.to_num::<f64>(),
+        asset_transfer.to_num::<f64>(),
+        actual_liab_transfer.to_num::<f64>()
+        );
 
         Ok(())
     }
@@ -2844,7 +2873,7 @@ impl Processor {
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
             msg!(
-                "token_bankruptcy: {{ liab_index: {}, dao_transfer:{} }}",
+                "token_bankruptcy details: {{ \"liab_index\": {}, \"dao_transfer\": {} }}",
                 liab_index,
                 dao_transfer
             );
@@ -2863,7 +2892,7 @@ impl Processor {
                 liab_node_bank_ai.key,
             )?;
             msg!(
-                "token_socialized_loss: {{ liab_index: {}, native_borrows:{} }}",
+                "token_socialized_loss details: {{ \"liab_index\": {}, \"native_borrows\":{} }}",
                 liab_index,
                 native_borrows.to_num::<f64>()
             );
