@@ -1478,13 +1478,17 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
+        let lmi = &mut perp_market.liquidity_mining_info;
+        if lmi.rate == 0 || lmi.mngo_per_period == 0 {
+            return Ok(());
+        }
+
         let best = match side {
             Side::Bid => max(best_initial, best_final),
             Side::Ask => min(best_initial, best_final),
         };
 
         // TODO limit incentives to orders that were on book at least 5 seconds
-        let lmi = &mut perp_market.liquidity_mining_info;
         let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
         let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
 
