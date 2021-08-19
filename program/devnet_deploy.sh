@@ -25,17 +25,13 @@ solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MA
 #solana program deploy target/devnet/mango.so --keypair $KEYPAIR --output json-compact
 
 # serum dex
-VERSION=v1.6.18
-sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
-
-cd ~/blockworks-foundation/serum-dex/dex
-cargo build-bpf --features devnet
 DEX_PROGRAM_ID=DESVgJVGajEgKGXhb6XmqDHGz3VjdgP7rEVESBgxmroY
-solana program deploy target/deploy/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID
+cd ~/blockworks-foundation/serum-dex/dex
+anchor build --verifiable
+solana program deploy target/verifiable/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID
 
 VERSION=v1.7.10
 sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
-
 
 ### Example Mango Client CLI commands to launch a new group from source/cli.ts in mango-client-v3
 ###

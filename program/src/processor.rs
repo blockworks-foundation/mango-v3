@@ -305,8 +305,8 @@ impl Processor {
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
 
         let oracle_type = determine_oracle_type(oracle_ai);
         match oracle_type {
@@ -648,7 +648,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         quantity: u64,
-        allow_borrow: bool, // TODO only borrow if true
+        allow_borrow: bool,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];

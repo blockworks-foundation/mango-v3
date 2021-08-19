@@ -22,7 +22,7 @@ enumflags2 = "^0.6.4"
 num_enum = "^0.5.1"
 thiserror = "^1.0.24"
 spl-token = { version = "^3.0.0", features = ["no-entrypoint"] }
-serum_dex = { version = "0.3.1", git = "https://github.com/blockworks-foundation/serum-dex.git", features = ["no-entrypoint", "program"] }
+serum_dex = { version = "0.4.0", git = "https://github.com/blockworks-foundation/serum-dex.git", default-features=false, features = ["no-entrypoint", "program"] }
 static_assertions = "^1.1.0"
 flux-aggregator = { version = "^0.1", git = "https://github.com/blockworks-foundation/solana-flux-aggregator.git", features = ["program", "no-entrypoint"] }
 safe-transmute = "^0.11.1"
@@ -60,5 +60,5 @@ name = "mango"
 crate-type = ["cdylib", "lib"]
 
 # Official Build Tools
-# solana-cli 1.7.9 (src:0707290b; feat:2045430982)
-# rustc 1.56.0-nightly (e3b1c12be 2021-08-02)
+# solana-cli 1.7.10 (src:03b93051; feat:660526986)
+# rustc 1.56.0-nightly (0035d9dce 2021-08-16)
