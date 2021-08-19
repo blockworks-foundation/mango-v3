@@ -78,6 +78,7 @@ impl MangoGroupCookie {
             test.create_account(size_of::<RootBank>(), &mango_program_id).await;
         let dao_vault_pk = test.create_token_account(&signer_pk, &quote_mint_pk).await;
         let msrm_vault_pk = test.create_token_account(&signer_pk, &msrm_token::ID).await;
+        let fees_vault_pk = test.create_token_account(&signer_pk, &quote_mint_pk).await;
 
         let quote_optimal_util = I80F48::from_num(0.7);
         let quote_optimal_rate = I80F48::from_num(0.06);
@@ -95,6 +96,7 @@ impl MangoGroupCookie {
                 &quote_root_bank_pk,
                 &dao_vault_pk,
                 &msrm_vault_pk,
+                &fees_vault_pk,
                 &mango_cache_pk,
                 &serum_program_id,
                 signer_nonce,
