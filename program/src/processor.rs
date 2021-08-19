@@ -54,7 +54,7 @@ impl Processor {
         quote_optimal_rate: I80F48,
         quote_max_rate: I80F48,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 12; // ***
+        const NUM_FIXED: usize = 12;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -67,7 +67,7 @@ impl Processor {
             quote_root_bank_ai, // write
             insurance_vault_ai, // read
             msrm_vault_ai,      // read
-            fees_vault_ai,      // read ***
+            fees_vault_ai,      // read
             mango_cache_ai,     // write
             dex_prog_ai         // read
         ] = accounts;
@@ -1534,7 +1534,7 @@ impl Processor {
             root_bank_ai,       // read
             node_bank_ai,       // write
             bank_vault_ai,      // write
-            fees_vault_ai,      // write *** 
+            fees_vault_ai,      // write
             signer_ai,          // read
             admin_ai,           // read, signer
             token_prog_ai,      // read

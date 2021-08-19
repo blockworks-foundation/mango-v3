@@ -1442,7 +1442,7 @@ pub struct PerpAccount {
     pub long_settled_funding: I80F48,
     pub short_settled_funding: I80F48,
 
-    // *** orders related info
+    // orders related info
     pub bids_quantity: i64, // total contracts in sell orders
     pub asks_quantity: i64, // total quote currency in buy orders
 
