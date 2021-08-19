@@ -579,7 +579,7 @@ impl Processor {
         msg!(
             "cache_prices details: {{ \
             \"oracle_indexes\": {:?}, \
-            \"oracle_prices\": {:?}
+            \"oracle_prices\": {:?} \
         }}",
             oracle_indexes,
             oracle_prices
@@ -2068,7 +2068,7 @@ impl Processor {
             \"liab_transfer\": {}, \
             \"asset_price\": {}, \
             \"liab_price\": {}, \
-            \"bankruptcy\": {}
+            \"bankruptcy\": {} \
         }}",
             asset_index,
             liab_index,
@@ -2356,7 +2356,7 @@ impl Processor {
             \"asset_price\": {}, \
             \"liab_price\": {}, \
             \"asset_transfer\": {}, \
-            \"actual_liab_transfer\": {}
+            \"actual_liab_transfer\": {} \
         }}",
             asset_index,
             liab_index,
@@ -2565,7 +2565,7 @@ impl Processor {
 
         // TODO make this more efficient
         msg!(
-            "liquidate_perp_market: {{ market_index: {}, base_transfer: {}, quote_transfer: {}, bankruptcy: {} }}",
+            "liquidate_perp_market details: {{ \"market_index\": {}, \"base_transfer\": {}, \"quote_transfer\": {}, \"bankruptcy\": {} }}",
             market_index,
             base_transfer,
             quote_transfer.to_num::<f64>(),
@@ -2688,7 +2688,7 @@ impl Processor {
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
             msg!(
-                "perp_bankruptcy: {{ liab_index: {}, insurance_transfer:{} }}",
+                "perp_bankruptcy details: {{ \"liab_index\": {}, \"insurance_transfer\": {} }}",
                 liab_index,
                 liab_transfer_u64
             );
@@ -2712,7 +2712,7 @@ impl Processor {
                 &mut mango_cache.perp_market_cache[liab_index],
             )?;
             msg!(
-                "perp_socialized_loss: {{ liab_index: {}, socialized_loss:{} }}",
+                "perp_socialized_loss details: {{ \"liab_index\": {}, \"socialized_loss\":{} }}",
                 liab_index,
                 (quote_position / (I80F48::from_num(perp_market.open_interest))).to_num::<f64>()
             );
