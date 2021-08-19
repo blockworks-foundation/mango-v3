@@ -464,6 +464,13 @@ impl RootBank {
             node_bank.checked_sub_borrow(loss)?;
         }
 
+        msg!(
+            "token_socialized_loss details: {{ \"liab_index\": {}, \"native_loss\":{}, \"percentage_loss\": {} }}",
+            token_index,
+            native_loss.to_num::<f64>(),
+            percentage_loss.to_num::<f64>()
+        );
+
         Ok(())
     }
 }
