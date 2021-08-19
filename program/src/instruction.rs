@@ -16,7 +16,7 @@ use std::num::NonZeroU64;
 pub enum MangoInstruction {
     /// Initialize a group of lending pools that can be cross margined
     ///
-    /// Accounts expected by this instruction (11):
+    /// Accounts expected by this instruction (12):
     ///
     /// 0. `[writable]` mango_group_ai
     /// 1. `[]` signer_ai
@@ -27,8 +27,9 @@ pub enum MangoInstruction {
     /// 6. `[writable]` quote_root_bank_ai
     /// 7. `[]` dao_vault_ai - aka insurance fund
     /// 8. `[]` msrm_vault_ai - msrm deposits for fee discounts; can be Pubkey::default()
-    /// 9. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
-    /// 10. `[]` dex_prog_ai
+    /// 9. `[]` fees_vault_ai - vault owned by Mango DAO token governance to receive fees
+    /// 10. `[writable]` mango_cache_ai - Account to cache prices, root banks, and perp markets
+    /// 11. `[]` dex_prog_ai
     InitMangoGroup {
         signer_nonce: u64,
         valid_interval: u64,
@@ -134,7 +135,7 @@ pub enum MangoInstruction {
 
     /// Place an order on the Serum Dex using Mango account
     ///
-    /// Accounts expected by this instruction (19 + MAX_PAIRS):
+    /// Accounts expected by this instruction (23 + MAX_PAIRS):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2. `[signer]` owner_ai - owner of MangoAccount
@@ -147,14 +148,18 @@ pub enum MangoInstruction {
     /// 9. `[writable]` dex_event_queue_ai - event queue for serum dex market
     /// 10. `[writable]` dex_base_ai - base currency serum dex market vault
     /// 11. `[writable]` dex_quote_ai - quote currency serum dex market vault
-    /// 12. `[]` root_bank_ai - root bank of base currency if sell or quote currency if buy
-    /// 13. `[writable]` node_bank_ai - node bank of base currency if sell or quote currency if buy
-    /// 14. `[writable]` vault_ai - vault of the node bank
-    /// 15. `[]` token_prog_ai - SPL token program id
-    /// 16. `[]` signer_ai - signer key for this MangoGroup
-    /// 17. `[]` rent_ai - rent sysvar var
-    /// 18. `[]` msrm_or_srm_vault_ai - the msrm or srm vault in this MangoGroup. Can be zero key
-    /// 19+ `[writable]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
+    /// 12. `[]` base_root_bank_ai - root bank of base currency
+    /// 13. `[writable]` base_node_bank_ai - node bank of base currency
+    /// 14. `[writable]` base_vault_ai - vault of the basenode bank
+    /// 15. `[]` quote_root_bank_ai - root bank of quote currency
+    /// 16. `[writable]` quote_node_bank_ai - node bank of quote currency
+    /// 17. `[writable]` quote_vault_ai - vault of the quote node bank
+    /// 18. `[]` token_prog_ai - SPL token program id
+    /// 19. `[]` signer_ai - signer key for this MangoGroup
+    /// 20. `[]` rent_ai - rent sysvar var
+    /// 21. `[]` dex_signer_key - signer for serum dex
+    /// 22. `[]` msrm_or_srm_vault_ai - the msrm or srm vault in this MangoGroup. Can be zero key
+    /// 23+ `[writable]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
     ///         index needs to be writable. Only OpenOrders in_margin_basket needs to be correct;
     ///         remaining open orders can just be Pubkey::default() (the zero key)
     PlaceSpotOrder {
@@ -218,13 +223,16 @@ pub enum MangoInstruction {
         order_type: OrderType,
     },
 
+    // ***
     CancelPerpOrderByClientId {
         client_order_id: u64,
+        invalid_id_ok: bool,
     },
 
+    // ***
     CancelPerpOrder {
         order_id: i128,
-        side: Side,
+        invalid_id_ok: bool,
     },
 
     ConsumeEvents {
@@ -408,7 +416,7 @@ pub enum MangoInstruction {
     /// 4. `[]` root_bank_ai - RootBank
     /// 5. `[writable]` node_bank_ai - NodeBank
     /// 6. `[writable]` bank_vault_ai - ?
-    /// 7. `[writable]` dao_vault_ai - DAO Vault
+    /// 7. `[writable]` fees_vault_ai - fee vault owned by mango DAO token governance
     /// 8. `[]` signer_ai - Group Signer Account
     /// 9. `[signer]` admin_ai - Group Admin Account
     /// 10. `[]` token_prog_ai - Token Program Account
@@ -648,17 +656,22 @@ impl MangoInstruction {
                 }
             }
             13 => {
-                let data_arr = array_ref![data, 0, 8];
+                // ***
+                let data_arr = array_ref![data, 0, 9];
+                let (client_order_id, invalid_id_ok) = array_refs![data_arr, 8, 1];
+
                 MangoInstruction::CancelPerpOrderByClientId {
-                    client_order_id: u64::from_le_bytes(*data_arr),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    invalid_id_ok: invalid_id_ok[0] != 0,
                 }
             }
             14 => {
+                // ***
                 let data_arr = array_ref![data, 0, 17];
-                let (order_id, side) = array_refs![data_arr, 16, 1];
+                let (order_id, invalid_id_ok) = array_refs![data_arr, 16, 1];
                 MangoInstruction::CancelPerpOrder {
                     order_id: i128::from_le_bytes(*order_id),
-                    side: Side::try_from_primitive(side[0]).ok()?,
+                    invalid_id_ok: invalid_id_ok[0] != 0,
                 }
             }
             15 => {
@@ -833,8 +846,9 @@ pub fn init_mango_group(
     quote_vault_pk: &Pubkey,
     quote_node_bank_pk: &Pubkey,
     quote_root_bank_pk: &Pubkey,
-    dao_vault_pk: &Pubkey,
+    insurance_vault_pk: &Pubkey,
     msrm_vault_pk: &Pubkey, // send in Pubkey:default() if not using this feature
+    fees_vault_pk: &Pubkey,
     mango_cache_ai: &Pubkey,
     dex_program_pk: &Pubkey,
 
@@ -852,8 +866,9 @@ pub fn init_mango_group(
         AccountMeta::new_readonly(*quote_vault_pk, false),
         AccountMeta::new(*quote_node_bank_pk, false),
         AccountMeta::new(*quote_root_bank_pk, false),
-        AccountMeta::new_readonly(*dao_vault_pk, false),
+        AccountMeta::new_readonly(*insurance_vault_pk, false),
         AccountMeta::new_readonly(*msrm_vault_pk, false),
+        AccountMeta::new_readonly(*fees_vault_pk, false),
         AccountMeta::new(*mango_cache_ai, false),
         AccountMeta::new_readonly(*dex_program_pk, false),
     ];
@@ -1066,7 +1081,9 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    let instr = MangoInstruction::CancelPerpOrderByClientId { client_order_id };
+    // TODO - add in invalid_id_ok
+    let instr =
+        MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok: false };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1080,7 +1097,6 @@ pub fn cancel_perp_order(
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
     order_id: i128,
-    side: Side,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1090,7 +1106,8 @@ pub fn cancel_perp_order(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    let instr = MangoInstruction::CancelPerpOrder { order_id, side };
+    // TODO - add in invalid_id_ok
+    let instr = MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok: false };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1314,10 +1331,14 @@ pub fn place_spot_order(
     dex_event_queue_pk: &Pubkey,
     dex_base_pk: &Pubkey,
     dex_quote_pk: &Pubkey,
-    root_bank_pk: &Pubkey,
-    node_bank_pk: &Pubkey,
-    vault_pk: &Pubkey,
+    base_root_bank_pk: &Pubkey,
+    base_node_bank_pk: &Pubkey,
+    base_vault_pk: &Pubkey,
+    quote_root_bank_pk: &Pubkey,
+    quote_node_bank_pk: &Pubkey,
+    quote_vault_pk: &Pubkey,
     signer_pk: &Pubkey,
+    dex_signer_pk: &Pubkey,
     msrm_or_srm_vault_pk: &Pubkey,
     open_orders_pks: &[Pubkey],
 
@@ -1337,12 +1358,16 @@ pub fn place_spot_order(
         AccountMeta::new(*dex_event_queue_pk, false),
         AccountMeta::new(*dex_base_pk, false),
         AccountMeta::new(*dex_quote_pk, false),
-        AccountMeta::new_readonly(*root_bank_pk, false),
-        AccountMeta::new(*node_bank_pk, false),
-        AccountMeta::new(*vault_pk, false),
+        AccountMeta::new_readonly(*base_root_bank_pk, false),
+        AccountMeta::new(*base_node_bank_pk, false),
+        AccountMeta::new(*base_vault_pk, false),
+        AccountMeta::new_readonly(*quote_root_bank_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_vault_pk, false),
         AccountMeta::new_readonly(spl_token::ID, false),
         AccountMeta::new_readonly(*signer_pk, false),
         AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
+        AccountMeta::new_readonly(*dex_signer_pk, false),
         AccountMeta::new_readonly(*msrm_or_srm_vault_pk, false),
     ];
 

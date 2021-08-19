@@ -63,6 +63,7 @@ pub const PROD_ATTR_SIZE: usize = PROD_ACCT_SIZE - PROD_HDR_SIZE;
 pub enum OracleType {
     Stub,
     Pyth,
+    Switchboard,
     Unknown,
 }
 
@@ -226,6 +227,8 @@ pub fn determine_oracle_type<'a>(account: &'a AccountInfo) -> OracleType {
         return OracleType::Pyth;
     } else if borrowed[0] == 77 && borrowed[1] == 110 && borrowed[2] == 103 && borrowed[3] == 111 {
         return OracleType::Stub;
+    } else if borrowed.len() == 1000 {
+        return OracleType::Switchboard;
     } else {
         return OracleType::Unknown;
     }
