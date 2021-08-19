@@ -2899,7 +2899,6 @@ impl Processor {
             && liqee_ma.borrows[liab_index].is_positive()
         {
             // insurance fund empty so socialize loss
-            let native_borrows = liqee_ma.get_native_borrow(liab_bank_cache, liab_index)?;
             liab_root_bank.socialize_loss(
                 program_id,
                 liab_index,
@@ -2909,11 +2908,6 @@ impl Processor {
                 &mut liab_node_bank,
                 liab_node_bank_ai.key,
             )?;
-            msg!(
-                "token_socialized_loss details: {{ \"liab_index\": {}, \"native_borrows\":{} }}",
-                liab_index,
-                native_borrows.to_num::<f64>()
-            );
         }
 
         liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
