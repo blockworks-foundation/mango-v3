@@ -607,7 +607,7 @@ impl PerpMarketCookie {
 
         let order_size = test.base_size_number_to_lots(&self.mint, size);
         let order_price = test.price_number_to_lots(&self.mint, price);
-
+        
         test.place_perp_order(
             &mango_group_cookie,
             self,
