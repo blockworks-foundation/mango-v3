@@ -408,7 +408,7 @@ pub enum MangoInstruction {
 
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     ///
-    /// Accounts expected: 11
+    /// Accounts expected: 10
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` mango_cache_ai - MangoCache
     /// 2. `[writable]` perp_market_ai - PerpMarket
@@ -418,8 +418,7 @@ pub enum MangoInstruction {
     /// 6. `[writable]` bank_vault_ai - ?
     /// 7. `[writable]` fees_vault_ai - fee vault owned by mango DAO token governance
     /// 8. `[]` signer_ai - Group Signer Account
-    /// 9. `[signer]` admin_ai - Group Admin Account
-    /// 10. `[]` token_prog_ai - Token Program Account
+    /// 9. `[]` token_prog_ai - Token Program Account
     SettleFees,
 
     /// Claim insurance fund and then socialize loss

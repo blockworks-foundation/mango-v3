@@ -1476,8 +1476,6 @@ impl Processor {
 
         let price = mango_cache.price_cache[market_index].price;
 
-        // No need to check if market_index is in basket because if it's not, it will be zero and not possible to settle
-
         let a = &mut mango_account_a.perp_accounts[market_index];
         let b = &mut mango_account_b.perp_accounts[market_index];
 
@@ -1524,7 +1522,7 @@ impl Processor {
     #[inline(never)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        const NUM_FIXED: usize = 11;
+        const NUM_FIXED: usize = 10; // *** remove admin
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
@@ -1535,17 +1533,13 @@ impl Processor {
             node_bank_ai,       // write
             bank_vault_ai,      // write
             fees_vault_ai,      // write
-            signer_ai,          // read
-            admin_ai,           // read, signer
+            signer_ai,          // read  *** remove admin
             token_prog_ai,      // read
         ] = accounts;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(fees_vault_ai.key == &mango_group.fees_vault, MangoErrorCode::InvalidVault)?;
-        check!(admin_ai.key == &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
-        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -1555,13 +1549,13 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
-        match mango_group.find_root_bank_index(root_bank_ai.key) {
-            None => return Err(throw_err!(MangoErrorCode::InvalidRootBank)),
-            Some(i) => check!(i == QUOTE_INDEX, MangoErrorCode::InvalidRootBank)?,
-        }
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::Default)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
         check!(bank_vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -1581,7 +1575,7 @@ impl Processor {
         let price = mango_cache.price_cache[market_index].price;
 
         let pa = &mut mango_account.perp_accounts[market_index];
-
+        pa.settle_funding(&perp_market_cache);
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos = I80F48::from_num(-pa.base_position * contract_size) * price;
         let pnl: I80F48 = pa.quote_position - new_quote_pos;
