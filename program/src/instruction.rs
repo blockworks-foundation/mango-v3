@@ -533,6 +533,29 @@ pub enum MangoInstruction {
     WithdrawMsrm {
         quantity: u64,
     },
+
+    /// Change the params for perp market. Right now only rate and mngo_per_period can be changed.
+    /// You must pass in the current values for all other params or this instruction will fail.
+    ///
+    /// Accounts expected by this instruction (3):
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` perp_market_ai - PerpMarket
+    /// 2. `[signer]` admin_ai - MangoAccount admin
+    ChangePerpMarketParams {
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
+        liquidation_fee: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
+        /// Starting rate for liquidity mining
+        rate: I80F48,
+        /// depth liquidity mining works for
+        max_depth_bps: I80F48,
+        /// target length in seconds of one period
+        target_period_length: u64,
+        /// amount MNGO rewarded per period
+        mngo_per_period: u64,
+    },
 }
 
 impl MangoInstruction {
@@ -779,6 +802,32 @@ impl MangoInstruction {
             36 => {
                 let quantity = array_ref![data, 0, 8];
                 MangoInstruction::WithdrawMsrm { quantity: u64::from_le_bytes(*quantity) }
+            }
+
+            37 => {
+                let data_arr = array_ref![data, 0, 128];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 16, 16, 8, 8];
+                MangoInstruction::ChangePerpMarketParams {
+                    maint_leverage: I80F48::from_le_bytes(*maint_leverage),
+                    init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
+                    maker_fee: I80F48::from_le_bytes(*maker_fee),
+                    taker_fee: I80F48::from_le_bytes(*taker_fee),
+                    rate: I80F48::from_le_bytes(*rate),
+                    max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
+                    target_period_length: u64::from_le_bytes(*target_period_length),
+                    mngo_per_period: u64::from_le_bytes(*mngo_per_period),
+                }
             }
 
             _ => {

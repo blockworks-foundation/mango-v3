@@ -519,7 +519,7 @@ impl Processor {
     #[inline(never)]
     #[allow(unused)]
     /// Change the shape of the interest rate function
-    fn set_rate_params(
+    fn change_rate_params(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         optimal_util: I80F48,
@@ -535,8 +535,8 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(
             mango_group.find_root_bank_index(root_bank_ai.key).is_some(),
             MangoErrorCode::InvalidRootBank
@@ -544,6 +544,85 @@ impl Processor {
         let mut root_bank = RootBank::load_mut_checked(root_bank_ai, program_id)?;
         root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
 
+        Ok(())
+    }
+    #[inline(never)]
+    /// Change leverage, fees and liquidity mining params
+    /// Note: only mngo_per_period  and rate works right now; others not yet implemented; this is for safety
+    fn change_perp_market_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
+        liquidation_fee: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
+        rate: I80F48,
+        max_depth_bps: I80F48,
+        target_period_length: u64,
+        mngo_per_period: u64,
+    ) -> MangoResult<()> {
+        // params check
+        check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_leverage > init_leverage, MangoErrorCode::InvalidParam)?;
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // write
+            perp_market_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let info = &mango_group.perp_markets[market_index];
+
+        check!(maker_fee == info.maker_fee, MangoErrorCode::Unimplemented)?;
+        // info.maker_fee = maker_fee;
+        check!(taker_fee == info.taker_fee, MangoErrorCode::Unimplemented)?;
+        // info.taker_fee = taker_fee;
+        check!(liquidation_fee == info.liquidation_fee, MangoErrorCode::Unimplemented)?;
+        // info.liquidation_fee = liquidation_fee;
+
+        let maint_asset_weight = (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap();
+        let init_asset_weight = (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap();
+        let maint_liab_weight = (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap();
+        let init_liab_weight = (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap();
+
+        // TODO - check that asset weight >= curr asset weight; liab weight <= curr liab weight
+        //      lev can only go up for now. if it goes down, people may get liquidated unwittingly
+        check!(maint_asset_weight == info.maint_asset_weight, MangoErrorCode::Unimplemented)?;
+        // info.maint_asset_weight = maint_asset_weight;
+        check!(init_asset_weight == info.init_asset_weight, MangoErrorCode::Unimplemented)?;
+        // info.init_asset_weight = init_asset_weight;
+        check!(maint_liab_weight == info.maint_liab_weight, MangoErrorCode::Unimplemented)?;
+        // info.maint_liab_weight = maint_liab_weight;
+        check!(init_liab_weight == info.init_liab_weight, MangoErrorCode::Unimplemented)?;
+        // info.init_liab_weight = init_liab_weight;
+
+        let mut lmi = &mut perp_market.liquidity_mining_info;
+
+        check!(max_depth_bps == lmi.max_depth_bps, MangoErrorCode::Unimplemented)?;
+        // lmi.max_depth_bps = max_depth_bps;
+        check!(target_period_length == lmi.target_period_length, MangoErrorCode::Unimplemented)?;
+        // lmi.target_period_length = target_period_length;
+
+        lmi.mngo_per_period = mngo_per_period;
+        lmi.rate = rate;
         Ok(())
     }
 
@@ -3589,6 +3668,32 @@ impl Processor {
             MangoInstruction::WithdrawMsrm { quantity } => {
                 msg!("Mango: WithdrawMsrm");
                 Self::withdraw_msrm(program_id, accounts, quantity)
+            }
+            MangoInstruction::ChangePerpMarketParams {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                maker_fee,
+                taker_fee,
+                rate,
+                max_depth_bps,
+                target_period_length,
+                mngo_per_period,
+            } => {
+                msg!("Mango: ChangePerpMarketParams");
+                Self::change_perp_market_params(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                )
             }
         }
     }

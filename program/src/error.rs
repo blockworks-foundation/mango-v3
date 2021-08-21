@@ -49,6 +49,8 @@ pub enum MangoErrorCode {
     InvalidGroupOwner,
     #[error("MangoErrorCode::InvalidSignerKey")]
     InvalidSignerKey,
+    #[error("MangoErrorCode::InvalidAdminKey")]
+    InvalidAdminKey,
     #[error("MangoErrorCode::InvalidVault")]
     InvalidVault,
     #[error("MangoErrorCode::MathError")]
