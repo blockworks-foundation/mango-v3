@@ -645,84 +645,35 @@ impl MangoCache {
         active_assets: &UserActiveAssets,
         now_ts: u64,
     ) -> MangoResult<()> {
-        let valid_interval = mango_group.valid_interval;
+        let valid_start = now_ts - mango_group.valid_interval;
         check!(
-            now_ts <= self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval,
+            self.root_bank_cache[QUOTE_INDEX].last_update >= valid_start,
             MangoErrorCode::InvalidRootBankCache
         )?;
 
         for i in 0..mango_group.num_oracles {
             if active_assets.spot[i] || active_assets.perps[i] {
                 check!(
-                    now_ts <= self.price_cache[i].last_update + valid_interval,
+                    self.price_cache[i].last_update >= valid_start,
                     MangoErrorCode::InvalidPriceCache
                 )?;
             }
 
             if active_assets.spot[i] {
                 check!(
-                    now_ts <= self.root_bank_cache[i].last_update + valid_interval,
+                    self.root_bank_cache[i].last_update >= valid_start,
                     MangoErrorCode::InvalidRootBankCache
                 )?;
             }
 
             if active_assets.perps[i] {
                 check!(
-                    now_ts <= self.perp_market_cache[i].last_update + valid_interval,
-                    MangoErrorCode::InvalidRootBankCache
+                    self.perp_market_cache[i].last_update >= valid_start,
+                    MangoErrorCode::InvalidPerpMarketCache
                 )?;
             }
         }
         Ok(())
-    }
-    // TODO - only check caches are valid if balances are non-zero
-    pub fn check_caches_valid(
-        &self,
-        mango_group: &MangoGroup,
-        active_assets: &[bool; MAX_TOKENS],
-        now_ts: u64,
-    ) -> bool {
-        let valid_interval = mango_group.valid_interval;
-        if now_ts > self.root_bank_cache[QUOTE_INDEX].last_update + valid_interval {
-            msg!(
-                "root_bank_cache {} invalid: {}",
-                QUOTE_INDEX,
-                self.root_bank_cache[QUOTE_INDEX].last_update
-            );
-            return false;
-        }
-
-        for i in 0..mango_group.num_oracles {
-            // If this asset is not in user basket, then there are no deposits, borrows or perp positions to calculate value of
-            if !active_assets[i] {
-                continue;
-            }
-
-            if now_ts > self.price_cache[i].last_update + valid_interval {
-                msg!("price_cache {} invalid: {}", i, self.price_cache[i].last_update);
-                return false;
-            }
-
-            if !mango_group.spot_markets[i].is_empty() {
-                if now_ts > self.root_bank_cache[i].last_update + valid_interval {
-                    msg!("root_bank_cache {} invalid: {}", i, self.root_bank_cache[i].last_update);
-                    return false;
-                }
-            }
-
-            if !mango_group.perp_markets[i].is_empty() {
-                if now_ts > self.perp_market_cache[i].last_update + valid_interval {
-                    msg!(
-                        "perp_market_cache {} invalid: {}",
-                        i,
-                        self.perp_market_cache[i].last_update
-                    );
-                    return false;
-                }
-            }
-        }
-
-        true
     }
 
     pub fn get_price(&self, i: usize) -> I80F48 {

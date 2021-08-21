@@ -1522,7 +1522,7 @@ impl Processor {
     #[inline(never)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        const NUM_FIXED: usize = 10; // *** remove admin
+        const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
@@ -1533,7 +1533,7 @@ impl Processor {
             node_bank_ai,       // write
             bank_vault_ai,      // write
             fees_vault_ai,      // write
-            signer_ai,          // read  *** remove admin
+            signer_ai,          // read
             token_prog_ai,      // read
         ] = accounts;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
@@ -4119,8 +4119,5 @@ fn invoke_init_open_orders<'a>(
 }
 
 /*
-TODO
-check bankruptcy everywhere
-
 TODO test order types
  */

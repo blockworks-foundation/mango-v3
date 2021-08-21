@@ -103,11 +103,11 @@ pub enum MangoErrorCode {
     InvalidOpenOrdersAccount,
     #[error("MangoErrorCode::BeingLiquidated Invalid instruction while being liquidated")]
     BeingLiquidated,
-    #[error("MangoErrorCode::InvalidRootBankCache")]
+    #[error("MangoErrorCode::InvalidRootBankCache Cache the root bank to resolve")]
     InvalidRootBankCache,
-    #[error("MangoErrorCode::InvalidPriceCache")]
+    #[error("MangoErrorCode::InvalidPriceCache Cache the oracle price to resolve")]
     InvalidPriceCache,
-    #[error("MangoErrorCode::InvalidPerpMarketCache")]
+    #[error("MangoErrorCode::InvalidPerpMarketCache Cache the perp market to resolve")]
     InvalidPerpMarketCache,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
