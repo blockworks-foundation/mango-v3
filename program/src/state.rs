@@ -272,7 +272,7 @@ impl RootBank {
         optimal_rate: I80F48,
         max_rate: I80F48,
     ) -> MangoResult<RefMut<'a, Self>> {
-        let mut root_bank = Self::load_mut(account)?;
+        let mut root_bank: RefMut<'a, Self> = Self::load_mut(account)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         check!(
             rent.is_exempt(account.lamports(), size_of::<Self>()),
@@ -352,9 +352,8 @@ impl RootBank {
         &mut self,
         node_bank_ais: &[AccountInfo],
         program_id: &Pubkey,
+        now_ts: u64,
     ) -> MangoResult<()> {
-        let clock = Clock::get()?;
-        let curr_ts = clock.unix_timestamp as u64;
         let mut native_deposits = ZERO_I80F48;
         let mut native_borrows = ZERO_I80F48;
 
@@ -383,10 +382,10 @@ impl RootBank {
         };
 
         let borrow_interest =
-            interest_rate.checked_mul(I80F48::from_num(curr_ts - self.last_updated)).unwrap();
+            interest_rate.checked_mul(I80F48::from_num(now_ts - self.last_updated)).unwrap();
         let deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
 
-        self.last_updated = curr_ts;
+        self.last_updated = now_ts;
         self.borrow_index = self
             .borrow_index
             .checked_mul(borrow_interest)
@@ -1665,6 +1664,8 @@ impl PerpMarket {
 
         let vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
         check!(vault.owner == mango_group.signer_key, MangoErrorCode::InvalidOwner)?;
+        check!(vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
+        check!(vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
         check!(vault.mint == mngo_token::ID, MangoErrorCode::InvalidVault)?;
         check!(mngo_vault_ai.owner == &spl_token::ID, MangoErrorCode::InvalidOwner)?;
         state.mngo_vault = *mngo_vault_ai.key;

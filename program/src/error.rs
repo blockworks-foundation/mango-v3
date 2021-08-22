@@ -63,7 +63,7 @@ pub enum MangoErrorCode {
     InvalidMarket,
     #[error("MangoErrorCode::InvalidProgramId")]
     InvalidProgramId,
-    #[error("MangoErrorCode::NotRentExempt")]
+    #[error("MangoErrorCode::GroupNotRentExempt")]
     GroupNotRentExempt,
     #[error("MangoErrorCode::OutOfSpace")]
     OutOfSpace,

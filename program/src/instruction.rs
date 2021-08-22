@@ -542,19 +542,19 @@ pub enum MangoInstruction {
     /// 1. `[writable]` perp_market_ai - PerpMarket
     /// 2. `[signer]` admin_ai - MangoAccount admin
     ChangePerpMarketParams {
-        maint_leverage: I80F48,
-        init_leverage: I80F48,
-        liquidation_fee: I80F48,
-        maker_fee: I80F48,
-        taker_fee: I80F48,
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        maker_fee: Option<I80F48>,
+        taker_fee: Option<I80F48>,
         /// Starting rate for liquidity mining
-        rate: I80F48,
+        rate: Option<I80F48>,
         /// depth liquidity mining works for
-        max_depth_bps: I80F48,
+        max_depth_bps: Option<I80F48>,
         /// target length in seconds of one period
-        target_period_length: u64,
+        target_period_length: Option<u64>,
         /// amount MNGO rewarded per period
-        mngo_per_period: u64,
+        mngo_per_period: Option<u64>,
     },
 }
 
@@ -805,7 +805,7 @@ impl MangoInstruction {
             }
 
             37 => {
-                let data_arr = array_ref![data, 0, 128];
+                let data_arr = array_ref![data, 0, 137];
                 let (
                     maint_leverage,
                     init_leverage,
@@ -816,17 +816,18 @@ impl MangoInstruction {
                     max_depth_bps,
                     target_period_length,
                     mngo_per_period,
-                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 16, 16, 8, 8];
+                ) = array_refs![data_arr, 17, 17, 17, 17, 17, 17, 17, 9, 9];
+
                 MangoInstruction::ChangePerpMarketParams {
-                    maint_leverage: I80F48::from_le_bytes(*maint_leverage),
-                    init_leverage: I80F48::from_le_bytes(*init_leverage),
-                    liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
-                    maker_fee: I80F48::from_le_bytes(*maker_fee),
-                    taker_fee: I80F48::from_le_bytes(*taker_fee),
-                    rate: I80F48::from_le_bytes(*rate),
-                    max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
-                    target_period_length: u64::from_le_bytes(*target_period_length),
-                    mngo_per_period: u64::from_le_bytes(*mngo_per_period),
+                    maint_leverage: unpack_i80f48_opt(maint_leverage),
+                    init_leverage: unpack_i80f48_opt(init_leverage),
+                    liquidation_fee: unpack_i80f48_opt(liquidation_fee),
+                    maker_fee: unpack_i80f48_opt(maker_fee),
+                    taker_fee: unpack_i80f48_opt(taker_fee),
+                    rate: unpack_i80f48_opt(rate),
+                    max_depth_bps: unpack_i80f48_opt(max_depth_bps),
+                    target_period_length: unpack_u64_opt(target_period_length),
+                    mngo_per_period: unpack_u64_opt(mngo_per_period),
                 }
             }
 
@@ -837,6 +838,23 @@ impl MangoInstruction {
     }
     pub fn pack(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
+    }
+}
+
+fn unpack_i80f48_opt(data: &[u8; 17]) -> Option<I80F48> {
+    let (opt, val) = array_refs![data, 1, 16];
+    if opt[0] == 0 {
+        None
+    } else {
+        Some(I80F48::from_le_bytes(*val))
+    }
+}
+fn unpack_u64_opt(data: &[u8; 9]) -> Option<u64> {
+    let (opt, val) = array_refs![data, 1, 8];
+    if opt[0] == 0 {
+        None
+    } else {
+        Some(u64::from_le_bytes(*val))
     }
 }
 
