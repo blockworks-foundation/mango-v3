@@ -28,17 +28,26 @@ async fn test_token_and_token_liquidation() {
     let asker_user_index: usize = 1;
     let liqor_user_index: usize = 2;
     let mint_index: usize = 0;
-    let base_price = 15_000;
+    let base_price: f64 = 15_000.0;
+    let base_size: f64 = 1.0;
 
     // Set oracles
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price as f64).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
 
     // Deposit amounts
     let user_deposits = vec![
-        (bidder_user_index, test.quote_index, 10_000),
-        (asker_user_index, mint_index, 1),
-        (asker_user_index, test.quote_index, 10_000),
-        (liqor_user_index, test.quote_index, 10_000),
+        (bidder_user_index, test.quote_index, 10_000.0),
+        (asker_user_index, mint_index, 1.0),
+        (asker_user_index, test.quote_index, 10_000.0),
+        (liqor_user_index, test.quote_index, 10_000.0),
+    ];
+
+    // Matched Spot Orders
+    let matched_spot_orders = vec![
+        vec![
+            (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
+            (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
+        ],
     ];
 
     // === Act ===
@@ -46,14 +55,7 @@ async fn test_token_and_token_liquidation() {
     deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place and match an order for 1 BTC @ 15_000
-    match_single_spot_order_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        bidder_user_index,
-        asker_user_index,
-        mint_index,
-        base_price,
-    ).await;
+    match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
 
     // Step 3: Assert that the order has been matched and the bidder has 1 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;
@@ -70,7 +72,7 @@ async fn test_token_and_token_liquidation() {
     assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
 
     // Step 4: Change the oracle price so that bidder becomes liqee
-    mango_group_cookie.set_oracle(&mut test, mint_index, (base_price / 15) as f64).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 15.0).await;
 
     // Step 5: Perform a coulple liquidations
     for _ in 0..5 {

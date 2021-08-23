@@ -24,14 +24,14 @@ async fn test_deposit_succeeds() {
     // solana_logger::setup_with("error");
 
     let user_index = 0;
-    let quantity = 10000;
+    let amount = 10_000;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
 
-    let deposit_amount = (quantity * test.quote_mint.unit) as u64;
     let user_token_account = test.with_user_token_account(user_index, test.quote_index);
     let initial_balance = test.get_token_balance(user_token_account).await;
+    let deposit_amount = amount * (test.quote_mint.unit as u64);
 
     // === Act ===
     mango_group_cookie.run_keeper(&mut test).await;

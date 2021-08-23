@@ -1191,6 +1191,7 @@ pub fn cancel_perp_order(
 pub fn consume_events(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,      // read
+    mango_cache_pk: &Pubkey,      // read
     perp_market_pk: &Pubkey,      // read
     event_queue_pk: &Pubkey,      // write
     mango_acc_pks: &mut [Pubkey], // write
@@ -1198,13 +1199,37 @@ pub fn consume_events(
 ) -> Result<Instruction, ProgramError> {
     let fixed_accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
-        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
     mango_acc_pks.sort();
     let mango_accounts = mango_acc_pks.into_iter().map(|pk| AccountMeta::new(*pk, false));
     let accounts = fixed_accounts.into_iter().chain(mango_accounts).collect();
     let instr = MangoInstruction::ConsumeEvents { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn settle_pnl(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,      // read
+    mango_account_a_pk: &Pubkey,  // write
+    mango_account_b_pk: &Pubkey,  // write
+    mango_cache_pk: &Pubkey,      // read
+    root_bank_pk: &Pubkey,        // read
+    node_bank_pk: &Pubkey,        // write
+    market_index: usize,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_a_pk, false),
+        AccountMeta::new(*mango_account_b_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+    ];
+    let instr = MangoInstruction::SettlePnl { market_index };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

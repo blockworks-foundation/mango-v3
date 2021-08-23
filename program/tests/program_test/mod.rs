@@ -31,6 +31,7 @@ use solana_program::entrypoint::ProgramResult;
 
 pub mod scenarios;
 pub mod cookies;
+pub mod assertions;
 use self::cookies::*;
 
 trait AddPacked {
@@ -118,129 +119,129 @@ impl MangoProgramTest {
             MintCookie {
                 index: 0,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None, //Some(mngo_token::ID),
             }, // symbol: "MNGO".to_string()
             MintCookie {
                 index: 1,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None, //Some(msrm_token::ID),
             }, // symbol: "MSRM".to_string()
             MintCookie {
                 index: 2,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 3,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 1000,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 1000 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "ETH".to_string()
             MintCookie {
                 index: 4,
                 decimals: 9,
-                unit: 10u64.pow(9),
-                base_lot: 100000000,
-                quote_lot: 100,
+                unit: 10u64.pow(9) as f64,
+                base_lot: 100000000 as f64,
+                quote_lot: 100 as f64,
                 pubkey: None,
             }, // symbol: "SOL".to_string()
             MintCookie {
                 index: 5,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100000,
-                quote_lot: 100,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100000 as f64,
+                quote_lot: 100 as f64,
                 pubkey: None,
             }, // symbol: "SRM".to_string()
             MintCookie {
                 index: 6,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 7,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 8,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 9,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 10,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 11,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 12,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 13,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 14,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 100,
-                quote_lot: 10,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 100 as f64,
+                quote_lot: 10 as f64,
                 pubkey: None,
             }, // symbol: "BTC".to_string()
             MintCookie {
                 index: 15,
                 decimals: 6,
-                unit: 10u64.pow(6),
-                base_lot: 0,
-                quote_lot: 0,
+                unit: 10u64.pow(6) as f64,
+                base_lot: 0 as f64,
+                quote_lot: 0 as f64,
                 pubkey: None,
             }, // symbol: "USDC".to_string()
         ];
@@ -342,7 +343,6 @@ impl MangoProgramTest {
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
         mints = mints[..num_mints].to_vec();
-        // TODO: Add the 32nd mint as the quote mint
 
         Self {
             context,
@@ -595,18 +595,18 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub fn base_size_number_to_lots(&mut self, mint: &MintCookie, quantity: u64) -> u64 {
-        return (quantity * mint.unit) / mint.base_lot;
+    pub fn base_size_number_to_lots(&mut self, mint: &MintCookie, quantity: f64) -> u64 {
+        return ((quantity * mint.unit) / mint.base_lot) as u64;
     }
 
     #[allow(dead_code)]
-    pub fn quote_size_number_to_lots(&mut self, mint: &MintCookie, quantity: u64) -> u64 {
-        return (quantity * self.quote_mint.unit) / mint.quote_lot;
+    pub fn quote_size_number_to_lots(&mut self, mint: &MintCookie, quantity: f64) -> u64 {
+        return ((quantity * self.quote_mint.unit) / mint.quote_lot) as u64;
     }
 
     #[allow(dead_code)]
-    pub fn price_number_to_lots(&mut self, mint: &MintCookie, price: u64) -> u64 {
-        return (price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot);
+    pub fn price_number_to_lots(&mut self, mint: &MintCookie, price: f64) -> u64 {
+        return ((price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot)) as u64;
     }
 
     #[allow(dead_code)]
@@ -681,6 +681,84 @@ impl MangoProgramTest {
             .unwrap(),
         ];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+
+    }
+
+    #[allow(dead_code)]
+    pub async fn consume_perp_events(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        mango_account_pks: &mut Vec<Pubkey>,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let instructions = [
+            consume_events(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.event_queue,
+                &mut mango_account_pks[..],
+                3,
+            ).unwrap(),
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
+    // pub fn get_pnl(
+    //     &mut self,
+    //     mango_group_cookie: &MangoGroupCookie,
+    //     perp_market_cookie: &PerpMarketCookie,
+    //     user_index: usize,
+    // ) {
+    //     let mango_cache = mango_group_cookie.mango_cache;
+    //     let mint = perp_market_cookie.mint;
+    //     let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+    //     let perp_account = mango_account.perp_accounts[mint.index];
+    //     let price = mango_cache.price_cache[mint.index].price;
+    //     return I80F48::from_num(perp_account.base_position) * I80F48::from_num(mint.base_lot) *
+    //         price +
+    //         I80F48::from_num(perp_account.quote_position);
+    // }
+
+    #[allow(dead_code)]
+    pub async fn settle_perp_funds(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_a_index: usize,
+        user_b_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account_a_pk = mango_group_cookie.mango_accounts[user_a_index].address;
+        let mango_account_b_pk = mango_group_cookie.mango_accounts[user_b_index].address;
+        let mango_cache_pk = mango_group.mango_cache;
+        let market_index = perp_market_cookie.mint.index;
+        let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, self.quote_index).await;
+        let (node_bank_pk, _node_bank) = self.with_node_bank(&root_bank, 0).await;
+
+        let instructions = [
+            settle_pnl(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_a_pk,
+                &mango_account_b_pk,
+                &mango_cache_pk,
+                &root_bank_pk,
+                &node_bank_pk,
+                market_index,
+            ).unwrap(),
+        ];
+
+        self.process_transaction(&instructions, None).await.unwrap();
 
     }
 
@@ -800,15 +878,14 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn consume_events(
+    pub async fn consume_spot_events(
         &mut self,
         spot_market_cookie: &SpotMarketCookie,
         open_orders: Vec<&Pubkey>,
         user_index: usize,
-        mint_index: usize,
     ) {
         let serum_program_id = self.serum_program_id;
-        let coin_fee_receivable_account = self.with_user_token_account(user_index, mint_index);
+        let coin_fee_receivable_account = self.with_user_token_account(user_index, spot_market_cookie.mint.index);
         let pc_fee_receivable_account = self.with_user_token_account(user_index, self.quote_index);
 
         for open_order in open_orders {
@@ -1067,7 +1144,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn settle_funds(
+    pub async fn settle_spot_funds(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         spot_market_cookie: &SpotMarketCookie,
@@ -1146,13 +1223,6 @@ impl MangoProgramTest {
         let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await;
 
         let instructions = [
-            cache_root_banks(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &[root_bank_pk],
-            )
-            .unwrap(),
             deposit(
                 &mango_program_id,
                 &mango_group_pk,
@@ -1194,22 +1264,24 @@ impl MangoProgramTest {
         let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
         let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
 
-        let instructions = [withdraw(
-            &mango_program_id,
-            &mango_group_pk,
-            &mango_account_pk,
-            &user.pubkey(),
-            &mango_group.mango_cache,
-            &root_bank_pk,
-            &node_bank_pk,
-            &node_bank.vault,
-            &user_token_account,
-            &signer_pk,
-            &mango_account.spot_open_orders,
-            quantity,
-            allow_borrow,
-        )
-        .unwrap()];
+        let instructions = [
+            withdraw(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_account_pk,
+                &user.pubkey(),
+                &mango_group.mango_cache,
+                &root_bank_pk,
+                &node_bank_pk,
+                &node_bank.vault,
+                &user_token_account,
+                &signer_pk,
+                &mango_account.spot_open_orders,
+                quantity,
+                allow_borrow,
+            )
+            .unwrap(),
+        ];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
