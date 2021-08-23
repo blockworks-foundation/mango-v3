@@ -312,12 +312,12 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load_mut(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
@@ -330,12 +330,12 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<Ref<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
@@ -371,7 +371,6 @@ impl RootBank {
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
-        // TODO: Review interest rate calculation
         let interest_rate = if utilization > self.optimal_util {
             let extra_util = utilization - self.optimal_util;
             let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
@@ -380,9 +379,6 @@ impl RootBank {
             let slope = self.optimal_rate / self.optimal_util;
             slope * utilization
         };
-
-        // TODO: Remove this when tested
-        // msg!("== interest_rate: {} ==", interest_rate.to_string());
 
         let borrow_interest =
             interest_rate.checked_mul(I80F48::from_num(now_ts - self.last_updated)).unwrap();
