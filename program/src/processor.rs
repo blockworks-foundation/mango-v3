@@ -1616,6 +1616,16 @@ impl Processor {
             b.quote_position -= settlement;
         }
 
+        // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
+        msg!(
+            "settle_pnl details: {{ \"mango_account_a_ai\": {}, \"mango_account_b_ai\": {}, \"market_index\": {}, \"settlement\": {}, \"redundant_field\": {} }}",
+            mango_account_a_ai.key,
+            mango_account_b_ai.key,
+            market_index,
+            settlement.to_num::<f64>(),
+            0
+        );
+
         checked_add_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
