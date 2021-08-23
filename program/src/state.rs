@@ -382,7 +382,7 @@ impl RootBank {
         };
 
         // TODO: Remove this when tested
-        msg!("== interest_rate: {} ==", interest_rate.to_string());
+        // msg!("== interest_rate: {} ==", interest_rate.to_string());
 
         let borrow_interest =
             interest_rate.checked_mul(I80F48::from_num(now_ts - self.last_updated)).unwrap();
@@ -518,25 +518,35 @@ impl NodeBank {
 
         // TODO verify if size check necessary. We know load_mut fails if account size is too small for struct,
         //  does it also fail if it's too big?
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
         let node_bank = Self::load_mut(account)?;
 
-        check!(node_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             node_bank.meta_data.data_type,
             DataType::NodeBank as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(node_bank)
     }
-    #[allow(unused)]
+
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<Ref<'a, Self>> {
-        // TODO
-        Ok(Self::load(account)?)
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
+        let node_bank = Self::load(account)?;
+
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
+        check_eq!(
+            node_bank.meta_data.data_type,
+            DataType::NodeBank as u8,
+            MangoErrorCode::InvalidAccount
+        )?;
+
+        Ok(node_bank)
     }
 
     // TODO - Add checks to these math methods to prevent result from being < 0
