@@ -96,5 +96,5 @@ async fn test_interest_rate() {
     // Deposit: 1, Borrow: 1 = 0.000000047564683
     // Deposit: 1, Borrow: 0.5 = 0.000000001358988
     // Deposit: 1, Borrow: 0.05 = 0.0000000001359
-    // Deposit: 2, Borrow: 0.05 = 0.0000000001359
+    // Deposit: 2, Borrow: 0.05 = 0.00000000006795
 }
