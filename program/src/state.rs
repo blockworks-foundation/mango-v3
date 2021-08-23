@@ -194,14 +194,14 @@ impl MangoGroup {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let mango_group = Self::load_mut(account)?;
+        let mango_group: RefMut<'a, Self> = Self::load_mut(account)?;
+        check!(mango_group.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             mango_group.meta_data.data_type,
             DataType::MangoGroup as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(mango_group)
@@ -212,12 +212,12 @@ impl MangoGroup {
     ) -> MangoResult<Ref<'a, Self>> {
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let mango_group = Self::load(account)?;
-        check!(mango_group.meta_data.is_initialized, MangoErrorCode::Default)?;
+        let mango_group: Ref<'a, Self> = Self::load(account)?;
+        check!(mango_group.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             mango_group.meta_data.data_type,
             DataType::MangoGroup as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(mango_group)
@@ -312,12 +312,12 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load_mut(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
@@ -330,12 +330,12 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<Ref<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
@@ -371,7 +371,6 @@ impl RootBank {
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
-        // TODO: Review interest rate calculation
         let interest_rate = if utilization > self.optimal_util {
             let extra_util = utilization - self.optimal_util;
             let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
@@ -515,25 +514,35 @@ impl NodeBank {
 
         // TODO verify if size check necessary. We know load_mut fails if account size is too small for struct,
         //  does it also fail if it's too big?
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
         let node_bank = Self::load_mut(account)?;
 
-        check!(node_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             node_bank.meta_data.data_type,
             DataType::NodeBank as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(node_bank)
     }
-    #[allow(unused)]
+
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<Ref<'a, Self>> {
-        // TODO
-        Ok(Self::load(account)?)
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
+        let node_bank = Self::load(account)?;
+
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
+        check_eq!(
+            node_bank.meta_data.data_type,
+            DataType::NodeBank as u8,
+            MangoErrorCode::InvalidAccount
+        )?;
+
+        Ok(node_bank)
     }
 
     // TODO - Add checks to these math methods to prevent result from being < 0
@@ -731,9 +740,6 @@ impl UserActiveAssets {
 }
 
 pub struct HealthCache {
-    // pub active_assets: [bool; MAX_TOKENS],
-    // pub active_spot: [bool; MAX_PAIRS],
-    // pub active_perps: [bool; MAX_PAIRS],
     pub active_assets: UserActiveAssets,
 
     /// Vec of length MAX_PAIRS containing worst case spot vals; unweighted
@@ -1213,7 +1219,8 @@ impl MangoAccount {
         mango_group: &MangoGroup,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> bool {
-        // TODO - consider using DUST_THRESHOLD
+        // TODO - what if bank index is very large? then deposits will be artifically low
+        // TODO -
         // TODO - what if asset_weight == 0 for some asset? should it still be counted
         if self.deposits[QUOTE_INDEX] > DUST_THRESHOLD {
             return false;
@@ -1232,7 +1239,7 @@ impl MangoAccount {
                 // We know the bids and asks are empty to even be inside the liquidate function
                 // So no need to check that
                 // TODO - what if there's unsettled funding for a short position which turns this positive?
-                if pa.quote_position.is_positive() || pa.base_position.is_positive() {
+                if pa.quote_position.is_positive() || pa.base_position != 0 {
                     return false;
                 }
             }
@@ -1252,9 +1259,8 @@ impl MangoAccount {
         }
 
         for i in 0..mango_group.num_oracles {
-            if self.perp_accounts[i].quote_position.is_negative()
-                || self.perp_accounts[i].base_position.is_negative()
-            {
+            let pa = &self.perp_accounts[i];
+            if pa.quote_position.is_negative() || pa.base_position != 0 {
                 return false;
             }
         }

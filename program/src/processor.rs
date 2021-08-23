@@ -2823,7 +2823,6 @@ impl Processor {
             let mut perp_market =
                 PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
-            // TODO - log this
             perp_market.socialize_loss(
                 &mut liqee_ma.perp_accounts[liab_index],
                 &mut mango_cache.perp_market_cache[liab_index],
@@ -3451,6 +3450,26 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn set_group_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // write
+            new_admin_ai,       // read
+            admin_ai,           // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+
+        mango_group.admin = *new_admin_ai.key;
+
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -3739,6 +3758,10 @@ impl Processor {
                     target_period_length,
                     mngo_per_period,
                 )
+            }
+            MangoInstruction::SetGroupAdmin => {
+                msg!("Mango: SetGroupAdmin");
+                Self::set_group_admin(program_id, accounts)
             }
         }
     }
