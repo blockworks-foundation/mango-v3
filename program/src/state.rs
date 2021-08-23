@@ -1063,6 +1063,14 @@ impl MangoAccount {
     // TODO - Add unchecked versions to be used when we're confident
     // TODO OPT - remove negative and zero checks if we're confident
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+
+        msg!(
+            "checked_add_borrow details: {{ \"mango_account\": {}, \"token_index\": {}, \"quantity\": {} }}",
+            self.owner,
+            token_i,
+            v.to_num::<f64>()
+        );
+
         self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(math_err!())?;
         // TODO - actually try to hit this error
         check!(
@@ -1071,6 +1079,14 @@ impl MangoAccount {
         )
     }
     pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+
+        msg!(
+            "checked_sub_borrow details: {{ \"mango_account\": {}, \"token_index\": {}, \"quantity\": {} }}",
+            self.owner,
+            token_i,
+            v.to_num::<f64>()
+        );
+
         self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(math_err!())?;
         check!(!self.borrows[token_i].is_negative(), MangoErrorCode::MathError)?;
         check!(
@@ -1079,6 +1095,14 @@ impl MangoAccount {
         )
     }
     pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+
+        msg!(
+            "checked_add_deposit details: {{ \"mango_account\": {}, \"token_index\": {}, \"quantity\": {} }}",
+            self.owner,
+            token_i,
+            v.to_num::<f64>()
+        );
+
         self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(math_err!())?;
         check!(
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
@@ -1086,6 +1110,14 @@ impl MangoAccount {
         )
     }
     pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+
+        msg!(
+            "checked_sub_deposit details: {{ \"mango_account\": {}, \"token_index\": {}, \"quantity\": {} }}",
+            self.owner,
+            token_i,
+            v.to_num::<f64>()
+        );
+
         self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(math_err!())?;
         check!(!self.deposits[token_i].is_negative(), MangoErrorCode::MathError)?;
         check!(

@@ -696,6 +696,10 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
 
+        let mut token_indexes = Vec::new();
+        let mut deposit_indexes = Vec::new();
+        let mut borrow_indexes = Vec::new();
+
         for root_bank_ai in root_bank_ais.iter() {
             let index = mango_group.find_root_bank_index(root_bank_ai.key).unwrap();
             let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -704,7 +708,23 @@ impl Processor {
                 borrow_index: root_bank.borrow_index,
                 last_update: now_ts,
             };
+
+            token_indexes.push(index);
+            deposit_indexes.push(root_bank.deposit_index.to_num::<f64>());
+            borrow_indexes.push(root_bank.borrow_index.to_num::<f64>())
         }
+
+        msg!(
+            "cache_root_banks details: {{ \
+            \"token_indexes\": {:?}, \
+            \"deposit_indexes\": {:?} \
+            \"borrow_indexes\": {:?} \
+        }}",
+            token_indexes,
+            deposit_indexes,
+            borrow_indexes
+        );
+
         Ok(())
     }
 
