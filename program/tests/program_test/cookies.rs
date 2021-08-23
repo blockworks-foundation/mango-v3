@@ -88,6 +88,7 @@ impl MangoGroupCookie {
                 &quote_root_bank_pk,
                 &dao_vault_pk,
                 &msrm_vault_pk,
+                &dao_vault_pk,
                 &mango_cache_pk,
                 &serum_program_id,
                 signer_nonce,
