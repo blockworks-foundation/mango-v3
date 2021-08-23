@@ -3427,8 +3427,8 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // write
-            admin_ai,           // read, signer
             new_admin_ai,       // read
+            admin_ai,           // read, signer
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
