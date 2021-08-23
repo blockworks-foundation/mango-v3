@@ -3730,7 +3730,7 @@ impl Processor {
                     mngo_per_period,
                 )
             }
-            MangoInstruction::SetGroupAdmin {} => {
+            MangoInstruction::SetGroupAdmin => {
                 msg!("Mango: SetGroupAdmin");
                 Self::set_group_admin(program_id, accounts)
             }

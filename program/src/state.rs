@@ -1200,7 +1200,7 @@ impl MangoAccount {
                 // We know the bids and asks are empty to even be inside the liquidate function
                 // So no need to check that
                 // TODO - what if there's unsettled funding for a short position which turns this positive?
-                if pa.quote_position.is_positive() || pa.base_position.is_positive() {
+                if pa.quote_position.is_positive() || pa.base_position != 0 {
                     return false;
                 }
             }

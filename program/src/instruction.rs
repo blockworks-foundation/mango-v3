@@ -538,7 +538,7 @@ pub enum MangoInstruction {
     /// You must pass in the current values for all other params or this instruction will fail.
     ///
     /// Accounts expected by this instruction (3):
-    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 0. `[writable]` mango_group_ai - MangoGroup
     /// 1. `[writable]` perp_market_ai - PerpMarket
     /// 2. `[signer]` admin_ai - MangoGroup admin
     ChangePerpMarketParams {
@@ -560,10 +560,10 @@ pub enum MangoInstruction {
     /// Transfer admin permissions over group to another account
     ///
     /// Accounts expected by this instruction (3):
-    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 0. `[writable]` mango_group_ai - MangoGroup
     /// 1. `[]` new_admin_ai - New MangoGroup admin
     /// 2. `[signer]` admin_ai - MangoGroup admin
-    SetGroupAdmin {},
+    SetGroupAdmin,
 }
 
 impl MangoInstruction {
@@ -839,7 +839,7 @@ impl MangoInstruction {
                 }
             }
 
-            38 => MangoInstruction::SetGroupAdmin {},
+            38 => MangoInstruction::SetGroupAdmin,
 
             _ => {
                 return None;
