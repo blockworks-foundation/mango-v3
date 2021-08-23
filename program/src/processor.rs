@@ -2793,7 +2793,6 @@ impl Processor {
             let mut perp_market =
                 PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
-            // TODO - log this
             perp_market.socialize_loss(
                 &mut liqee_ma.perp_accounts[liab_index],
                 &mut mango_cache.perp_market_cache[liab_index],

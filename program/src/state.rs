@@ -194,14 +194,14 @@ impl MangoGroup {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let mango_group = Self::load_mut(account)?;
+        let mango_group: RefMut<'a, Self> = Self::load_mut(account)?;
+        check!(mango_group.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             mango_group.meta_data.data_type,
             DataType::MangoGroup as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(mango_group)
@@ -212,12 +212,12 @@ impl MangoGroup {
     ) -> MangoResult<Ref<'a, Self>> {
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-        let mango_group = Self::load(account)?;
-        check!(mango_group.meta_data.is_initialized, MangoErrorCode::Default)?;
+        let mango_group: Ref<'a, Self> = Self::load(account)?;
+        check!(mango_group.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             mango_group.meta_data.data_type,
             DataType::MangoGroup as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(mango_group)
@@ -731,9 +731,6 @@ impl UserActiveAssets {
 }
 
 pub struct HealthCache {
-    // pub active_assets: [bool; MAX_TOKENS],
-    // pub active_spot: [bool; MAX_PAIRS],
-    // pub active_perps: [bool; MAX_PAIRS],
     pub active_assets: UserActiveAssets,
 
     /// Vec of length MAX_PAIRS containing worst case spot vals; unweighted
@@ -1181,7 +1178,8 @@ impl MangoAccount {
         mango_group: &MangoGroup,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> bool {
-        // TODO - consider using DUST_THRESHOLD
+        // TODO - what if bank index is very large? then deposits will be artifically low
+        // TODO -
         // TODO - what if asset_weight == 0 for some asset? should it still be counted
         if self.deposits[QUOTE_INDEX] > DUST_THRESHOLD {
             return false;
@@ -1220,9 +1218,8 @@ impl MangoAccount {
         }
 
         for i in 0..mango_group.num_oracles {
-            if self.perp_accounts[i].quote_position.is_negative()
-                || self.perp_accounts[i].base_position.is_negative()
-            {
+            let pa = &self.perp_accounts[i];
+            if pa.quote_position.is_negative() || pa.base_position != 0 {
                 return false;
             }
         }
