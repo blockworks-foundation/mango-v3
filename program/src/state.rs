@@ -381,6 +381,9 @@ impl RootBank {
             slope * utilization
         };
 
+        // TODO: Remove this when tested
+        msg!("== interest_rate: {} ==", interest_rate.to_string());
+
         let borrow_interest =
             interest_rate.checked_mul(I80F48::from_num(now_ts - self.last_updated)).unwrap();
         let deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
