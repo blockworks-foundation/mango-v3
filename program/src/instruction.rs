@@ -408,7 +408,7 @@ pub enum MangoInstruction {
 
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     ///
-    /// Accounts expected: 11
+    /// Accounts expected: 10
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` mango_cache_ai - MangoCache
     /// 2. `[writable]` perp_market_ai - PerpMarket
@@ -418,8 +418,7 @@ pub enum MangoInstruction {
     /// 6. `[writable]` bank_vault_ai - ?
     /// 7. `[writable]` fees_vault_ai - fee vault owned by mango DAO token governance
     /// 8. `[]` signer_ai - Group Signer Account
-    /// 9. `[signer]` admin_ai - Group Admin Account
-    /// 10. `[]` token_prog_ai - Token Program Account
+    /// 9. `[]` token_prog_ai - Token Program Account
     SettleFees,
 
     /// Claim insurance fund and then socialize loss
@@ -533,6 +532,29 @@ pub enum MangoInstruction {
     /// 6. `[]` token_prog_ai - SPL Token program id
     WithdrawMsrm {
         quantity: u64,
+    },
+
+    /// Change the params for perp market. Right now only rate and mngo_per_period can be changed.
+    /// You must pass in the current values for all other params or this instruction will fail.
+    ///
+    /// Accounts expected by this instruction (3):
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` perp_market_ai - PerpMarket
+    /// 2. `[signer]` admin_ai - MangoAccount admin
+    ChangePerpMarketParams {
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        maker_fee: Option<I80F48>,
+        taker_fee: Option<I80F48>,
+        /// Starting rate for liquidity mining
+        rate: Option<I80F48>,
+        /// depth liquidity mining works for
+        max_depth_bps: Option<I80F48>,
+        /// target length in seconds of one period
+        target_period_length: Option<u64>,
+        /// amount MNGO rewarded per period
+        mngo_per_period: Option<u64>,
     },
 }
 
@@ -782,6 +804,33 @@ impl MangoInstruction {
                 MangoInstruction::WithdrawMsrm { quantity: u64::from_le_bytes(*quantity) }
             }
 
+            37 => {
+                let data_arr = array_ref![data, 0, 137];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                ) = array_refs![data_arr, 17, 17, 17, 17, 17, 17, 17, 9, 9];
+
+                MangoInstruction::ChangePerpMarketParams {
+                    maint_leverage: unpack_i80f48_opt(maint_leverage),
+                    init_leverage: unpack_i80f48_opt(init_leverage),
+                    liquidation_fee: unpack_i80f48_opt(liquidation_fee),
+                    maker_fee: unpack_i80f48_opt(maker_fee),
+                    taker_fee: unpack_i80f48_opt(taker_fee),
+                    rate: unpack_i80f48_opt(rate),
+                    max_depth_bps: unpack_i80f48_opt(max_depth_bps),
+                    target_period_length: unpack_u64_opt(target_period_length),
+                    mngo_per_period: unpack_u64_opt(mngo_per_period),
+                }
+            }
+
             _ => {
                 return None;
             }
@@ -789,6 +838,23 @@ impl MangoInstruction {
     }
     pub fn pack(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
+    }
+}
+
+fn unpack_i80f48_opt(data: &[u8; 17]) -> Option<I80F48> {
+    let (opt, val) = array_refs![data, 1, 16];
+    if opt[0] == 0 {
+        None
+    } else {
+        Some(I80F48::from_le_bytes(*val))
+    }
+}
+fn unpack_u64_opt(data: &[u8; 9]) -> Option<u64> {
+    let (opt, val) = array_refs![data, 1, 8];
+    if opt[0] == 0 {
+        None
+    } else {
+        Some(u64::from_le_bytes(*val))
     }
 }
 

@@ -91,7 +91,9 @@ impl Processor {
 
         // TODO OPT make PDA
         let insurance_vault = Account::unpack(&insurance_vault_ai.try_borrow_data()?)?;
-        check!(insurance_vault.is_initialized(), MangoErrorCode::Default)?;
+        check!(insurance_vault.is_initialized(), MangoErrorCode::InvalidVault)?;
+        check!(insurance_vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
+        check!(insurance_vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
         check_eq!(insurance_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
         check_eq!(&insurance_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
         check_eq!(insurance_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
@@ -99,6 +101,8 @@ impl Processor {
 
         let fees_vault = Account::unpack(&fees_vault_ai.try_borrow_data()?)?;
         check!(fees_vault.is_initialized(), MangoErrorCode::Default)?;
+        check!(fees_vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
+        check!(fees_vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
         check_eq!(&fees_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
         check_eq!(fees_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
         mango_group.fees_vault = *fees_vault_ai.key;
@@ -107,6 +111,8 @@ impl Processor {
         if msrm_vault_ai.key != &Pubkey::default() {
             let msrm_vault = Account::unpack(&msrm_vault_ai.try_borrow_data()?)?;
             check!(msrm_vault.is_initialized(), MangoErrorCode::InvalidVault)?;
+            check!(msrm_vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
+            check!(msrm_vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
             check_eq!(msrm_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
             check_eq!(&msrm_vault.mint, &msrm_token::ID, MangoErrorCode::InvalidVault)?;
             check_eq!(msrm_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
@@ -139,6 +145,10 @@ impl Processor {
         mango_group.meta_data = MetaData::new(DataType::MangoGroup, 0, true);
 
         // init MangoCache
+        check!(
+            rent.is_exempt(mango_cache_ai.lamports(), size_of::<MangoCache>()),
+            MangoErrorCode::AccountNotRentExempt
+        )?;
         let mut mango_cache = MangoCache::load_mut(&mango_cache_ai)?;
         check!(!mango_cache.meta_data.is_initialized, MangoErrorCode::Default)?;
         mango_cache.meta_data = MetaData::new(DataType::MangoCache, 0, true);
@@ -170,7 +180,7 @@ impl Processor {
             rent.is_exempt(mango_account_ai.lamports(), size_of::<MangoAccount>()),
             MangoErrorCode::Default
         )?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
@@ -256,8 +266,6 @@ impl Processor {
             decimals: mint.decimals,
             padding: [0u8; 7],
         };
-
-        // check leverage is reasonable
 
         mango_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
@@ -519,7 +527,7 @@ impl Processor {
     #[inline(never)]
     #[allow(unused)]
     /// Change the shape of the interest rate function
-    fn set_rate_params(
+    fn change_rate_params(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         optimal_util: I80F48,
@@ -535,8 +543,8 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(
             mango_group.find_root_bank_index(root_bank_ai.key).is_some(),
             MangoErrorCode::InvalidRootBank
@@ -544,6 +552,91 @@ impl Processor {
         let mut root_bank = RootBank::load_mut_checked(root_bank_ai, program_id)?;
         root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
 
+        Ok(())
+    }
+    #[inline(never)]
+    /// Change leverage, fees and liquidity mining params
+    /// Note: only mngo_per_period  and rate works right now; others not yet implemented; this is for safety
+    fn change_perp_market_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        maker_fee: Option<I80F48>,
+        taker_fee: Option<I80F48>,
+        rate: Option<I80F48>,
+        max_depth_bps: Option<I80F48>,
+        target_period_length: Option<u64>,
+        mngo_per_period: Option<u64>,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // write
+            perp_market_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let mut info = &mut mango_group.perp_markets[market_index];
+        let mut lmi = &mut perp_market.liquidity_mining_info;
+
+        // Unwrap params. Default to current state if Option is None
+        let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
+            ((x - ONE_I80F48).checked_div(x).unwrap(), (x + ONE_I80F48).checked_div(x).unwrap())
+        } else {
+            (info.maint_asset_weight, info.maint_liab_weight)
+        };
+        let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
+            ((x - ONE_I80F48).checked_div(x).unwrap(), (x + ONE_I80F48).checked_div(x).unwrap())
+        } else {
+            (info.init_asset_weight, info.init_liab_weight)
+        };
+
+        let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
+        let maker_fee = maker_fee.unwrap_or(info.maker_fee);
+        let taker_fee = taker_fee.unwrap_or(info.taker_fee);
+        let rate = rate.unwrap_or(lmi.rate);
+        let max_depth_bps = max_depth_bps.unwrap_or(lmi.max_depth_bps);
+        let target_period_length = target_period_length.unwrap_or(lmi.target_period_length);
+        let mngo_per_period = mngo_per_period.unwrap_or(lmi.mngo_per_period);
+
+        // params check
+        check!(init_asset_weight > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_asset_weight > init_asset_weight, MangoErrorCode::InvalidParam)?;
+        // maint leverage may only increase to prevent unforeseen liquidations
+        check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
+
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+
+        // Set the params on MangoGroup PerpMarketInfo
+        info.maker_fee = maker_fee;
+        info.taker_fee = taker_fee;
+        info.liquidation_fee = liquidation_fee;
+        info.maint_asset_weight = maint_asset_weight;
+        info.init_asset_weight = init_asset_weight;
+        info.maint_liab_weight = maint_liab_weight;
+        info.init_liab_weight = init_liab_weight;
+
+        // Set params on LiquidtyMiningInfo
+        lmi.max_depth_bps = max_depth_bps;
+        lmi.target_period_length = target_period_length;
+        lmi.mngo_per_period = mngo_per_period;
+        lmi.rate = rate;
         Ok(())
     }
 
@@ -1476,8 +1569,6 @@ impl Processor {
 
         let price = mango_cache.price_cache[market_index].price;
 
-        // No need to check if market_index is in basket because if it's not, it will be zero and not possible to settle
-
         let a = &mut mango_account_a.perp_accounts[market_index];
         let b = &mut mango_account_b.perp_accounts[market_index];
 
@@ -1524,7 +1615,7 @@ impl Processor {
     #[inline(never)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
     fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        const NUM_FIXED: usize = 11;
+        const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
@@ -1536,16 +1627,12 @@ impl Processor {
             bank_vault_ai,      // write
             fees_vault_ai,      // write
             signer_ai,          // read
-            admin_ai,           // read, signer
             token_prog_ai,      // read
         ] = accounts;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(fees_vault_ai.key == &mango_group.fees_vault, MangoErrorCode::InvalidVault)?;
-        check!(admin_ai.key == &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
-        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -1555,13 +1642,13 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
-        match mango_group.find_root_bank_index(root_bank_ai.key) {
-            None => return Err(throw_err!(MangoErrorCode::InvalidRootBank)),
-            Some(i) => check!(i == QUOTE_INDEX, MangoErrorCode::InvalidRootBank)?,
-        }
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::Default)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
         check!(bank_vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -1581,7 +1668,7 @@ impl Processor {
         let price = mango_cache.price_cache[market_index].price;
 
         let pa = &mut mango_account.perp_accounts[market_index];
-
+        pa.settle_funding(&perp_market_cache);
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos = I80F48::from_num(-pa.base_position * contract_size) * price;
         let pnl: I80F48 = pa.quote_position - new_quote_pos;
@@ -2934,14 +3021,15 @@ impl Processor {
         // TODO check root bank belongs to group in load functions
         let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
         check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
-        for i in 0..root_bank.num_node_banks - 1 {
+        for i in 0..root_bank.num_node_banks {
             check!(
                 node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
                 MangoErrorCode::InvalidNodeBank
             )?;
         }
-
-        root_bank.update_index(node_bank_ais, program_id)?;
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        root_bank.update_index(node_bank_ais, program_id, now_ts)?;
 
         Ok(())
     }
@@ -3596,6 +3684,32 @@ impl Processor {
                 msg!("Mango: WithdrawMsrm");
                 Self::withdraw_msrm(program_id, accounts, quantity)
             }
+            MangoInstruction::ChangePerpMarketParams {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                maker_fee,
+                taker_fee,
+                rate,
+                max_depth_bps,
+                target_period_length,
+                mngo_per_period,
+            } => {
+                msg!("Mango: ChangePerpMarketParams");
+                Self::change_perp_market_params(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                )
+            }
         }
     }
 }
@@ -3614,12 +3728,14 @@ fn init_root_bank(
     max_rate: I80F48,
 ) -> MangoResult<RootBank> {
     let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
-    check!(vault.is_initialized(), MangoErrorCode::Default)?;
-    check_eq!(vault.owner, mango_group.signer_key, MangoErrorCode::Default)?;
-    check_eq!(&vault.mint, mint_ai.key, MangoErrorCode::Default)?;
-    check_eq!(vault_ai.owner, &spl_token::id(), MangoErrorCode::Default)?;
+    check!(vault.is_initialized(), MangoErrorCode::InvalidVault)?;
+    check!(vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
+    check!(vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
+    check_eq!(vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
+    check_eq!(&vault.mint, mint_ai.key, MangoErrorCode::InvalidVault)?;
+    check_eq!(vault_ai.owner, &spl_token::id(), MangoErrorCode::InvalidVault)?;
 
-    let mut _node_bank = NodeBank::load_and_init(&node_bank_ai, &program_id, &vault_ai, rent)?;
+    let _node_bank = NodeBank::load_and_init(&node_bank_ai, &program_id, &vault_ai, rent)?;
     let root_bank = RootBank::load_and_init(
         &root_bank_ai,
         &program_id,
@@ -4125,8 +4241,5 @@ fn invoke_init_open_orders<'a>(
 }
 
 /*
-TODO
-check bankruptcy everywhere
-
 TODO test order types
  */

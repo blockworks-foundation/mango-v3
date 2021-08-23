@@ -49,6 +49,8 @@ pub enum MangoErrorCode {
     InvalidGroupOwner,
     #[error("MangoErrorCode::InvalidSignerKey")]
     InvalidSignerKey,
+    #[error("MangoErrorCode::InvalidAdminKey")]
+    InvalidAdminKey,
     #[error("MangoErrorCode::InvalidVault")]
     InvalidVault,
     #[error("MangoErrorCode::MathError")]
@@ -61,7 +63,7 @@ pub enum MangoErrorCode {
     InvalidMarket,
     #[error("MangoErrorCode::InvalidProgramId")]
     InvalidProgramId,
-    #[error("MangoErrorCode::NotRentExempt")]
+    #[error("MangoErrorCode::GroupNotRentExempt")]
     GroupNotRentExempt,
     #[error("MangoErrorCode::OutOfSpace")]
     OutOfSpace,
@@ -103,11 +105,11 @@ pub enum MangoErrorCode {
     InvalidOpenOrdersAccount,
     #[error("MangoErrorCode::BeingLiquidated Invalid instruction while being liquidated")]
     BeingLiquidated,
-    #[error("MangoErrorCode::InvalidRootBankCache")]
+    #[error("MangoErrorCode::InvalidRootBankCache Cache the root bank to resolve")]
     InvalidRootBankCache,
-    #[error("MangoErrorCode::InvalidPriceCache")]
+    #[error("MangoErrorCode::InvalidPriceCache Cache the oracle price to resolve")]
     InvalidPriceCache,
-    #[error("MangoErrorCode::InvalidPerpMarketCache")]
+    #[error("MangoErrorCode::InvalidPerpMarketCache Cache the perp market to resolve")]
     InvalidPerpMarketCache,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]

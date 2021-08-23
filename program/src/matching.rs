@@ -644,7 +644,9 @@ impl<'a> Book<'a> {
             if price < best_ask_price {
                 break;
             } else if post_only {
-                return Err(throw_err!(MangoErrorCode::PostOnly));
+                msg!("Order could not be placed due to PostOnly");
+                return Ok(()); // return silently to not fail other instructions in tx
+                               // return Err(throw_err!(MangoErrorCode::PostOnly));
             }
 
             let match_quantity = rem_quantity.min(best_ask.quantity);
@@ -774,7 +776,8 @@ impl<'a> Book<'a> {
             if price > best_bid_price {
                 break;
             } else if post_only {
-                return Err(throw_err!(MangoErrorCode::PostOnly));
+                msg!("Order could not be placed due to PostOnly");
+                return Ok(()); // return silently to not fail other instructions in tx
             }
 
             let match_quantity = rem_quantity.min(best_bid.quantity);
