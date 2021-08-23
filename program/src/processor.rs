@@ -3426,15 +3426,15 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-                mango_group_ai,     // write
-                new_admin_ai,       // read
-                admin_ai,           // read, signer
-            ] = accounts;
+            mango_group_ai,     // write
+            admin_ai,           // read, signer
+            new_admin_ai,       // read
+        ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
 
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidOwner)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
         mango_group.admin = *new_admin_ai.key;
 
