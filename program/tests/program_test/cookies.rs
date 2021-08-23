@@ -13,20 +13,23 @@ use mango::{
 
 use crate::*;
 
+pub const STARTING_SPOT_ORDER_ID: u64 = 0;
+pub const STARTING_PERP_ORDER_ID: u64 = 10_000;
+
 #[derive(Copy, Clone)]
 pub struct MintCookie {
 
     pub index: usize,
     pub decimals: u8,
-    pub unit: u64,
-    pub base_lot: u64,
-    pub quote_lot: u64,
+    pub unit: f64,
+    pub base_lot: f64,
+    pub quote_lot: f64,
     pub pubkey: Option<Pubkey>,
 
 }
 
 pub struct MangoGroupCookie {
-    
+
     pub address: Pubkey,
 
     pub mango_group: MangoGroup,
@@ -44,6 +47,10 @@ pub struct MangoGroupCookie {
     pub current_spot_order_id: u64,
 
     pub current_perp_order_id: u64,
+
+    pub users_with_spot_event: Vec<Vec<usize>>,
+
+    pub users_with_perp_event: Vec<Vec<usize>>,
 
 }
 
@@ -71,6 +78,7 @@ impl MangoGroupCookie {
             test.create_account(size_of::<RootBank>(), &mango_program_id).await;
         let dao_vault_pk = test.create_token_account(&signer_pk, &quote_mint_pk).await;
         let msrm_vault_pk = test.create_token_account(&signer_pk, &msrm_token::ID).await;
+        let fees_vault_pk = test.create_token_account(&signer_pk, &quote_mint_pk).await;
 
         let quote_optimal_util = I80F48::from_num(0.7);
         let quote_optimal_rate = I80F48::from_num(0.06);
@@ -88,7 +96,7 @@ impl MangoGroupCookie {
                 &quote_root_bank_pk,
                 &dao_vault_pk,
                 &msrm_vault_pk,
-                &dao_vault_pk,
+                &fees_vault_pk,
                 &mango_cache_pk,
                 &serum_program_id,
                 signer_nonce,
@@ -112,8 +120,10 @@ impl MangoGroupCookie {
             mango_accounts: vec![],
             spot_markets: vec![],
             perp_markets: vec![],
-            current_spot_order_id: 0,
-            current_perp_order_id: 10_000,
+            current_spot_order_id: STARTING_SPOT_ORDER_ID,
+            current_perp_order_id: STARTING_PERP_ORDER_ID,
+            users_with_spot_event: vec![Vec::new(); test.num_mints - 1],
+            users_with_perp_event: vec![Vec::new(); test.num_mints - 1],
         }
 
     }
@@ -233,6 +243,104 @@ impl MangoGroupCookie {
 
     }
 
+    #[allow(dead_code)]
+    pub async fn consume_spot_events(
+        &mut self,
+        test: &mut MangoProgramTest,
+    ) {
+
+        for spot_market_index in 0..self.users_with_spot_event.len() {
+            let users_with_spot_event = &self.users_with_spot_event[spot_market_index];
+            if users_with_spot_event.len() > 0 {
+                let spot_market_cookie = self.spot_markets[spot_market_index];
+                let mut open_orders = Vec::new();
+                for user_index in users_with_spot_event {
+                    open_orders.push(&self.mango_accounts[*user_index].mango_account.spot_open_orders[spot_market_index]);
+                }
+                test.consume_spot_events(
+                    &spot_market_cookie,
+                    open_orders,
+                    0, // TODO: Change coin_fee_receivable_account, pc_fee_receivable_account to owner of test
+                ).await;
+            }
+            self.users_with_spot_event[spot_market_index] = Vec::new();
+        }
+        self.run_keeper(test).await;
+
+    }
+
+    #[allow(dead_code)]
+    pub async fn settle_spot_funds(
+        &mut self,
+        test: &mut MangoProgramTest,
+        spot_orders: &Vec<(usize, usize, serum_dex::matching::Side, f64, f64)>,
+    ) {
+
+        for spot_order in spot_orders {
+            let (user_index, market_index, order_side, order_size, order_price) = *spot_order;
+            let spot_market_cookie = self.spot_markets[market_index];
+            test.settle_spot_funds(self, &spot_market_cookie, user_index).await;
+        }
+
+    }
+
+    #[allow(dead_code)]
+    pub async fn consume_perp_events(
+        &mut self,
+        test: &mut MangoProgramTest,
+    ) {
+        for perp_market_index in 0..self.users_with_perp_event.len() {
+            let users_with_perp_event = &self.users_with_perp_event[perp_market_index];
+            if users_with_perp_event.len() > 0 {
+                let perp_market_cookie = self.perp_markets[perp_market_index];
+                let mut mango_account_pks = Vec::new();
+                for user_index in users_with_perp_event {
+                    mango_account_pks.push(self.mango_accounts[*user_index].address);
+                }
+                test.consume_perp_events(
+                    &self,
+                    &perp_market_cookie,
+                    &mut mango_account_pks,
+                ).await;
+            }
+            self.users_with_perp_event[perp_market_index] = Vec::new();
+        }
+        self.run_keeper(test).await;
+    }
+
+    // NOTE: This function assumes an array of perp orders for the same market (coming from match_perp_order_scenario)
+    #[allow(dead_code)]
+    pub async fn settle_perp_funds(
+        &mut self,
+        test: &mut MangoProgramTest,
+        perp_orders: &Vec<(usize, usize, mango::matching::Side, f64, f64)>,
+    ) {
+
+        if perp_orders.len() > 0 {
+
+            let mut bidders = Vec::new();
+            let mut askers = Vec::new();
+            let (_, market_index, _, _, _) = perp_orders[0];
+            let perp_market_cookie = self.perp_markets[market_index];
+
+            for perp_order in perp_orders {
+                let (user_index, _, order_side, _, _) = *perp_order;
+                if order_side == mango::matching::Side::Bid {
+                    bidders.push(user_index);
+                } else {
+                    askers.push(user_index);
+                }
+            }
+
+            for user_a_index in &bidders {
+                for user_b_index in &askers {
+                    test.settle_perp_funds(self, &perp_market_cookie, *user_a_index, *user_b_index).await;
+                    self.run_keeper(test).await;
+                }
+            }
+        }
+
+    }
 }
 
 
@@ -366,14 +474,14 @@ impl SpotMarketCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         side: serum_dex::matching::Side,
-        size: u64,
-        price: u64,
+        size: f64,
+        price: f64,
     ) {
 
         let limit_price = test.price_number_to_lots(&self.mint, price);
         let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
         let max_native_pc_qty_including_fees = match side {
-            serum_dex::matching::Side::Bid => self.mint.quote_lot * limit_price * max_coin_qty,
+            serum_dex::matching::Side::Bid => self.mint.quote_lot as u64 * limit_price * max_coin_qty,
             serum_dex::matching::Side::Ask => std::u64::MAX
         };
 
@@ -401,24 +509,6 @@ impl SpotMarketCookie {
 
     }
 
-    #[allow(dead_code)]
-    pub async fn settle_funds(
-        &mut self,
-        test: &mut MangoProgramTest,
-        mango_group_cookie: &mut MangoGroupCookie,
-        user_index: usize,
-    ) {
-
-        test.settle_funds(
-            &mango_group_cookie,
-            self,
-            user_index,
-        ).await;
-
-        mango_group_cookie.mango_accounts[user_index].mango_account =
-            test.load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address).await;
-
-    }
 }
 
 #[derive(Copy, Clone)]
@@ -511,8 +601,8 @@ impl PerpMarketCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         side: mango::matching::Side,
-        size: u64,
-        price: u64,
+        size: f64,
+        price: f64,
     ) {
 
         let order_size = test.base_size_number_to_lots(&self.mint, size);
