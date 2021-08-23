@@ -9,10 +9,10 @@ use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
+use solana_program::clock::Clock;
 use solana_program::msg;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
-use solana_program::clock::Clock;
 use solana_program::sysvar::Sysvar;
 use static_assertions::const_assert_eq;
 use std::cell::RefMut;
@@ -914,6 +914,7 @@ impl<'a> Book<'a> {
         market_index: usize,
         mut limit: u8,
     ) -> MangoResult<()> {
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         for i in 0..MAX_PERP_OPEN_ORDERS {
             if mango_account.order_market[i] != market_index as u8 {
                 // means slot is free or belongs to different perp market
@@ -921,9 +922,11 @@ impl<'a> Book<'a> {
             }
             let order_id = mango_account.orders[i];
             let order_side = mango_account.order_side[i];
-            match self.cancel_order(order_id, mango_account.order_side[i]) {
+            match self.cancel_order(order_id, order_side) {
                 Ok(order) => {
-                    mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+                    // technically these should be the same. Can enable this check to be extra sure
+                    // check!(i == order.owner_slot as usize, MathError)?;
+                    mango_account.remove_order(i, order.quantity)?;
                     let best_final = match order_side {
                         Side::Bid => self.get_best_bid_price().unwrap(),
                         Side::Ask => self.get_best_ask_price().unwrap(),
@@ -935,7 +938,7 @@ impl<'a> Book<'a> {
                         order.best_initial,
                         best_final,
                         order.timestamp,
-                        Clock::get()?.unix_timestamp as u64,
+                        now_ts,
                         order.quantity,
                     )?;
                 }
