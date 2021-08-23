@@ -10,7 +10,7 @@ fi
 source ~/mango/cli/devnet.env $KEYPAIR
 solana config set --url $CLUSTER_URL
 
-cd ~/blockworks-foundation/mango-v3/program
+cd ~/blockworks-foundation/mango-v3/
 
 mkdir target/devnet
 cargo build-bpf --features devnet --bpf-out-dir target/devnet

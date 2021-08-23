@@ -538,9 +538,9 @@ pub enum MangoInstruction {
     /// You must pass in the current values for all other params or this instruction will fail.
     ///
     /// Accounts expected by this instruction (3):
-    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 0. `[writable]` mango_group_ai - MangoGroup
     /// 1. `[writable]` perp_market_ai - PerpMarket
-    /// 2. `[signer]` admin_ai - MangoAccount admin
+    /// 2. `[signer]` admin_ai - MangoGroup admin
     ChangePerpMarketParams {
         maint_leverage: Option<I80F48>,
         init_leverage: Option<I80F48>,
@@ -556,6 +556,14 @@ pub enum MangoInstruction {
         /// amount MNGO rewarded per period
         mngo_per_period: Option<u64>,
     },
+
+    /// Transfer admin permissions over group to another account
+    ///
+    /// Accounts expected by this instruction (3):
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[]` new_admin_ai - New MangoGroup admin
+    /// 2. `[signer]` admin_ai - MangoGroup admin
+    SetGroupAdmin,
 }
 
 impl MangoInstruction {
@@ -830,6 +838,8 @@ impl MangoInstruction {
                     mngo_per_period: unpack_u64_opt(mngo_per_period),
                 }
             }
+
+            38 => MangoInstruction::SetGroupAdmin,
 
             _ => {
                 return None;

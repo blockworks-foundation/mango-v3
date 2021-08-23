@@ -1,0 +1,19 @@
+anchor_version = "0.13.2"
+solana_version = "1.7.10"
+
+[workspace]
+members = [
+    "common",
+    "mango-macro",
+    "program"
+]
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[programs.mainnet]
+mango = "mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68"
+
+[programs.devnet]
+mango = "5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
