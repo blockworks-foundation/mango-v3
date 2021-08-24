@@ -36,7 +36,7 @@ pub const ONE_I80F48: I80F48 = I80F48!(1);
 pub const DAY: I80F48 = I80F48!(86400);
 pub const YEAR: I80F48 = I80F48!(31536000);
 
-pub const DUST_THRESHOLD: I80F48 = I80F48!(1); // TODO make this part of MangoGroup state
+pub const DUST_THRESHOLD: I80F48 = I80F48!(0.000001); // TODO make this part of MangoGroup state
 const MAX_RATE_ADJ: I80F48 = I80F48!(4); // TODO make this part of PerpMarket if we want per market flexibility
 const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
@@ -283,8 +283,10 @@ impl RootBank {
         root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
         root_bank.node_banks[0] = *node_bank_ai.key;
         root_bank.num_node_banks = 1;
-        root_bank.deposit_index = ONE_I80F48;
-        root_bank.borrow_index = ONE_I80F48;
+        // root_bank.deposit_index = ONE_I80F48;
+        // root_bank.borrow_index = ONE_I80F48;
+        root_bank.deposit_index = I80F48!(1_000_000);
+        root_bank.borrow_index = I80F48!(1_000_000);
 
         root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
         Ok(root_bank)
@@ -303,8 +305,10 @@ impl RootBank {
         check!(max_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
 
         self.optimal_util = optimal_util;
-        self.optimal_rate = optimal_rate / YEAR;
-        self.max_rate = max_rate / YEAR;
+        // self.optimal_rate = optimal_rate / YEAR;
+        // self.max_rate = max_rate / YEAR;
+        self.optimal_rate = optimal_rate;
+        self.max_rate = max_rate;
 
         Ok(())
     }
@@ -380,20 +384,27 @@ impl RootBank {
             slope * utilization
         };
 
-        let borrow_interest =
+        let borrow_interest: I80F48 =
             interest_rate.checked_mul(I80F48::from_num(now_ts - self.last_updated)).unwrap();
         let deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
 
         self.last_updated = now_ts;
+        if borrow_interest <= ZERO_I80F48 || deposit_interest <= ZERO_I80F48 {
+            return Ok(());
+        }
         self.borrow_index = self
             .borrow_index
             .checked_mul(borrow_interest)
+            .unwrap()
+            .checked_div(YEAR)
             .unwrap()
             .checked_add(self.borrow_index)
             .unwrap();
         self.deposit_index = self
             .deposit_index
             .checked_mul(deposit_interest)
+            .unwrap()
+            .checked_div(YEAR)
             .unwrap()
             .checked_add(self.deposit_index)
             .unwrap();
@@ -1194,6 +1205,7 @@ impl MangoAccount {
         // TODO - what if bank index is very large? then deposits will be artifically low
         // TODO -
         // TODO - what if asset_weight == 0 for some asset? should it still be counted
+
         if self.deposits[QUOTE_INDEX] > DUST_THRESHOLD {
             return false;
         }

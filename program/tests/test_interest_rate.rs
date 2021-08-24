@@ -34,7 +34,7 @@ async fn test_interest_rate() {
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
     let base_deposit_size: f64 = 0.01;
-    let base_withdraw_size: f64 = 0.000001;
+    let base_withdraw_size: f64 = 0.0001;
     let base_order_size: f64 = 1.0;
     let mut clock = test.get_clock().await;
     let start_time = clock.unix_timestamp;
