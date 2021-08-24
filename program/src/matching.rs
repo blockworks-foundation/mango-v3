@@ -926,7 +926,7 @@ impl<'a> Book<'a> {
                 Ok(order) => {
                     // technically these should be the same. Can enable this check to be extra sure
                     // check!(i == order.owner_slot as usize, MathError)?;
-                    mango_account.remove_order(i, order.quantity)?;
+                    mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
                     let best_final = match order_side {
                         Side::Bid => self.get_best_bid_price().unwrap(),
                         Side::Ask => self.get_best_ask_price().unwrap(),
