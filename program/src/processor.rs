@@ -37,6 +37,7 @@ use crate::state::{
     MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use solana_program::log::sol_log_compute_units;
 use switchboard_program::FastRoundResultAccountData;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -1618,16 +1619,6 @@ impl Processor {
         let a_settle = if a_pnl > 0 { settlement } else { -settlement };
         a.transfer_quote_position(b, a_settle);
 
-        // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
-        msg!(
-            "settle_pnl details: {{ \"mango_account_a_ai\": {}, \"mango_account_b_ai\": {}, \"market_index\": {}, \"settlement\": {}, \"redundant_field\": {} }}",
-            mango_account_a_ai.key,
-            mango_account_b_ai.key,
-            market_index,
-            a_settle.to_num::<f64>(),  // Will be positive if a has positive pnl and settling with b
-            0
-        );
-
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
@@ -1643,7 +1634,25 @@ impl Processor {
             mango_account_b_ai.key,
             QUOTE_INDEX,
             -a_settle,
-        )
+        )?;
+
+        // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
+        msg!(
+            "settle_pnl details: {{ \
+                \"mango_account_a\": {}, \
+                \"mango_account_b\": {}, \
+                \"market_index\": {}, \
+                \"settlement\": {}, \
+                \"redundant_field\": {} \
+                }}",
+            mango_account_a_ai.key,
+            mango_account_b_ai.key,
+            market_index,
+            a_settle.to_num::<f64>(), // Will be positive if a has positive pnl and settling with b
+            0
+        );
+
+        Ok(())
     }
 
     #[inline(never)]
@@ -1733,7 +1742,20 @@ impl Processor {
             mango_account_ai.key,
             QUOTE_INDEX,
             -settlement,
-        )
+        )?;
+
+        msg!(
+            "settle_fees details: {{ \
+                \"mango_account\": {}, \
+                \"market_index\": {}, \
+                \"settlement\": {}, \
+                }}",
+            mango_account_ai.key,
+            market_index,
+            settlement.to_num::<f64>(), // Will be positive if a has positive pnl and settling with b
+        );
+
+        Ok(())
     }
 
     #[inline(never)]
@@ -3176,6 +3198,36 @@ impl Processor {
                         maker.execute_maker(market_index, &mut perp_market, info, cache, fill)?;
                         taker.execute_taker(market_index, &mut perp_market, info, cache, fill)?;
                     }
+
+                    sol_log_compute_units();
+                    // TODO OPT remove this log if we start hitting compute limits
+                    msg!(
+                        "FillEvent details: {{ \
+                            \"timestamp\": {}, \
+                            \"seq_num\": {}, \
+                            \"maker\": {}, \
+                            \"taker\": {}, \
+                            \"taker_side\": {}, \
+                            \"maker_order_id\": {}, \
+                            \"taker_order_id\": {}, \
+                            \"maker_fee\": {}, \
+                            \"taker_fee\": {}, \
+                            \"price\": {}, \
+                            \"quantity\": {} \
+                            }}",
+                        fill.timestamp,
+                        fill.seq_num,
+                        fill.maker.to_string(),
+                        fill.taker.to_string(),
+                        if fill.taker_side == Side::Bid { "bid" } else { "sell" },
+                        fill.maker_order_id,
+                        fill.taker_order_id,
+                        fill.maker_fee.to_num::<f64>(),
+                        fill.taker_fee.to_num::<f64>(),
+                        fill.price,
+                        fill.quantity
+                    );
+                    sol_log_compute_units();
                 }
                 EventType::Out => {
                     let out: &OutEvent = cast_ref(event);
