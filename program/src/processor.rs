@@ -188,7 +188,6 @@ impl Processor {
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
 
-        mango_account.key = *mango_account_ai.key;
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
@@ -515,10 +514,11 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
 
-        checked_add_net(
+        checked_change_net(
             root_bank_cache,
             &mut node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             token_index,
             I80F48::from_num(quantity),
         )
@@ -817,12 +817,13 @@ impl Processor {
         let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index)?;
         let withdraw = I80F48::from_num(quantity);
         check!(native_deposit >= withdraw || allow_borrow, MangoErrorCode::InsufficientFunds)?;
-        checked_sub_net(
+        checked_change_net(
             root_bank_cache,
             &mut node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             token_index,
-            withdraw,
+            -withdraw,
         )?;
 
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
@@ -1086,6 +1087,7 @@ impl Processor {
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut quote_node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             QUOTE_INDEX,
             quote_change,
         )?;
@@ -1094,6 +1096,7 @@ impl Processor {
             &mango_cache.root_bank_cache[market_index],
             &mut base_node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             market_index,
             base_change,
         )?;
@@ -1295,17 +1298,19 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
 
-        checked_add_net(
+        checked_change_net(
             &mango_cache.root_bank_cache[spot_market_index],
             &mut base_node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             spot_market_index,
             I80F48::from_num(pre_base - post_base),
         )?;
-        checked_add_net(
+        checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut quote_node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             QUOTE_INDEX,
             I80F48::from_num(pre_quote - post_quote),
         )?;
@@ -1627,19 +1632,21 @@ impl Processor {
             0
         );
 
-        checked_add_net(
+        checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             if a_pnl > 0 { &mut mango_account_a } else { &mut mango_account_b },
+            if a_pnl > 0 { mango_account_a_ai.key } else { mango_account_b_ai.key },
             QUOTE_INDEX,
             settlement,
         )?;
-        checked_sub_net(
+        checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             if a_pnl > 0 { &mut mango_account_b } else { &mut mango_account_a },
+            if a_pnl > 0 { mango_account_b_ai.key } else { mango_account_a_ai.key },
             QUOTE_INDEX,
-            settlement,
+            -settlement,
         )
     }
 
@@ -1723,12 +1730,13 @@ impl Processor {
         )?;
 
         // Decrement deposits on mango account
-        checked_sub_net(
+        checked_change_net(
             root_bank_cache,
             &mut node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             QUOTE_INDEX,
-            settlement,
+            -settlement,
         )
     }
 
@@ -1891,22 +1899,22 @@ impl Processor {
         let base_change = I80F48::from_num(pre_base - post_base);
         let quote_change = I80F48::from_num(pre_quote - post_quote);
 
-        checked_add_net(
+        checked_change_net(
             &mango_cache.root_bank_cache[market_index],
             &mut base_node_bank,
             &mut liqee_ma,
+            liqee_mango_account_ai.key,
             market_index,
             base_change,
         )?;
-        checked_add_net(
+        checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut quote_node_bank,
             &mut liqee_ma,
+            liqee_mango_account_ai.key,
             QUOTE_INDEX,
             quote_change,
-        )?;
-
-        Ok(())
+        )
     }
 
     #[inline(never)]
@@ -2109,42 +2117,46 @@ impl Processor {
         );
 
         // Transfer into liqee to reduce liabilities
-        checked_add_net(
+        checked_change_net(
             &liab_bank,
             &mut liab_node_bank,
             &mut liqee_ma,
+            liqee_mango_account_ai.key,
             liab_index,
             actual_liab_transfer,
         )?; // TODO make sure deposits for this index is == 0
 
         // Transfer from liqor
-        checked_sub_net(
+        checked_change_net(
             &liab_bank,
             &mut liab_node_bank,
             &mut liqor_ma,
+            liqor_mango_account_ai.key,
             liab_index,
-            actual_liab_transfer,
+            -actual_liab_transfer,
         )?;
 
         let asset_transfer =
             actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
         // Transfer collater into liqor
-        checked_add_net(
+        checked_change_net(
             &asset_bank,
             &mut asset_node_bank,
             &mut liqor_ma,
+            liqor_mango_account_ai.key,
             asset_index,
             asset_transfer,
         )?;
 
         // Transfer collateral out of liqee
-        checked_sub_net(
+        checked_change_net(
             &asset_bank,
             &mut asset_node_bank,
             &mut liqee_ma,
+            liqee_mango_account_ai.key,
             asset_index,
-            asset_transfer,
+            -asset_transfer,
         )?;
 
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
@@ -2343,21 +2355,23 @@ impl Processor {
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
             // Transfer collater into liqor
-            checked_add_net(
+            checked_change_net(
                 bank_cache,
                 &mut node_bank,
                 &mut liqor_ma,
+                liqor_mango_account_ai.key,
                 asset_index,
                 asset_transfer,
             )?;
 
             // Transfer collateral out of liqee
-            checked_sub_net(
+            checked_change_net(
                 bank_cache,
                 &mut node_bank,
                 &mut liqee_ma,
+                liqee_mango_account_ai.key,
                 asset_index,
-                asset_transfer,
+                -asset_transfer,
             )?;
 
             health_cache.update_token_val(
@@ -2415,21 +2429,23 @@ impl Processor {
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
             // Transfer collater into liqor
-            checked_add_net(
+            checked_change_net(
                 bank_cache,
                 &mut node_bank,
                 &mut liqor_ma,
+                liqor_mango_account_ai.key,
                 liab_index,
                 actual_liab_transfer,
             )?;
 
             // Transfer collateral out of liqee
-            checked_sub_net(
+            checked_change_net(
                 bank_cache,
                 &mut node_bank,
                 &mut liqee_ma,
+                liqee_mango_account_ai.key,
                 liab_index,
-                actual_liab_transfer,
+                -actual_liab_transfer,
             )?;
 
             liqee_ma.perp_accounts[asset_index]
@@ -2792,7 +2808,15 @@ impl Processor {
             let liab_transfer = I80F48::from_num(liab_transfer_u64);
             liqee_ma.perp_accounts[liab_index]
                 .transfer_quote_position(&mut liqor_ma.perp_accounts[liab_index], -liab_transfer);
-            checked_add_net(bank_cache, &mut node_bank, &mut liqor_ma, QUOTE_INDEX, liab_transfer)?;
+
+            checked_change_net(
+                bank_cache,
+                &mut node_bank,
+                &mut liqor_ma,
+                liqor_mango_account_ai.key,
+                QUOTE_INDEX,
+                liab_transfer,
+            )?;
 
             // Make sure liqor is above init cond.
             let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
@@ -2950,10 +2974,11 @@ impl Processor {
             let liab_transfer = I80F48::from_num(insurance_transfer) * liab_fee / liab_price;
 
             if liab_index == QUOTE_INDEX {
-                checked_add_net(
+                checked_change_net(
                     &mango_cache.root_bank_cache[QUOTE_INDEX],
                     &mut liab_node_bank,
                     &mut liqor_ma,
+                    liqor_mango_account_ai.key,
                     QUOTE_INDEX,
                     I80F48::from_num(insurance_transfer),
                 )?;
@@ -2971,28 +2996,31 @@ impl Processor {
                     MangoErrorCode::InvalidNodeBank
                 )?;
 
-                checked_add_net(
+                checked_change_net(
                     &mango_cache.root_bank_cache[QUOTE_INDEX],
                     &mut quote_node_bank,
                     &mut liqor_ma,
+                    liqor_mango_account_ai.key,
                     QUOTE_INDEX,
                     I80F48::from_num(insurance_transfer),
                 )?;
             }
 
-            checked_add_net(
+            checked_change_net(
                 liab_bank_cache,
                 &mut liab_node_bank,
                 &mut liqee_ma,
+                liqee_mango_account_ai.key,
                 liab_index,
                 liab_transfer,
             )?;
-            checked_sub_net(
+            checked_change_net(
                 liab_bank_cache,
                 &mut liab_node_bank,
                 &mut liqor_ma,
+                liqor_mango_account_ai.key,
                 liab_index,
-                liab_transfer,
+                -liab_transfer,
             )?;
 
             // Make sure liqor is above init health
@@ -3342,10 +3370,11 @@ impl Processor {
             MangoErrorCode::InvalidCache
         )?;
 
-        checked_add_net(
+        checked_change_net(
             mngo_bank_cache,
             &mut mngo_node_bank,
             &mut mango_account,
+            mango_account_ai.key,
             mngo_index,
             I80F48::from_num(mngo),
         )
@@ -3971,16 +4000,30 @@ fn checked_change_net(
     root_bank_cache: &RootBankCache,
     node_bank: &mut NodeBank,
     mango_account: &mut MangoAccount,
+    mango_account_pk: &Pubkey,
     token_index: usize,
     native_quantity: I80F48,
 ) -> MangoResult<()> {
     if native_quantity.is_negative() {
-        checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)
+        checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)?;
+        msg!(
+            "checked_sub_net details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
+            mango_account_pk,
+            token_index,
+            mango_account.deposits[token_index].to_num::<f64>(),
+            mango_account.borrows[token_index].to_num::<f64>(),
+        );
     } else if native_quantity.is_positive() {
-        checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)
-    } else {
-        Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
+        checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)?;
+        msg!(
+            "checked_add_net details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
+            mango_account_pk,
+            token_index,
+            mango_account.deposits[token_index].to_num::<f64>(),
+            mango_account.borrows[token_index].to_num::<f64>(),
+        );
     }
+    Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
 }
 
 /// If there are borrows, pay down borrows first then increase deposits

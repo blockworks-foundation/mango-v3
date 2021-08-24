@@ -980,7 +980,6 @@ pub struct MangoAccount {
     pub meta_data: MetaData,
 
     pub mango_group: Pubkey,
-    pub key: Pubkey,
     pub owner: Pubkey,
 
     pub in_margin_basket: [bool; MAX_PAIRS],
@@ -1008,7 +1007,7 @@ pub struct MangoAccount {
     pub is_bankrupt: bool,
     pub info: [u8; INFO_LEN],
     /// padding for expansions
-    pub padding: [u8; 38],
+    pub padding: [u8; 70],
 }
 
 impl MangoAccount {
@@ -1070,15 +1069,7 @@ impl MangoAccount {
     // TODO - Add unchecked versions to be used when we're confident
     // TODO OPT - remove negative and zero checks if we're confident
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-
         self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(math_err!())?;
-
-        msg!(
-            "checked_add_borrow details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"closing_borrow\": {} }}",
-            self.key,
-            token_i,
-            self.borrows[token_i].to_num::<f64>()
-        );
 
         // TODO - actually try to hit this error
         check!(
@@ -1087,15 +1078,7 @@ impl MangoAccount {
         )
     }
     pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-
         self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(math_err!())?;
-
-        msg!(
-            "checked_sub_borrow details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"closing_borrow\": {} }}",
-            self.key,
-            token_i,
-            self.borrows[token_i].to_num::<f64>()
-        );
 
         check!(!self.borrows[token_i].is_negative(), MangoErrorCode::MathError)?;
         check!(
@@ -1104,15 +1087,7 @@ impl MangoAccount {
         )
     }
     pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-
         self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(math_err!())?;
-
-        msg!(
-            "checked_add_deposit details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"closing_deposit\": {} }}",
-            self.key,
-            token_i,
-            self.deposits[token_i].to_num::<f64>()
-        );
 
         check!(
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
@@ -1120,15 +1095,7 @@ impl MangoAccount {
         )
     }
     pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
-
         self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(math_err!())?;
-
-        msg!(
-            "checked_sub_deposit details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"closing_deposit\": {} }}",
-            self.key,
-            token_i,
-            self.deposits[token_i].to_num::<f64>()
-        );
 
         check!(!self.deposits[token_i].is_negative(), MangoErrorCode::MathError)?;
         check!(
