@@ -188,6 +188,7 @@ impl Processor {
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
 
+        mango_account.key = *mango_account_ai.key;
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
