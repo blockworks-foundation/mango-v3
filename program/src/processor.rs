@@ -1539,6 +1539,40 @@ impl Processor {
     }
 
     #[inline(never)]
+    fn cancel_all_perp_orders(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        limit: u8
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        book.cancel_all_with_incentives(&mut mango_account, &mut perp_market, market_index, limit)
+    }
+
+    #[inline(never)]
     /// Take two MangoAccount and settle quote currency pnl between them
     fn settle_pnl(
         program_id: &Pubkey,
@@ -3788,6 +3822,10 @@ impl Processor {
             MangoInstruction::SetGroupAdmin => {
                 msg!("Mango: SetGroupAdmin");
                 Self::set_group_admin(program_id, accounts)
+            }
+            MangoInstruction::CancelAllPerpOrders { limit } => {
+                msg!("Mango: CancelAllPerpOrders");
+                Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
         }
     }

@@ -564,6 +564,19 @@ pub enum MangoInstruction {
     /// 1. `[]` new_admin_ai - New MangoGroup admin
     /// 2. `[signer]` admin_ai - MangoGroup admin
     SetGroupAdmin,
+
+    /// Cancel all perp open orders (batch cancel)
+    ///
+    /// Accounts expected: 6
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - Owner of Mango Account
+    /// 3. `[writable]` perp_market_ai - PerpMarket
+    /// 4. `[writable]` bids_ai - Bids acc
+    /// 5. `[writable]` asks_ai - Asks acc
+    CancelAllPerpOrders {
+        limit: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -840,6 +853,11 @@ impl MangoInstruction {
             }
 
             38 => MangoInstruction::SetGroupAdmin,
+
+            39 => {
+                let data_arr = array_ref![data, 0, 1];
+                MangoInstruction::CancelAllPerpOrders { limit: u8::from_le_bytes(*data_arr) }
+            }
 
             _ => {
                 return None;
@@ -1184,6 +1202,30 @@ pub fn cancel_perp_order(
     ];
     // TODO - add in invalid_id_ok
     let instr = MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok: false };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cancel_all_perp_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,   // read
+    mango_account_pk: &Pubkey, // write
+    owner_pk: &Pubkey,         // read, signer
+    perp_market_pk: &Pubkey,   // write
+    bids_pk: &Pubkey,          // write
+    asks_pk: &Pubkey,          // write
+    limit: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+    ];
+    let instr =
+        MangoInstruction::CancelAllPerpOrders { limit };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
