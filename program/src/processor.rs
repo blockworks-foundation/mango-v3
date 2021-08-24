@@ -1605,8 +1605,8 @@ impl Processor {
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
         let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
-        let a_pnl = a.quote_position - new_quote_pos_a;
-        let b_pnl = b.quote_position - new_quote_pos_b;
+        let a_pnl: I80F48 = a.quote_position - new_quote_pos_a;
+        let b_pnl: I80F48 = b.quote_position - new_quote_pos_b;
 
         // pnl must be opposite signs for there to be a settlement
         if a_pnl * b_pnl > 0 {
@@ -1614,13 +1614,8 @@ impl Processor {
         }
 
         let settlement = a_pnl.abs().min(b_pnl.abs());
-        if a_pnl > 0 {
-            a.quote_position -= settlement;
-            b.quote_position += settlement;
-        } else {
-            a.quote_position += settlement;
-            b.quote_position -= settlement;
-        }
+        let a_settle = if a_pnl > 0 { settlement } else { -settlement };
+        a.transfer_quote_position(b, a_settle);
 
         // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
         msg!(
@@ -1628,25 +1623,25 @@ impl Processor {
             mango_account_a_ai.key,
             mango_account_b_ai.key,
             market_index,
-            settlement.to_num::<f64>(),
+            a_settle.to_num::<f64>(),  // Will be positive if a has positive pnl and settling with b
             0
         );
 
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
-            if a_pnl > 0 { &mut mango_account_a } else { &mut mango_account_b },
-            if a_pnl > 0 { mango_account_a_ai.key } else { mango_account_b_ai.key },
+            &mut mango_account_a,
+            mango_account_a_ai.key,
             QUOTE_INDEX,
-            settlement,
+            a_settle,
         )?;
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
-            if a_pnl > 0 { &mut mango_account_b } else { &mut mango_account_a },
-            if a_pnl > 0 { mango_account_b_ai.key } else { mango_account_a_ai.key },
+            &mut mango_account_b,
+            mango_account_b_ai.key,
             QUOTE_INDEX,
-            -settlement,
+            -a_settle,
         )
     }
 
