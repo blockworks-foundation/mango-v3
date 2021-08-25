@@ -534,8 +534,7 @@ pub enum MangoInstruction {
         quantity: u64,
     },
 
-    /// Change the params for perp market. Right now only rate and mngo_per_period can be changed.
-    /// You must pass in the current values for all other params or this instruction will fail.
+    /// Change the params for perp market.
     ///
     /// Accounts expected by this instruction (3):
     /// 0. `[writable]` mango_group_ai - MangoGroup
@@ -1224,8 +1223,7 @@ pub fn cancel_all_perp_orders(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    let instr =
-        MangoInstruction::CancelAllPerpOrders { limit };
+    let instr = MangoInstruction::CancelAllPerpOrders { limit };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1255,12 +1253,12 @@ pub fn consume_events(
 
 pub fn settle_pnl(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey,      // read
-    mango_account_a_pk: &Pubkey,  // write
-    mango_account_b_pk: &Pubkey,  // write
-    mango_cache_pk: &Pubkey,      // read
-    root_bank_pk: &Pubkey,        // read
-    node_bank_pk: &Pubkey,        // write
+    mango_group_pk: &Pubkey,     // read
+    mango_account_a_pk: &Pubkey, // write
+    mango_account_b_pk: &Pubkey, // write
+    mango_cache_pk: &Pubkey,     // read
+    root_bank_pk: &Pubkey,       // read
+    node_bank_pk: &Pubkey,       // write
     market_index: usize,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![

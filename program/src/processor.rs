@@ -37,7 +37,6 @@ use crate::state::{
     MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
-use solana_program::log::sol_log_compute_units;
 use switchboard_program::FastRoundResultAccountData;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -1542,7 +1541,7 @@ impl Processor {
     fn cancel_all_perp_orders(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        limit: u8
+        limit: u8,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -3233,7 +3232,6 @@ impl Processor {
                         taker.execute_taker(market_index, &mut perp_market, info, cache, fill)?;
                     }
 
-                    sol_log_compute_units();
                     // TODO OPT remove this log if we start hitting compute limits
                     msg!(
                         "FillEvent details: {{ \
@@ -3261,7 +3259,6 @@ impl Processor {
                         fill.price,
                         fill.quantity
                     );
-                    sol_log_compute_units();
                 }
                 EventType::Out => {
                     let out: &OutEvent = cast_ref(event);

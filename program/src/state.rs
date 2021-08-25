@@ -1203,8 +1203,7 @@ impl MangoAccount {
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> bool {
         // TODO - what if bank index is very large? then deposits will be artifically low
-        // TODO -
-        // TODO - what if asset_weight == 0 for some asset? should it still be counted
+        //          -> should store DUST_THRESHOLD per token in MangoGroup but this is breaking
 
         if self.deposits[QUOTE_INDEX] > DUST_THRESHOLD {
             return false;
@@ -1222,7 +1221,6 @@ impl MangoAccount {
                 let pa = &self.perp_accounts[i];
                 // We know the bids and asks are empty to even be inside the liquidate function
                 // So no need to check that
-                // TODO - what if there's unsettled funding for a short position which turns this positive?
                 if pa.quote_position.is_positive() || pa.base_position != 0 {
                     return false;
                 }
