@@ -232,6 +232,10 @@ impl MangoGroupCookie {
         test.advance_clock().await;
         test.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks[..]).await;
         test.update_all_root_banks(&mango_group, &mango_group_pk).await;
+        for perp_market_index in 0..self.perp_markets.len() {
+            let perp_market = &self.perp_markets[perp_market_index];
+            test.update_funding(self, perp_market).await;
+        }
         test.cache_all_root_banks(&mango_group, &mango_group_pk).await;
         test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
         self.mango_cache =

@@ -312,12 +312,12 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<RefMut<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
-        check_eq!(account.owner, program_id, MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load_mut(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
@@ -330,12 +330,12 @@ impl RootBank {
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<Ref<'a, Self>> {
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
         let root_bank = Self::load(account)?;
 
-        check!(root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             root_bank.meta_data.data_type,
             DataType::RootBank as u8,
@@ -371,7 +371,6 @@ impl RootBank {
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
-        // TODO: Review interest rate calculation
         let interest_rate = if utilization > self.optimal_util {
             let extra_util = utilization - self.optimal_util;
             let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
@@ -518,25 +517,35 @@ impl NodeBank {
 
         // TODO verify if size check necessary. We know load_mut fails if account size is too small for struct,
         //  does it also fail if it's too big?
-        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::Default)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
         let node_bank = Self::load_mut(account)?;
 
-        check!(node_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
         check_eq!(
             node_bank.meta_data.data_type,
             DataType::NodeBank as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccount
         )?;
 
         Ok(node_bank)
     }
-    #[allow(unused)]
+
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<Ref<'a, Self>> {
-        // TODO
-        Ok(Self::load(account)?)
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(account.data_len(), size_of::<Self>(), MangoErrorCode::InvalidAccount)?;
+        let node_bank = Self::load(account)?;
+
+        check!(node_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
+        check_eq!(
+            node_bank.meta_data.data_type,
+            DataType::NodeBank as u8,
+            MangoErrorCode::InvalidAccount
+        )?;
+
+        Ok(node_bank)
     }
 
     // TODO - Add checks to these math methods to prevent result from being < 0
@@ -1064,6 +1073,7 @@ impl MangoAccount {
     // TODO OPT - remove negative and zero checks if we're confident
     pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(math_err!())?;
+
         // TODO - actually try to hit this error
         check!(
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
@@ -1072,6 +1082,7 @@ impl MangoAccount {
     }
     pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(math_err!())?;
+
         check!(!self.borrows[token_i].is_negative(), MangoErrorCode::MathError)?;
         check!(
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
@@ -1080,6 +1091,7 @@ impl MangoAccount {
     }
     pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(math_err!())?;
+
         check!(
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
             MangoErrorCode::MathError
@@ -1087,6 +1099,7 @@ impl MangoAccount {
     }
     pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
         self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(math_err!())?;
+
         check!(!self.deposits[token_i].is_negative(), MangoErrorCode::MathError)?;
         check!(
             self.borrows[token_i].is_zero() || self.deposits[token_i].is_zero(),
