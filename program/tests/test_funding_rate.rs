@@ -32,23 +32,10 @@ async fn test_funding_rate() {
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
+    let new_bid_price: f64 = 10_000.0;
+    let new_ask_price: f64 = 10_200.0;
     let mut clock = test.get_clock().await;
     let start_time = clock.unix_timestamp;
-    // let mut end_time = start_time + 2_628_000; // 1 Month
-    // let mut end_time = start_time + 1_314_000; // 0.5 Month
-    // let mut end_time = start_time + 657_000; // 0.25 Month
-    // let mut end_time = start_time + 328_500; // 0.125 Month
-    // let mut end_time = start_time + 164_250; // 0.0625 Month
-    // let mut end_time = start_time + 82_125; // 0.125 Month
-    // let mut end_time = start_time + 3600; // 1 Hour
-    // let mut end_time = start_time + 3600 * 2; // 2 Hours
-    // let mut end_time = start_time + 3600 * 3; // 3 Hours
-    // let mut end_time = start_time + 3600 * 6; // 6 Hours
-    // let mut end_time = start_time + 3600 * 12; // 12 Hours
-    // let mut end_time = start_time + 3600 * 18; // 18 Hours
-    // let mut end_time = start_time + 3600 * 20; // 20 Hours
-    // let mut end_time = start_time + 3600 * 22; // 22 Hours
-    // let mut end_time = start_time + 3600 * 24; // 24 Hours
     let mut end_time = start_time + 3600 * 48; // 48 Hours
 
     // Set oracles
@@ -70,8 +57,8 @@ async fn test_funding_rate() {
 
     // Perp Orders
     let user_perp_orders = vec![
-        (bidder_user_index, mint_index, Side::Bid, 1.0, 10_000.0),
-        (asker_user_index, mint_index, Side::Ask, 1.0, 10_200.0),
+        (bidder_user_index, mint_index, Side::Bid, base_size, new_bid_price),
+        (asker_user_index, mint_index, Side::Ask, base_size, new_ask_price),
     ];
 
     // === Act ===
@@ -84,62 +71,30 @@ async fn test_funding_rate() {
     // Step 3: Place perp orders
     place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
 
-    // Step ?: Log before funding
-    let base_mint = test.with_mint(mint_index);
-    let base_position = base_size * base_mint.base_lot;
-    let quote_position = I80F48::from_num(base_size * base_price * test.quote_mint.unit);
+    // Step 4: Record / Log quote positions before funding
+    let bidder_quote_position_before = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    let asker_quote_position_before = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    println!("bidder_quote_position before: {}", bidder_quote_position_before.to_string());
+    println!("asker_quote_position before: {}", asker_quote_position_before.to_string());
 
-    let bidder_base_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
-    let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
-    let asker_base_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
-    let asker_quote_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
-
-    println!("bidder_base_position before: {}", bidder_base_position);
-    println!("bidder_quote_position before: {}", bidder_quote_position.to_string());
-    println!("asker_base_position before: {}", asker_base_position);
-    println!("asker_quote_position before: {}", asker_quote_position.to_string());
-
-    // Step 4: Skip one month ahead
+    // Step 5: Skip x hours ahead
     test.advance_clock_past_timestamp(end_time).await;
 
-    // Step 5: Settle pnl
+    // Step 6: Settle pnl
     mango_group_cookie.run_keeper(&mut test).await;
     for matched_perp_order in matched_perp_orders {
         mango_group_cookie.settle_perp_funds(&mut test, &matched_perp_order).await;
     }
 
-
     // === Assert ===
-    clock = test.get_clock().await;
-    println!("Timestamp after: {}", clock.unix_timestamp);
     mango_group_cookie.run_keeper(&mut test).await;
 
-    // assert_matched_perp_orders(&mango_group_cookie, &user_perp_orders);
-
-    let base_mint = test.with_mint(mint_index);
-    let base_position = base_size * base_mint.base_lot;
-    let quote_position = I80F48::from_num(base_size * base_price * test.quote_mint.unit);
-
-    let bidder_base_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
-    let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
-    let asker_base_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
-    let asker_quote_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
-
-    println!("bidder_base_position after: {}", bidder_base_position);
-    println!("bidder_quote_position after: {}", bidder_quote_position.to_string());
-    println!("asker_base_position after: {}", asker_base_position);
-    println!("asker_quote_position after: {}", asker_quote_position.to_string());
-
-    // assert!(bidder_base_position == base_position);
-    // assert!(bidder_quote_position == quote_position);
-    // assert!(asker_base_position == -base_position);
-    // assert!(asker_quote_position <= quote_position); // TODO Figure this out...
+    let bidder_quote_position_after = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    let asker_quote_position_after = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    println!("bidder_quote_position after: {}", bidder_quote_position_after.to_string());
+    println!("asker_quote_position after: {}", asker_quote_position_after.to_string());
 
 }
-
-// bidder_base_position: 10000
-// bidder_quote_position: -10100000000
-// asker_base_position: -10000
 
 // bidder_quote_position after 0 hours: -10100000000.000015631940187
 // bidder_quote_position after 24 hours: -10200000000.000031263880373

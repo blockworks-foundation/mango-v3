@@ -154,10 +154,10 @@ async fn test_token_and_token_liquidation_v2() {
     );
 
     // // Perp Orders
-    // let mut user_perp_orders = vec![];
-    // for mint_index in 0..num_orders {
-    //     user_perp_orders.push((bidder_user_index, mint_index, mango::matching::Side::Ask, 1.0, base_price));
-    // }
+    let mut user_perp_orders = vec![];
+    for mint_index in 0..num_orders {
+        user_perp_orders.push((bidder_user_index, mint_index, mango::matching::Side::Ask, 1.0, base_price));
+    }
 
     // Matched Spot Orders
     let matched_spot_orders = vec![
@@ -172,7 +172,7 @@ async fn test_token_and_token_liquidation_v2() {
     deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
 
     // Step 2: Place perp orders
-    // place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
+    place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
 
     // Step 3: Place and match an order for 1 BTC @ 15_000
     match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
@@ -195,14 +195,16 @@ async fn test_token_and_token_liquidation_v2() {
         mango_group_cookie.set_oracle(&mut test, mint_index, 0.0000000001).await;
     }
 
-    // // Step 6: Force cancel perp orders
-    // for mint_index in 0..num_orders {
-    //     test.force_cancel_perp_orders(
-    //         &mango_group_cookie
-    //         perp_market_cookie
-    //         liqee_mango_account_pk
-    //     ).await;
-    // }
+    // Step 6: Force cancel perp orders
+    mango_group_cookie.run_keeper(&mut test).await;
+    for mint_index in 0..num_orders {
+        let perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+        test.force_cancel_perp_orders(
+            &mango_group_cookie,
+            &perp_market_cookie,
+            bidder_user_index,
+        ).await;
+    }
 
     // Step 6: Perform a couple liquidations
     for _ in 0..5 {

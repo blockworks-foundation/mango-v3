@@ -720,34 +720,36 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
-    // #[allow(dead_code)]
-    // pub async fn force_cancel_perp_orders(
-    //     &mut self,
-    //     mango_group_cookie: &MangoGroupCookie,
-    //     perp_market_index: usize,
-    //     liqee_mango_account_pk: &Pubkey,
-    // ) {
-    //     let mango_program_id = self.mango_program_id;
-    //     let mango_group = mango_group_cookie.mango_group;
-    //     let mango_group_pk = mango_group_cookie.address;
-    //     let perp_market_cookie = mango_group_cookie.perp_markets[perp_market_index];
-    //     let perp_market = perp_market_cookie.perp_market;
-    //     let perp_market_pk = perp_market_cookie.address;
-    //
-    //     let instructions = [
-    //         force_cancel_perp_orders(
-    //             &mango_program_id,
-    //             &mango_group_pk,
-    //             &mango_group.mango_cache,
-    //             &perp_market_pk,
-    //             &perp_market.bids,
-    //             &perp_market.asks,
-    //             &mut mango_account_pks[..],
-    //             20,
-    //         ).unwrap(),
-    //     ];
-    //     self.process_transaction(&instructions, None).await.unwrap();
-    // }
+    #[allow(dead_code)]
+    pub async fn force_cancel_perp_orders(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let instructions = [
+            force_cancel_perp_orders(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.bids,
+                &perp_market.asks,
+                &mango_account_pk,
+                &mango_account.spot_open_orders,
+                20,
+            ).unwrap(),
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
 
     // pub fn get_pnl(
     //     &mut self,
