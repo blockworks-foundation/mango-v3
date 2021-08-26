@@ -634,6 +634,7 @@ impl Processor {
         info.init_liab_weight = init_liab_weight;
 
         // Set params on LiquidtyMiningInfo
+        // TODO - make sure rate is adjusted appropriately when changing from 0
         lmi.max_depth_bps = max_depth_bps;
         lmi.target_period_length = target_period_length;
         lmi.mngo_per_period = mngo_per_period;
@@ -1537,6 +1538,40 @@ impl Processor {
     }
 
     #[inline(never)]
+    fn cancel_all_perp_orders(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        limit: u8,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        book.cancel_all_with_incentives(&mut mango_account, &mut perp_market, market_index, limit)
+    }
+
+    #[inline(never)]
     /// Take two MangoAccount and settle quote currency pnl between them
     fn settle_pnl(
         program_id: &Pubkey,
@@ -1617,16 +1652,6 @@ impl Processor {
         let a_settle = if a_pnl > 0 { settlement } else { -settlement };
         a.transfer_quote_position(b, a_settle);
 
-        // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
-        msg!(
-            "settle_pnl details: {{ \"mango_account_a_ai\": {}, \"mango_account_b_ai\": {}, \"market_index\": {}, \"settlement\": {}, \"redundant_field\": {} }}",
-            mango_account_a_ai.key,
-            mango_account_b_ai.key,
-            market_index,
-            a_settle.to_num::<f64>(),  // Will be positive if a has positive pnl and settling with b
-            0
-        );
-
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
@@ -1642,7 +1667,25 @@ impl Processor {
             mango_account_b_ai.key,
             QUOTE_INDEX,
             -a_settle,
-        )
+        )?;
+
+        // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
+        msg!(
+            "settle_pnl details: {{ \
+                \"mango_account_a\": {}, \
+                \"mango_account_b\": {}, \
+                \"market_index\": {}, \
+                \"settlement\": {}, \
+                \"redundant_field\": {} \
+                }}",
+            mango_account_a_ai.key,
+            mango_account_b_ai.key,
+            market_index,
+            a_settle.to_num::<f64>(), // Will be positive if a has positive pnl and settling with b
+            0
+        );
+
+        Ok(())
     }
 
     #[inline(never)]
@@ -1732,7 +1775,20 @@ impl Processor {
             mango_account_ai.key,
             QUOTE_INDEX,
             -settlement,
-        )
+        )?;
+
+        msg!(
+            "settle_fees details: {{ \
+                \"mango_account\": {}, \
+                \"market_index\": {}, \
+                \"settlement\": {}, \
+                }}",
+            mango_account_ai.key,
+            market_index,
+            settlement.to_num::<f64>(), // Will be positive if a has positive pnl and settling with b
+        );
+
+        Ok(())
     }
 
     #[inline(never)]
@@ -3112,9 +3168,9 @@ impl Processor {
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
         let cache = &mango_cache.perp_market_cache[market_index];
-        // TODO *** - turn on this check
-        // let valid_last_update = Clock::get()?.unix_timestamp as u64 - mango_group.valid_interval;
-        // check!(cache.last_update >= valid_last_update, MangoErrorCode::InvalidPerpMarketCache)?;
+
+        let valid_last_update = Clock::get()?.unix_timestamp as u64 - mango_group.valid_interval;
+        check!(cache.last_update >= valid_last_update, MangoErrorCode::InvalidPerpMarketCache)?;
 
         let info = &mango_group.perp_markets[market_index];
 
@@ -3130,7 +3186,7 @@ impl Processor {
 
                     // TODO add msg! for FillEvent
 
-                    // handle self trade separately
+                    // handle self trade separately because of rust borrow checker
                     if fill.maker == fill.taker {
                         let mut ma = match mango_account_ais.iter().find(|ai| ai.key == &fill.maker)
                         {
@@ -3144,21 +3200,6 @@ impl Processor {
                                 mango_group_ai.key,
                             )?,
                         };
-
-                        // let mut ma = match mango_account_ais
-                        //     .binary_search_by_key(&fill.maker, |ai| *(ai.key))
-                        // {
-                        //     Ok(i) => MangoAccount::load_mut_checked(
-                        //         &mango_account_ais[i],
-                        //         program_id,
-                        //         mango_group_ai.key,
-                        //     )?,
-                        //     Err(_) => {
-                        //         msg!("Unable to find account {}", fill.taker.to_string());
-                        //         return Ok(());
-                        //     } // If it's not found, stop consuming events
-                        // };
-
                         ma.execute_maker(market_index, &mut perp_market, info, cache, fill)?;
                         ma.execute_taker(market_index, &mut perp_market, info, cache, fill)?;
                     } else {
@@ -3174,19 +3215,6 @@ impl Processor {
                                     mango_group_ai.key,
                                 )?,
                             };
-                        // let mut maker = match mango_account_ais
-                        //     .binary_search_by_key(&fill.maker, |ai| *(ai.key))
-                        // {
-                        //     Ok(i) => MangoAccount::load_mut_checked(
-                        //         &mango_account_ais[i],
-                        //         program_id,
-                        //         mango_group_ai.key,
-                        //     )?,
-                        //     Err(_) => {
-                        //         msg!("Unable to find maker account {}", fill.maker.to_string());
-                        //         return Ok(());
-                        //     } // If it's not found, stop consuming events
-                        // };
                         let mut taker =
                             match mango_account_ais.iter().find(|ai| ai.key == &fill.taker) {
                                 None => {
@@ -3200,23 +3228,37 @@ impl Processor {
                                 )?,
                             };
 
-                        // let mut taker = match mango_account_ais
-                        //     .binary_search_by_key(&fill.taker, |ai| *(ai.key))
-                        // {
-                        //     Ok(i) => MangoAccount::load_mut_checked(
-                        //         &mango_account_ais[i],
-                        //         program_id,
-                        //         mango_group_ai.key,
-                        //     )?,
-                        //     Err(_) => {
-                        //         msg!("Unable to find taker account {}", fill.taker.to_string());
-                        //         return Ok(());
-                        //     } // If it's not found, stop consuming events
-                        // };
-
                         maker.execute_maker(market_index, &mut perp_market, info, cache, fill)?;
                         taker.execute_taker(market_index, &mut perp_market, info, cache, fill)?;
                     }
+
+                    // TODO OPT remove this log if we start hitting compute limits
+                    msg!(
+                        "FillEvent details: {{ \
+                            \"timestamp\": {}, \
+                            \"seq_num\": {}, \
+                            \"maker\": {}, \
+                            \"taker\": {}, \
+                            \"taker_side\": {}, \
+                            \"maker_order_id\": {}, \
+                            \"taker_order_id\": {}, \
+                            \"maker_fee\": {}, \
+                            \"taker_fee\": {}, \
+                            \"price\": {}, \
+                            \"quantity\": {} \
+                            }}",
+                        fill.timestamp,
+                        fill.seq_num,
+                        fill.maker.to_string(),
+                        fill.taker.to_string(),
+                        if fill.taker_side == Side::Bid { "bid" } else { "sell" },
+                        fill.maker_order_id,
+                        fill.taker_order_id,
+                        fill.maker_fee.to_num::<f64>(),
+                        fill.taker_fee.to_num::<f64>(),
+                        fill.price,
+                        fill.quantity
+                    );
                 }
                 EventType::Out => {
                     let out: &OutEvent = cast_ref(event);
@@ -3233,16 +3275,6 @@ impl Processor {
                         )?,
                     };
 
-                    // let mut mango_account = match mango_account_ais
-                    //     .binary_search_by_key(&out_event.owner, |ai| *ai.key)
-                    // {
-                    //     Ok(i) => MangoAccount::load_mut_checked(
-                    //         &mango_account_ais[i],
-                    //         program_id,
-                    //         mango_group_ai.key,
-                    //     )?,
-                    //     Err(_) => return Ok(()), // If it's not found, stop consuming events
-                    // };
                     ma.remove_order(out.slot as usize, out.quantity)?;
                 }
                 EventType::Liquidate => {}
@@ -3787,6 +3819,10 @@ impl Processor {
             MangoInstruction::SetGroupAdmin => {
                 msg!("Mango: SetGroupAdmin");
                 Self::set_group_admin(program_id, accounts)
+            }
+            MangoInstruction::CancelAllPerpOrders { limit } => {
+                msg!("Mango: CancelAllPerpOrders");
+                Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
         }
     }
