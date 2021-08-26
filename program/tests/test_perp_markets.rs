@@ -6,7 +6,6 @@ use program_test::scenarios::*;
 use program_test::assertions::*;
 use solana_program_test::*;
 use std::{mem::size_of, mem::size_of_val};
-use fixed::types::I80F48;
 
 #[tokio::test]
 async fn test_init_perp_markets() {
@@ -143,10 +142,6 @@ async fn test_match_perp_order() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     // assert_matched_perp_orders(&mango_group_cookie, &user_perp_orders);
-
-    let base_mint = test.with_mint(mint_index);
-    let base_position = base_size * base_mint.base_lot;
-    let quote_position = I80F48::from_num(base_size * base_price * test.quote_mint.unit);
 
     let bidder_base_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
     let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;

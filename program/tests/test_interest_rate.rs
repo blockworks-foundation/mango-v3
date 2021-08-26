@@ -1,12 +1,10 @@
 mod program_test;
 use fixed::types::I80F48;
-use mango::{matching::*, state::*};
-use program_test::assertions::*;
+use mango::state::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
-use std::{mem::size_of, mem::size_of_val};
 
 #[tokio::test]
 async fn test_interest_rate() {
@@ -29,15 +27,13 @@ async fn test_interest_rate() {
     // General parameters
     let borrower_user_index: usize = 0;
     let lender_user_index: usize = 1;
-    let num_orders: usize = test.num_mints - 1;
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
-    let base_size: f64 = 1.0;
     let base_deposit_size: f64 = 0.01;
     let base_withdraw_size: f64 = 0.0001;
-    let base_order_size: f64 = 1.0;
     let mut clock = test.get_clock().await;
     let start_time = clock.unix_timestamp;
+    // TODO: Make into variables and figure out assert
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -66,7 +62,7 @@ async fn test_interest_rate() {
         .mango_account
         .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
         .unwrap();
-    let lender_base_deposit = &mango_group_cookie.mango_accounts[lender_user_index]
+    let _lender_base_deposit = &mango_group_cookie.mango_accounts[lender_user_index]
         .mango_account
         .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
         .unwrap();
@@ -89,7 +85,7 @@ async fn test_interest_rate() {
     };
     let borrow_interest =
         interest_rate.checked_mul(I80F48::from_num(start_time - end_time)).unwrap();
-    let deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
+    let _deposit_interest = borrow_interest.checked_mul(utilization).unwrap();
     let new_borrow = borrower_base_borrow + borrow_interest;
     println!("new_borrow: {}", new_borrow.to_string());
     // TODO: Assert

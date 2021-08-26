@@ -135,8 +135,7 @@ async fn test_token_and_token_liquidation_v2() {
     let base_price: f64 = 15_000.0;
     let base_size: f64 = 2.0;
     let liq_mint_index: usize = 0;
-    let liq_order_size: f64 = 1.0;
-
+    // TODO: Make the order prices into variables
 
     // Set oracles
     for mint_index in 0..num_orders {

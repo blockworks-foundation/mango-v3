@@ -281,7 +281,7 @@ impl MangoGroupCookie {
     ) {
 
         for spot_order in spot_orders {
-            let (user_index, market_index, order_side, order_size, order_price) = *spot_order;
+            let (user_index, market_index, _, _, _) = *spot_order;
             let spot_market_cookie = self.spot_markets[market_index];
             test.settle_spot_funds(self, &spot_market_cookie, user_index).await;
         }

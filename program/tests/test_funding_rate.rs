@@ -1,12 +1,9 @@
 mod program_test;
-use mango::{matching::*, state::*};
+use mango::{matching::*};
 use program_test::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
-use program_test::assertions::*;
 use solana_program_test::*;
-use std::{mem::size_of, mem::size_of_val};
-use fixed::types::I80F48;
 
 #[tokio::test]
 async fn test_funding_rate() {
@@ -34,9 +31,10 @@ async fn test_funding_rate() {
     let base_size: f64 = 1.0;
     let new_bid_price: f64 = 10_000.0;
     let new_ask_price: f64 = 10_200.0;
-    let mut clock = test.get_clock().await;
+    let clock = test.get_clock().await;
     let start_time = clock.unix_timestamp;
-    let mut end_time = start_time + 3600 * 48; // 48 Hours
+    let end_time = start_time + 3600 * 48; // 48 Hours
+    // TODO: Figure out assertion
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
