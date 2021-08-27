@@ -283,8 +283,6 @@ impl RootBank {
         root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
         root_bank.node_banks[0] = *node_bank_ai.key;
         root_bank.num_node_banks = 1;
-        // root_bank.deposit_index = ONE_I80F48;
-        // root_bank.borrow_index = ONE_I80F48;
         root_bank.deposit_index = I80F48!(1_000_000);
         root_bank.borrow_index = I80F48!(1_000_000);
 
@@ -305,8 +303,6 @@ impl RootBank {
         check!(max_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
 
         self.optimal_util = optimal_util;
-        // self.optimal_rate = optimal_rate / YEAR;
-        // self.max_rate = max_rate / YEAR;
         self.optimal_rate = optimal_rate;
         self.max_rate = max_rate;
 
@@ -1367,7 +1363,7 @@ impl MangoAccount {
             fill.best_initial,
             fill.price,
             fill.maker_timestamp,
-            Clock::get()?.unix_timestamp as u64,
+            fill.timestamp,
             fill.quantity,
         )?;
 

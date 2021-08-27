@@ -3150,6 +3150,9 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
+        // Limit may be max 5 because of compute limits from logging. Increase if compute goes up
+        let limit = min(limit, 5);
+
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -3183,8 +3186,6 @@ impl Processor {
             match EventType::try_from(event.event_type).map_err(|_| throw!())? {
                 EventType::Fill => {
                     let fill: &FillEvent = cast_ref(event);
-
-                    // TODO add msg! for FillEvent
 
                     // handle self trade separately because of rust borrow checker
                     if fill.maker == fill.taker {
@@ -3277,7 +3278,9 @@ impl Processor {
 
                     ma.remove_order(out.slot as usize, out.quantity)?;
                 }
-                EventType::Liquidate => {}
+                EventType::Liquidate => {
+                    // This is purely for record keeping. Can be removed if program logs are superior
+                }
             }
 
             // consume this event
