@@ -2080,7 +2080,7 @@ impl Processor {
         let mut asset_node_bank = NodeBank::load_mut_checked(asset_node_bank_ai, program_id)?;
         check!(
             asset_root_bank.node_banks.contains(asset_node_bank_ai.key),
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidNodeBank
         )?;
 
         let liab_root_bank = RootBank::load_checked(liab_root_bank_ai, program_id)?;
@@ -2619,8 +2619,8 @@ impl Processor {
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        let perp_market_info = &mango_group.perp_markets[market_index];
-        check!(!perp_market_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+        let pmi = &mango_group.perp_markets[market_index];
+        check!(!pmi.is_empty(), MangoErrorCode::InvalidMarket)?;
         let mut event_queue: EventQueue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
@@ -2671,41 +2671,37 @@ impl Processor {
         let liqor_perp_account = &mut liqor_ma.perp_accounts[market_index];
 
         let price = mango_cache.price_cache[market_index].price;
+        let lot_price = price * I80F48::from_num(pmi.base_lot_size);
         let (base_transfer, quote_transfer) = if liqee_perp_account.base_position > 0 {
             check!(base_transfer_request > 0, MangoErrorCode::InvalidParam)?;
 
-            // TODO - verify this calculation is accurate
-            let max_transfer: I80F48 = -init_health
-                / (price
-                    * (ONE_I80F48
-                        - perp_market_info.init_asset_weight
-                        - perp_market_info.liquidation_fee));
+            let health_per_lot =
+                lot_price * (ONE_I80F48 - pmi.init_asset_weight - pmi.liquidation_fee);
+            let max_transfer = -init_health / health_per_lot;
             let max_transfer: i64 = max_transfer.checked_ceil().unwrap().to_num();
 
             let base_transfer =
                 max_transfer.min(base_transfer_request).min(liqee_perp_account.base_position);
 
-            let quote_transfer = I80F48::from_num(-base_transfer * perp_market_info.base_lot_size)
+            let quote_transfer = I80F48::from_num(-base_transfer * pmi.base_lot_size)
                 * price
-                * (ONE_I80F48 - perp_market_info.liquidation_fee);
+                * (ONE_I80F48 - pmi.liquidation_fee);
 
             (base_transfer, quote_transfer)
         } else {
             // We know it liqee_perp_account.base_position < 0
             check!(base_transfer_request < 0, MangoErrorCode::InvalidParam)?;
 
-            // TODO verify calculations are accurate
-            let max_transfer: I80F48 = -init_health
-                / (price
-                    * (ONE_I80F48 - perp_market_info.init_liab_weight
-                        + perp_market_info.liquidation_fee));
+            let health_per_lot =
+                lot_price * (ONE_I80F48 - pmi.init_liab_weight + pmi.liquidation_fee);
+            let max_transfer = -init_health / health_per_lot;
             let max_transfer: i64 = max_transfer.checked_floor().unwrap().to_num();
 
             let base_transfer =
                 max_transfer.max(base_transfer_request).max(liqee_perp_account.base_position);
-            let quote_transfer = I80F48::from_num(-base_transfer * perp_market_info.base_lot_size)
+            let quote_transfer = I80F48::from_num(-base_transfer * pmi.base_lot_size)
                 * price
-                * (ONE_I80F48 + perp_market_info.liquidation_fee);
+                * (ONE_I80F48 + pmi.liquidation_fee);
 
             (base_transfer, quote_transfer)
         };
@@ -2723,7 +2719,7 @@ impl Processor {
             *liqor_mango_account_ai.key,
             price,
             base_transfer,
-            perp_market_info.liquidation_fee,
+            pmi.liquidation_fee,
         );
         event_queue.push_back(cast(liquidate_event)).unwrap();
 
@@ -2748,7 +2744,7 @@ impl Processor {
             liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
         }
 
-        // TODO make this more efficient
+        // TODO OPT make this more efficient
         msg!(
             "liquidate_perp_market details: {{ \"market_index\": {}, \"base_transfer\": {}, \"quote_transfer\": {}, \"bankruptcy\": {} }}",
             market_index,
@@ -3151,7 +3147,7 @@ impl Processor {
         limit: usize,
     ) -> MangoResult<()> {
         // Limit may be max 5 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 5);
+        let limit = min(limit, 4);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
