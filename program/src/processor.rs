@@ -2264,6 +2264,137 @@ impl Processor {
     }
 
     #[inline(never)]
+    #[allow(dead_code)]
+    fn force_settle_quote_positions(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+
+        let [
+            mango_group_ai,         // read
+            mango_cache_ai,         // read
+            liqee_mango_account_ai, // write
+            liqor_mango_account_ai, // write
+            liqor_ai,               // read, signer
+            root_bank_ai,           // read
+            node_bank_ai,           // write
+        ] = fixed_ais;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let mut liqee_ma =
+            MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
+
+        let mut liqor_ma =
+            MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
+        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(!liqor_ma.being_liquidated, MangoErrorCode::BeingLiquidated)?;
+
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
+        mango_cache.check_valid(&mango_group, &liqee_active_assets, now_ts)?;
+
+        // Make sure orders are cancelled for perps and check orders
+        for i in 0..mango_group.num_oracles {
+            if liqee_active_assets.perps[i] {
+                check!(
+                    liqee_ma.perp_accounts[i].is_liquidatable(),
+                    MangoErrorCode::NotLiquidatable
+                )?;
+            }
+        }
+
+        let mut health_cache = HealthCache::new(liqee_active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
+
+        if liqee_ma.being_liquidated {
+            if init_health > ZERO_I80F48 {
+                liqee_ma.being_liquidated = false;
+                msg!("Account init_health above zero.");
+                return Ok(());
+            }
+        } else if maint_health >= ZERO_I80F48 {
+            // TODO - there is an issue here where you stack this instruction after ForceCancelOrders
+            //  and it causes the whole tx to fail and therefore being_liquidate flag to not be reversed
+            return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+        } else {
+            liqee_ma.being_liquidated = true;
+        }
+
+        let mut total_settle = ZERO_I80F48;
+
+        // Iterate over all perp markets and transfer the quote position to liqor
+        let mut market_settle_log = [0.0; MAX_PAIRS];
+        for i in 0..mango_group.num_oracles {
+            if !health_cache.active_assets.perps[i] {
+                continue;
+            }
+            let cache = &mango_cache.perp_market_cache[i];
+            let liqee_pa = &mut liqee_ma.perp_accounts[i];
+            let liqor_pa = &mut liqor_ma.perp_accounts[i];
+
+            liqee_pa.settle_funding(cache);
+            liqor_pa.settle_funding(cache);
+
+            // Can only force settle on markets where base position == 0
+            if liqee_pa.base_position != 0 || liqee_pa.quote_position.is_zero() {
+                continue;
+            }
+
+            market_settle_log[i] = liqee_pa.quote_position.to_num();
+            total_settle += liqee_pa.quote_position;
+            liqee_pa.transfer_quote_position(liqor_pa, liqee_pa.quote_position);
+        }
+
+        // Now do the quote currency transfer on token side
+        checked_change_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &mut node_bank,
+            &mut liqee_ma,
+            liqee_mango_account_ai.key,
+            QUOTE_INDEX,
+            total_settle,
+        )?;
+        checked_change_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &mut node_bank,
+            &mut liqor_ma,
+            liqor_mango_account_ai.key,
+            QUOTE_INDEX,
+            -total_settle,
+        )?;
+
+        msg!(
+            "force_settle_quote_positions details: {{ \
+                \"liqee\": {}, \
+                \"liqor\": {}, \
+                \"settlements\": {:?}, \
+                }}",
+            liqee_mango_account_ai.key,
+            liqor_mango_account_ai.key,
+            market_settle_log,
+        );
+
+        Ok(())
+    }
+
+    #[inline(never)]
     /// swap tokens for perp quote position only and only if the base position in that market is 0
     fn liquidate_token_and_perp(
         program_id: &Pubkey,
@@ -2392,10 +2523,10 @@ impl Processor {
             // Max liab transferred to reach asset_i == 0
             let asset_implied_liab_transfer =
                 native_deposits * asset_price * liab_fee / (liab_price * asset_fee);
-            actual_liab_transfer = min(
-                min(min(deficit_max_liab, native_borrows), max_liab_transfer),
-                asset_implied_liab_transfer,
-            );
+            actual_liab_transfer = deficit_max_liab
+                .min(native_borrows)
+                .min(max_liab_transfer)
+                .min(asset_implied_liab_transfer);
 
             liqee_ma.perp_accounts[liab_index].transfer_quote_position(
                 &mut liqor_ma.perp_accounts[liab_index],
@@ -2459,44 +2590,43 @@ impl Processor {
             } else {
                 let liab_info = &mango_group.spot_markets[liab_index];
                 check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-                (ONE_I80F48 + liab_info.liquidation_fee, liab_info.init_asset_weight)
+                (ONE_I80F48 - liab_info.liquidation_fee, liab_info.init_liab_weight)
             };
 
             let native_borrows = liqee_ma.get_native_borrow(bank_cache, liab_index)?;
 
-            // Max liab transferred to reach init_health == 0
             let deficit_max_liab: I80F48 = -init_health
                 / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
 
             // Max liab transferred to reach asset_i == 0
             let asset_implied_liab_transfer =
                 native_deposits * asset_price * liab_fee / (liab_price * asset_fee);
-            actual_liab_transfer = min(
-                min(min(deficit_max_liab, native_borrows), max_liab_transfer),
-                asset_implied_liab_transfer,
-            );
+            actual_liab_transfer = deficit_max_liab
+                .min(native_borrows)
+                .min(max_liab_transfer)
+                .min(asset_implied_liab_transfer);
 
             asset_transfer =
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
-            // Transfer collater into liqor
+            // Transfer liabilities into liqor
             checked_change_net(
                 bank_cache,
                 &mut node_bank,
                 &mut liqor_ma,
                 liqor_mango_account_ai.key,
                 liab_index,
-                actual_liab_transfer,
+                -actual_liab_transfer,
             )?;
 
-            // Transfer collateral out of liqee
+            // Transfer liabilities out of liqee
             checked_change_net(
                 bank_cache,
                 &mut node_bank,
                 &mut liqee_ma,
                 liqee_mango_account_ai.key,
                 liab_index,
-                -actual_liab_transfer,
+                actual_liab_transfer,
             )?;
 
             liqee_ma.perp_accounts[asset_index]
@@ -2581,8 +2711,7 @@ impl Processor {
         accounts: &[AccountInfo],
         base_transfer_request: i64,
     ) -> MangoResult<()> {
-        // TODO - make sure sum of all quote positions + funding in system == 0
-        // TODO - find a way to send in open orders accounts
+        // TODO OPT find a way to send in open orders accounts without zero keys
         // liqor passes in his own account and the liqee mango account
         // position is transfered to the liqor at favorable rate
         check!(base_transfer_request != 0, MangoErrorCode::InvalidParam)?;
