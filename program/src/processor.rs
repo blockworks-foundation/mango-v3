@@ -2345,12 +2345,8 @@ impl Processor {
             if !health_cache.active_assets.perps[i] {
                 continue;
             }
-            let cache = &mango_cache.perp_market_cache[i];
             let liqee_pa = &mut liqee_ma.perp_accounts[i];
             let liqor_pa = &mut liqor_ma.perp_accounts[i];
-
-            liqee_pa.settle_funding(cache);
-            liqor_pa.settle_funding(cache);
 
             // Can only force settle on markets where base position == 0
             if liqee_pa.base_position != 0 || liqee_pa.quote_position.is_zero() {
