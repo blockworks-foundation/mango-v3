@@ -2265,6 +2265,9 @@ impl Processor {
 
     #[inline(never)]
     #[allow(dead_code)]
+    /// Liqor takes on all the quote positions where base_position == 0
+    /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
+    /// This is very similar to the settle_pnl function, but is forced for Sick accounts
     fn force_settle_quote_positions(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -2391,6 +2394,7 @@ impl Processor {
     }
 
     #[inline(never)]
+    /// DEPRECATED - will disappear soon
     /// swap tokens for perp quote position only and only if the base position in that market is 0
     fn liquidate_token_and_perp(
         program_id: &Pubkey,
