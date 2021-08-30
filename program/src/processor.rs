@@ -2264,7 +2264,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(dead_code)]
     /// Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
@@ -3951,6 +3950,10 @@ impl Processor {
             MangoInstruction::CancelAllPerpOrders { limit } => {
                 msg!("Mango: CancelAllPerpOrders");
                 Self::cancel_all_perp_orders(program_id, accounts, limit)
+            }
+            MangoInstruction::ForceSettleQuotePositions => {
+                msg!("Mango: ForceSettleQuotePositions");
+                Self::force_settle_quote_positions(program_id, accounts)
             }
         }
     }
