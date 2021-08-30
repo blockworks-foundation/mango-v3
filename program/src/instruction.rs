@@ -576,6 +576,21 @@ pub enum MangoInstruction {
     CancelAllPerpOrders {
         limit: u8,
     },
+
+    /// Liqor takes on all the quote positions where base_position == 0
+    /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
+    /// This is very similar to the settle_pnl function, but is forced for Sick accounts
+    ///
+    /// Accounts expected: 7 + MAX_PAIRS
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_cache_ai - MangoCache
+    /// 2. `[writable]` liqee_mango_account_ai - MangoAccount
+    /// 3. `[writable]` liqor_mango_account_ai - MangoAccount
+    /// 4. `[signer]` liqor_ai - Liqor Account
+    /// 5. `[]` root_bank_ai - RootBank
+    /// 6. `[writable]` node_bank_ai - NodeBank
+    /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
+    ForceSettleQuotePositions,
 }
 
 impl MangoInstruction {
@@ -857,6 +872,8 @@ impl MangoInstruction {
                 let data_arr = array_ref![data, 0, 1];
                 MangoInstruction::CancelAllPerpOrders { limit: u8::from_le_bytes(*data_arr) }
             }
+
+            40 => MangoInstruction::ForceSettleQuotePositions,
 
             _ => {
                 return None;

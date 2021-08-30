@@ -608,10 +608,6 @@ impl Processor {
         let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
         let maker_fee = maker_fee.unwrap_or(info.maker_fee);
         let taker_fee = taker_fee.unwrap_or(info.taker_fee);
-        let rate = rate.unwrap_or(lmi.rate);
-        let max_depth_bps = max_depth_bps.unwrap_or(lmi.max_depth_bps);
-        let target_period_length = target_period_length.unwrap_or(lmi.target_period_length);
-        let mngo_per_period = mngo_per_period.unwrap_or(lmi.mngo_per_period);
 
         // params check
         check!(init_asset_weight > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
@@ -620,9 +616,6 @@ impl Processor {
         check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
 
         check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
-        check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
-        check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
-        check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
 
         // Set the params on MangoGroup PerpMarketInfo
         info.maker_fee = maker_fee;
@@ -633,12 +626,33 @@ impl Processor {
         info.maint_liab_weight = maint_liab_weight;
         info.init_liab_weight = init_liab_weight;
 
-        // Set params on LiquidtyMiningInfo
-        // TODO - make sure rate is adjusted appropriately when changing from 0
-        lmi.max_depth_bps = max_depth_bps;
-        lmi.target_period_length = target_period_length;
-        lmi.mngo_per_period = mngo_per_period;
-        lmi.rate = rate;
+        // If any of the LM params are changed, reset LM then change.
+        if rate.is_some()
+            || max_depth_bps.is_some()
+            || target_period_length.is_some()
+            || mngo_per_period.is_some()
+        {
+            let rate = rate.unwrap_or(lmi.rate);
+            let max_depth_bps = max_depth_bps.unwrap_or(lmi.max_depth_bps);
+            let target_period_length = target_period_length.unwrap_or(lmi.target_period_length);
+            let mngo_per_period = mngo_per_period.unwrap_or(lmi.mngo_per_period);
+
+            // Check params are valid
+            check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+            check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+            check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+
+            // Reset liquidity incentives
+            lmi.mngo_left = mngo_per_period;
+            lmi.period_start = Clock::get()?.unix_timestamp as u64;
+
+            // Set new params
+            lmi.rate = rate;
+            lmi.max_depth_bps = max_depth_bps;
+            lmi.target_period_length = target_period_length;
+            lmi.mngo_per_period = mngo_per_period;
+        }
+
         Ok(())
     }
 
@@ -1652,21 +1666,15 @@ impl Processor {
         let a_settle = if a_pnl > 0 { settlement } else { -settlement };
         a.transfer_quote_position(b, a_settle);
 
-        checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut node_bank,
-            &mut mango_account_a,
-            mango_account_a_ai.key,
-            QUOTE_INDEX,
-            a_settle,
-        )?;
-        checked_change_net(
+        transfer_token_internal(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             &mut mango_account_b,
+            &mut mango_account_a,
             mango_account_b_ai.key,
+            mango_account_a_ai.key,
             QUOTE_INDEX,
-            -a_settle,
+            a_settle,
         )?;
 
         // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
@@ -2264,7 +2272,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    #[allow(dead_code)]
     /// Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
@@ -2361,22 +2368,16 @@ impl Processor {
             liqee_pa.transfer_quote_position(liqor_pa, liqee_pa.quote_position);
         }
 
-        // Now do the quote currency transfer on token side
-        checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut node_bank,
-            &mut liqee_ma,
-            liqee_mango_account_ai.key,
-            QUOTE_INDEX,
-            total_settle,
-        )?;
-        checked_change_net(
+        // Now do the quote currency transfer from liqor to liqee on token side
+        transfer_token_internal(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             &mut liqor_ma,
+            &mut liqee_ma,
             liqor_mango_account_ai.key,
+            liqee_mango_account_ai.key,
             QUOTE_INDEX,
-            -total_settle,
+            total_settle,
         )?;
 
         msg!(
@@ -3952,6 +3953,10 @@ impl Processor {
                 msg!("Mango: CancelAllPerpOrders");
                 Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
+            MangoInstruction::ForceSettleQuotePositions => {
+                msg!("Mango: ForceSettleQuotePositions");
+                Self::force_settle_quote_positions(program_id, accounts)
+            }
         }
     }
 }
@@ -4153,6 +4158,31 @@ fn read_oracle(
         }
     };
     Ok(price)
+}
+
+/// Transfer token deposits/borrows between two MangoAccounts
+/// `native_quantity` is subtracted from src and added to dst
+/// Make sure to credit deposits first in case Node bank is fully utilized
+fn transfer_token_internal(
+    root_bank_cache: &RootBankCache,
+    node_bank: &mut NodeBank,
+    src: &mut MangoAccount,
+    dst: &mut MangoAccount,
+    src_pk: &Pubkey,
+    dst_pk: &Pubkey,
+    token_index: usize,
+    native_quantity: I80F48,
+) -> MangoResult<()> {
+    if native_quantity.is_positive() {
+        // increase dst first before decreasing from src
+        checked_change_net(root_bank_cache, node_bank, dst, dst_pk, token_index, native_quantity)?;
+        checked_change_net(root_bank_cache, node_bank, src, src_pk, token_index, -native_quantity)?;
+    } else if native_quantity.is_negative() {
+        // increase src first before decreasing from dst
+        checked_change_net(root_bank_cache, node_bank, src, src_pk, token_index, -native_quantity)?;
+        checked_change_net(root_bank_cache, node_bank, dst, dst_pk, token_index, native_quantity)?;
+    }
+    Ok(())
 }
 
 fn checked_change_net(
