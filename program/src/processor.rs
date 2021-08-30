@@ -1666,21 +1666,15 @@ impl Processor {
         let a_settle = if a_pnl > 0 { settlement } else { -settlement };
         a.transfer_quote_position(b, a_settle);
 
-        checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut node_bank,
-            &mut mango_account_a,
-            mango_account_a_ai.key,
-            QUOTE_INDEX,
-            a_settle,
-        )?;
-        checked_change_net(
+        transfer_token_internal(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
             &mut node_bank,
             &mut mango_account_b,
+            &mut mango_account_a,
             mango_account_b_ai.key,
+            mango_account_a_ai.key,
             QUOTE_INDEX,
-            -a_settle,
+            a_settle,
         )?;
 
         // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
