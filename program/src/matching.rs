@@ -915,6 +915,7 @@ impl<'a> Book<'a> {
         mut limit: u8,
     ) -> MangoResult<()> {
         let now_ts = Clock::get()?.unix_timestamp as u64;
+
         for i in 0..MAX_PERP_OPEN_ORDERS {
             if mango_account.order_market[i] != market_index as u8 {
                 // means slot is free or belongs to different perp market
