@@ -22,16 +22,14 @@ use solana_sdk::{
 };
 use spl_token::{state::*, *};
 
-use mango::{
-    entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*,
-};
+use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*};
 
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
 
-pub mod scenarios;
-pub mod cookies;
 pub mod assertions;
+pub mod cookies;
+pub mod scenarios;
 use self::cookies::*;
 
 trait AddPacked {
@@ -528,19 +526,13 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn with_mango_cache(
-        &mut self,
-        mango_group: &MangoGroup,
-    ) -> (Pubkey, MangoCache) {
+    pub async fn with_mango_cache(&mut self, mango_group: &MangoGroup) -> (Pubkey, MangoCache) {
         let mango_cache = self.load_account::<MangoCache>(mango_group.mango_cache).await;
         return (mango_group.mango_cache, mango_cache);
     }
 
     #[allow(dead_code)]
-    pub fn with_mint(
-        &mut self,
-        mint_index: usize,
-    ) -> MintCookie {
+    pub fn with_mint(&mut self, mint_index: usize) -> MintCookie {
         return self.mints[mint_index];
     }
 
@@ -559,15 +551,12 @@ impl MangoProgramTest {
         let actual_mint_index =
             if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
         let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
-        return mango_account.deposits[actual_mint_index].to_num();
+        // TODO - make this use cached root bank deposit index instead
+        return (mango_account.deposits[actual_mint_index] * INDEX_START).to_num();
     }
 
     #[allow(dead_code)]
-    pub fn with_oracle_price(
-        &mut self,
-        base_mint: &MintCookie,
-        price: f64,
-    ) -> I80F48 {
+    pub fn with_oracle_price(&mut self, base_mint: &MintCookie, price: f64) -> I80F48 {
         return I80F48::from_num(price) * I80F48::from_num(self.quote_mint.unit)
             / I80F48::from_num(base_mint.unit);
     }
@@ -580,7 +569,6 @@ impl MangoProgramTest {
         oracle_pk: &Pubkey,
         oracle_price: I80F48,
     ) {
-
         let mango_program_id = self.mango_program_id;
         let instructions = [
             mango::instruction::set_oracle(
@@ -600,7 +588,6 @@ impl MangoProgramTest {
             .unwrap(),
         ];
         self.process_transaction(&instructions, None).await.unwrap();
-
     }
 
     #[allow(dead_code)]
@@ -615,7 +602,8 @@ impl MangoProgramTest {
 
     #[allow(dead_code)]
     pub fn price_number_to_lots(&mut self, mint: &MintCookie, price: f64) -> u64 {
-        return ((price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot)) as u64;
+        return ((price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot))
+            as u64;
     }
 
     #[allow(dead_code)]
@@ -631,7 +619,6 @@ impl MangoProgramTest {
         let root_bank_pk = mango_group.tokens[actual_mint_index].root_bank;
         let root_bank = self.load_account::<RootBank>(root_bank_pk).await;
         return (root_bank_pk, root_bank);
-
     }
 
     #[allow(dead_code)]
@@ -640,11 +627,9 @@ impl MangoProgramTest {
         root_bank: &RootBank,
         bank_index: usize,
     ) -> (Pubkey, NodeBank) {
-
         let node_bank_pk = root_bank.node_banks[bank_index];
         let node_bank = self.load_account::<NodeBank>(node_bank_pk).await;
         return (node_bank_pk, node_bank);
-
     }
 
     #[allow(dead_code)]
@@ -659,7 +644,6 @@ impl MangoProgramTest {
         order_id: u64,
         order_type: OrderType,
     ) {
-
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -669,28 +653,25 @@ impl MangoProgramTest {
         let perp_market_pk = perp_market_cookie.address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let instructions = [
-            place_perp_order(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_account_pk,
-                &user.pubkey(),
-                &mango_group.mango_cache,
-                &perp_market_pk,
-                &perp_market.bids,
-                &perp_market.asks,
-                &perp_market.event_queue,
-                &mango_account.spot_open_orders,
-                order_side,
-                order_price as i64,
-                order_size as i64,
-                order_id,
-                order_type,
-            )
-            .unwrap(),
-        ];
+        let instructions = [place_perp_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &perp_market.event_queue,
+            &mango_account.spot_open_orders,
+            order_side,
+            order_price as i64,
+            order_size as i64,
+            order_id,
+            order_type,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
-
     }
 
     #[allow(dead_code)]
@@ -706,17 +687,16 @@ impl MangoProgramTest {
         let perp_market = perp_market_cookie.perp_market;
         let perp_market_pk = perp_market_cookie.address;
 
-        let instructions = [
-            consume_events(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &perp_market_pk,
-                &perp_market.event_queue,
-                &mut mango_account_pks[..],
-                3,
-            ).unwrap(),
-        ];
+        let instructions = [consume_events(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.event_queue,
+            &mut mango_account_pks[..],
+            3,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
@@ -735,19 +715,18 @@ impl MangoProgramTest {
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
-        let instructions = [
-            force_cancel_perp_orders(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &perp_market_pk,
-                &perp_market.bids,
-                &perp_market.asks,
-                &mango_account_pk,
-                &mango_account.spot_open_orders,
-                20,
-            ).unwrap(),
-        ];
+        let instructions = [force_cancel_perp_orders(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &mango_account_pk,
+            &mango_account.spot_open_orders,
+            20,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
@@ -785,21 +764,19 @@ impl MangoProgramTest {
         let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, self.quote_index).await;
         let (node_bank_pk, _node_bank) = self.with_node_bank(&root_bank, 0).await;
 
-        let instructions = [
-            settle_pnl(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_account_a_pk,
-                &mango_account_b_pk,
-                &mango_cache_pk,
-                &root_bank_pk,
-                &node_bank_pk,
-                market_index,
-            ).unwrap(),
-        ];
+        let instructions = [settle_pnl(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_a_pk,
+            &mango_account_b_pk,
+            &mango_cache_pk,
+            &root_bank_pk,
+            &node_bank_pk,
+            market_index,
+        )
+        .unwrap()];
 
         self.process_transaction(&instructions, None).await.unwrap();
-
     }
 
     #[allow(dead_code)]
@@ -850,10 +827,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn list_spot_market(
-        &mut self,
-        base_index: usize,
-    ) -> SpotMarketCookie {
+    pub async fn list_spot_market(&mut self, base_index: usize) -> SpotMarketCookie {
         let serum_program_id = self.serum_program_id;
         let coin_mint = self.mints[base_index].pubkey.unwrap();
         let pc_mint = self.mints[self.quote_index].pubkey.unwrap();
@@ -888,7 +862,8 @@ impl MangoProgramTest {
             self.mints[base_index].quote_lot as u64,
             vault_signer_nonce,
             100,
-        ).unwrap();
+        )
+        .unwrap();
 
         instructions.push(init_market_instruction);
 
@@ -925,22 +900,21 @@ impl MangoProgramTest {
         user_index: usize,
     ) {
         let serum_program_id = self.serum_program_id;
-        let coin_fee_receivable_account = self.with_user_token_account(user_index, spot_market_cookie.mint.index);
+        let coin_fee_receivable_account =
+            self.with_user_token_account(user_index, spot_market_cookie.mint.index);
         let pc_fee_receivable_account = self.with_user_token_account(user_index, self.quote_index);
 
         for open_order in open_orders {
-            let instructions = [
-                serum_dex::instruction::consume_events(
-                    &serum_program_id,
-                    vec![open_order],
-                    &spot_market_cookie.market,
-                    &spot_market_cookie.event_q,
-                    &coin_fee_receivable_account,
-                    &pc_fee_receivable_account,
-                    5,
-                )
-                .unwrap()
-            ];
+            let instructions = [serum_dex::instruction::consume_events(
+                &serum_program_id,
+                vec![open_order],
+                &spot_market_cookie.market,
+                &spot_market_cookie.event_q,
+                &coin_fee_receivable_account,
+                &pc_fee_receivable_account,
+                5,
+            )
+            .unwrap()];
             self.process_transaction(&instructions, None).await.unwrap();
         }
     }
@@ -1076,19 +1050,16 @@ impl MangoProgramTest {
         for mint_index in 0..self.num_mints {
             let root_bank_pk = mango_group.tokens[mint_index].root_bank;
             if root_bank_pk != Pubkey::default() {
-                let (root_bank_pk, root_bank) =
-                    self.with_root_bank(mango_group, mint_index).await;
+                let (root_bank_pk, root_bank) = self.with_root_bank(mango_group, mint_index).await;
                 let (node_bank_pk, _node_bank) = self.with_node_bank(&root_bank, 0).await;
 
-                let instructions = [
-                    update_root_bank(
-                        &mango_program_id,
-                        &mango_group_pk,
-                        &root_bank_pk,
-                        &[node_bank_pk],
-                    )
-                    .unwrap()
-                ];
+                let instructions = [update_root_bank(
+                    &mango_program_id,
+                    &mango_group_pk,
+                    &root_bank_pk,
+                    &[node_bank_pk],
+                )
+                .unwrap()];
                 self.process_transaction(&instructions, None).await.unwrap();
             }
         }
@@ -1105,16 +1076,15 @@ impl MangoProgramTest {
         let perp_market = perp_market_cookie.perp_market;
         let perp_market_pk = perp_market_cookie.address;
 
-        let instructions = [
-            update_funding(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &perp_market_pk,
-                &perp_market.bids,
-                &perp_market.asks,
-            ).unwrap(),
-        ];
+        let instructions = [update_funding(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
     }
 
@@ -1126,7 +1096,6 @@ impl MangoProgramTest {
         user_index: usize,
         order: NewOrderInstructionV3,
     ) {
-
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
         let mango_group = mango_group_cookie.mango_group;
@@ -1171,36 +1140,34 @@ impl MangoProgramTest {
         let (dex_signer_pk, _dex_signer_nonce) =
             create_signer_key_and_nonce(&serum_program_id, &spot_market_cookie.market);
 
-        let instructions = [
-            mango::instruction::place_spot_order(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_account_pk,
-                &user.pubkey(),
-                &mango_group.mango_cache,
-                &serum_program_id,
-                &spot_market_cookie.market,
-                &spot_market_cookie.bids,
-                &spot_market_cookie.asks,
-                &spot_market_cookie.req_q,
-                &spot_market_cookie.event_q,
-                &spot_market_cookie.coin_vault,
-                &spot_market_cookie.pc_vault,
-                &mint_root_bank_pk,
-                &mint_node_bank_pk,
-                &mint_node_bank.vault,
-                &quote_root_bank_pk,
-                &quote_node_bank_pk,
-                &quote_node_bank.vault,
-                &signer_pk,
-                &dex_signer_pk,
-                &mango_group.msrm_vault,
-                &open_orders_pks, // oo ais
-                mint_index,
-                order,
-            )
-            .unwrap(),
-        ];
+        let instructions = [mango::instruction::place_spot_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &serum_program_id,
+            &spot_market_cookie.market,
+            &spot_market_cookie.bids,
+            &spot_market_cookie.asks,
+            &spot_market_cookie.req_q,
+            &spot_market_cookie.event_q,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &mint_root_bank_pk,
+            &mint_node_bank_pk,
+            &mint_node_bank.vault,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &signer_pk,
+            &dex_signer_pk,
+            &mango_group.msrm_vault,
+            &open_orders_pks, // oo ais
+            mint_index,
+            order,
+        )
+        .unwrap()];
 
         let signers = vec![&user];
 
@@ -1237,34 +1204,31 @@ impl MangoProgramTest {
         let (dex_signer_pk, _dex_signer_nonce) =
             create_signer_key_and_nonce(&serum_program_id, &spot_market_cookie.market);
 
-        let instructions = [
-            mango::instruction::settle_funds(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &user.pubkey(),
-                &mango_account_pk,
-                &serum_program_id,
-                &spot_market_cookie.market,
-                &mango_account.spot_open_orders[mint_index],
-                &signer_pk,
-                &spot_market_cookie.coin_vault,
-                &spot_market_cookie.pc_vault,
-                &base_root_bank_pk,
-                &base_node_bank_pk,
-                &quote_root_bank_pk,
-                &quote_node_bank_pk,
-                &base_node_bank.vault,
-                &quote_node_bank.vault,
-                &dex_signer_pk,
-            )
-            .unwrap(),
-        ];
+        let instructions = [mango::instruction::settle_funds(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &user.pubkey(),
+            &mango_account_pk,
+            &serum_program_id,
+            &spot_market_cookie.market,
+            &mango_account.spot_open_orders[mint_index],
+            &signer_pk,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &base_root_bank_pk,
+            &base_node_bank_pk,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &base_node_bank.vault,
+            &quote_node_bank.vault,
+            &dex_signer_pk,
+        )
+        .unwrap()];
 
         let signers = vec![&user];
 
         self.process_transaction(&instructions, Some(&signers)).await.unwrap();
-
     }
 
     #[allow(dead_code)]
@@ -1286,21 +1250,19 @@ impl MangoProgramTest {
         let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
         let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await;
 
-        let instructions = [
-            deposit(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_account_pk,
-                &user.pubkey(),
-                &mango_group.mango_cache,
-                &root_bank_pk,
-                &node_bank_pk,
-                &node_bank.vault,
-                &user_token_account,
-                amount,
-            )
-            .unwrap(),
-        ];
+        let instructions = [deposit(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &root_bank_pk,
+            &node_bank_pk,
+            &node_bank.vault,
+            &user_token_account,
+            amount,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
@@ -1328,24 +1290,22 @@ impl MangoProgramTest {
         let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
         let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
 
-        let instructions = [
-            withdraw(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_account_pk,
-                &user.pubkey(),
-                &mango_group.mango_cache,
-                &root_bank_pk,
-                &node_bank_pk,
-                &node_bank.vault,
-                &user_token_account,
-                &signer_pk,
-                &mango_account.spot_open_orders,
-                quantity,
-                allow_borrow,
-            )
-            .unwrap(),
-        ];
+        let instructions = [withdraw(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &root_bank_pk,
+            &node_bank_pk,
+            &node_bank.vault,
+            &user_token_account,
+            &signer_pk,
+            &mango_account.spot_open_orders,
+            quantity,
+            allow_borrow,
+        )
+        .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
@@ -1368,32 +1328,32 @@ impl MangoProgramTest {
 
         let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
 
-        let (asset_root_bank_pk, asset_root_bank) = self.with_root_bank(&mango_group, asset_index).await;
+        let (asset_root_bank_pk, asset_root_bank) =
+            self.with_root_bank(&mango_group, asset_index).await;
         let (asset_node_bank_pk, _asset_node_bank) = self.with_node_bank(&asset_root_bank, 0).await;
 
-        let (liab_root_bank_pk, liab_root_bank) = self.with_root_bank(&mango_group, liab_index).await;
+        let (liab_root_bank_pk, liab_root_bank) =
+            self.with_root_bank(&mango_group, liab_index).await;
         let (liab_node_bank_pk, _liab_node_bank) = self.with_node_bank(&liab_root_bank, 0).await;
 
         let max_liab_transfer = I80F48::from_num(10_000); // TODO: This needs to adapt to the situation probably
 
-        let instructions = vec![
-            mango::instruction::liquidate_token_and_token(
-                &mango_program_id,
-                &mango_group_pk,
-                &mango_group.mango_cache,
-                &liqee_mango_account_pk,
-                &liqor_mango_account_pk,
-                &liqor.pubkey(),
-                &asset_root_bank_pk,
-                &asset_node_bank_pk,
-                &liab_root_bank_pk,
-                &liab_node_bank_pk,
-                &liqee_mango_account.spot_open_orders,
-                &liqor_mango_account.spot_open_orders,
-                max_liab_transfer,
-            )
-            .unwrap(),
-        ];
+        let instructions = vec![mango::instruction::liquidate_token_and_token(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &liqee_mango_account_pk,
+            &liqor_mango_account_pk,
+            &liqor.pubkey(),
+            &asset_root_bank_pk,
+            &asset_node_bank_pk,
+            &liab_root_bank_pk,
+            &liab_node_bank_pk,
+            &liqee_mango_account.spot_open_orders,
+            &liqor_mango_account.spot_open_orders,
+            max_liab_transfer,
+        )
+        .unwrap()];
 
         self.process_transaction(&instructions, Some(&[&liqor])).await.unwrap();
 
@@ -1402,9 +1362,7 @@ impl MangoProgramTest {
 
         mango_group_cookie.mango_accounts[liqor_index].mango_account =
             self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
-
     }
-
 }
 
 fn process_serum_instruction(

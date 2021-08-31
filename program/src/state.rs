@@ -43,6 +43,7 @@ pub const INFO_LEN: usize = 32;
 pub const MAX_PERP_OPEN_ORDERS: usize = 64;
 pub const FREE_ORDER_SLOT: u8 = u8::MAX; // TODO add check to prevent markets more than 255
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
+pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -282,8 +283,8 @@ impl RootBank {
         root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
         root_bank.node_banks[0] = *node_bank_ai.key;
         root_bank.num_node_banks = 1;
-        root_bank.deposit_index = I80F48!(1_000_000);
-        root_bank.borrow_index = I80F48!(1_000_000);
+        root_bank.deposit_index = INDEX_START;
+        root_bank.borrow_index = INDEX_START;
 
         root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
         Ok(root_bank)
