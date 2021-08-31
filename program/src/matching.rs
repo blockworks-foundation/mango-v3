@@ -734,7 +734,6 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
-    // TODO implement self trade behavior
     #[inline(never)]
     pub fn new_ask(
         &mut self,
