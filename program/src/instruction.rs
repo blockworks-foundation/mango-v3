@@ -1244,6 +1244,31 @@ pub fn cancel_all_perp_orders(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn force_cancel_perp_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,           // read
+    mango_cache_pk: &Pubkey,           // read
+    perp_market_pk: &Pubkey,           // read
+    bids_pk: &Pubkey,                  // write
+    asks_pk: &Pubkey,                  // write
+    liqee_mango_account_pk: &Pubkey,   // write
+    open_orders_pks: &[Pubkey],        // read
+    limit: u8,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*liqee_mango_account_pk, false),
+    ];
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    let instr = MangoInstruction::ForceCancelPerpOrders { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn consume_events(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,      // read

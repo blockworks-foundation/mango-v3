@@ -232,6 +232,10 @@ impl MangoGroupCookie {
         test.advance_clock().await;
         test.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks[..]).await;
         test.update_all_root_banks(&mango_group, &mango_group_pk).await;
+        for perp_market_index in 0..self.perp_markets.len() {
+            let perp_market = &self.perp_markets[perp_market_index];
+            test.update_funding(self, perp_market).await;
+        }
         test.cache_all_root_banks(&mango_group, &mango_group_pk).await;
         test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
         self.mango_cache =
@@ -277,7 +281,7 @@ impl MangoGroupCookie {
     ) {
 
         for spot_order in spot_orders {
-            let (user_index, market_index, order_side, order_size, order_price) = *spot_order;
+            let (user_index, market_index, _, _, _) = *spot_order;
             let spot_market_cookie = self.spot_markets[market_index];
             test.settle_spot_funds(self, &spot_market_cookie, user_index).await;
         }

@@ -493,13 +493,22 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn advance_clock_by_slots(&mut self, slots: u64) {
+        let mut clock: Clock = self.get_clock().await;
+        println!("clock slot before: {}", clock.slot);
+        self.context.warp_to_slot(clock.slot + slots).unwrap();
+        clock = self.get_clock().await;
+        println!("clock slot after: {}", clock.slot);
+    }
+
+    #[allow(dead_code)]
     pub async fn advance_clock_past_timestamp(&mut self, unix_timestamp: UnixTimestamp) {
         let mut clock: Clock = self.get_clock().await;
         let mut n = 1;
 
         while clock.unix_timestamp <= unix_timestamp {
             // Since the exact time is not deterministic keep wrapping by arbitrary 400 slots until we pass the requested timestamp
-            self.context.warp_to_slot(clock.slot + n * 400).unwrap();
+            self.context.warp_to_slot(clock.slot + 400).unwrap();
 
             n = n + 1;
             clock = self.get_clock().await;
@@ -706,6 +715,37 @@ impl MangoProgramTest {
                 &perp_market.event_queue,
                 &mut mango_account_pks[..],
                 3,
+            ).unwrap(),
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn force_cancel_perp_orders(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let instructions = [
+            force_cancel_perp_orders(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.bids,
+                &perp_market.asks,
+                &mango_account_pk,
+                &mango_account.spot_open_orders,
+                20,
             ).unwrap(),
         ];
         self.process_transaction(&instructions, None).await.unwrap();
@@ -1052,6 +1092,30 @@ impl MangoProgramTest {
                 self.process_transaction(&instructions, None).await.unwrap();
             }
         }
+    }
+
+    pub async fn update_funding(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+    ) {
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_program_id = self.mango_program_id;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let instructions = [
+            update_funding(
+                &mango_program_id,
+                &mango_group_pk,
+                &mango_group.mango_cache,
+                &perp_market_pk,
+                &perp_market.bids,
+                &perp_market.asks,
+            ).unwrap(),
+        ];
+        self.process_transaction(&instructions, None).await.unwrap();
     }
 
     #[allow(dead_code)]

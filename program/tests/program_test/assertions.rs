@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::num::NonZeroU64;
 use solana_program::pubkey::Pubkey;
 use crate::*;
 
@@ -11,7 +10,7 @@ pub fn assert_open_spot_orders(
 ) {
 
     for i in 0..user_spot_orders.len() {
-        let (user_index, mint_index, arranged_order_side, _, _) = user_spot_orders[i];
+        let (user_index, mint_index, _, _, _) = user_spot_orders[i];
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
         assert_ne!(
             mango_account.spot_open_orders[mint_index],
@@ -31,7 +30,7 @@ pub fn assert_open_perp_orders(
     let mut perp_orders_map: HashMap<String, usize> = HashMap::new();
 
     for i in 0..user_perp_orders.len() {
-        let (user_index, mint_index, arranged_order_side, _, _) = user_perp_orders[i];
+        let (user_index, _, arranged_order_side, _, _) = user_perp_orders[i];
         let perp_orders_map_key = format!("{}", user_index);
         if let Some(x) = perp_orders_map.get_mut(&perp_orders_map_key) {
             *x += 1;
