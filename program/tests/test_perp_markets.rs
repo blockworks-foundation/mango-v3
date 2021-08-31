@@ -1,9 +1,9 @@
 mod program_test;
 use mango::{matching::*, state::*};
-use program_test::*;
+use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
-use program_test::assertions::*;
+use program_test::*;
 use solana_program_test::*;
 use std::{mem::size_of, mem::size_of_val};
 
@@ -63,6 +63,9 @@ async fn test_place_perp_order() {
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
 
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
     // Deposit amounts
     let user_deposits = vec![
         (user_index, test.quote_index, base_price * base_size),
@@ -86,7 +89,6 @@ async fn test_place_perp_order() {
     mango_group_cookie.run_keeper(&mut test).await;
 
     assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
-
 }
 
 #[tokio::test]
@@ -124,12 +126,10 @@ async fn test_match_perp_order() {
     ];
 
     // Matched Perp Orders
-    let matched_perp_orders = vec![
-        vec![
-            (asker_user_index, mint_index, mango::matching::Side::Ask, base_size, base_price),
-            (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
-        ],
-    ];
+    let matched_perp_orders = vec![vec![
+        (asker_user_index, mint_index, mango::matching::Side::Ask, base_size, base_price),
+        (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
+    ]];
 
     // === Act ===
     // Step 1: Make deposits
@@ -143,13 +143,26 @@ async fn test_match_perp_order() {
 
     // assert_matched_perp_orders(&mango_group_cookie, &user_perp_orders);
 
-    let bidder_base_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
-    let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
-    let asker_base_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].base_position as f64;
-    let asker_quote_position = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    let bidder_base_position = mango_group_cookie.mango_accounts[bidder_user_index]
+        .mango_account
+        .perp_accounts[mint_index]
+        .base_position as f64;
+    let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index]
+        .mango_account
+        .perp_accounts[mint_index]
+        .quote_position;
+    let asker_base_position =
+        mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index]
+            .base_position as f64;
+    let asker_quote_position =
+        mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index]
+            .quote_position;
 
     println!("bidder_base_position: {}", bidder_base_position);
-    println!("bidder_quote_position: {}", bidder_quote_position.checked_round().unwrap().to_string());
+    println!(
+        "bidder_quote_position: {}",
+        bidder_quote_position.checked_round().unwrap().to_string()
+    );
     println!("asker_base_position: {}", asker_base_position);
     println!("asker_quote_position: {}", asker_quote_position.checked_round().unwrap().to_string());
 
@@ -157,5 +170,4 @@ async fn test_match_perp_order() {
     // assert!(bidder_quote_position == quote_position);
     // assert!(asker_base_position == -base_position);
     // assert!(asker_quote_position <= quote_position); // TODO Figure this out...
-
 }

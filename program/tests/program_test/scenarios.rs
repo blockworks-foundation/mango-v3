@@ -21,21 +21,14 @@ pub async fn deposit_scenario(
     mango_group_cookie: &mut MangoGroupCookie,
     deposits: Vec<(usize, usize, f64)>,
 ) {
-
     mango_group_cookie.run_keeper(test).await;
 
     for deposit in deposits {
         let (user_index, mint_index, amount) = deposit;
         let mint = test.with_mint(mint_index);
         let deposit_amount = (amount * mint.unit) as u64;
-        test.perform_deposit(
-            &mango_group_cookie,
-            user_index,
-            mint_index,
-            deposit_amount,
-        ).await;
+        test.perform_deposit(&mango_group_cookie, user_index, mint_index, deposit_amount).await;
     }
-
 }
 
 #[allow(dead_code)]
@@ -44,7 +37,6 @@ pub async fn withdraw_scenario(
     mango_group_cookie: &mut MangoGroupCookie,
     withdraws: Vec<(usize, usize, f64, bool)>,
 ) {
-
     mango_group_cookie.run_keeper(test).await;
 
     for withdraw in withdraws {
@@ -57,9 +49,9 @@ pub async fn withdraw_scenario(
             mint_index,
             withdraw_amount,
             allow_borrow,
-        ).await;
+        )
+        .await;
     }
-
 }
 
 #[allow(dead_code)]
@@ -68,25 +60,17 @@ pub async fn place_spot_order_scenario(
     mango_group_cookie: &mut MangoGroupCookie,
     spot_orders: &Vec<(usize, usize, serum_dex::matching::Side, f64, f64)>,
 ) {
-
     mango_group_cookie.run_keeper(test).await;
 
     for spot_order in spot_orders {
         let (user_index, market_index, order_side, order_size, order_price) = *spot_order;
         let mut spot_market_cookie = mango_group_cookie.spot_markets[market_index];
-        spot_market_cookie.place_order(
-            test,
-            mango_group_cookie,
-            user_index,
-            order_side,
-            order_size,
-            order_price,
-        ).await;
+        spot_market_cookie
+            .place_order(test, mango_group_cookie, user_index, order_side, order_size, order_price)
+            .await;
 
         mango_group_cookie.users_with_spot_event[market_index].push(user_index);
-
     }
-
 }
 
 #[allow(dead_code)]
@@ -95,27 +79,18 @@ pub async fn place_perp_order_scenario(
     mango_group_cookie: &mut MangoGroupCookie,
     perp_orders: &Vec<(usize, usize, mango::matching::Side, f64, f64)>,
 ) {
-
     mango_group_cookie.run_keeper(test).await;
 
     for perp_order in perp_orders {
         let (user_index, market_index, order_side, order_size, order_price) = *perp_order;
         let mut perp_market_cookie = mango_group_cookie.perp_markets[market_index];
-        perp_market_cookie.place_order(
-            test,
-            mango_group_cookie,
-            user_index,
-            order_side,
-            order_size,
-            order_price,
-        ).await;
+        perp_market_cookie
+            .place_order(test, mango_group_cookie, user_index, order_side, order_size, order_price)
+            .await;
 
         mango_group_cookie.users_with_perp_event[market_index].push(user_index);
-
     }
-
 }
-
 
 #[allow(dead_code)]
 pub async fn match_spot_order_scenario(
@@ -123,7 +98,6 @@ pub async fn match_spot_order_scenario(
     mango_group_cookie: &mut MangoGroupCookie,
     matched_spot_orders: &Vec<Vec<(usize, usize, serum_dex::matching::Side, f64, f64)>>,
 ) {
-
     for matched_spot_order in matched_spot_orders {
         place_spot_order_scenario(test, mango_group_cookie, matched_spot_order).await;
         mango_group_cookie.run_keeper(test).await;
@@ -131,7 +105,6 @@ pub async fn match_spot_order_scenario(
         mango_group_cookie.run_keeper(test).await;
         mango_group_cookie.settle_spot_funds(test, matched_spot_order).await; // TODO: Is this necessary to test matching
     }
-
 }
 
 #[allow(dead_code)]
@@ -140,7 +113,6 @@ pub async fn match_perp_order_scenario(
     mango_group_cookie: &mut MangoGroupCookie,
     matched_perp_orders: &Vec<Vec<(usize, usize, mango::matching::Side, f64, f64)>>,
 ) {
-
     for matched_perp_order in matched_perp_orders {
         place_perp_order_scenario(test, mango_group_cookie, matched_perp_order).await;
         mango_group_cookie.run_keeper(test).await;
@@ -148,5 +120,4 @@ pub async fn match_perp_order_scenario(
         mango_group_cookie.run_keeper(test).await;
         // mango_group_cookie.settle_perp_funds(test, matched_perp_order).await;
     }
-
 }

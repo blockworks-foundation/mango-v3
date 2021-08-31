@@ -1754,7 +1754,6 @@ impl PerpMarket {
             MangoErrorCode::InvalidCache
         )?;
         let index_price = price_cache.price;
-
         // Get current book price & compare it to index price
 
         // TODO get impact bid and impact ask if compute allows
