@@ -9,7 +9,7 @@ members = [
 ]
 
 [provider]
-cluster = "devnet"
+cluster = "mainnet"
 wallet = "~/.config/solana/id.json"
 
 [programs.mainnet]
