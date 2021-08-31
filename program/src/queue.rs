@@ -45,7 +45,6 @@ impl<'a, H: QueueHeader> Queue<'a, H> {
     }
 
     pub fn load_mut(account: &'a AccountInfo) -> MangoResult<Self> {
-        // TODO
         let (header, buf) = strip_header_mut::<H, H::Item>(account)?;
         Ok(Self { header, buf })
     }
@@ -188,8 +187,6 @@ impl<'a> EventQueue<'a> {
         program_id: &Pubkey,
         rent: &Rent,
     ) -> MangoResult<Self> {
-        // TODO: check for size
-
         // NOTE: check this first so we can borrow account later
         check!(
             rent.is_exempt(account.lamports(), account.data_len()),

@@ -249,7 +249,7 @@ pub enum MangoInstruction {
     /// Update funding related variables
     UpdateFunding,
 
-    // TODO - remove this instruction before mainnet (reviewed)
+    /// Can only be used on a stub oracle in devnet
     SetOracle {
         price: I80F48,
     },
@@ -1182,6 +1182,7 @@ pub fn cancel_perp_order_by_client_id(
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
     client_order_id: u64,
+    invalid_id_ok: bool,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1191,9 +1192,7 @@ pub fn cancel_perp_order_by_client_id(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    // TODO - add in invalid_id_ok
-    let instr =
-        MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok: false };
+    let instr = MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1207,6 +1206,7 @@ pub fn cancel_perp_order(
     bids_pk: &Pubkey,          // write
     asks_pk: &Pubkey,          // write
     order_id: i128,
+    invalid_id_ok: bool,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1216,8 +1216,7 @@ pub fn cancel_perp_order(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
     ];
-    // TODO - add in invalid_id_ok
-    let instr = MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok: false };
+    let instr = MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

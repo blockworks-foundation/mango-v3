@@ -107,7 +107,6 @@ impl MetaData {
     }
 }
 
-// TODO - move all the weights from SpotMarketInfo to TokenInfo
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {

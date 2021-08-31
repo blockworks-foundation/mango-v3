@@ -485,8 +485,6 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
-        // TODO - Probably not necessary for deposit to be from owner
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
 
@@ -918,7 +916,6 @@ impl Processor {
         Ok(())
     }
 
-    // TODO - add serum dex fee discount functionality
     #[inline(never)]
     fn place_spot_order(
         program_id: &Pubkey,
