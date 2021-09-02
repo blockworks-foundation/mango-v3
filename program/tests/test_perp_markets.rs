@@ -80,7 +80,7 @@ async fn test_place_perp_order() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place perp orders
     place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
@@ -133,7 +133,7 @@ async fn test_match_perp_order() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place and match spot order
     match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;

@@ -19,15 +19,15 @@ pub fn arrange_deposit_all_scenario(
 pub async fn deposit_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
-    deposits: Vec<(usize, usize, f64)>,
+    deposits: &Vec<(usize, usize, f64)>,
 ) {
     mango_group_cookie.run_keeper(test).await;
 
     for deposit in deposits {
         let (user_index, mint_index, amount) = deposit;
-        let mint = test.with_mint(mint_index);
-        let deposit_amount = (amount * mint.unit) as u64;
-        test.perform_deposit(&mango_group_cookie, user_index, mint_index, deposit_amount).await;
+        let mint = test.with_mint(*mint_index);
+        let deposit_amount = (*amount * mint.unit) as u64;
+        test.perform_deposit(&mango_group_cookie, *user_index, *mint_index, deposit_amount).await;
     }
 }
 
@@ -35,20 +35,20 @@ pub async fn deposit_scenario(
 pub async fn withdraw_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
-    withdraws: Vec<(usize, usize, f64, bool)>,
+    withdraws: &Vec<(usize, usize, f64, bool)>,
 ) {
     mango_group_cookie.run_keeper(test).await;
 
     for withdraw in withdraws {
         let (user_index, mint_index, amount, allow_borrow) = withdraw;
-        let mint = test.with_mint(mint_index);
-        let withdraw_amount = (amount * mint.unit) as u64;
+        let mint = test.with_mint(*mint_index);
+        let withdraw_amount = (*amount * mint.unit) as u64;
         test.perform_withdraw(
             &mango_group_cookie,
-            user_index,
-            mint_index,
+            *user_index,
+            *mint_index,
             withdraw_amount,
-            allow_borrow,
+            *allow_borrow,
         )
         .await;
     }

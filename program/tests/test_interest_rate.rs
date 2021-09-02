@@ -49,10 +49,10 @@ async fn test_interest_rate() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Make withdraws
-    withdraw_scenario(&mut test, &mut mango_group_cookie, user_withdraws).await;
+    withdraw_scenario(&mut test, &mut mango_group_cookie, &user_withdraws).await;
 
     //Assert
     clock = test.get_clock().await;

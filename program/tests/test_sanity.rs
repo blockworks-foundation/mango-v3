@@ -24,28 +24,34 @@ async fn test_vault_net_deposit_diff() {
     // General parameters
     let user_index: usize = 0;
     let mint_index: usize = 0;
-    let base_deposit_size: f64 = 100000000.0;
-    let base_withdraw_size: f64 = 100000000.0;
+    let mut base_deposit_size: f64 = 1000.0;
+    let mut base_withdraw_size: f64 = 600.9999;
 
-    // Deposit amounts
-    let user_deposits = vec![
-        (user_index, mint_index, base_deposit_size),
-    ];
 
-    // Withdraw amounts
-    let user_withdraws = vec![
-        (user_index, mint_index, base_withdraw_size, true),
-    ];
 
     // === Act ===
-    // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    for _ in 0..10 {
+        base_deposit_size *= 2.0;
+        base_withdraw_size *= 2.0;
+        // Deposit amounts
+        let user_deposits = vec![
+            (user_index, mint_index, base_deposit_size),
+        ];
 
-    // Step 2: Make withdraws
-    withdraw_scenario(&mut test, &mut mango_group_cookie, user_withdraws).await;
+        // Withdraw amounts
+        let user_withdraws = vec![
+            (user_index, mint_index, base_withdraw_size, true),
+        ];
+        // Step 1: Make deposits
+        deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+        // Step 2: Make withdraws
+        withdraw_scenario(&mut test, &mut mango_group_cookie, &user_withdraws).await;
+    }
+
 
     // === Assert ===
-    mango_group_cookie.run_keeper(&mut test).await;
+    // mango_group_cookie.run_keeper(&mut test).await;
     assert_vault_net_deposit_diff(
         &mut test,
         &mut mango_group_cookie,

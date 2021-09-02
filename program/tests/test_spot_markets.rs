@@ -96,7 +96,7 @@ async fn test_place_spot_order() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place spot orders
     place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders).await;
@@ -172,7 +172,7 @@ async fn test_match_spot_order() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place and match spot order
     match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;

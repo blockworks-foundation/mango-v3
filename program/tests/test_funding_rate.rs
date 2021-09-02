@@ -61,7 +61,7 @@ async fn test_funding_rate() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place and match spot order
     match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;
