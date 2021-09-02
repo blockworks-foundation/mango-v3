@@ -118,6 +118,5 @@ pub async fn match_perp_order_scenario(
         mango_group_cookie.run_keeper(test).await;
         mango_group_cookie.consume_perp_events(test).await;
         mango_group_cookie.run_keeper(test).await;
-        // mango_group_cookie.settle_perp_funds(test, matched_perp_order).await;
     }
 }

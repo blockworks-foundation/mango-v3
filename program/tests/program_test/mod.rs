@@ -22,7 +22,15 @@ use solana_sdk::{
 };
 use spl_token::{state::*, *};
 
-use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*};
+use mango::{
+    entrypoint::*,
+    ids::*,
+    instruction::*,
+    matching::*,
+    oracle::*,
+    state::*,
+    utils::*
+};
 
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
@@ -383,6 +391,11 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn get_account(&mut self, address: Pubkey) -> solana_sdk::account::Account {
+        return self.context.banks_client.get_account(address).await.unwrap().unwrap();
+    }
+
+    #[allow(dead_code)]
     pub fn get_payer_pk(&mut self) -> Pubkey {
         return self.context.payer.pubkey();
     }
@@ -391,6 +404,32 @@ impl MangoProgramTest {
     pub async fn get_token_balance(&mut self, address: Pubkey) -> u64 {
         let token = self.context.banks_client.get_account(address).await.unwrap().unwrap();
         return spl_token::state::Account::unpack(&token.data[..]).unwrap().amount;
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_oo_info(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        mint_index: usize,
+    ) -> (I80F48, I80F48, I80F48, I80F48) {
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mut oo = self.get_account(mango_account.spot_open_orders[0]).await;
+        let clock = self.get_clock().await;
+        let acc = solana_program::account_info::AccountInfo::new(
+            &mango_account.spot_open_orders[mint_index],
+            false,
+            false,
+            &mut oo.lamports,
+            &mut oo.data,
+            &mango_group_cookie.mango_accounts[user_index].address,
+            false,
+            clock.epoch,
+        );
+        let open_orders = load_open_orders(&acc).unwrap();
+        let (quote_free, quote_locked, base_free, base_locked) =
+            split_open_orders(&open_orders);
+        return (quote_free, quote_locked, base_free, base_locked);
     }
 
     #[allow(dead_code)]

@@ -138,6 +138,12 @@ async fn test_match_perp_order() {
     // Step 2: Place and match spot order
     match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;
 
+    // Step 3: Settle pnl
+    mango_group_cookie.run_keeper(&mut test).await;
+    for matched_perp_order in matched_perp_orders {
+        mango_group_cookie.settle_perp_funds(&mut test, &matched_perp_order).await;
+    }
+
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
