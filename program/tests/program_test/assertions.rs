@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use solana_program::pubkey::Pubkey;
 use fixed::types::I80F48;
-use mango::{
-    ids::*, matching::*, queue::*, state::*, utils::*,
-};
+use mango::state::*;
 use crate::*;
 
 #[allow(dead_code)]
@@ -176,14 +174,14 @@ pub async fn assert_vault_net_deposit_diff(
 
   let mango_cache = mango_group_cookie.mango_cache;
   let root_bank_cache = mango_cache.root_bank_cache[mint_index];
-  let (root_bank_pk, root_bank) = test.with_root_bank(
+  let (_root_bank_pk, root_bank) = test.with_root_bank(
       &mango_group_cookie.mango_group, mint_index).await;
+
   let net = get_net(
       &mango_group_cookie.mango_accounts[user_index].mango_account,
       &root_bank_cache,
       mint_index,
   );
-
 
   let mut vault_amount = ZERO_I80F48;
   for node_bank_pk in root_bank.node_banks {

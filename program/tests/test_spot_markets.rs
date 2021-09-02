@@ -203,7 +203,7 @@ async fn test_match_spot_order() {
         asker_user_index,
         mint_index,
     ).await;
-    println!("asker_base_free: {}", asker_base_free);
+    println!("asker_quote_free: {}", asker_quote_free);
     println!("asker_quote_locked: {}", asker_quote_locked);
     println!("asker_base_free: {}", asker_base_free);
     println!("asker_base_locked: {}", asker_base_locked);
