@@ -52,7 +52,7 @@ async fn test_token_and_token_liquidation_v1() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place and match an order for 1 BTC @ 15_000
     match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
@@ -168,7 +168,7 @@ async fn test_token_and_token_liquidation_v2() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place perp orders
     place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;

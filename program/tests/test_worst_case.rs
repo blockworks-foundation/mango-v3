@@ -55,7 +55,7 @@ async fn test_worst_case_v1() {
 
     // === Act ===
     // Step 1: Deposit all tokens into mango account
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Place spot orders
     place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders).await;
@@ -131,10 +131,10 @@ async fn test_worst_case_v2() {
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Make withdraws
-    withdraw_scenario(&mut test, &mut mango_group_cookie, user_withdraws).await;
+    withdraw_scenario(&mut test, &mut mango_group_cookie, &user_withdraws).await;
 
     // Step 3: Check that lenders all deposits are not a nice number anymore (> 10 mint)
     mango_group_cookie.run_keeper(&mut test).await;

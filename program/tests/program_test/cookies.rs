@@ -357,7 +357,6 @@ pub struct MangoAccountCookie {
 }
 
 impl MangoAccountCookie {
-    // TODO: Maybe move deposit and withdraw here
     #[allow(dead_code)]
     pub async fn init(
         test: &mut MangoProgramTest,
