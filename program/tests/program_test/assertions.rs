@@ -168,33 +168,37 @@ fn get_net(
 pub async fn assert_vault_net_deposit_diff(
     test: &mut MangoProgramTest,
     mango_group_cookie: &MangoGroupCookie,
-    user_index: usize,
     mint_index: usize,
 ) {
 
-  let mango_cache = mango_group_cookie.mango_cache;
-  let root_bank_cache = mango_cache.root_bank_cache[mint_index];
-  let (_root_bank_pk, root_bank) = test.with_root_bank(
+    let mango_cache = mango_group_cookie.mango_cache;
+    let root_bank_cache = mango_cache.root_bank_cache[mint_index];
+    let (_root_bank_pk, root_bank) = test.with_root_bank(
       &mango_group_cookie.mango_group, mint_index).await;
 
-  let net = get_net(
-      &mango_group_cookie.mango_accounts[user_index].mango_account,
-      &root_bank_cache,
-      mint_index,
-  );
+    let mut total_net = ZERO_I80F48;
+    for mango_account in &mango_group_cookie.mango_accounts {
+        total_net += get_net(
+          &mango_account.mango_account,
+          &root_bank_cache,
+          mint_index,
+        );
+    }
 
-  let mut vault_amount = ZERO_I80F48;
-  for node_bank_pk in root_bank.node_banks {
+    total_net = total_net.checked_round().unwrap();
+
+    let mut vault_amount = ZERO_I80F48;
+    for node_bank_pk in root_bank.node_banks {
       if node_bank_pk != Pubkey::default() {
           let node_bank = test.load_account::<NodeBank>(node_bank_pk).await;
           let balance = test.get_token_balance(node_bank.vault).await;
           vault_amount += I80F48::from_num(balance);
       }
-  }
+    }
 
-  println!("net: {}", net.to_string());
-  println!("vault_amount: {}", vault_amount.to_string());
+    println!("total_net: {}", total_net.to_string());
+    println!("vault_amount: {}", vault_amount.to_string());
 
-  assert!(net == vault_amount);
+    assert!(total_net == vault_amount);
 
 }
