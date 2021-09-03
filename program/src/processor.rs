@@ -2269,6 +2269,7 @@ impl Processor {
     }
 
     #[inline(never)]
+    /// DEPRECATED
     /// Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
@@ -2376,6 +2377,7 @@ impl Processor {
             QUOTE_INDEX,
             total_settle,
         )?;
+        liqee_ma.is_bankrupt = liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
 
         msg!(
             "force_settle_quote_positions details: {{ \
@@ -2392,7 +2394,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// DEPRECATED - will disappear soon
     /// swap tokens for perp quote position only and only if the base position in that market is 0
     fn liquidate_token_and_perp(
         program_id: &Pubkey,
@@ -3049,7 +3050,7 @@ impl Processor {
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
         // If insurance fund does not have enough, start the socialize loss function
-        check!(max_liab_transfer.is_positive(), MangoErrorCode::Default)?;
+        check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 13;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS + MAX_NODE_BANKS];
@@ -3094,10 +3095,10 @@ impl Processor {
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
 
         // Load the bank for liab token
+        let liab_index = mango_group
+            .find_root_bank_index(liab_root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
         let mut liab_root_bank = RootBank::load_mut_checked(liab_root_bank_ai, program_id)?;
-        let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
-        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
-        check!(liab_root_bank.node_banks.contains(liab_node_bank_ai.key), MangoErrorCode::Default)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let liqor_active_assets =
@@ -3147,6 +3148,12 @@ impl Processor {
             )?;
             let liab_transfer = I80F48::from_num(insurance_transfer) * liab_fee / liab_price;
 
+            check!(
+                liab_root_bank.node_banks.contains(liab_node_bank_ai.key),
+                MangoErrorCode::InvalidNodeBank
+            )?;
+            let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
+
             if liab_index == QUOTE_INDEX {
                 checked_change_net(
                     &mango_cache.root_bank_cache[QUOTE_INDEX],
@@ -3180,21 +3187,16 @@ impl Processor {
                 )?;
             }
 
-            checked_change_net(
-                liab_bank_cache,
-                &mut liab_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                liab_index,
-                liab_transfer,
-            )?;
-            checked_change_net(
+            // Liqor transfers to cancel out liability on liqee
+            transfer_token_internal(
                 liab_bank_cache,
                 &mut liab_node_bank,
                 &mut liqor_ma,
+                &mut liqee_ma,
                 liqor_mango_account_ai.key,
+                liqee_mango_account_ai.key,
                 liab_index,
-                -liab_transfer,
+                liab_transfer,
             )?;
 
             // Make sure liqor is above init health
@@ -3224,8 +3226,6 @@ impl Processor {
                 &mut mango_cache,
                 &mut liqee_ma,
                 liab_node_bank_ais,
-                &mut liab_node_bank,
-                liab_node_bank_ai.key,
             )?;
         }
 
@@ -3238,18 +3238,22 @@ impl Processor {
     /// *** Keeper Related Instructions ***
     /// Update the deposit and borrow index on a passed in RootBank
     fn update_root_bank(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        const NUM_FIXED: usize = 2;
+        const NUM_FIXED: usize = 3;
         let (fixed_accounts, node_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai, // read
+            mango_cache_ai, // write
             root_bank_ai,   // write
         ] = fixed_accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check!(
-            mango_group.find_root_bank_index(root_bank_ai.key).is_some(),
-            MangoErrorCode::InvalidRootBank
-        )?;
+        let mut mango_cache =
+            MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
+
+        let index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
         // TODO check root bank belongs to group in load functions
         let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
         check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
@@ -3262,6 +3266,23 @@ impl Processor {
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
         root_bank.update_index(node_bank_ais, program_id, now_ts)?;
+
+        mango_cache.root_bank_cache[index] = RootBankCache {
+            deposit_index: root_bank.deposit_index,
+            borrow_index: root_bank.borrow_index,
+            last_update: now_ts,
+        };
+
+        msg!(
+            "update_root_bank details: {{ \
+            \"token_index\": {}, \
+            \"deposit_index\": {} \
+            \"borrow_index\": {} \
+        }}",
+            index,
+            root_bank.deposit_index.to_num::<f64>(),
+            root_bank.borrow_index.to_num::<f64>(),
+        );
 
         Ok(())
     }

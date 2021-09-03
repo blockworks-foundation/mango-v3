@@ -1246,13 +1246,13 @@ pub fn cancel_all_perp_orders(
 
 pub fn force_cancel_perp_orders(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey,           // read
-    mango_cache_pk: &Pubkey,           // read
-    perp_market_pk: &Pubkey,           // read
-    bids_pk: &Pubkey,                  // write
-    asks_pk: &Pubkey,                  // write
-    liqee_mango_account_pk: &Pubkey,   // write
-    open_orders_pks: &[Pubkey],        // read
+    mango_group_pk: &Pubkey,         // read
+    mango_cache_pk: &Pubkey,         // read
+    perp_market_pk: &Pubkey,         // read
+    bids_pk: &Pubkey,                // write
+    asks_pk: &Pubkey,                // write
+    liqee_mango_account_pk: &Pubkey, // write
+    open_orders_pks: &[Pubkey],      // read
     limit: u8,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
@@ -1609,11 +1609,13 @@ pub fn add_oracle(
 pub fn update_root_bank(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
     root_bank_pk: &Pubkey,
     node_bank_pks: &[Pubkey],
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_cache_pk, false),
         AccountMeta::new(*root_bank_pk, false),
     ];
 
