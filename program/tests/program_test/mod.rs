@@ -1056,6 +1056,7 @@ impl MangoProgramTest {
                 let instructions = [update_root_bank(
                     &mango_program_id,
                     &mango_group_pk,
+                    &mango_group.mango_cache,
                     &root_bank_pk,
                     &[node_bank_pk],
                 )
