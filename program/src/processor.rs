@@ -2376,6 +2376,7 @@ impl Processor {
             QUOTE_INDEX,
             total_settle,
         )?;
+        liqee_ma.is_bankrupt = liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
 
         msg!(
             "force_settle_quote_positions details: {{ \
