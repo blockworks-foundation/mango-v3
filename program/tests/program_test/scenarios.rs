@@ -103,7 +103,6 @@ pub async fn match_spot_order_scenario(
         mango_group_cookie.run_keeper(test).await;
         mango_group_cookie.consume_spot_events(test).await;
         mango_group_cookie.run_keeper(test).await;
-        mango_group_cookie.settle_spot_funds(test, matched_spot_order).await; // TODO: Is this necessary to test matching
     }
 }
 

@@ -346,6 +346,8 @@ impl MangoProgramTest {
             users.push(user_key);
         }
 
+
+
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
         mints = mints[..num_mints].to_vec();
@@ -635,14 +637,21 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub fn quote_size_number_to_lots(&mut self, mint: &MintCookie, quantity: f64) -> u64 {
-        return ((quantity * self.quote_mint.unit) / mint.quote_lot) as u64;
+    pub fn quote_size_number_to_lots(&mut self, mint: &MintCookie, price: f64, size: f64) -> u64 {
+        let limit_price = self.price_number_to_lots(&mint, price);
+        let max_coin_qty = self.base_size_number_to_lots(&mint, size);
+        return mint.quote_lot as u64 * limit_price * max_coin_qty;
     }
 
     #[allow(dead_code)]
     pub fn price_number_to_lots(&mut self, mint: &MintCookie, price: f64) -> u64 {
         return ((price * self.quote_mint.unit * mint.base_lot) / (mint.unit * mint.quote_lot))
             as u64;
+    }
+
+    #[allow(dead_code)]
+    pub fn to_native(&mut self, mint: &MintCookie, size: f64) -> I80F48 {
+        return I80F48::from_num(mint.unit * size);
     }
 
     #[allow(dead_code)]

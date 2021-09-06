@@ -25,33 +25,34 @@ pub fn assert_open_spot_orders(
 pub async fn assert_user_spot_orders(
     test: &mut MangoProgramTest,
     mango_group_cookie: &MangoGroupCookie,
-    expected_values: HashMap<&str, I80F48>,
-    user_index: usize,
-    mint_index: usize,
+    expected_values: (usize, usize, HashMap<&str, I80F48>),
 ) {
+    let (mint_index, user_index, expected_value) = expected_values;
     let (actual_quote_free, actual_quote_locked, actual_base_free, actual_base_locked) = test.get_oo_info(
         &mango_group_cookie,
         user_index,
         mint_index,
     ).await;
-    if let Some(quote_free) = expected_values.get("quote_free") {
-        println!("quote_free: {}", quote_free.to_string());
-        println!("actual_quote_free: {}", actual_quote_free.to_string());
+
+    // println!("User index: {}", user_index);
+    if let Some(quote_free) = expected_value.get("quote_free") {
+        // println!("quote_free: {}", quote_free.to_string());
+        // println!("actual_quote_free: {}", actual_quote_free.to_string());
         assert!(*quote_free == actual_quote_free);
     }
-    if let Some(quote_locked) = expected_values.get("quote_locked") {
-        println!("quote_locked: {}", quote_locked.to_string());
-        println!("actual_quote_locked: {}", actual_quote_locked.to_string());
+    if let Some(quote_locked) = expected_value.get("quote_locked") {
+        // println!("quote_locked: {}", quote_locked.to_string());
+        // println!("actual_quote_locked: {}", actual_quote_locked.to_string());
         assert!(*quote_locked == actual_quote_locked);
     }
-    if let Some(base_free) = expected_values.get("base_free") {
-        println!("base_free: {}", base_free.to_string());
-        println!("actual_base_free: {}", actual_base_free.to_string());
+    if let Some(base_free) = expected_value.get("base_free") {
+        // println!("base_free: {}", base_free.to_string());
+        // println!("actual_base_free: {}", actual_base_free.to_string());
         assert!(*base_free == actual_base_free);
     }
-    if let Some(base_locked) = expected_values.get("base_locked") {
-        println!("base_locked: {}", base_locked.to_string());
-        println!("actual_base_locked: {}", actual_base_locked.to_string());
+    if let Some(base_locked) = expected_value.get("base_locked") {
+        // println!("base_locked: {}", base_locked.to_string());
+        // println!("actual_base_locked: {}", actual_base_locked.to_string());
         assert!(*base_locked == actual_base_locked);
     }
 }
