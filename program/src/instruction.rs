@@ -221,15 +221,15 @@ pub enum MangoInstruction {
         side: Side,
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
         order_type: OrderType,
+        /// Optional to be backward compatible
+        reduce_only: bool,
     },
 
-    // ***
     CancelPerpOrderByClientId {
         client_order_id: u64,
         invalid_id_ok: bool,
     },
 
-    // ***
     CancelPerpOrder {
         order_id: i128,
         invalid_id_ok: bool,
@@ -701,15 +701,31 @@ impl MangoInstruction {
                 }
             }
             12 => {
-                let data_arr = array_ref![data, 0, 26];
-                let (price, quantity, client_order_id, side, order_type) =
-                    array_refs![data_arr, 8, 8, 8, 1, 1];
-                MangoInstruction::PlacePerpOrder {
-                    price: i64::from_le_bytes(*price),
-                    quantity: i64::from_le_bytes(*quantity),
-                    client_order_id: u64::from_le_bytes(*client_order_id),
-                    side: Side::try_from_primitive(side[0]).ok()?,
-                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                if data.len() > 26 {
+                    let data_arr = array_ref![data, 0, 27];
+                    let (price, quantity, client_order_id, side, order_type, reduce_only) =
+                        array_refs![data_arr, 8, 8, 8, 1, 1, 1];
+
+                    MangoInstruction::PlacePerpOrder {
+                        price: i64::from_le_bytes(*price),
+                        quantity: i64::from_le_bytes(*quantity),
+                        client_order_id: u64::from_le_bytes(*client_order_id),
+                        side: Side::try_from_primitive(side[0]).ok()?,
+                        order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                        reduce_only: reduce_only[0] != 0,
+                    }
+                } else {
+                    let data_arr = array_ref![data, 0, 26];
+                    let (price, quantity, client_order_id, side, order_type) =
+                        array_refs![data_arr, 8, 8, 8, 1, 1];
+                    MangoInstruction::PlacePerpOrder {
+                        price: i64::from_le_bytes(*price),
+                        quantity: i64::from_le_bytes(*quantity),
+                        client_order_id: u64::from_le_bytes(*client_order_id),
+                        side: Side::try_from_primitive(side[0]).ok()?,
+                        order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                        reduce_only: false,
+                    }
                 }
             }
             13 => {
@@ -1153,6 +1169,7 @@ pub fn place_perp_order(
     quantity: i64,
     client_order_id: u64,
     order_type: OrderType,
+    reduce_only: bool,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1166,8 +1183,14 @@ pub fn place_perp_order(
     ];
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
-    let instr =
-        MangoInstruction::PlacePerpOrder { side, price, quantity, client_order_id, order_type };
+    let instr = MangoInstruction::PlacePerpOrder {
+        side,
+        price,
+        quantity,
+        client_order_id,
+        order_type,
+        reduce_only,
+    };
     let data = instr.pack();
 
     Ok(Instruction { program_id: *program_id, accounts, data })

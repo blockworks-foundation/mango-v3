@@ -1339,6 +1339,7 @@ impl Processor {
         quantity: i64,
         client_order_id: u64,
         order_type: OrderType,
+        reduce_only: bool,
     ) -> MangoResult<()> {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
@@ -1399,11 +1400,27 @@ impl Processor {
         }
 
         // This means health must only go up
-        let reduce_only = pre_health < ZERO_I80F48;
+        let health_up_only = pre_health < ZERO_I80F48;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+
+        // If reduce_only, position must only go down
+        let quantity = if reduce_only {
+            let base_pos = mango_account.perp_accounts[market_index].base_position;
+            if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
+                0
+            } else {
+                base_pos.abs().min(quantity)
+            }
+        } else {
+            quantity
+        };
+
+        if quantity == 0 {
+            return Ok(());
+        }
 
         book.new_order(
             &mut event_queue,
@@ -1422,9 +1439,8 @@ impl Processor {
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
-        // If an account is in reduce_only mode, health must only go up
         check!(
-            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
+            post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
             MangoErrorCode::InsufficientFunds
         )
     }
@@ -3806,6 +3822,7 @@ impl Processor {
                 quantity,
                 client_order_id,
                 order_type,
+                reduce_only,
             } => {
                 msg!("Mango: PlacePerpOrder client_order_id={}", client_order_id);
                 Self::place_perp_order(
@@ -3816,6 +3833,7 @@ impl Processor {
                     quantity,
                     client_order_id,
                     order_type,
+                    reduce_only,
                 )
             }
             MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok } => {

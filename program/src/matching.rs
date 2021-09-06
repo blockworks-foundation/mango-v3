@@ -206,6 +206,7 @@ pub enum OrderType {
     Limit = 0,
     ImmediateOrCancel = 1,
     PostOnly = 2,
+    Market = 3, // ***
 }
 
 #[derive(
@@ -507,19 +508,6 @@ impl BookSide {
     pub fn is_full(&self) -> bool {
         self.free_list_len == 0 && self.bump_index == self.nodes.len()
     }
-
-    #[allow(dead_code)]
-    fn to_vec(&self, root: NodeHandle, v: &mut Vec<NodeHandle>) {
-        match self.get(root).unwrap().case().unwrap() {
-            NodeRef::Inner(inner) => {
-                self.to_vec(inner.children[0], v);
-                self.to_vec(inner.children[1], v);
-            }
-            NodeRef::Leaf(_) => {
-                v.push(root);
-            }
-        }
-    }
 }
 
 pub struct Book<'a> {
@@ -580,7 +568,7 @@ impl<'a> Book<'a> {
                 mango_account,
                 mango_account_pk,
                 market_index,
-                price,
+                if order_type == OrderType::Market { i64::MAX } else { price },
                 quantity,
                 order_type,
                 client_order_id,
@@ -593,7 +581,7 @@ impl<'a> Book<'a> {
                 mango_account,
                 mango_account_pk,
                 market_index,
-                price,
+                if order_type == OrderType::Market { 0 } else { price },
                 quantity,
                 order_type,
                 client_order_id,
@@ -621,9 +609,10 @@ impl<'a> Book<'a> {
         // TODO handle the case where we run out of compute (right now just fails)
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel => (false, false),
+            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
             OrderType::PostOnly => (true, true),
         };
+
         let order_id = market.gen_order_id(Side::Bid, price);
 
         let best_initial = match self.get_best_bid_price() {
@@ -752,7 +741,7 @@ impl<'a> Book<'a> {
         // TODO proper error handling
         let (post_only, post_allowed) = match order_type {
             OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel => (false, false),
+            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
             OrderType::PostOnly => (true, true),
         };
         let order_id = market.gen_order_id(Side::Ask, price);

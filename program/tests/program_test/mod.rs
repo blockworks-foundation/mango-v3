@@ -22,15 +22,7 @@ use solana_sdk::{
 };
 use spl_token::{state::*, *};
 
-use mango::{
-    entrypoint::*,
-    ids::*,
-    instruction::*,
-    matching::*,
-    oracle::*,
-    state::*,
-    utils::*
-};
+use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*};
 
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
@@ -427,8 +419,7 @@ impl MangoProgramTest {
             clock.epoch,
         );
         let open_orders = load_open_orders(&acc).unwrap();
-        let (quote_free, quote_locked, base_free, base_locked) =
-            split_open_orders(&open_orders);
+        let (quote_free, quote_locked, base_free, base_locked) = split_open_orders(&open_orders);
         return (quote_free, quote_locked, base_free, base_locked);
     }
 
@@ -682,6 +673,7 @@ impl MangoProgramTest {
         order_price: u64,
         order_id: u64,
         order_type: OrderType,
+        reduce_only: bool,
     ) {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
@@ -708,6 +700,7 @@ impl MangoProgramTest {
             order_size as i64,
             order_id,
             order_type,
+            reduce_only,
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
