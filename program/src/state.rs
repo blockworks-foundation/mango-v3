@@ -581,6 +581,15 @@ pub struct RootBankCache {
     pub last_update: u64,
 }
 
+impl RootBankCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidRootBankCache
+        )
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
@@ -676,18 +685,6 @@ impl MangoCache {
             }
         }
         Ok(())
-    }
-
-    pub fn check_root_bank_cache(
-        &self,
-        mango_group: &MangoGroup,
-        token_index: usize,
-        now_ts: u64,
-    ) -> MangoResult<()> {
-        check!(
-            self.root_bank_cache[token_index].last_update >= now_ts - mango_group.valid_interval,
-            MangoErrorCode::InvalidRootBankCache
-        )
     }
 
     pub fn get_price(&self, i: usize) -> I80F48 {
@@ -1012,8 +1009,9 @@ pub struct MangoAccount {
     /// This account cannot do anything except go through `resolve_bankruptcy`
     pub is_bankrupt: bool,
     pub info: [u8; INFO_LEN],
+    pub advanced_orders: Pubkey,
     /// padding for expansions
-    pub padding: [u8; 70],
+    pub padding: [u8; 38],
 }
 
 impl MangoAccount {
@@ -1405,22 +1403,28 @@ impl MangoAccount {
     }
 }
 
-// #[derive(Copy, Clone, Pod)]
-// #[repr(C)]
-// pub struct AdvancedOrder {
-//     pub advanced_order_type: u8, // StopLimit,
-//     pub price: i64,
-//     pub quantity: i64,
-//     pub market_index: u8,
-//     pub is_perp: bool, // spot market if false
-// }
-//
-// #[derive(Copy, Clone, Pod, Loadable)]
-// #[repr(C)]
-// pub struct AdvancedOrdersAccount {
-//     pub meta_data: MetaData,
-//     pub orders: [AdvancedOrder; 10],
-// }
+/*
+1. Support StopLimit, profit taking
+2.
+ */
+
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct AdvancedOrder {
+    pub is_active: bool,
+    pub advanced_order_type: u8, // StopLimit,
+    pub is_perp: bool,           // spot market if false
+    pub market_index: u8,
+    pub price: i64,
+    pub quantity: i64,
+}
+
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct AdvancedOrdersAccount {
+    pub meta_data: MetaData,
+    pub orders: [AdvancedOrder; 32],
+}
 
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]

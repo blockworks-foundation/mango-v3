@@ -506,8 +506,8 @@ impl Processor {
 
         // Check validity of root bank cache
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        mango_cache.check_root_bank_cache(&mango_group, token_index, now_ts)?;
-
+        let root_bank_cache = &mango_cache.root_bank_cache[token_index];
+        root_bank_cache.check_valid(&mango_group, now_ts)?;
         checked_change_net(
             root_bank_cache,
             &mut node_bank,
