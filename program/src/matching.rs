@@ -615,11 +615,6 @@ impl<'a> Book<'a> {
 
         let order_id = market.gen_order_id(Side::Bid, price);
 
-        let best_initial = match self.get_best_bid_price() {
-            None => price,
-            Some(p) => p,
-        };
-
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
@@ -696,6 +691,11 @@ impl<'a> Book<'a> {
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
+            let best_initial = match self.get_best_bid_price() {
+                None => price,
+                Some(p) => p,
+            };
+
             let owner_slot = mango_account
                 .next_order_slot()
                 .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
@@ -745,11 +745,6 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true),
         };
         let order_id = market.gen_order_id(Side::Ask, price);
-
-        let best_initial = match self.get_best_ask_price() {
-            None => price,
-            Some(p) => p,
-        };
 
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
@@ -825,6 +820,10 @@ impl<'a> Book<'a> {
                 event_queue.push_back(cast(event)).unwrap();
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
+            let best_initial = match self.get_best_ask_price() {
+                None => price,
+                Some(p) => p,
+            };
 
             let owner_slot = mango_account
                 .next_order_slot()

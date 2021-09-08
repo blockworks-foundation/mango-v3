@@ -468,6 +468,7 @@ impl Processor {
     #[inline(never)]
     /// Deposit instruction
     fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
+        // TODO - consider putting update crank here
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -481,6 +482,8 @@ impl Processor {
             token_prog_ai,          // read
             owner_token_account_ai, // write
         ] = accounts;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -490,27 +493,20 @@ impl Processor {
 
         let token_index = mango_group
             .find_root_bank_index(root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
-
-        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
 
         // Find the node_bank pubkey in root_bank, if not found error
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::Default)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         // deposit into node bank token vault using invoke_transfer
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::Default)?;
-
         invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
 
         // Check validity of root bank cache
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let root_bank_cache = &mango_cache.root_bank_cache[token_index];
-        check!(
-            now_ts <= root_bank_cache.last_update + mango_group.valid_interval,
-            MangoErrorCode::InvalidCache
-        )?;
+        mango_cache.check_root_bank_cache(&mango_group, token_index, now_ts)?;
 
         checked_change_net(
             root_bank_cache,
@@ -1303,11 +1299,11 @@ impl Processor {
         let valid_last_update = Clock::get()?.unix_timestamp as u64 - mango_group.valid_interval;
         check!(
             mango_cache.root_bank_cache[spot_market_index].last_update >= valid_last_update,
-            MangoErrorCode::InvalidCache
+            MangoErrorCode::InvalidRootBankCache
         )?;
         check!(
             mango_cache.root_bank_cache[QUOTE_INDEX].last_update >= valid_last_update,
-            MangoErrorCode::InvalidCache
+            MangoErrorCode::InvalidRootBankCache
         )?;
 
         checked_change_net(

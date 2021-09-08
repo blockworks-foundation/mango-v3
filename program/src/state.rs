@@ -678,6 +678,18 @@ impl MangoCache {
         Ok(())
     }
 
+    pub fn check_root_bank_cache(
+        &self,
+        mango_group: &MangoGroup,
+        token_index: usize,
+        now_ts: u64,
+    ) -> MangoResult<()> {
+        check!(
+            self.root_bank_cache[token_index].last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidRootBankCache
+        )
+    }
+
     pub fn get_price(&self, i: usize) -> I80F48 {
         if i == QUOTE_INDEX {
             ONE_I80F48
@@ -1392,6 +1404,23 @@ impl MangoAccount {
         None
     }
 }
+
+// #[derive(Copy, Clone, Pod)]
+// #[repr(C)]
+// pub struct AdvancedOrder {
+//     pub advanced_order_type: u8, // StopLimit,
+//     pub price: i64,
+//     pub quantity: i64,
+//     pub market_index: u8,
+//     pub is_perp: bool, // spot market if false
+// }
+//
+// #[derive(Copy, Clone, Pod, Loadable)]
+// #[repr(C)]
+// pub struct AdvancedOrdersAccount {
+//     pub meta_data: MetaData,
+//     pub orders: [AdvancedOrder; 10],
+// }
 
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
