@@ -205,7 +205,6 @@ impl Processor {
     fn add_spot_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
         liquidation_fee: I80F48,
@@ -218,10 +217,11 @@ impl Processor {
             MangoErrorCode::InvalidParam
         )?;
 
-        const NUM_FIXED: usize = 8;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai, // write
+            oracle_ai,      //read
             spot_market_ai, // read
             dex_program_ai, // read
             mint_ai,        // read
@@ -236,6 +236,8 @@ impl Processor {
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidOwner)?;
 
+        let market_index =
+            mango_group.oracles.iter().enumerate().find(|&o| o.1.eq(oracle_ai.key)).unwrap().0;
         check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
@@ -369,7 +371,6 @@ impl Processor {
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
         liquidation_fee: I80F48,
@@ -392,11 +393,12 @@ impl Processor {
         check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
 
-        const NUM_FIXED: usize = 7;
+        const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
             mango_group_ai, // write
+            oracle_ai,      // read
             perp_market_ai, // write
             event_queue_ai, // write
             bids_ai,        // write
@@ -412,6 +414,8 @@ impl Processor {
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
 
+        let market_index =
+            mango_group.oracles.iter().enumerate().find(|&o| o.1.eq(oracle_ai.key)).unwrap().0;
         check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
@@ -3709,7 +3713,6 @@ impl Processor {
                 Self::withdraw(program_id, accounts, quantity, allow_borrow)
             }
             MangoInstruction::AddSpotMarket {
-                market_index,
                 maint_leverage,
                 init_leverage,
                 liquidation_fee,
@@ -3721,7 +3724,6 @@ impl Processor {
                 Self::add_spot_market(
                     program_id,
                     accounts,
-                    market_index,
                     maint_leverage,
                     init_leverage,
                     liquidation_fee,
@@ -3769,7 +3771,6 @@ impl Processor {
             }
 
             MangoInstruction::AddPerpMarket {
-                market_index,
                 maint_leverage,
                 init_leverage,
                 liquidation_fee,
@@ -3786,7 +3787,6 @@ impl Processor {
                 Self::add_perp_market(
                     program_id,
                     accounts,
-                    market_index,
                     maint_leverage,
                     init_leverage,
                     liquidation_fee,

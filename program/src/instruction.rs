@@ -91,15 +91,15 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction (8):
     ///
     /// 0. `[writable]` mango_group_ai
-    /// 1. `[]` spot_market_ai
-    /// 2. `[]` dex_program_ai
-    /// 3. `[]` mint_ai
-    /// 4. `[writable]` node_bank_ai
-    /// 5. `[]` vault_ai
-    /// 6. `[writable]` root_bank_ai
-    /// 7. `[signer]` admin_ai
+    /// 1  `[]` oracle_ai
+    /// 2. `[]` spot_market_ai
+    /// 3. `[]` dex_program_ai
+    /// 4. `[]` mint_ai
+    /// 5. `[writable]` node_bank_ai
+    /// 6. `[]` vault_ai
+    /// 7. `[writable]` root_bank_ai
+    /// 8. `[signer]` admin_ai
     AddSpotMarket {
-        market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
         liquidation_fee: I80F48,
@@ -179,14 +179,14 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction (7):
     ///
     /// 0. `[writable]` mango_group_ai
-    /// 1. `[writable]` perp_market_ai
-    /// 2. `[writable]` event_queue_ai
-    /// 3. `[writable]` bids_ai
-    /// 4. `[writable]` asks_ai
-    /// 5. `[]` mngo_vault_ai - the vault from which liquidity incentives will be paid out for this market
-    /// 6. `[signer]` admin_ai
+    /// 1. `[]` oracle_ai
+    /// 2. `[writable]` perp_market_ai
+    /// 3. `[writable]` event_queue_ai
+    /// 4. `[writable]` bids_ai
+    /// 5. `[writable]` asks_ai
+    /// 6. `[]` mngo_vault_ai - the vault from which liquidity incentives will be paid out for this market
+    /// 7. `[signer]` admin_ai
     AddPerpMarket {
-        market_index: usize,
         maint_leverage: I80F48,
         init_leverage: I80F48,
         liquidation_fee: I80F48,
@@ -633,18 +633,16 @@ impl MangoInstruction {
                 MangoInstruction::Withdraw { quantity: u64::from_le_bytes(*quantity), allow_borrow }
             }
             4 => {
-                let data = array_ref![data, 0, 104];
+                let data = array_ref![data, 0, 96];
                 let (
-                    market_index,
                     maint_leverage,
                     init_leverage,
                     liquidation_fee,
                     optimal_util,
                     optimal_rate,
                     max_rate,
-                ) = array_refs![data, 8, 16, 16, 16, 16, 16, 16];
+                ) = array_refs![data, 16, 16, 16, 16, 16, 16];
                 MangoInstruction::AddSpotMarket {
-                    market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
                     liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
@@ -670,9 +668,8 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
-                let data_arr = array_ref![data, 0, 152];
+                let data_arr = array_ref![data, 0, 144];
                 let (
-                    market_index,
                     maint_leverage,
                     init_leverage,
                     liquidation_fee,
@@ -684,9 +681,8 @@ impl MangoInstruction {
                     max_depth_bps,
                     target_period_length,
                     mngo_per_period,
-                ) = array_refs![data_arr, 8, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8];
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8];
                 MangoInstruction::AddPerpMarket {
-                    market_index: usize::from_le_bytes(*market_index),
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
                     liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
@@ -1046,6 +1042,7 @@ pub fn deposit(
 pub fn add_spot_market(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
+    oracle_pk: &Pubkey,
     spot_market_pk: &Pubkey,
     dex_program_pk: &Pubkey,
     token_mint_pk: &Pubkey,
@@ -1054,7 +1051,6 @@ pub fn add_spot_market(
     root_bank_pk: &Pubkey,
     admin_pk: &Pubkey,
 
-    market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
     liquidation_fee: I80F48,
@@ -1064,6 +1060,7 @@ pub fn add_spot_market(
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new_readonly(*oracle_pk, false),
         AccountMeta::new_readonly(*spot_market_pk, false),
         AccountMeta::new_readonly(*dex_program_pk, false),
         AccountMeta::new_readonly(*token_mint_pk, false),
@@ -1074,7 +1071,6 @@ pub fn add_spot_market(
     ];
 
     let instr = MangoInstruction::AddSpotMarket {
-        market_index,
         maint_leverage,
         init_leverage,
         liquidation_fee,
@@ -1089,6 +1085,7 @@ pub fn add_spot_market(
 pub fn add_perp_market(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
+    oracle_pk: &Pubkey,
     perp_market_pk: &Pubkey,
     event_queue_pk: &Pubkey,
     bids_pk: &Pubkey,
@@ -1096,7 +1093,6 @@ pub fn add_perp_market(
     mngo_vault_pk: &Pubkey,
     admin_pk: &Pubkey,
 
-    market_index: usize,
     maint_leverage: I80F48,
     init_leverage: I80F48,
     liquidation_fee: I80F48,
@@ -1111,6 +1107,7 @@ pub fn add_perp_market(
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*oracle_pk, false),
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*event_queue_pk, false),
         AccountMeta::new(*bids_pk, false),
@@ -1120,7 +1117,6 @@ pub fn add_perp_market(
     ];
 
     let instr = MangoInstruction::AddPerpMarket {
-        market_index,
         maint_leverage,
         init_leverage,
         liquidation_fee,
