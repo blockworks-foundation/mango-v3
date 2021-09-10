@@ -119,10 +119,10 @@ impl MangoGroupCookie {
         num_users: usize,
         num_markets: usize,
     ) {
-        test.add_oracles_to_mango_group(&self.address).await;
+        let oracle_pks = test.add_oracles_to_mango_group(&self.address).await;
         self.mango_accounts = self.add_mango_accounts(test, num_users).await;
-        self.spot_markets = self.add_spot_markets(test, num_markets).await;
-        self.perp_markets = self.add_perp_markets(test, num_markets).await;
+        self.spot_markets = self.add_spot_markets(test, num_markets, &oracle_pks).await;
+        self.perp_markets = self.add_perp_markets(test, num_markets, &oracle_pks).await;
         self.mango_group = test.load_account::<MangoGroup>(self.address).await;
     }
 
@@ -144,10 +144,11 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
         num_markets: usize,
+        oracle_pks: &Vec<Pubkey>,
     ) -> Vec<PerpMarketCookie> {
         let mut perp_markets = Vec::new();
         for i in 0..num_markets {
-            perp_markets.push(PerpMarketCookie::init(test, self, i).await);
+            perp_markets.push(PerpMarketCookie::init(test, self, i, oracle_pks).await);
         }
         perp_markets
     }
@@ -157,10 +158,11 @@ impl MangoGroupCookie {
         &mut self,
         test: &mut MangoProgramTest,
         num_markets: usize,
+        oracle_pks: &Vec<Pubkey>,
     ) -> Vec<SpotMarketCookie> {
         let mut spot_markets = Vec::new();
         for i in 0..num_markets {
-            spot_markets.push(SpotMarketCookie::init(test, self, i).await);
+            spot_markets.push(SpotMarketCookie::init(test, self, i, oracle_pks).await);
         }
         spot_markets
     }
@@ -363,6 +365,7 @@ impl SpotMarketCookie {
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         mint_index: usize,
+        oracle_pks: &Vec<Pubkey>,
     ) -> Self {
         let mango_program_id = test.mango_program_id;
         let serum_program_id = test.serum_program_id;
@@ -390,6 +393,7 @@ impl SpotMarketCookie {
         let instructions = [mango::instruction::add_spot_market(
             &mango_program_id,
             &mango_group_pk,
+            &oracle_pks[mint_index],
             &spot_market_cookie.market,
             &serum_program_id,
             &test.mints[mint_index].pubkey.unwrap(),
@@ -397,7 +401,6 @@ impl SpotMarketCookie {
             &vault_pk,
             &root_bank_pk,
             &admin_pk,
-            mint_index,
             maint_leverage,
             init_leverage,
             liquidation_fee,
@@ -467,6 +470,7 @@ impl PerpMarketCookie {
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         mint_index: usize,
+        oracle_pks: &Vec<Pubkey>,
     ) -> Self {
         let mango_program_id = test.mango_program_id;
         let mango_group_pk = mango_group_cookie.address;
@@ -499,13 +503,13 @@ impl PerpMarketCookie {
         let instructions = [mango::instruction::add_perp_market(
             &mango_program_id,
             &mango_group_pk,
+            &oracle_pks[mint_index],
             &perp_market_pk,
             &event_queue_pk,
             &bids_pk,
             &asks_pk,
             &mngo_vault_pk,
             &admin_pk,
-            mint_index,
             maint_leverage,
             init_leverage,
             liquidation_fee,
@@ -523,7 +527,11 @@ impl PerpMarketCookie {
         test.process_transaction(&instructions, None).await.unwrap();
 
         let perp_market = test.load_account::<PerpMarket>(perp_market_pk).await;
-        PerpMarketCookie { address: perp_market_pk, perp_market, mint: test.with_mint(mint_index) }
+        PerpMarketCookie {
+            address: perp_market_pk,
+            perp_market: perp_market,
+            mint: test.with_mint(mint_index),
+        }
     }
 
     #[allow(dead_code)]
@@ -535,7 +543,6 @@ impl PerpMarketCookie {
         side: mango::matching::Side,
         size: f64,
         price: f64,
-        reduce_only: bool,
     ) {
         let order_size = test.base_size_number_to_lots(&self.mint, size);
         let order_price = test.price_number_to_lots(&self.mint, price);
@@ -549,7 +556,6 @@ impl PerpMarketCookie {
             order_price,
             mango_group_cookie.current_perp_order_id,
             mango::matching::OrderType::Limit,
-            reduce_only,
         )
         .await;
 
