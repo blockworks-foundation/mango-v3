@@ -73,6 +73,7 @@ pub enum DataType {
     Asks,
     MangoCache,
     EventQueue,
+    AdvancedOrders,
 }
 
 const NUM_HEALTHS: usize = 2;
@@ -1009,6 +1010,8 @@ pub struct MangoAccount {
     /// This account cannot do anything except go through `resolve_bankruptcy`
     pub is_bankrupt: bool,
     pub info: [u8; INFO_LEN],
+
+    /// Starts off as zero pubkey and points to the AdvancedOrders account
     pub advanced_orders: Pubkey,
     /// padding for expansions
     pub padding: [u8; 38],
@@ -1401,29 +1404,6 @@ impl MangoAccount {
         }
         None
     }
-}
-
-/*
-1. Support StopLimit, profit taking
-2.
- */
-
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct AdvancedOrder {
-    pub is_active: bool,
-    pub advanced_order_type: u8, // StopLimit,
-    pub is_perp: bool,           // spot market if false
-    pub market_index: u8,
-    pub price: i64,
-    pub quantity: i64,
-}
-
-#[derive(Copy, Clone, Pod, Loadable)]
-#[repr(C)]
-pub struct AdvancedOrdersAccount {
-    pub meta_data: MetaData,
-    pub orders: [AdvancedOrder; 32],
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -1960,3 +1940,60 @@ pub struct OrderBookStateHeader {
 }
 unsafe impl Zeroable for OrderBookStateHeader {}
 unsafe impl Pod for OrderBookStateHeader {}
+
+#[derive(Copy, Clone, Pod)]
+#[repr(C)]
+pub struct AdvancedOrder {
+    pub advanced_order_type: u8,
+    pub is_active: bool,
+
+    pub limit_price: i64,
+    pub quantity: i64,
+    pub trigger_price: I80F48,
+    pub side: Side, // example:
+                    // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
+                    // index_price < trigger_price
+}
+
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct AdvancedOrders {
+    pub meta_data: MetaData,
+    pub orders: [AdvancedOrder; 32],
+}
+
+impl AdvancedOrders {
+    pub fn load_and_init<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        let mut state: RefMut<Self> = Self::load_mut(advanced_orders_ai)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), size_of::<Self>()),
+            MangoErrorCode::AccountNotRentExempt
+        )?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        state.meta_data = MetaData::new(DataType::AdvancedOrders, 0, true);
+
+        Ok(state)
+    }
+
+    pub fn load_mut_checked() {
+        todo!()
+    }
+}
+
+/*
+Advanced Order Types
+
+1. Allow user to create an AdvancedOrders account and store the pubkey in his MangoAccount
+2. Allow user to add AdvancedOrder to AdvancedOrders account
+3. Another instruction to let anyone trigger the AdvancedOrders on the account
+    - give the initiator an incentive to keep track of these AdvancedOrders and trigger them
+
+incentive
+5e-6
+fee = 0.0005
+ */

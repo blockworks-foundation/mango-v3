@@ -30,11 +30,11 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
-    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AssetType, DataType,
-    HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
-    PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
-    TokenInfo, UserActiveAssets, FREE_ORDER_SLOT, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS,
-    MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrders, AssetType,
+    DataType, HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank,
+    PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
+    SpotMarketInfo, TokenInfo, UserActiveAssets, FREE_ORDER_SLOT, INFO_LEN, MAX_NODE_BANKS,
+    MAX_PAIRS, MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use switchboard_program::FastRoundResultAccountData;
@@ -3686,6 +3686,46 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn init_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read & signer
+            advanced_orders_ai,     // write
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        // Make sure the MangoAccount doesn't already have a AdvancedOrders set
+        check!(mango_account.advanced_orders == Pubkey::default(), MangoErrorCode::InvalidParam)?;
+
+        // load the advanced_orders_ai
+        let _advanced_orders = AdvancedOrders::load_and_init(advanced_orders_ai, program_id)?;
+
+        // set the mango_account.advanced_orders field
+        mango_account.advanced_orders = *advanced_orders_ai.key;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn register_advanced_order() -> MangoResult<()> {
+        todo!()
+    }
+
+    #[inline(never)]
+    fn execute_advanced_order() -> MangoResult<()> {
+        todo!()
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -3988,6 +4028,9 @@ impl Processor {
             MangoInstruction::ForceSettleQuotePositions => {
                 msg!("Mango: ForceSettleQuotePositions");
                 Self::force_settle_quote_positions(program_id, accounts)
+            }
+            MangoInstruction::InitAdvancedOrders => {
+                Self::init_advanced_orders(program_id, accounts)
             }
         }
     }

@@ -577,7 +577,7 @@ pub enum MangoInstruction {
         limit: u8,
     },
 
-    /// Liqor takes on all the quote positions where base_position == 0
+    /// DEPRECATED - Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
     ///
@@ -591,6 +591,9 @@ pub enum MangoInstruction {
     /// 6. `[writable]` node_bank_ai - NodeBank
     /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
     ForceSettleQuotePositions,
+
+    ///
+    InitAdvancedOrders,
 }
 
 impl MangoInstruction {
@@ -890,7 +893,7 @@ impl MangoInstruction {
             }
 
             40 => MangoInstruction::ForceSettleQuotePositions,
-
+            41 => MangoInstruction::InitAdvancedOrders,
             _ => {
                 return None;
             }
