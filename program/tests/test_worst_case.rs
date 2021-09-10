@@ -178,7 +178,7 @@ async fn test_worst_case_v2() {
 
     let mut expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = Vec::new();
     for user_spot_order in user_spot_orders {
-        let (user_index, mint_index, _, base_size, base_price) = user_spot_order;
+        let (user_index, mint_index, _, base_size, _) = user_spot_order;
         let mint = test.with_mint(mint_index);
         expected_values_vec.push((
             mint_index, // Mint index
@@ -192,7 +192,7 @@ async fn test_worst_case_v2() {
         ));
     }
 
-    for expected_values in expected_values_vec {
+    for _expected_values in expected_values_vec {
         // assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
     }
 

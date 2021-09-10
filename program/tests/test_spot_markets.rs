@@ -4,7 +4,6 @@ use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use mango::state::{ZERO_I80F48, QUOTE_INDEX};
 use std::collections::HashMap;
@@ -79,7 +78,6 @@ async fn test_place_spot_order() {
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
-    let mint = test.with_mint(mint_index);
     let quote_mint = test.quote_mint;
 
     // Set oracles
@@ -277,7 +275,7 @@ async fn test_match_and_settle_spot_order() {
         ),
     ];
     for expected_deposits in expected_deposits_vec {
-        assert_deposits(&mut test, &mango_group_cookie, expected_deposits);
+        assert_deposits(&mango_group_cookie, expected_deposits);
     }
-  
+
 }

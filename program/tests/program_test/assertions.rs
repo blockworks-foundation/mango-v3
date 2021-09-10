@@ -6,7 +6,6 @@ use crate::*;
 
 #[allow(dead_code)]
 pub fn assert_deposits(
-    test: &mut MangoProgramTest,
     mango_group_cookie: &MangoGroupCookie,
     expected_values: (usize, HashMap<usize, I80F48>),
 ) {
