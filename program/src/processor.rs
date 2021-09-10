@@ -232,16 +232,13 @@ impl Processor {
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidOwner)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
-        let market_index =
-            mango_group.oracles.iter().enumerate().find(|&o| o.1.eq(oracle_ai.key)).unwrap().0;
+        let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
+
+        // This will catch the issue if oracle_ai.key == Pubkey::Default
         check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
-
-        // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
-        check!(mango_group.oracles[market_index] != Pubkey::default(), MangoErrorCode::Default)?;
 
         // Make sure spot market at this index not already initialized
         check!(mango_group.spot_markets[market_index].is_empty(), MangoErrorCode::Default)?;
@@ -411,15 +408,13 @@ impl Processor {
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
 
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
-        let market_index =
-            mango_group.oracles.iter().enumerate().find(|&o| o.1.eq(oracle_ai.key)).unwrap().0;
+        let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
+
+        // This will catch the issue if oracle_ai.key == Pubkey::Default
         check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
-
-        // Make sure there is an oracle at this index -- probably unnecessary because add_oracle is only place that modifies num_oracles
-        check!(mango_group.oracles[market_index] != Pubkey::default(), MangoErrorCode::Default)?;
 
         // Make sure perp market at this index not already initialized
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
