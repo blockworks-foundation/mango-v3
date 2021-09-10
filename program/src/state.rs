@@ -573,6 +573,15 @@ pub struct PriceCache {
     pub last_update: u64,
 }
 
+impl PriceCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidPriceCache
+        )
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct RootBankCache {
@@ -596,6 +605,15 @@ pub struct PerpMarketCache {
     pub long_funding: I80F48,
     pub short_funding: I80F48,
     pub last_update: u64,
+}
+
+impl PerpMarketCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidPerpMarketCache
+        )
+    }
 }
 
 #[derive(Copy, Clone, Pod, Loadable)]

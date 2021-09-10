@@ -1296,18 +1296,16 @@ impl Processor {
         check!(post_quote <= pre_quote, MangoErrorCode::Default)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let valid_last_update = Clock::get()?.unix_timestamp as u64 - mango_group.valid_interval;
-        check!(
-            mango_cache.root_bank_cache[spot_market_index].last_update >= valid_last_update,
-            MangoErrorCode::InvalidRootBankCache
-        )?;
-        check!(
-            mango_cache.root_bank_cache[QUOTE_INDEX].last_update >= valid_last_update,
-            MangoErrorCode::InvalidRootBankCache
-        )?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let base_root_bank_cache = &mango_cache.root_bank_cache[spot_market_index];
+        let quote_root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+
+        base_root_bank_cache.check_valid(&mango_group, now_ts)?;
+        quote_root_bank_cache.check_valid(&mango_group, now_ts)?;
 
         checked_change_net(
-            &mango_cache.root_bank_cache[spot_market_index],
+            base_root_bank_cache,
             &mut base_node_bank,
             &mut mango_account,
             mango_account_ai.key,
@@ -1315,7 +1313,7 @@ impl Processor {
             I80F48::from_num(pre_base - post_base),
         )?;
         checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            quote_root_bank_cache,
             &mut quote_node_bank,
             &mut mango_account,
             mango_account_ai.key,
@@ -1638,20 +1636,15 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let now_ts = Clock::get()?.unix_timestamp as u64;
 
-        let valid_last_update = now_ts - mango_group.valid_interval;
+        let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+        let price_cache = &mango_cache.price_cache[market_index];
         let perp_market_cache = &mango_cache.perp_market_cache[market_index];
 
-        check!(
-            valid_last_update <= mango_cache.price_cache[market_index].last_update,
-            MangoErrorCode::InvalidCache
-        )?;
-        check!(
-            valid_last_update <= mango_cache.root_bank_cache[QUOTE_INDEX].last_update,
-            MangoErrorCode::InvalidCache
-        )?;
-        check!(valid_last_update <= perp_market_cache.last_update, MangoErrorCode::InvalidCache)?;
+        root_bank_cache.check_valid(&mango_group, now_ts)?;
+        price_cache.check_valid(&mango_group, now_ts)?;
+        perp_market_cache.check_valid(&mango_group, now_ts)?;
 
-        let price = mango_cache.price_cache[market_index].price;
+        let price = price_cache.price;
 
         let a = &mut mango_account_a.perp_accounts[market_index];
         let b = &mut mango_account_b.perp_accounts[market_index];
@@ -1676,7 +1669,7 @@ impl Processor {
         a.transfer_quote_position(b, a_settle);
 
         transfer_token_internal(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &root_bank_cache,
             &mut node_bank,
             &mut mango_account_b,
             &mut mango_account_a,
@@ -3575,7 +3568,7 @@ impl Processor {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-            mango_group_ai,     // read 
+            mango_group_ai,     // read
             mango_account_ai,   // write
             owner_ai            // signer
         ] = accounts;
