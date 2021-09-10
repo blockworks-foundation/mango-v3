@@ -1740,18 +1740,15 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let now_ts = Clock::get()?.unix_timestamp as u64;
 
-        let valid_last_update = now_ts - mango_group.valid_interval;
-        let perp_market_cache = &mango_cache.perp_market_cache[market_index];
         let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+        let price_cache = &mango_cache.price_cache[market_index];
+        let perp_market_cache = &mango_cache.perp_market_cache[market_index];
 
-        check!(
-            valid_last_update <= mango_cache.price_cache[market_index].last_update,
-            MangoErrorCode::InvalidCache
-        )?;
-        check!(valid_last_update <= root_bank_cache.last_update, MangoErrorCode::InvalidCache)?;
-        check!(valid_last_update <= perp_market_cache.last_update, MangoErrorCode::InvalidCache)?;
+        root_bank_cache.check_valid(&mango_group, now_ts)?;
+        price_cache.check_valid(&mango_group, now_ts)?;
+        perp_market_cache.check_valid(&mango_group, now_ts)?;
 
-        let price = mango_cache.price_cache[market_index].price;
+        let price = price_cache.price;
 
         let pa = &mut mango_account.perp_accounts[market_index];
         pa.settle_funding(&perp_market_cache);
@@ -3318,11 +3315,11 @@ impl Processor {
         let mut event_queue: EventQueue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
-        let cache = &mango_cache.perp_market_cache[market_index];
+        let perp_market_cache = &mango_cache.perp_market_cache[market_index];
 
-        let valid_last_update = Clock::get()?.unix_timestamp as u64 - mango_group.valid_interval;
-        check!(cache.last_update >= valid_last_update, MangoErrorCode::InvalidPerpMarketCache)?;
+        perp_market_cache.check_valid(&mango_group, now_ts)?;
 
         let info = &mango_group.perp_markets[market_index];
 
@@ -3350,8 +3347,8 @@ impl Processor {
                                 mango_group_ai.key,
                             )?,
                         };
-                        ma.execute_maker(market_index, &mut perp_market, info, cache, fill)?;
-                        ma.execute_taker(market_index, &mut perp_market, info, cache, fill)?;
+                        ma.execute_maker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
+                        ma.execute_taker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
                     } else {
                         let mut maker =
                             match mango_account_ais.iter().find(|ai| ai.key == &fill.maker) {
@@ -3378,8 +3375,8 @@ impl Processor {
                                 )?,
                             };
 
-                        maker.execute_maker(market_index, &mut perp_market, info, cache, fill)?;
-                        taker.execute_taker(market_index, &mut perp_market, info, cache, fill)?;
+                        maker.execute_maker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
+                        taker.execute_taker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
                     }
 
                     // TODO OPT remove this log if we start hitting compute limits
@@ -3544,10 +3541,7 @@ impl Processor {
         )?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        check!(
-            now_ts <= mngo_bank_cache.last_update + mango_group.valid_interval,
-            MangoErrorCode::InvalidCache
-        )?;
+        mngo_bank_cache.check_valid(&mango_group, now_ts)?;
 
         checked_change_net(
             mngo_bank_cache,
