@@ -4,11 +4,9 @@ use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-
 use solana_program::pubkey::Pubkey;
 use solana_program_test::*;
 use mango::state::{ZERO_I80F48, QUOTE_INDEX};
-
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -160,12 +158,10 @@ async fn test_match_spot_order() {
     ];
 
     // Matched Spot Orders
-    let matched_spot_orders = vec![
-        vec![
-            (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
-            (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
-        ],
-    ];
+    let matched_spot_orders = vec![vec![
+        (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
+        (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
+    ]];
 
     // === Act ===
     // Step 1: Make deposits
@@ -283,4 +279,5 @@ async fn test_match_and_settle_spot_order() {
     for expected_deposits in expected_deposits_vec {
         assert_deposits(&mut test, &mango_group_cookie, expected_deposits);
     }
+  
 }
