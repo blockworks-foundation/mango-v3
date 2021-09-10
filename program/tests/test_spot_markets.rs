@@ -1,11 +1,11 @@
 mod program_test;
-use program_test::*;
+use fixed::types::I80F48;
+use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
-use program_test::assertions::*;
+use program_test::*;
 use solana_program_test::*;
 use mango::state::{ZERO_I80F48, QUOTE_INDEX};
-use fixed::types::I80F48;
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -33,7 +33,6 @@ async fn test_list_spot_market_on_serum() {
 
 #[tokio::test]
 async fn test_init_spot_markets() {
-
     // === Arrange ===
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -49,12 +48,11 @@ async fn test_init_spot_markets() {
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
 
     // === Act ===
-    test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
-    mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1).await;
+    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
+    mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1, &oracle_pks).await;
 
     // === Assert ===
     // TODO: Figure out how to assert
-
 }
 
 #[tokio::test]
@@ -87,14 +85,11 @@ async fn test_place_spot_order() {
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
 
     // Deposit amounts
-    let user_deposits = vec![
-        (user_index, test.quote_index, base_price),
-    ];
+    let user_deposits = vec![(user_index, test.quote_index, base_price)];
 
     // Spot Orders
-    let user_spot_orders = vec![
-        (user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
-    ];
+    let user_spot_orders =
+        vec![(user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price)];
 
     // === Act ===
     // Step 1: Make deposits
@@ -128,7 +123,7 @@ async fn test_place_spot_order() {
 #[tokio::test]
 async fn test_match_spot_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 6 };
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
     solana_logger::setup_with_default(
@@ -146,7 +141,7 @@ async fn test_match_spot_order() {
     // General parameters
     let bidder_user_index: usize = 0;
     let asker_user_index: usize = 1;
-    let mint_index: usize = 4;
+    let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
     let mint = test.with_mint(mint_index);
