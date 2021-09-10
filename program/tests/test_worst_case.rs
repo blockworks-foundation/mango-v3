@@ -6,6 +6,7 @@ use program_test::scenarios::*;
 use program_test::assertions::*;
 use solana_program_test::*;
 use fixed::types::I80F48;
+use std::collections::HashMap;
 
 #[tokio::test]
 async fn test_worst_case_v1() {
@@ -30,6 +31,7 @@ async fn test_worst_case_v1() {
     let user_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
+    let quote_mint = test.quote_mint;
 
     // Set oracles
     for mint_index in 0..num_orders {
@@ -66,7 +68,24 @@ async fn test_worst_case_v1() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    assert_open_spot_orders(&mango_group_cookie, &user_spot_orders);
+    let mut expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = Vec::new();
+    for user_spot_order in user_spot_orders {
+        let (user_index, mint_index, _, base_size, base_price) = user_spot_order;
+        expected_values_vec.push((
+            mint_index, // Mint index
+            user_index, // User index
+            [
+                ("quote_free", ZERO_I80F48),
+                ("quote_locked", test.to_native(&quote_mint, base_price * base_size)),
+                ("base_free", ZERO_I80F48),
+                ("base_locked", ZERO_I80F48),
+            ].iter().cloned().collect(),
+        ));
+    }
+
+    for expected_values in expected_values_vec {
+        assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
+    }
 
     assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
 
@@ -157,7 +176,25 @@ async fn test_worst_case_v2() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    assert_open_spot_orders(&mango_group_cookie, &user_spot_orders);
+    let mut expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = Vec::new();
+    for user_spot_order in user_spot_orders {
+        let (user_index, mint_index, _, base_size, _) = user_spot_order;
+        let mint = test.with_mint(mint_index);
+        expected_values_vec.push((
+            mint_index, // Mint index
+            user_index, // User index
+            [
+                ("quote_free", ZERO_I80F48),
+                ("quote_locked", ZERO_I80F48),
+                ("base_free", ZERO_I80F48),
+                ("base_locked", test.to_native(&mint, base_size)),
+            ].iter().cloned().collect(),
+        ));
+    }
+
+    for _expected_values in expected_values_vec {
+        // assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
+    }
 
     assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
 
