@@ -4,7 +4,7 @@ use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::assertions::*;
 use solana_program_test::*;
-use mango::state::ZERO_I80F48;
+use mango::state::{ZERO_I80F48, QUOTE_INDEX};
 use fixed::types::I80F48;
 use std::collections::HashMap;
 
@@ -108,12 +108,12 @@ async fn test_place_spot_order() {
 
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
         (
-            0 as usize, // Mint index
-            0 as usize, // User index
+            mint_index, // Mint index
+            user_index, // User index
             [
-                ("quote_free", test.to_native(&quote_mint, base_price * base_size)),
-                ("quote_locked", ZERO_I80F48),
-                ("base_free", test.to_native(&mint, 1.0)),
+                ("quote_free", ZERO_I80F48),
+                ("quote_locked", test.to_native(&quote_mint, base_price * base_size)),
+                ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
             ].iter().cloned().collect(),
         )
@@ -128,7 +128,7 @@ async fn test_place_spot_order() {
 #[tokio::test]
 async fn test_match_spot_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 6 };
     let mut test = MangoProgramTest::start_new(&config).await;
     // Supress some of the logs
     solana_logger::setup_with_default(
@@ -146,7 +146,7 @@ async fn test_match_spot_order() {
     // General parameters
     let bidder_user_index: usize = 0;
     let asker_user_index: usize = 1;
-    let mint_index: usize = 0;
+    let mint_index: usize = 4;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
     let mint = test.with_mint(mint_index);
@@ -181,18 +181,18 @@ async fn test_match_spot_order() {
 
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
         (
-            0 as usize, // Mint index
-            0 as usize, // User index
+            mint_index, // Mint index
+            bidder_user_index, // User index
             [
                 ("quote_free", test.to_native(&quote_mint, 3.0)), // serum_dex fee
                 ("quote_locked", ZERO_I80F48),
-                ("base_free", test.to_native(&mint, 1.0)),
+                ("base_free", test.to_native(&mint, base_size)),
                 ("base_locked", ZERO_I80F48),
             ].iter().cloned().collect(),
         ),
         (
-            0 as usize, // Mint index
-            1 as usize, // User index
+            mint_index, // Mint index
+            asker_user_index, // User index
             [
                 ("quote_free", ZERO_I80F48),
                 ("quote_locked", ZERO_I80F48),
@@ -266,23 +266,23 @@ async fn test_match_and_settle_spot_order() {
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
-
-    let bidder_base_deposit =
-        &mango_group_cookie.mango_accounts[bidder_user_index].mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
-    let asker_base_deposit =
-        &mango_group_cookie.mango_accounts[asker_user_index].mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
-
-    // let bidder_quote_deposit =
-    //     &mango_group_cookie.mango_accounts[bidder_user_index].mango_account
-    //     .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
-    // let asker_quote_deposit =
-    //     &mango_group_cookie.mango_accounts[asker_user_index].mango_account
-    //     .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX).unwrap();
-
-    assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(1000000).to_string());
-    assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
-
-
+    let expected_deposits_vec: Vec<(usize, HashMap<usize, I80F48>)> = vec![
+        (
+            bidder_user_index, // User index
+            [
+                (mint_index, test.to_native(&mint, 1.0)),
+                (QUOTE_INDEX, test.to_native(&quote_mint, 3.0)), // serum_dex fee
+            ].iter().cloned().collect(),
+        ),
+        (
+            asker_user_index, // User index
+            [
+                (mint_index, ZERO_I80F48),
+                (QUOTE_INDEX, I80F48::from_num(9982399999 as i64).checked_add(I80F48::from_num(0.999999998578915 as f64)).unwrap()), //TODO: Explain this
+            ].iter().cloned().collect(),
+        ),
+    ];
+    for expected_deposits in expected_deposits_vec {
+        assert_deposits(&mut test, &mango_group_cookie, expected_deposits);
+    }
 }
