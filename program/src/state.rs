@@ -574,6 +574,15 @@ pub struct PriceCache {
     pub last_update: u64,
 }
 
+impl PriceCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidPriceCache
+        )
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct RootBankCache {
@@ -585,7 +594,7 @@ pub struct RootBankCache {
 impl RootBankCache {
     pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
         check!(
-            self.last_update >= now_ts - mango_group.valid_interval,
+            self.last_update >= now_ts - (mango_group.valid_interval * 2),
             MangoErrorCode::InvalidRootBankCache
         )
     }
@@ -597,6 +606,15 @@ pub struct PerpMarketCache {
     pub long_funding: I80F48,
     pub short_funding: I80F48,
     pub last_update: u64,
+}
+
+impl PerpMarketCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidPerpMarketCache
+        )
+    }
 }
 
 #[derive(Copy, Clone, Pod, Loadable)]
@@ -657,32 +675,24 @@ impl MangoCache {
         active_assets: &UserActiveAssets,
         now_ts: u64,
     ) -> MangoResult<()> {
-        let valid_start = now_ts - mango_group.valid_interval;
-        check!(
-            self.root_bank_cache[QUOTE_INDEX].last_update >= valid_start,
-            MangoErrorCode::InvalidRootBankCache
-        )?;
+
+        let root_bank_cache = &self.root_bank_cache[QUOTE_INDEX];
+        root_bank_cache.check_valid(&mango_group, now_ts)?;
 
         for i in 0..mango_group.num_oracles {
             if active_assets.spot[i] || active_assets.perps[i] {
-                check!(
-                    self.price_cache[i].last_update >= valid_start,
-                    MangoErrorCode::InvalidPriceCache
-                )?;
+                let price_cache = &self.price_cache[i];
+                price_cache.check_valid(&mango_group, now_ts)?;
             }
 
             if active_assets.spot[i] {
-                check!(
-                    self.root_bank_cache[i].last_update >= valid_start,
-                    MangoErrorCode::InvalidRootBankCache
-                )?;
+                let root_bank_cache = &self.root_bank_cache[i];
+                root_bank_cache.check_valid(&mango_group, now_ts)?;
             }
 
             if active_assets.perps[i] {
-                check!(
-                    self.perp_market_cache[i].last_update >= valid_start,
-                    MangoErrorCode::InvalidPerpMarketCache
-                )?;
+                let perp_market_cache = &self.perp_market_cache[i];
+                perp_market_cache.check_valid(&mango_group, now_ts)?;
             }
         }
         Ok(())
@@ -1749,10 +1759,8 @@ impl PerpMarket {
     ) -> MangoResult<()> {
         // Get the index price from cache, ensure it's not outdated
         let price_cache = &mango_cache.price_cache[market_index];
-        check!(
-            now_ts <= price_cache.last_update + mango_group.valid_interval,
-            MangoErrorCode::InvalidCache
-        )?;
+        price_cache.check_valid(&mango_group, now_ts)?;
+
         let index_price = price_cache.price;
         // Get current book price & compare it to index price
 
