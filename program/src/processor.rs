@@ -37,6 +37,7 @@ use crate::state::{
     MAX_PAIRS, MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use solana_program::log::sol_log_compute_units;
 use switchboard_program::FastRoundResultAccountData;
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -488,6 +489,13 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        sol_log_compute_units();
+        let (pda_address, bump_seed) =
+            Pubkey::find_program_address(&[&mango_account_ai.key.to_bytes()], program_id);
+        sol_log_compute_units();
+        msg!("address {} bump seed {}", pda_address.to_string(), bump_seed);
+
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
 
         let token_index = mango_group
@@ -912,6 +920,7 @@ impl Processor {
     }
 
     #[inline(never)]
+    /// DEPRECATED
     fn place_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -937,9 +946,9 @@ impl Processor {
             base_root_bank_ai,      // read
             base_node_bank_ai,      // write
             base_vault_ai,          // write
-            quote_root_bank_ai,      // read
-            quote_node_bank_ai,      // write
-            quote_vault_ai,          // write
+            quote_root_bank_ai,     // read
+            quote_node_bank_ai,     // write
+            quote_vault_ai,         // write
             token_prog_ai,          // read
             signer_ai,              // read
             rent_ai,                // read
@@ -948,10 +957,10 @@ impl Processor {
         ] = fixed_ais;
 
         // TODO OPT - reduce size of this transaction
-        // put bank info into group +64 bytes
-        // remove settle_funds +64 bytes
+        // put bank info into group +64 bytes (can't do this now)
+        // remove settle_funds +64 bytes (can't do this for UX reasons)
         // ask serum dex to use dynamic sysvars +32 bytes
-        // only send in open orders pubkeys we need +54 bytes
+        // only send in open orders pubkeys we need +38 bytes
         // shrink size of order instruction +10 bytes
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -985,19 +994,17 @@ impl Processor {
 
         check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-
         check!(
             &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
             MangoErrorCode::InvalidRootBank
         )?;
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
 
         check!(
             quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
             MangoErrorCode::InvalidNodeBank
         )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         // Adjust margin basket; this also makes this market an active asset
@@ -1115,6 +1122,225 @@ impl Processor {
             &mango_cache,
             &mango_account,
             &open_orders_ais[market_index],
+            market_index,
+        )?;
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // If an account is in reduce_only mode, health must only go up
+        check!(
+            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
+    }
+
+    #[inline(never)]
+    fn place_spot_order2<'a>(
+        program_id: &Pubkey,
+        accounts: &'a [AccountInfo<'a>],
+        order: serum_dex::instruction::NewOrderInstructionV3,
+        allow_borrow: bool,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 22;
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read & signer
+            mango_cache_ai,         // read
+            dex_prog_ai,            // read
+            spot_market_ai,         // write
+            bids_ai,                // write
+            asks_ai,                // write
+            dex_request_queue_ai,   // write
+            dex_event_queue_ai,     // write
+            dex_base_ai,            // write
+            dex_quote_ai,           // write
+            base_root_bank_ai,      // read
+            base_node_bank_ai,      // write
+            base_vault_ai,          // write
+            quote_root_bank_ai,     // read
+            quote_node_bank_ai,     // write
+            quote_vault_ai,         // write
+            token_prog_ai,          // read
+            signer_ai,              // read
+            dex_signer_ai,          // read
+            msrm_or_srm_vault_ai,   // read
+        ] = fixed_ais;
+
+        // put bank info into group +64 bytes (can't do this now)
+        // remove settle_funds +64 bytes (can't do this for UX reasons)
+        // ask serum dex to use dynamic sysvars +31 bytes (done)
+        // only send in open orders pubkeys we need +38 bytes (done)
+        // shrink size of order instruction +10 bytes
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        check!(
+            &mango_group.tokens[market_index].root_bank == base_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        // Adjust margin basket; this also makes this market an active asset
+        mango_account.add_to_basket(market_index)?;
+
+        let open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+
+        let active_assets = UserActiveAssets::new(&mango_group, &mango_account, vec![]);
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            &open_orders_ais,
+        )?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
+
+        // TODO maybe check that root bank was updated recently
+        // TODO maybe check oracle was updated recently
+
+        // TODO OPT - write a zero copy way to deserialize Account to reduce compute
+        // this is to keep track of the amount of funds transferred
+        let (pre_base, pre_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )
+        };
+        let vault_ai = match order.side {
+            serum_dex::matching::Side::Bid => quote_vault_ai,
+            serum_dex::matching::Side::Ask => base_vault_ai,
+        };
+
+        // Send order to serum dex
+        let market_open_orders_ai = open_orders_ais[market_index].unwrap();
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_new_order(
+            dex_prog_ai,
+            spot_market_ai,
+            market_open_orders_ai,
+            dex_request_queue_ai,
+            dex_event_queue_ai,
+            bids_ai,
+            asks_ai,
+            vault_ai,
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            token_prog_ai,
+            signer_ai, // send this instead of rent_ai because rent_ai not necessary
+            msrm_or_srm_vault_ai,
+            &[&signers_seeds],
+            order,
+        )?;
+
+        // Settle funds for this market
+        invoke_settle_funds(
+            dex_prog_ai,
+            spot_market_ai,
+            market_open_orders_ai,
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            base_vault_ai,
+            quote_vault_ai,
+            dex_signer_ai,
+            token_prog_ai,
+            &[&signers_seeds],
+        )?;
+
+        // See if we can remove this market from margin
+        let open_orders = load_open_orders(open_orders_ais[market_index].unwrap())?;
+        mango_account.update_basket(market_index, &open_orders)?;
+
+        let (post_base, post_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )
+        };
+
+        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
+        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
+
+        checked_change_net(
+            &mango_cache.root_bank_cache[QUOTE_INDEX],
+            &mut quote_node_bank,
+            &mut mango_account,
+            mango_account_ai.key,
+            QUOTE_INDEX,
+            quote_change,
+        )?;
+
+        checked_change_net(
+            &mango_cache.root_bank_cache[market_index],
+            &mut base_node_bank,
+            &mut mango_account,
+            mango_account_ai.key,
+            market_index,
+            base_change,
+        )?;
+
+        // Update health for tokens that may have changed
+        health_cache.update_quote(&mango_cache, &mango_account);
+        health_cache.update_spot_val(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            market_open_orders_ai,
             market_index,
         )?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -3346,8 +3572,20 @@ impl Processor {
                                 mango_group_ai.key,
                             )?,
                         };
-                        ma.execute_maker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
-                        ma.execute_taker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
+                        ma.execute_maker(
+                            market_index,
+                            &mut perp_market,
+                            info,
+                            perp_market_cache,
+                            fill,
+                        )?;
+                        ma.execute_taker(
+                            market_index,
+                            &mut perp_market,
+                            info,
+                            perp_market_cache,
+                            fill,
+                        )?;
                     } else {
                         let mut maker =
                             match mango_account_ais.iter().find(|ai| ai.key == &fill.maker) {
@@ -3374,8 +3612,20 @@ impl Processor {
                                 )?,
                             };
 
-                        maker.execute_maker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
-                        taker.execute_taker(market_index, &mut perp_market, info, perp_market_cache, fill)?;
+                        maker.execute_maker(
+                            market_index,
+                            &mut perp_market,
+                            info,
+                            perp_market_cache,
+                            fill,
+                        )?;
+                        taker.execute_taker(
+                            market_index,
+                            &mut perp_market,
+                            info,
+                            perp_market_cache,
+                            fill,
+                        )?;
                     }
 
                     // TODO OPT remove this log if we start hitting compute limits
@@ -3674,16 +3924,17 @@ impl Processor {
 
     #[inline(never)]
     fn init_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        const NUM_FIXED: usize = 4;
+        const NUM_FIXED: usize = 5;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
-            owner_ai,               // read & signer
+            owner_ai,               // write & signer
             advanced_orders_ai,     // write
+            system_prog_ai,         // read
         ] = accounts;
 
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -3694,8 +3945,24 @@ impl Processor {
         // Make sure the MangoAccount doesn't already have a AdvancedOrders set
         check!(mango_account.advanced_orders == Pubkey::default(), MangoErrorCode::InvalidParam)?;
 
-        // load the advanced_orders_ai
-        let _advanced_orders = AdvancedOrders::load_and_init(advanced_orders_ai, program_id)?;
+        let (pda_address, bump_seed) =
+            Pubkey::find_program_address(&[&mango_account_ai.key.to_bytes()], program_id);
+        check!(&pda_address == advanced_orders_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        let pda_signer_seeds: &[&[u8]] = &[&pda_address.to_bytes(), &[bump_seed]];
+        let rent = Rent::get()?;
+        create_pda_account(
+            owner_ai,
+            &rent,
+            size_of::<AdvancedOrders>(),
+            program_id,
+            system_prog_ai,
+            advanced_orders_ai,
+            pda_signer_seeds,
+        )?;
+
+        // initialize the AdvancedOrders account
+        AdvancedOrders::init(advanced_orders_ai, program_id, &rent)?;
 
         // set the mango_account.advanced_orders field
         mango_account.advanced_orders = *advanced_orders_ai.key;
@@ -4583,6 +4850,52 @@ fn invoke_init_open_orders<'a>(
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
 
-/*
-TODO test order types
- */
+fn create_pda_account<'a>(
+    funder: &AccountInfo<'a>,
+    rent: &Rent,
+    space: usize,
+    owner: &Pubkey,
+    system_program: &AccountInfo<'a>,
+    new_pda_account: &AccountInfo<'a>,
+    new_pda_signer_seeds: &[&[u8]],
+) -> ProgramResult {
+    if new_pda_account.lamports() > 0 {
+        let required_lamports =
+            rent.minimum_balance(space).max(1).saturating_sub(new_pda_account.lamports());
+
+        if required_lamports > 0 {
+            solana_program::program::invoke(
+                &solana_program::system_instruction::transfer(
+                    funder.key,
+                    new_pda_account.key,
+                    required_lamports,
+                ),
+                &[funder.clone(), new_pda_account.clone(), system_program.clone()],
+            )?;
+        }
+
+        solana_program::program::invoke_signed(
+            &solana_program::system_instruction::allocate(new_pda_account.key, space as u64),
+            &[new_pda_account.clone(), system_program.clone()],
+            &[new_pda_signer_seeds],
+        )?;
+
+        solana_program::program::invoke_signed(
+            &solana_program::system_instruction::assign(new_pda_account.key, owner),
+            &[new_pda_account.clone(), system_program.clone()],
+            &[new_pda_signer_seeds],
+        )
+    } else {
+        solana_program::program::invoke_signed(
+            &solana_program::system_instruction::create_account(
+                funder.key,
+                new_pda_account.key,
+                rent.minimum_balance(space).max(1),
+                space as u64,
+                owner,
+            ),
+            &[funder.clone(), new_pda_account.clone(), system_program.clone()],
+            &[new_pda_signer_seeds],
+        )
+    }
+}

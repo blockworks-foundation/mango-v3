@@ -675,27 +675,20 @@ impl MangoCache {
         active_assets: &UserActiveAssets,
         now_ts: u64,
     ) -> MangoResult<()> {
-
-        let root_bank_cache = &self.root_bank_cache[QUOTE_INDEX];
-        root_bank_cache.check_valid(&mango_group, now_ts)?;
-
         for i in 0..mango_group.num_oracles {
             if active_assets.spot[i] || active_assets.perps[i] {
-                let price_cache = &self.price_cache[i];
-                price_cache.check_valid(&mango_group, now_ts)?;
+                self.price_cache[i].check_valid(&mango_group, now_ts)?;
             }
 
             if active_assets.spot[i] {
-                let root_bank_cache = &self.root_bank_cache[i];
-                root_bank_cache.check_valid(&mango_group, now_ts)?;
+                self.root_bank_cache[i].check_valid(&mango_group, now_ts)?;
             }
 
             if active_assets.perps[i] {
-                let perp_market_cache = &self.perp_market_cache[i];
-                perp_market_cache.check_valid(&mango_group, now_ts)?;
+                self.perp_market_cache[i].check_valid(&mango_group, now_ts)?;
             }
         }
-        Ok(())
+        self.root_bank_cache[QUOTE_INDEX].check_valid(&mango_group, now_ts)
     }
 
     pub fn get_price(&self, i: usize) -> I80F48 {
@@ -791,6 +784,34 @@ impl HealthCache {
                     mango_cache.price_cache[i].price,
                     i,
                     &open_orders_ais[i],
+                )?;
+            }
+
+            if self.active_assets.perps[i] {
+                self.perp[i] = mango_account.perp_accounts[i].get_val(
+                    &mango_group.perp_markets[i],
+                    &mango_cache.perp_market_cache[i],
+                    mango_cache.price_cache[i].price,
+                )?;
+            }
+        }
+        Ok(())
+    }
+    pub fn init_vals_with_orders_vec(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ais: &Vec<Option<&AccountInfo>>,
+    ) -> MangoResult<()> {
+        self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
+        for i in 0..mango_group.num_oracles {
+            if self.active_assets.spot[i] {
+                self.spot[i] = mango_account.get_spot_val(
+                    &mango_cache.root_bank_cache[i],
+                    mango_cache.price_cache[i].price,
+                    i,
+                    open_orders_ais[i].unwrap(),
                 )?;
             }
 
@@ -1255,6 +1276,25 @@ impl MangoAccount {
         true
     }
 
+    pub fn checked_unpack_open_orders<'a>(
+        &self,
+        mango_group: &MangoGroup,
+        open_orders_ais: &'a [AccountInfo<'a>],
+    ) -> MangoResult<Vec<Option<&'a AccountInfo<'a>>>> {
+        let mut unpacked = vec![None; MAX_PAIRS];
+        for i in 0..mango_group.num_oracles {
+            if self.in_margin_basket[i] {
+                let open_orders_ai = open_orders_ais
+                    .iter()
+                    .find(|ai| ai.key == &self.spot_open_orders[i])
+                    .ok_or(throw_err!(MangoErrorCode::InvalidOpenOrdersAccount))?;
+
+                check_open_orders(open_orders_ai, &mango_group.signer_key)?;
+                unpacked[i] = Some(open_orders_ai);
+            }
+        }
+        Ok(unpacked)
+    }
     pub fn check_open_orders(
         &self,
         mango_group: &MangoGroup,
@@ -1971,11 +2011,8 @@ pub struct AdvancedOrders {
 }
 
 impl AdvancedOrders {
-    pub fn load_and_init<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-    ) -> MangoResult<RefMut<'a, Self>> {
-        let mut state: RefMut<Self> = Self::load_mut(advanced_orders_ai)?;
+    pub fn init(account: &AccountInfo, program_id: &Pubkey, rent: &Rent) -> MangoResult<()> {
+        let mut state: RefMut<Self> = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
         check!(
             rent.is_exempt(account.lamports(), size_of::<Self>()),
@@ -1985,7 +2022,7 @@ impl AdvancedOrders {
 
         state.meta_data = MetaData::new(DataType::AdvancedOrders, 0, true);
 
-        Ok(state)
+        Ok(())
     }
 
     pub fn load_mut_checked() {
