@@ -57,7 +57,12 @@ async fn test_token_and_token_liquidation_v1() {
     // Step 2: Place and match an order for 1 BTC @ 15_000
     match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
 
-    // Step 3: Assert that the order has been matched and the bidder has 1 BTC in deposits
+    // Step 3: Settle all spot order
+    for matched_spot_order in matched_spot_orders {
+        mango_group_cookie.settle_spot_funds(&mut test, &matched_spot_order).await;
+    }
+
+    // Step 4: Assert that the order has been matched and the bidder has 1 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;
 
     let bidder_base_deposit =
@@ -71,10 +76,10 @@ async fn test_token_and_token_liquidation_v1() {
     assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(1000000).to_string());
     assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
 
-    // Step 4: Change the oracle price so that bidder becomes liqee
+    // Step 5: Change the oracle price so that bidder becomes liqee
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 15.0).await;
 
-    // Step 5: Perform a coulple liquidations
+    // Step 6: Perform a coulple liquidations
     for _ in 0..5 {
         mango_group_cookie.run_keeper(&mut test).await;
         test.perform_liquidate_token_and_token(
@@ -176,7 +181,12 @@ async fn test_token_and_token_liquidation_v2() {
     // Step 3: Place and match an order for 1 BTC @ 15_000
     match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
 
-    // Step 4: Assert that the order has been matched and the bidder has 3 BTC in deposits
+    // Step 4: Settle all spot orders
+    for matched_spot_order in matched_spot_orders {
+        mango_group_cookie.settle_spot_funds(&mut test, &matched_spot_order).await;
+    }
+
+    // Step 5: Assert that the order has been matched and the bidder has 3 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;
 
     let bidder_base_deposit =
@@ -189,12 +199,12 @@ async fn test_token_and_token_liquidation_v2() {
     assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(3000000).to_string());
     assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
 
-    // Step 5: Change the oracle price so that bidder becomes liqee
+    // Step 6: Change the oracle price so that bidder becomes liqee
     for mint_index in 0..num_orders {
         mango_group_cookie.set_oracle(&mut test, mint_index, 0.0000000001).await;
     }
 
-    // Step 6: Force cancel perp orders
+    // Step 7: Force cancel perp orders
     mango_group_cookie.run_keeper(&mut test).await;
     for mint_index in 0..num_orders {
         let perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
@@ -205,7 +215,7 @@ async fn test_token_and_token_liquidation_v2() {
         ).await;
     }
 
-    // Step 6: Perform a couple liquidations
+    // Step 8: Perform a couple liquidations
     for _ in 0..5 {
         mango_group_cookie.run_keeper(&mut test).await;
         test.perform_liquidate_token_and_token(

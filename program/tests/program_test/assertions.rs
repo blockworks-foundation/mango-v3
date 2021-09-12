@@ -5,6 +5,27 @@ use mango::state::*;
 use crate::*;
 
 #[allow(dead_code)]
+pub fn assert_deposits(
+    mango_group_cookie: &MangoGroupCookie,
+    expected_values: (usize, HashMap<usize, I80F48>),
+) {
+    let (user_index, expected_value) = expected_values;
+    for (mint_index, expected_deposit) in expected_value.iter() {
+        let actual_deposit =
+            &mango_group_cookie.mango_accounts[user_index].mango_account
+            .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[*mint_index], *mint_index).unwrap();
+        println!(
+            "==\nUser: {}, Mint: {}\nExpected deposit: {}, Actual deposit: {}\n==",
+            user_index,
+            mint_index,
+            expected_deposit.to_string(),
+            actual_deposit.to_string(),
+        );
+        assert!(expected_deposit == actual_deposit);
+    }
+}
+
+#[allow(dead_code)]
 pub fn assert_open_spot_orders(
     mango_group_cookie: &MangoGroupCookie,
     user_spot_orders: &Vec<(usize, usize, serum_dex::matching::Side, f64, f64)>,
@@ -25,33 +46,54 @@ pub fn assert_open_spot_orders(
 pub async fn assert_user_spot_orders(
     test: &mut MangoProgramTest,
     mango_group_cookie: &MangoGroupCookie,
-    expected_values: HashMap<&str, I80F48>,
-    user_index: usize,
-    mint_index: usize,
+    expected_values: (usize, usize, HashMap<&str, I80F48>),
 ) {
+    let (mint_index, user_index, expected_value) = expected_values;
     let (actual_quote_free, actual_quote_locked, actual_base_free, actual_base_locked) = test.get_oo_info(
         &mango_group_cookie,
         user_index,
         mint_index,
     ).await;
-    if let Some(quote_free) = expected_values.get("quote_free") {
-        println!("quote_free: {}", quote_free.to_string());
-        println!("actual_quote_free: {}", actual_quote_free.to_string());
+
+    println!("User index: {}", user_index);
+    if let Some(quote_free) = expected_value.get("quote_free") {
+        // println!(
+        //     "==\nUser: {}, Mint: {}\nExpected quote_free: {}, Actual quote_free: {}\n==",
+        //     user_index,
+        //     mint_index,
+        //     quote_free.to_string(),
+        //     actual_quote_free.to_string(),
+        // );
         assert!(*quote_free == actual_quote_free);
     }
-    if let Some(quote_locked) = expected_values.get("quote_locked") {
-        println!("quote_locked: {}", quote_locked.to_string());
-        println!("actual_quote_locked: {}", actual_quote_locked.to_string());
+    if let Some(quote_locked) = expected_value.get("quote_locked") {
+        // println!(
+        //     "==\nUser: {}, Mint: {}\nExpected quote_locked: {}, Actual quote_locked: {}\n==",
+        //     user_index,
+        //     mint_index,
+        //     quote_locked.to_string(),
+        //     actual_quote_locked.to_string(),
+        // );
         assert!(*quote_locked == actual_quote_locked);
     }
-    if let Some(base_free) = expected_values.get("base_free") {
-        println!("base_free: {}", base_free.to_string());
-        println!("actual_base_free: {}", actual_base_free.to_string());
+    if let Some(base_free) = expected_value.get("base_free") {
+        println!(
+            "==\nUser: {}, Mint: {}\nExpected base_free: {}, Actual base_free: {}\n==",
+            user_index,
+            mint_index,
+            base_free.to_string(),
+            actual_base_free.to_string(),
+        );
         assert!(*base_free == actual_base_free);
     }
-    if let Some(base_locked) = expected_values.get("base_locked") {
-        println!("base_locked: {}", base_locked.to_string());
-        println!("actual_base_locked: {}", actual_base_locked.to_string());
+    if let Some(base_locked) = expected_value.get("base_locked") {
+        println!(
+            "==\nUser: {}, Mint: {}\nExpected base_locked: {}, Actual base_locked: {}\n==",
+            user_index,
+            mint_index,
+            base_locked.to_string(),
+            actual_base_locked.to_string(),
+        );
         assert!(*base_locked == actual_base_locked);
     }
 }
