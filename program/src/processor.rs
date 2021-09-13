@@ -1138,7 +1138,6 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &'a [AccountInfo<'a>],
         order: serum_dex::instruction::NewOrderInstructionV3,
-        allow_borrow: bool,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 22;
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -3979,7 +3978,11 @@ impl Processor {
         todo!()
     }
 
-    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
+    pub fn process<'a>(
+        program_id: &Pubkey,
+        accounts: &'a [AccountInfo<'a>],
+        data: &[u8],
+    ) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         match instruction {
@@ -4275,11 +4278,35 @@ impl Processor {
                 Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
             MangoInstruction::ForceSettleQuotePositions => {
-                msg!("Mango: ForceSettleQuotePositions");
+                msg!("DEPRECATED Mango: ForceSettleQuotePositions");
                 Self::force_settle_quote_positions(program_id, accounts)
             }
             MangoInstruction::InitAdvancedOrders => {
+                msg!("Mango: InitAdvancedOrders");
                 Self::init_advanced_orders(program_id, accounts)
+            }
+            MangoInstruction::PlaceSpotOrder2 {
+                limit_price,
+                max_coin_qty,
+                max_native_pc_qty_including_fees,
+                client_order_id,
+                self_trade_behavior,
+                side,
+                order_type,
+                limit,
+            } => {
+                msg!("Mango: PlaceSpotOrder2");
+                let order = serum_dex::instruction::NewOrderInstructionV3 {
+                    side,
+                    limit_price,
+                    max_coin_qty,
+                    max_native_pc_qty_including_fees,
+                    self_trade_behavior,
+                    order_type,
+                    client_order_id,
+                    limit: limit as u16,
+                };
+                Self::place_spot_order2(program_id, accounts, order)
             }
         }
     }
