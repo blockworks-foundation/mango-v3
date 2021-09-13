@@ -30,11 +30,12 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
-    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrders, AssetType,
-    DataType, HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank,
-    PerpMarket, PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache,
-    SpotMarketInfo, TokenInfo, UserActiveAssets, FREE_ORDER_SLOT, INFO_LEN, MAX_NODE_BANKS,
-    MAX_PAIRS, MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrder,
+    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
+    MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
+    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, UserActiveAssets,
+    FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
+    MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use solana_program::log::sol_log_compute_units;
@@ -222,7 +223,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai, // write
-            oracle_ai,      //read
+            oracle_ai,      // read
             spot_market_ai, // read
             dex_program_ai, // read
             mint_ai,        // read
@@ -3968,14 +3969,96 @@ impl Processor {
         Ok(())
     }
 
+    /// Add an advanced order to the user's AdvancedOrders account
     #[inline(never)]
-    fn register_advanced_order() -> MangoResult<()> {
-        todo!()
+    fn register_advanced_order(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // read
+            owner_ai,               // write & signer
+            advanced_orders_ai,     // write
+        ] = accounts;
+
+        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_account =
+            MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+
+        for i in 0..MAX_ADVANCED_ORDERS {
+            if advanced_orders.orders[i].is_active {
+                continue;
+            }
+
+            advanced_orders.orders[i] = AdvancedOrder {
+                advanced_order_type: AdvancedOrderType::StopLimit,
+                is_active: true,
+                limit_price: 0,
+                quantity: 0,
+                trigger_price: ZERO_I80F48,
+                side: Side::Bid,
+            }
+        }
+
+        // Trailing Stop design
+        // Place a stop order that can be moved up if threshold is triggered
+        // Moving up each time costs money
+
+        // Stop Limit design
+        // Question: do you need the collateral reqs to be able to place a stop limit?
+        //
+        // Stop Market design
+
+        Ok(())
     }
 
     #[inline(never)]
-    fn execute_advanced_order() -> MangoResult<()> {
-        todo!()
+    fn execute_advanced_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        order_index: u8,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // read
+            advanced_orders_ai,     // write
+        ] = accounts;
+
+        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
+        let advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+
+        // deactivate all advanced orders if account is bankrupt
+        if mango_account.is_bankrupt {
+            for i in 0..MAX_ADVANCED_ORDERS {
+                advanced_orders.orders[i].is_active = false;
+            }
+            return Ok(());
+        }
+
+        // Select the AdvancedOrder
+        let order = &mut advanced_orders.orders[order_index as usize];
+        check!(order.is_active, MangoErrorCode::InvalidParam)?;
+        match order.advanced_order_type {
+            AdvancedOrderType::StopLimit => {}
+            AdvancedOrderType::StopLoss => {}
+            AdvancedOrderType::TrailingStop => {}
+        }
+
+        // TODO - do advanced orders get cleared if account is bankrupt?
+
+        Ok(())
     }
 
     pub fn process<'a>(

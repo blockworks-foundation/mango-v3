@@ -1992,7 +1992,7 @@ unsafe impl Pod for OrderBookStateHeader {}
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct AdvancedOrder {
-    pub advanced_order_type: u8,
+    pub advanced_order_type: AdvancedOrderType,
     pub is_active: bool,
 
     pub limit_price: i64,
@@ -2003,11 +2003,20 @@ pub struct AdvancedOrder {
                     // index_price < trigger_price
 }
 
+#[repr(u8)]
+#[derive(IntoPrimitive, TryFromPrimitive)]
+pub enum AdvancedOrderType {
+    StopLimit,
+    StopLoss,
+    TrailingStop,
+}
+
+pub const MAX_ADVANCED_ORDERS: usize = 32;
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct AdvancedOrders {
     pub meta_data: MetaData,
-    pub orders: [AdvancedOrder; 32],
+    pub orders: [AdvancedOrder; MAX_ADVANCED_ORDERS],
 }
 
 impl AdvancedOrders {
@@ -2025,8 +2034,20 @@ impl AdvancedOrders {
         Ok(())
     }
 
-    pub fn load_mut_checked() {
-        todo!()
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_account: &MangoAccount,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        let state: RefMut<'a, Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(
+            state.meta_data.data_type == DataType::PerpMarket as u8,
+            MangoErrorCode::InvalidAccountState
+        )?;
+        check!(&mango_account.advanced_orders == account.key, MangoErrorCode::InvalidAccount)?;
+        Ok(state)
     }
 }
 
