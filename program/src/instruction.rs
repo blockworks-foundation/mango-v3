@@ -592,8 +592,22 @@ pub enum MangoInstruction {
     /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
     ForceSettleQuotePositions,
 
-    ///
+    /// Initialize the advanced open orders account for a MangoAccount and set
     InitAdvancedOrders,
+
+    /// Place an order on the Serum Dex using Mango account
+    PlaceSpotOrder2 {
+        limit_price: NonZeroU64,
+        max_coin_qty: NonZeroU64,
+        max_native_pc_qty_including_fees: NonZeroU64,
+        client_order_id: u64,
+
+        self_trade_behavior: serum_dex::instruction::SelfTradeBehavior,
+        side: serum_dex::matching::Side,
+        order_type: serum_dex::matching::OrderType,
+        limit: u8,
+        reduce_only: bool,
+    },
 }
 
 impl MangoInstruction {
@@ -890,6 +904,40 @@ impl MangoInstruction {
 
             40 => MangoInstruction::ForceSettleQuotePositions,
             41 => MangoInstruction::InitAdvancedOrders,
+
+            42 => {
+                let data_arr = array_ref![data, 0, 37];
+                let (
+                    limit_price,
+                    max_coin_qty,
+                    max_native_pc_qty_including_fees,
+                    client_order_id,
+                    side,
+                    self_trade_behavior,
+                    client_order_id_bytes,
+                    limit,
+                    reduce_only,
+                ) = array_refs![data, 8, 8, 8, 8, 1, 1, 1, 1, 1];
+
+                MangoInstruction::PlaceSpotOrder2 {
+                    limit_price: NonZeroU64::new(u64::from_le_bytes(*limit_price)),
+                    max_coin_qty: NonZeroU64::new(u64::from_le_bytes(*max_coin_qty)),
+                    max_native_pc_qty_including_fees: NonZeroU64::new(u64::from_le_bytes(
+                        *max_native_pc_qty_including_fees,
+                    )),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    side: serum_dex::matching::Side::try_from_primtive(side[0]).ok()?,
+                    self_trade_behavior:
+                        serum_dex::instruction::SelfTradeBehavior::try_from_primitive(
+                            self_trade_behavior[0],
+                        )
+                        .ok()?,
+                    order_type: serum_dex::matching::OrderType::try_from_primitive(order_type[0])
+                        .ok()?,
+                    limit: limi,
+                    reduce_only: false,
+                }
+            }
             _ => {
                 return None;
             }
