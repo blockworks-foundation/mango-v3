@@ -11,5 +11,6 @@ syn = "^1.0.75"
 solana-program = "^1.7.10"
 bytemuck = "^1.7.2"
 quote = "^1.0.9"
+safe-transmute = "^0.11.1"
 
 mango-common = { path = "../common" }

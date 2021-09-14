@@ -206,7 +206,7 @@ pub enum OrderType {
     Limit = 0,
     ImmediateOrCancel = 1,
     PostOnly = 2,
-    Market = 3, // ***
+    Market = 3,
 }
 
 #[derive(

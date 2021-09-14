@@ -7,9 +7,8 @@ use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
 use enumflags2::BitFlags;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use mango_common::Loadable;
-use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use safe_transmute::trivial::TriviallyTransmutable;
 use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
@@ -21,9 +20,12 @@ use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use spl_token::state::Account;
 
+use mango_common::Loadable;
+use mango_macro::{Loadable, Pod, TriviallyTransmutable};
+
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
-use crate::matching::{Book, LeafNode, Side};
+use crate::matching::{Book, LeafNode, OrderType, Side};
 use crate::queue::FillEvent;
 use crate::utils::{invert_side, remove_slop_mut, split_open_orders};
 
@@ -1057,15 +1059,15 @@ impl MangoAccount {
         // load_mut checks for size already
         // mango account must be rent exempt to even be initialized
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        let mango_account = Self::load_mut(account)?;
+        let mango_account: RefMut<'a, Self> = Self::load_mut(account)?;
 
         check_eq!(
             mango_account.meta_data.data_type,
             DataType::MangoAccount as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccountState
         )?;
-        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
-        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
+        check!(mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::InvalidAccount)?;
 
         Ok(mango_account)
     }
@@ -1989,26 +1991,39 @@ pub struct OrderBookStateHeader {
 unsafe impl Zeroable for OrderBookStateHeader {}
 unsafe impl Pod for OrderBookStateHeader {}
 
-#[derive(Copy, Clone, Pod)]
-#[repr(C)]
-pub struct AdvancedOrder {
-    pub advanced_order_type: AdvancedOrderType,
-    pub is_active: bool,
-
-    pub limit_price: i64,
-    pub quantity: i64,
-    pub trigger_price: I80F48,
-    pub side: Side, // example:
-                    // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
-                    // index_price < trigger_price
+#[repr(u8)]
+#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
+pub enum AdvancedOrderType {
+    PerpStop,
+    SpotStop,
 }
 
-#[repr(u8)]
-#[derive(IntoPrimitive, TryFromPrimitive)]
-pub enum AdvancedOrderType {
-    StopLimit,
-    StopLoss,
-    TrailingStop,
+const ADVANCED_ORDER_SIZE: usize = size_of::<PerpStop>();
+
+#[derive(Copy, Clone, Pod, TriviallyTransmutable)]
+#[repr(C)]
+pub struct AnyAdvancedOrder {
+    pub advanced_order_type: AdvancedOrderType,
+    pub is_active: bool,
+    pub padding: [u8; ADVANCED_ORDER_SIZE - 2],
+}
+#[derive(Copy, Clone, Pod, TriviallyTransmutable)]
+#[repr(C)]
+pub struct PerpStop {
+    pub advanced_order_type: AdvancedOrderType,
+    pub is_active: bool,
+    pub market_index: u8,
+    pub order_type: OrderType,
+    pub side: Side,
+    pub reduce_only: bool, // only valid on perp order
+    pub padding: [u8; 2],
+    pub client_order_id: u64,
+    pub price: i64,
+    pub quantity: i64,
+    pub trigger_price: I80F48,
+    // example:
+    // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
+    // index_price < trigger_price
 }
 
 pub const MAX_ADVANCED_ORDERS: usize = 32;
@@ -2016,7 +2031,7 @@ pub const MAX_ADVANCED_ORDERS: usize = 32;
 #[repr(C)]
 pub struct AdvancedOrders {
     pub meta_data: MetaData,
-    pub orders: [AdvancedOrder; MAX_ADVANCED_ORDERS],
+    pub orders: [AnyAdvancedOrder; MAX_ADVANCED_ORDERS],
 }
 
 impl AdvancedOrders {
@@ -2043,7 +2058,7 @@ impl AdvancedOrders {
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
         check!(state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
         check!(
-            state.meta_data.data_type == DataType::PerpMarket as u8,
+            state.meta_data.data_type == DataType::AdvancedOrders as u8,
             MangoErrorCode::InvalidAccountState
         )?;
         check!(&mango_account.advanced_orders == account.key, MangoErrorCode::InvalidAccount)?;

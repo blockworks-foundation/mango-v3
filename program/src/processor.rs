@@ -5,7 +5,7 @@ use std::mem::size_of;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
-use bytemuck::{cast, cast_ref};
+use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
 use mango_common::Loadable;
 use serum_dex::instruction::NewOrderInstructionV3;
@@ -30,9 +30,9 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
-    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrder,
-    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
-    MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
+    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrderType,
+    AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
+    MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpStop,
     PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, UserActiveAssets,
     FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
     MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
@@ -1587,8 +1587,6 @@ impl Processor {
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
-
-        // TODO could also make class PosI64 but it gets ugly when doing computations. Maybe have to do this with a large enough dev team
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -3970,8 +3968,15 @@ impl Processor {
     }
 
     /// Add an advanced order to the user's AdvancedOrders account
+    /// WIP - do not use
     #[inline(never)]
-    fn register_advanced_order(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    #[allow(unused)]
+    fn register_advanced_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        advanced_order_type: AdvancedOrderType,
+        limit_price: u64,
+    ) -> MangoResult<()> {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -3988,24 +3993,25 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let advanced_orders =
-            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+        // let advanced_orders =
+        //     AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+        //
+        // for i in 0..MAX_ADVANCED_ORDERS {
+        //     if advanced_orders.orders[i].is_active {
+        //         continue;
+        //     }
+        //
+        //     advanced_orders.orders[i] = AdvancedOrder {
+        //         advanced_order_type: AdvancedOrderType::StopLimit,
+        //         is_active: true,
+        //         limit_price: 0,
+        //         quantity: 0,
+        //         trigger_price: ZERO_I80F48,
+        //         side: Side::Bid,
+        //     }
+        // }
 
-        for i in 0..MAX_ADVANCED_ORDERS {
-            if advanced_orders.orders[i].is_active {
-                continue;
-            }
-
-            advanced_orders.orders[i] = AdvancedOrder {
-                advanced_order_type: AdvancedOrderType::StopLimit,
-                is_active: true,
-                limit_price: 0,
-                quantity: 0,
-                trigger_price: ZERO_I80F48,
-                side: Side::Bid,
-            }
-        }
-
+        // TODO reject order if trigger price would insta trigger
         // Trailing Stop design
         // Place a stop order that can be moved up if threshold is triggered
         // Moving up each time costs money
@@ -4018,25 +4024,36 @@ impl Processor {
         Ok(())
     }
 
+    /// WIP - do not use
     #[inline(never)]
-    fn execute_advanced_order(
+    #[allow(unused)]
+    fn execute_perp_stop<'a>(
         program_id: &Pubkey,
-        accounts: &[AccountInfo],
+        accounts: &'a [AccountInfo<'a>],
         order_index: u8,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 4;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        const NUM_FIXED: usize = 8;
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // read
             advanced_orders_ai,     // write
-        ] = accounts;
+            mango_cache_ai,         // read
+            perp_market_ai,         // write
+            bids_ai,                // write
+            asks_ai,                // write
+            event_queue_ai,         // write
+        ] = fixed_ais;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        let open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
 
-        let advanced_orders =
+        let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
 
         // deactivate all advanced orders if account is bankrupt
@@ -4046,19 +4063,100 @@ impl Processor {
             }
             return Ok(());
         }
-
-        // Select the AdvancedOrder
-        let order = &mut advanced_orders.orders[order_index as usize];
-        check!(order.is_active, MangoErrorCode::InvalidParam)?;
-        match order.advanced_order_type {
-            AdvancedOrderType::StopLimit => {}
-            AdvancedOrderType::StopLoss => {}
-            AdvancedOrderType::TrailingStop => {}
-        }
-
-        // TODO - do advanced orders get cleared if account is bankrupt?
-
         Ok(())
+        //
+        // // Select the AdvancedOrder
+        // let order: &mut PerpStop = cast_mut(&mut advanced_orders.orders[order_index as usize]);
+        // check!(order.is_active, MangoErrorCode::InvalidParam)?;
+        // check!(
+        //     order.advanced_order_type == AdvancedOrderType::PerpStop,
+        //     MangoErrorCode::InvalidParam
+        // )?;
+        // let market_index = order.market_index as usize;
+        //
+        // // Check trigger condition is met
+        // // Pay from MangoAccount to the
+        //
+        // check!(
+        //     &mango_group.perp_markets[market_index].perp_market == perp_market_ai.key,
+        //     MangoErrorCode::InvalidMarket
+        // )?;
+        // let mut perp_market =
+        //     PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        //
+        // let active_assets = UserActiveAssets::new(
+        //     &mango_group,
+        //     &mango_account,
+        //     vec![(AssetType::Perp, market_index)],
+        // );
+        //
+        // let clock = Clock::get()?;
+        // let now_ts = clock.unix_timestamp as u64;
+        // let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        // mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+        //
+        // let mut health_cache = HealthCache::new(active_assets);
+        // health_cache.init_vals_with_orders_vec(
+        //     &mango_group,
+        //     &mango_cache,
+        //     &mango_account,
+        //     &open_orders_ais,
+        // )?;
+        // let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+        //
+        // // update the being_liquidated flag
+        // if mango_account.being_liquidated {
+        //     if pre_health >= ZERO_I80F48 {
+        //         mango_account.being_liquidated = false;
+        //     } else {
+        //         return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+        //     }
+        // }
+        //
+        // // This means health must only go up
+        // let health_up_only = pre_health < ZERO_I80F48;
+        //
+        // let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        // let mut event_queue =
+        //     EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+        //
+        // // If reduce_only, position must only go down
+        // let quantity = if reduce_only {
+        //     let base_pos = mango_account.perp_accounts[market_index].base_position;
+        //     if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
+        //         0
+        //     } else {
+        //         base_pos.abs().min(quantity)
+        //     }
+        // } else {
+        //     quantity
+        // };
+        //
+        // if quantity == 0 {
+        //     return Ok(());
+        // }
+        //
+        // book.new_order(
+        //     &mut event_queue,
+        //     &mut perp_market,
+        //     &mango_group.perp_markets[market_index],
+        //     &mut mango_account,
+        //     mango_account_ai.key,
+        //     market_index,
+        //     side,
+        //     price,
+        //     quantity,
+        //     order_type,
+        //     client_order_id,
+        //     now_ts,
+        // )?;
+        //
+        // health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
+        // let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+        // check!(
+        //     post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
+        //     MangoErrorCode::InsufficientFunds
+        // )
     }
 
     pub fn process<'a>(
@@ -4958,6 +5056,10 @@ fn invoke_init_open_orders<'a>(
         rent_ai.clone(),
     ];
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
+
+fn invoke_transfer_lamports<'a>() -> ProgramResult {
+    Ok(())
 }
 
 fn create_pda_account<'a>(
