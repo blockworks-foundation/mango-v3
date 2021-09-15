@@ -34,7 +34,7 @@ use crate::state::{
     AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
     MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpStop,
     PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, UserActiveAssets,
-    FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
+    ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
     MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
@@ -4032,18 +4032,24 @@ impl Processor {
         accounts: &'a [AccountInfo<'a>],
         order_index: u8,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 8;
+        const NUM_FIXED: usize = 10;
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // read
             advanced_orders_ai,     // write
+            agent_ai,               // write
             mango_cache_ai,         // read
             perp_market_ai,         // write
             bids_ai,                // write
             asks_ai,                // write
             event_queue_ai,         // write
+            system_prog_ai,         // read
         ] = fixed_ais;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -4058,105 +4064,124 @@ impl Processor {
 
         // deactivate all advanced orders if account is bankrupt
         if mango_account.is_bankrupt {
-            for i in 0..MAX_ADVANCED_ORDERS {
-                advanced_orders.orders[i].is_active = false;
-            }
-            return Ok(());
+            msg!("Failed to trigger order; MangoAccount is bankrupt.");
+            return cancel_all_advanced_orders(
+                advanced_orders_ai,
+                agent_ai,
+                system_prog_ai,
+                &mut advanced_orders,
+            );
         }
+
+        // Select the AdvancedOrder
+        let order: &mut PerpStop = cast_mut(&mut advanced_orders.orders[order_index as usize]);
+        check!(order.is_active, MangoErrorCode::InvalidParam)?;
+        check!(
+            order.advanced_order_type == AdvancedOrderType::PerpStop,
+            MangoErrorCode::InvalidParam
+        )?;
+        let market_index = order.market_index as usize;
+
+        // Check trigger condition is met
+        // Pay from MangoAccount to the
+
+        check!(
+            &mango_group.perp_markets[market_index].perp_market == perp_market_ai.key,
+            MangoErrorCode::InvalidMarket
+        )?;
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &mango_account,
+            vec![(AssetType::Perp, market_index)],
+        );
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            &open_orders_ais,
+        )?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                msg!("Failed to trigger order; MangoAccount is being liquidated.");
+                return cancel_all_advanced_orders(
+                    advanced_orders_ai,
+                    agent_ai,
+                    system_prog_ai,
+                    &mut advanced_orders,
+                );
+            }
+        }
+
+        // This means health must only go up
+        let health_up_only = pre_health < ZERO_I80F48;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+
+        // If reduce_only, position must only go down
+        let quantity = if order.reduce_only {
+            let base_pos = mango_account.perp_accounts[market_index].base_position;
+            if (order.side == Side::Bid && base_pos > 0)
+                || (order.side == Side::Ask && base_pos < 0)
+            {
+                0
+            } else {
+                base_pos.abs().min(order.quantity)
+            }
+        } else {
+            order.quantity
+        };
+
+        if quantity != 0 {
+            // set order inactive
+            // TODO pay fee
+            book.new_order(
+                &mut event_queue,
+                &mut perp_market,
+                &mango_group.perp_markets[market_index],
+                &mut mango_account,
+                mango_account_ai.key,
+                market_index,
+                order.side,
+                order.price,
+                quantity,
+                order.order_type,
+                order.client_order_id,
+                now_ts,
+            )?;
+
+            health_cache.update_perp_val(
+                &mango_group,
+                &mango_cache,
+                &mango_account,
+                market_index,
+            )?;
+            let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+            check!(
+                post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
+                MangoErrorCode::InsufficientFunds
+            )?;
+        }
+
+        order.is_active = false;
+        invoke_transfer_lamports(advanced_orders_ai, agent_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
         Ok(())
-        //
-        // // Select the AdvancedOrder
-        // let order: &mut PerpStop = cast_mut(&mut advanced_orders.orders[order_index as usize]);
-        // check!(order.is_active, MangoErrorCode::InvalidParam)?;
-        // check!(
-        //     order.advanced_order_type == AdvancedOrderType::PerpStop,
-        //     MangoErrorCode::InvalidParam
-        // )?;
-        // let market_index = order.market_index as usize;
-        //
-        // // Check trigger condition is met
-        // // Pay from MangoAccount to the
-        //
-        // check!(
-        //     &mango_group.perp_markets[market_index].perp_market == perp_market_ai.key,
-        //     MangoErrorCode::InvalidMarket
-        // )?;
-        // let mut perp_market =
-        //     PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        //
-        // let active_assets = UserActiveAssets::new(
-        //     &mango_group,
-        //     &mango_account,
-        //     vec![(AssetType::Perp, market_index)],
-        // );
-        //
-        // let clock = Clock::get()?;
-        // let now_ts = clock.unix_timestamp as u64;
-        // let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        // mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
-        //
-        // let mut health_cache = HealthCache::new(active_assets);
-        // health_cache.init_vals_with_orders_vec(
-        //     &mango_group,
-        //     &mango_cache,
-        //     &mango_account,
-        //     &open_orders_ais,
-        // )?;
-        // let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
-        //
-        // // update the being_liquidated flag
-        // if mango_account.being_liquidated {
-        //     if pre_health >= ZERO_I80F48 {
-        //         mango_account.being_liquidated = false;
-        //     } else {
-        //         return Err(throw_err!(MangoErrorCode::BeingLiquidated));
-        //     }
-        // }
-        //
-        // // This means health must only go up
-        // let health_up_only = pre_health < ZERO_I80F48;
-        //
-        // let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        // let mut event_queue =
-        //     EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-        //
-        // // If reduce_only, position must only go down
-        // let quantity = if reduce_only {
-        //     let base_pos = mango_account.perp_accounts[market_index].base_position;
-        //     if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
-        //         0
-        //     } else {
-        //         base_pos.abs().min(quantity)
-        //     }
-        // } else {
-        //     quantity
-        // };
-        //
-        // if quantity == 0 {
-        //     return Ok(());
-        // }
-        //
-        // book.new_order(
-        //     &mut event_queue,
-        //     &mut perp_market,
-        //     &mango_group.perp_markets[market_index],
-        //     &mut mango_account,
-        //     mango_account_ai.key,
-        //     market_index,
-        //     side,
-        //     price,
-        //     quantity,
-        //     order_type,
-        //     client_order_id,
-        //     now_ts,
-        // )?;
-        //
-        // health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
-        // let post_health = health_cache.get_health(&mango_group, HealthType::Init);
-        // check!(
-        //     post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
-        //     MangoErrorCode::InsufficientFunds
-        // )
     }
 
     pub fn process<'a>(
@@ -5058,8 +5083,16 @@ fn invoke_init_open_orders<'a>(
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
 
-fn invoke_transfer_lamports<'a>() -> ProgramResult {
-    Ok(())
+fn invoke_transfer_lamports<'a>(
+    src_ai: &AccountInfo<'a>,
+    dst_ai: &AccountInfo<'a>,
+    system_prog_ai: &AccountInfo<'a>,
+    quantity: u64,
+) -> ProgramResult {
+    solana_program::program::invoke(
+        &solana_program::system_instruction::transfer(src_ai.key, dst_ai.key, quantity),
+        &[src_ai.clone(), dst_ai.clone(), system_prog_ai.clone()],
+    )
 }
 
 fn create_pda_account<'a>(
@@ -5076,14 +5109,7 @@ fn create_pda_account<'a>(
             rent.minimum_balance(space).max(1).saturating_sub(new_pda_account.lamports());
 
         if required_lamports > 0 {
-            solana_program::program::invoke(
-                &solana_program::system_instruction::transfer(
-                    funder.key,
-                    new_pda_account.key,
-                    required_lamports,
-                ),
-                &[funder.clone(), new_pda_account.clone(), system_program.clone()],
-            )?;
+            invoke_transfer_lamports(funder, new_pda_account, system_program, required_lamports)?;
         }
 
         solana_program::program::invoke_signed(
@@ -5110,4 +5136,31 @@ fn create_pda_account<'a>(
             &[new_pda_signer_seeds],
         )
     }
+}
+
+fn cancel_all_advanced_orders<'a>(
+    advanced_orders_ai: &AccountInfo<'a>,
+    agent_ai: &AccountInfo<'a>,
+    system_prog_ai: &AccountInfo<'a>,
+    advanced_orders: &mut AdvancedOrders,
+) -> MangoResult<()> {
+    let mut count = 0u64;
+    for i in 0..MAX_ADVANCED_ORDERS {
+        if advanced_orders.orders[i].is_active {
+            advanced_orders.orders[i].is_active = false;
+            count += 1;
+        }
+    }
+
+    if count > 0 {
+        invoke_transfer_lamports(
+            advanced_orders_ai,
+            agent_ai,
+            system_prog_ai,
+            count * ADVANCED_ORDER_FEE,
+        )?;
+    }
+
+    // TODO transfer advanced order fee
+    Ok(())
 }

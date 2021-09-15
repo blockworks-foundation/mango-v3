@@ -8,7 +8,6 @@ use enumflags2::BitFlags;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use safe_transmute::trivial::TriviallyTransmutable;
 use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
@@ -785,7 +784,11 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    &open_orders_ais[i],
+                    if *open_orders_ais[i].key == Pubkey::default() {
+                        None
+                    } else {
+                        Some(&open_orders_ais[i])
+                    },
                 )?;
             }
 
@@ -813,7 +816,7 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    open_orders_ais[i].unwrap(),
+                    open_orders_ais[i],
                 )?;
             }
 
@@ -903,7 +906,7 @@ impl HealthCache {
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
             market_index,
-            open_orders_ai,
+            if *open_orders_ai.key == Pubkey::default() { None } else { Some(open_orders_ai) },
         )?;
 
         let (prev_base, prev_quote) = self.spot[market_index];
@@ -1162,13 +1165,13 @@ impl MangoAccount {
         bank_cache: &RootBankCache,
         price: I80F48,
         market_index: usize,
-        open_orders_ai: &AccountInfo,
+        open_orders_ai: Option<&AccountInfo>,
     ) -> MangoResult<(I80F48, I80F48)> {
         let base_net = self.get_net(bank_cache, market_index);
-        if !self.in_margin_basket[market_index] || *open_orders_ai.key == Pubkey::default() {
+        if !self.in_margin_basket[market_index] || open_orders_ai.is_none() {
             Ok((base_net * price, ZERO_I80F48))
         } else {
-            let open_orders = load_open_orders(open_orders_ai)?;
+            let open_orders = load_open_orders(open_orders_ai.unwrap())?;
             let (quote_free, quote_locked, base_free, base_locked) =
                 split_open_orders(&open_orders);
 
@@ -1991,8 +1994,11 @@ pub struct OrderBookStateHeader {
 unsafe impl Zeroable for OrderBookStateHeader {}
 unsafe impl Pod for OrderBookStateHeader {}
 
+/// Quantity in lamports for the agent who triggers the AdvancedOrder
+pub const ADVANCED_ORDER_FEE: u64 = 500_000;
+
 #[repr(u8)]
-#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
+#[derive(Copy, Clone, PartialEq, IntoPrimitive, TryFromPrimitive)]
 pub enum AdvancedOrderType {
     PerpStop,
     SpotStop,
