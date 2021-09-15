@@ -40,7 +40,7 @@ pub enum MangoInstruction {
 
     /// Initialize a mango account for a user
     ///
-    /// Accounts expected by this instruction (4):
+    /// Accounts expected by this instruction (3):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account data
