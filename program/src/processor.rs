@@ -4489,27 +4489,8 @@ impl Processor {
                 msg!("Mango: InitAdvancedOrders");
                 Self::init_advanced_orders(program_id, accounts)
             }
-            MangoInstruction::PlaceSpotOrder2 {
-                limit_price,
-                max_coin_qty,
-                max_native_pc_qty_including_fees,
-                client_order_id,
-                self_trade_behavior,
-                side,
-                order_type,
-                limit,
-            } => {
+            MangoInstruction::PlaceSpotOrder2 { order } => {
                 msg!("Mango: PlaceSpotOrder2");
-                let order = serum_dex::instruction::NewOrderInstructionV3 {
-                    side,
-                    limit_price,
-                    max_coin_qty,
-                    max_native_pc_qty_including_fees,
-                    self_trade_behavior,
-                    order_type,
-                    client_order_id,
-                    limit: limit as u16,
-                };
                 Self::place_spot_order2(program_id, accounts, order)
             }
         }

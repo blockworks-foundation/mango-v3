@@ -596,17 +596,9 @@ pub enum MangoInstruction {
     InitAdvancedOrders,
 
     /// Place an order on the Serum Dex using Mango account. Improved over PlaceSpotOrder
-    /// by reducing the tx size and order serialization and deserialization
+    /// by reducing the tx size
     PlaceSpotOrder2 {
-        limit_price: NonZeroU64,
-        max_coin_qty: NonZeroU64,
-        max_native_pc_qty_including_fees: NonZeroU64,
-        client_order_id: u64,
-
-        side: serum_dex::matching::Side,
-        self_trade_behavior: serum_dex::instruction::SelfTradeBehavior,
-        order_type: serum_dex::matching::OrderType,
-        limit: u8,
+        order: serum_dex::instruction::NewOrderInstructionV3,
     },
 }
 
@@ -904,34 +896,9 @@ impl MangoInstruction {
             41 => MangoInstruction::InitAdvancedOrders,
 
             42 => {
-                let data = array_ref![data, 0, 36];
-                let (
-                    limit_price,
-                    max_coin_qty,
-                    max_native_pc_qty_including_fees,
-                    client_order_id,
-                    side,
-                    self_trade_behavior,
-                    order_type,
-                    limit,
-                ) = array_refs![data, 8, 8, 8, 8, 1, 1, 1, 1];
-                MangoInstruction::PlaceSpotOrder2 {
-                    limit_price: NonZeroU64::new(u64::from_le_bytes(*limit_price))?,
-                    max_coin_qty: NonZeroU64::new(u64::from_le_bytes(*max_coin_qty))?,
-                    max_native_pc_qty_including_fees: NonZeroU64::new(u64::from_le_bytes(
-                        *max_native_pc_qty_including_fees,
-                    ))?,
-                    client_order_id: u64::from_le_bytes(*client_order_id),
-                    side: serum_dex::matching::Side::try_from_primitive(side[0]).ok()?,
-                    self_trade_behavior:
-                        serum_dex::instruction::SelfTradeBehavior::try_from_primitive(
-                            self_trade_behavior[0],
-                        )
-                        .ok()?,
-                    order_type: serum_dex::matching::OrderType::try_from_primitive(order_type[0])
-                        .ok()?,
-                    limit: limit[0],
-                }
+                let data_arr = array_ref![data, 0, 46];
+                let order = unpack_dex_new_order_v3(data_arr)?;
+                MangoInstruction::PlaceSpotOrder { order }
             }
             _ => {
                 return None;
