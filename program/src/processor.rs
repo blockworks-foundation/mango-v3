@@ -952,7 +952,7 @@ impl Processor {
             quote_vault_ai,         // write
             token_prog_ai,          // read
             signer_ai,              // read
-            rent_ai,                // read
+            _rent_ai,               // read
             dex_signer_ai,          // read
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
