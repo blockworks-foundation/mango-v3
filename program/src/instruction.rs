@@ -6,6 +6,7 @@ use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::{AccountMeta, Instruction};
+use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::convert::{TryFrom, TryInto};
@@ -904,8 +905,9 @@ impl MangoInstruction {
             41 => MangoInstruction::InitAdvancedOrders,
 
             42 => {
-                let data = array_ref![data, 0, 36];
+                let data = array_ref![data, 0, 52];
                 let (
+                    test_i80f48,
                     limit_price,
                     max_coin_qty,
                     max_native_pc_qty_including_fees,
@@ -914,7 +916,10 @@ impl MangoInstruction {
                     self_trade_behavior,
                     order_type,
                     limit,
-                ) = array_refs![data, 8, 8, 8, 8, 1, 1, 1, 1];
+                ) = array_refs![data, 16, 8, 8, 8, 8, 1, 1, 1, 1];
+
+                let test_i80f48 = I80F48::from_le_bytes(*test_i80f48);
+                msg!("test_i80f48 {:?}", test_i80f48);
 
                 MangoInstruction::PlaceSpotOrder2 {
                     limit_price: NonZeroU64::new(u64::from_le_bytes(*limit_price))?,
