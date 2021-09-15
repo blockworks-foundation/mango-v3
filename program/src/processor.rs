@@ -221,7 +221,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai, // write
-            oracle_ai,      //read
+            oracle_ai,      // read
             spot_market_ai, // read
             dex_program_ai, // read
             mint_ai,        // read
