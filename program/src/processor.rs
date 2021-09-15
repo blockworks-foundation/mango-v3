@@ -5007,7 +5007,7 @@ fn invoke_new_order<'a>(
             AccountMeta::new(*dex_base_ai.key, false),
             AccountMeta::new(*dex_quote_ai.key, false),
             AccountMeta::new_readonly(*token_prog_ai.key, false),
-            AccountMeta::new_readonly(*rent_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, false),
         ],
     };
 
