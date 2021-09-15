@@ -1063,7 +1063,6 @@ impl Processor {
             dex_base_ai,
             dex_quote_ai,
             token_prog_ai,
-            rent_ai,
             msrm_or_srm_vault_ai,
             &[&signers_seeds],
             order,
@@ -1281,7 +1280,6 @@ impl Processor {
             dex_base_ai,
             dex_quote_ai,
             token_prog_ai,
-            signer_ai, // send this instead of rent_ai because rent_ai not necessary
             msrm_or_srm_vault_ai,
             &[&signers_seeds],
             order,
@@ -4988,7 +4986,6 @@ fn invoke_new_order<'a>(
     dex_base_ai: &AccountInfo<'a>,
     dex_quote_ai: &AccountInfo<'a>,
     token_prog_ai: &AccountInfo<'a>,
-    rent_ai: &AccountInfo<'a>,
     msrm_or_srm_vault_ai: &AccountInfo<'a>,
     signers_seeds: &[&[&[u8]]],
 
@@ -5029,7 +5026,7 @@ fn invoke_new_order<'a>(
             dex_base_ai.clone(),
             dex_quote_ai.clone(),
             token_prog_ai.clone(),
-            rent_ai.clone(),
+            signer_ai.clone(),
             msrm_or_srm_vault_ai.clone(),
         ];
         solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
@@ -5047,7 +5044,7 @@ fn invoke_new_order<'a>(
             dex_base_ai.clone(),
             dex_quote_ai.clone(),
             token_prog_ai.clone(),
-            rent_ai.clone(),
+            signer_ai.clone(),
         ];
         solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
     }
