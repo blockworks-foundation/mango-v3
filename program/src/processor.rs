@@ -780,7 +780,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
         let [
-            mango_group_ai,     // read
+            mango_group_ai,     // write
             mango_account_ai,   // write
             owner_ai,           // read
             mango_cache_ai,     // read

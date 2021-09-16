@@ -49,7 +49,7 @@ pub enum MangoInstruction {
 
     /// Deposit funds into mango account
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (9):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account for this user
@@ -66,20 +66,19 @@ pub enum MangoInstruction {
 
     /// Withdraw funds that were deposited earlier.
     ///
-    /// Accounts expected by this instruction (10):
+    /// Accounts expected by this instruction (10+MAX_PAIRS):
     ///
-    /// 0. `[read]` mango_group_ai,   -
-    /// 1. `[write]` mango_account_ai, -
-    /// 2. `[read]` owner_ai,         -
-    /// 3. `[read]` mango_cache_ai,   -
-    /// 4. `[read]` root_bank_ai,     -
-    /// 5. `[write]` node_bank_ai,     -
-    /// 6. `[write]` vault_ai,         -
-    /// 7. `[write]` token_account_ai, -
-    /// 8. `[read]` signer_ai,        -
-    /// 9. `[read]` token_prog_ai,    -
-    /// 10. `[read]` clock_ai,         -
-    /// 11..+ `[]` open_orders_accs - open orders for each of the spot market
+    /// 0. `[writable]` mango_group_ai,   -
+    /// 1. `[writable]` mango_account_ai, -
+    /// 2. `[signer]` owner_ai,         -
+    /// 3. `[]` mango_cache_ai,   -
+    /// 4. `[]` root_bank_ai,     -
+    /// 5. `[writable]` node_bank_ai,     -
+    /// 6. `[writable]` vault_ai,         -
+    /// 7. `[writable]` token_account_ai, -
+    /// 8. `[]` signer_ai,        -
+    /// 9. `[]` token_prog_ai,    -
+    /// 10..+ `[]` open_orders_accs - open orders for each of the spot market
     Withdraw {
         quantity: u64,
         allow_borrow: bool,
