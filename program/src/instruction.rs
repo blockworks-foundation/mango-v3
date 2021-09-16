@@ -618,17 +618,19 @@ pub enum MangoInstruction {
         trigger_price: I80F48,
     },
 
-    /// Executes the first possible advanced perp order for a given market
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
-    /// 3. `[writable,signer]` executor_ai - operator of the execution service (receives lamports)
+    /// 3. `[writable,signer]` agent_ai - operator of the execution service (receives lamports)
     /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
     /// 5. `[writable]` perp_market_ai
     /// 6. `[writable]` bids_ai - bids account for this PerpMarket
     /// 7. `[writable]` asks_ai - asks account for this PerpMarket
     /// 8. `[writable]` event_queue_ai - EventQueue for this PerpMarket
-    ExecuteAdvancedPerpOrder,
+    /// 9. `[] system_prog_ai
+    ExecutePerpStopOrder {
+        order_index: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -951,7 +953,10 @@ impl MangoInstruction {
                 }
             }
 
-            44 => MangoInstruction::ExecuteAdvancedPerpOrder,
+            44 => {
+                let order_index = array_ref![data, 0, 1][0];
+                MangoInstruction::ExecutePerpStopOrder { order_index }
+            }
             _ => {
                 return None;
             }

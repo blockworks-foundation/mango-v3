@@ -3967,7 +3967,7 @@ impl Processor {
 
     /// Add a perp stop order to the user's AdvancedOrders account
     #[inline(never)]
-    fn register_advanced_perp_stop_order(
+    fn register_perp_stop_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order_type: OrderType,
@@ -4069,10 +4069,8 @@ impl Processor {
         Ok(())
     }
 
-    /// WIP - do not use
     #[inline(never)]
-    #[allow(unused)]
-    fn execute_perp_stop<'a>(
+    fn execute_perp_stop_order<'a>(
         program_id: &Pubkey,
         accounts: &'a [AccountInfo<'a>],
         order_index: u8,
@@ -4549,8 +4547,16 @@ impl Processor {
                 quantity,
                 trigger_price,
             } => {
-                msg!("Mango: RegisterPerpStopOrder");
-                Self::register_advanced_perp_stop_order(
+                msg!(
+                    "Mango: RegisterPerpStopOrder client_order_id={} type={:?} side={:?} price={} quantity={} trigger={}",
+                    client_order_id,
+                    order_type,
+                    side,
+                    price.to_string(),
+                    quantity.to_string(),
+                    trigger_price.to_string()
+                );
+                Self::register_perp_stop_order(
                     program_id,
                     accounts,
                     order_type,
@@ -4562,9 +4568,9 @@ impl Processor {
                     trigger_price,
                 )
             }
-            MangoInstruction::ExecuteAdvancedPerpOrder => {
-                msg!("Mango: ExecuteAdvancedPerpOrder");
-                check!(false, MangoErrorCode::Default)
+            MangoInstruction::ExecutePerpStopOrder { order_index } => {
+                msg!("Mango: ExecutePerpStopOrder {}", order_index);
+                Self::execute_perp_stop_order(program_id, accounts, order_index)
             }
         }
     }
