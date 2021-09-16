@@ -4493,6 +4493,22 @@ impl Processor {
                 msg!("Mango: PlaceSpotOrder2");
                 Self::place_spot_order2(program_id, accounts, order)
             }
+            MangoInstruction::PlacePerpStopOrder {
+                order_type,
+                side,
+                reduce_only,
+                client_order_id,
+                price,
+                quantity,
+                trigger_price,
+            } => {
+                msg!("Mango: PlacePerpStopOrder");
+                check!(false, MangoErrorCode::Default)
+            }
+            MangoInstruction::ExecuteAdvancedPerpOrder => {
+                msg!("Mango: ExecuteAdvancedPerpOrder");
+                check!(false, MangoErrorCode::Default)
+            }
         }
     }
 }

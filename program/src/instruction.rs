@@ -600,6 +600,34 @@ pub enum MangoInstruction {
     PlaceSpotOrder2 {
         order: serum_dex::instruction::NewOrderInstructionV3,
     },
+
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
+    /// 3. `[signer]` owner_ai - owner of MangoAccount
+    /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 5. `[]` perp_market_ai
+    PlacePerpStopOrder {
+        order_type: OrderType,
+        side: Side,
+        reduce_only: bool, // only valid on perp order
+        client_order_id: u64,
+        price: i64,
+        quantity: i64,
+        trigger_price: I80F48,
+    },
+
+    /// Executes the first possible advanced perp order for a given market
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
+    /// 3. `[signer,writable]` executor_ai - operator of the execution service (receives lamports)
+    /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 5. `[writable]` perp_market_ai
+    /// 6. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 7. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 8. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    ExecuteAdvancedPerpOrder,
 }
 
 impl MangoInstruction {
@@ -900,6 +928,29 @@ impl MangoInstruction {
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MangoInstruction::PlaceSpotOrder { order }
             }
+            43 => {
+                let data_arr = array_ref![data, 0, 43];
+                let (
+                    order_type,
+                    side,
+                    reduce_only,
+                    client_order_id,
+                    price,
+                    quantity,
+                    trigger_price,
+                ) = array_refs![data_arr, 1, 1, 1, 8, 8, 8, 16];
+                MangoInstruction::PlacePerpStopOrder {
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    reduce_only: reduce_only[0] != 0,
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    price: i64::from_le_bytes(*price),
+                    quantity: i64::from_le_bytes(*quantity),
+                    trigger_price: I80F48::from_le_bytes(*trigger_price),
+                }
+            }
+
+            44 => MangoInstruction::ExecuteAdvancedPerpOrder,
             _ => {
                 return None;
             }
