@@ -3965,59 +3965,106 @@ impl Processor {
         Ok(())
     }
 
-    /// Add an advanced order to the user's AdvancedOrders account
-    /// WIP - do not use
+    /// Add a perp stop order to the user's AdvancedOrders account
     #[inline(never)]
-    #[allow(unused)]
-    fn register_advanced_order(
+    fn register_advanced_perp_stop_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        advanced_order_type: AdvancedOrderType,
-        limit_price: u64,
+        order_type: OrderType,
+        side: Side,
+        reduce_only: bool,
+        client_order_id: u64,
+        price: i64,
+        quantity: i64,
+        trigger_price: I80F48,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 4;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // read
             owner_ai,               // write & signer
             advanced_orders_ai,     // write
+            mango_cache_ai,          // read
+            perp_market_ai,          // read
+            system_prog_ai,         // read
         ] = accounts;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        // let advanced_orders =
-        //     AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
-        //
-        // for i in 0..MAX_ADVANCED_ORDERS {
-        //     if advanced_orders.orders[i].is_active {
-        //         continue;
-        //     }
-        //
-        //     advanced_orders.orders[i] = AdvancedOrder {
-        //         advanced_order_type: AdvancedOrderType::StopLimit,
-        //         is_active: true,
-        //         limit_price: 0,
-        //         quantity: 0,
-        //         trigger_price: ZERO_I80F48,
-        //         side: Side::Bid,
-        //     }
-        // }
+        let mut advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
 
-        // TODO reject order if trigger price would insta trigger
-        // Trailing Stop design
-        // Place a stop order that can be moved up if threshold is triggered
-        // Moving up each time costs money
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
 
-        // Stop Limit design
-        // Question: do you need the collateral reqs to be able to place a stop limit?
-        //
-        // Stop Market design
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &mango_account,
+            vec![(AssetType::Perp, market_index)],
+        );
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        // Note: no need to check health here, needs to be checked on trigger
+        // TODO: make sure liquidator cancels all advanced orders
+
+        let mut registered_order = false;
+        for i in 0..MAX_ADVANCED_ORDERS {
+            if advanced_orders.orders[i].is_active {
+                continue;
+            }
+
+            advanced_orders.orders[i] = cast(PerpStop {
+                advanced_order_type: AdvancedOrderType::PerpStop,
+                is_active: true,
+                market_index: market_index as u8,
+                order_type,
+                side,
+                reduce_only,
+                padding: [0, 0],
+                client_order_id,
+                price,
+                quantity,
+                trigger_price,
+            });
+
+            // TODO decide if to reject order if trigger price would insta trigger
+            //      might be better for user if order still gets executed
+            // buy-side triggers when current price is higher
+            // sell-side triggers when current price is lower
+            let current_price = mango_cache.get_price(market_index);
+            if (side == Side::Bid
+                && trigger_price.checked_sub(current_price).unwrap().is_positive())
+                || (side == Side::Ask
+                    && trigger_price.checked_sub(current_price).unwrap().is_negative())
+            {
+                msg!(
+                    "registered order would already trigger side={:?} trigger={} current={}",
+                    side,
+                    trigger_price.to_string(),
+                    current_price.to_string()
+                )
+            }
+
+            registered_order = true;
+            break;
+        }
+
+        check!(registered_order, MangoErrorCode::OutOfSpace)?;
+
+        // fund order payment
+        invoke_transfer_lamports(owner_ai, advanced_orders_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
 
         Ok(())
     }
@@ -4493,7 +4540,7 @@ impl Processor {
                 msg!("Mango: PlaceSpotOrder2");
                 Self::place_spot_order2(program_id, accounts, order)
             }
-            MangoInstruction::PlacePerpStopOrder {
+            MangoInstruction::RegisterPerpStopOrder {
                 order_type,
                 side,
                 reduce_only,
@@ -4502,8 +4549,18 @@ impl Processor {
                 quantity,
                 trigger_price,
             } => {
-                msg!("Mango: PlacePerpStopOrder");
-                check!(false, MangoErrorCode::Default)
+                msg!("Mango: RegisterPerpStopOrder");
+                Self::register_advanced_perp_stop_order(
+                    program_id,
+                    accounts,
+                    order_type,
+                    side,
+                    reduce_only,
+                    client_order_id,
+                    price,
+                    quantity,
+                    trigger_price,
+                )
             }
             MangoInstruction::ExecuteAdvancedPerpOrder => {
                 msg!("Mango: ExecuteAdvancedPerpOrder");

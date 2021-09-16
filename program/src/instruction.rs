@@ -602,12 +602,13 @@ pub enum MangoInstruction {
     },
 
     /// 0. `[]` mango_group_ai - MangoGroup
-    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
-    /// 2  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
-    /// 3. `[signer]` owner_ai - owner of MangoAccount
+    /// 1. `[]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[writable,signer]` owner_ai - owner of MangoAccount
+    /// 3  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
     /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
     /// 5. `[]` perp_market_ai
-    PlacePerpStopOrder {
+    /// 6. `[]` system_prog_ai
+    RegisterPerpStopOrder {
         order_type: OrderType,
         side: Side,
         reduce_only: bool, // only valid on perp order
@@ -621,7 +622,7 @@ pub enum MangoInstruction {
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
-    /// 3. `[signer,writable]` executor_ai - operator of the execution service (receives lamports)
+    /// 3. `[writable,signer]` executor_ai - operator of the execution service (receives lamports)
     /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
     /// 5. `[writable]` perp_market_ai
     /// 6. `[writable]` bids_ai - bids account for this PerpMarket
@@ -939,7 +940,7 @@ impl MangoInstruction {
                     quantity,
                     trigger_price,
                 ) = array_refs![data_arr, 1, 1, 1, 8, 8, 8, 16];
-                MangoInstruction::PlacePerpStopOrder {
+                MangoInstruction::RegisterPerpStopOrder {
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     side: Side::try_from_primitive(side[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,

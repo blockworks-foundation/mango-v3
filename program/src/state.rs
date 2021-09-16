@@ -21,6 +21,7 @@ use spl_token::state::Account;
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod, TriviallyTransmutable};
+use static_assertions::const_assert_eq;
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
@@ -2013,6 +2014,7 @@ pub struct AnyAdvancedOrder {
     pub is_active: bool,
     pub padding: [u8; ADVANCED_ORDER_SIZE - 2],
 }
+
 #[derive(Copy, Clone, Pod, TriviallyTransmutable)]
 #[repr(C)]
 pub struct PerpStop {
@@ -2031,6 +2033,8 @@ pub struct PerpStop {
     // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
     // index_price < trigger_price
 }
+
+const_assert_eq!(size_of::<AnyAdvancedOrder>(), size_of::<PerpStop>());
 
 pub const MAX_ADVANCED_ORDERS: usize = 32;
 #[derive(Copy, Clone, Pod, Loadable)]
