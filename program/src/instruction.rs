@@ -577,7 +577,8 @@ pub enum MangoInstruction {
         limit: u8,
     },
 
-    /// DEPRECATED - Liqor takes on all the quote positions where base_position == 0
+    /// DEPRECATED - No longer valid instruction as of release 3.0.5
+    /// Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
     ///
@@ -592,18 +593,19 @@ pub enum MangoInstruction {
     /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
     ForceSettleQuotePositions,
 
-    /// Initialize the advanced open orders account for a MangoAccount and set
-    InitAdvancedOrders,
-
     /// Place an order on the Serum Dex using Mango account. Improved over PlaceSpotOrder
     /// by reducing the tx size
     PlaceSpotOrder2 {
         order: serum_dex::instruction::NewOrderInstructionV3,
     },
 
+    /// Initialize the advanced open orders account for a MangoAccount and set
+    InitAdvancedOrders,
+
+    /// Add a trigger order which executes if the trigger condition is met.
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` mango_account_ai - the MangoAccount of owner
-    /// 2. `[writable,signer]` owner_ai - owner of MangoAccount
+    /// 2. `[writable, signer]` owner_ai - owner of MangoAccount
     /// 3  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
     /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
     /// 5. `[]` perp_market_ai
@@ -618,6 +620,10 @@ pub enum MangoInstruction {
         price: i64,
         quantity: i64,
         trigger_price: I80F48,
+    },
+    /// Remove the order at the order_index
+    RemoveAdvancedOrder {
+        order_index: u8,
     },
 
     /// 0. `[]` mango_group_ai - MangoGroup
@@ -926,13 +932,16 @@ impl MangoInstruction {
             }
 
             40 => MangoInstruction::ForceSettleQuotePositions,
-            41 => MangoInstruction::InitAdvancedOrders,
-
-            42 => {
+            41 => {
+                // ***
                 let data_arr = array_ref![data, 0, 46];
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MangoInstruction::PlaceSpotOrder2 { order }
             }
+
+            // ***
+            42 => MangoInstruction::InitAdvancedOrders,
+
             43 => {
                 let data_arr = array_ref![data, 0, 44];
                 let (
@@ -961,6 +970,10 @@ impl MangoInstruction {
             }
 
             44 => {
+                let order_index = array_ref![data, 0, 1][0];
+                MangoInstruction::RemoveAdvancedOrder { order_index }
+            }
+            45 => {
                 let order_index = array_ref![data, 0, 1][0];
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }

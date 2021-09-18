@@ -2492,131 +2492,6 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// DEPRECATED
-    /// Liqor takes on all the quote positions where base_position == 0
-    /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
-    /// This is very similar to the settle_pnl function, but is forced for Sick accounts
-    fn force_settle_quote_positions(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 7;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
-
-        let [
-            mango_group_ai,         // read
-            mango_cache_ai,         // read
-            liqee_mango_account_ai, // write
-            liqor_mango_account_ai, // write
-            liqor_ai,               // read, signer
-            root_bank_ai,           // read
-            node_bank_ai,           // write
-        ] = fixed_ais;
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let mut liqee_ma =
-            MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
-
-        let mut liqor_ma =
-            MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
-        check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(!liqor_ma.being_liquidated, MangoErrorCode::BeingLiquidated)?;
-
-        check!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank == root_bank_ai.key,
-            MangoErrorCode::InvalidRootBank
-        )?;
-        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
-        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
-        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
-
-        let now_ts = Clock::get()?.unix_timestamp as u64;
-        let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
-        mango_cache.check_valid(&mango_group, &liqee_active_assets, now_ts)?;
-
-        // Make sure orders are cancelled for perps and check orders
-        for i in 0..mango_group.num_oracles {
-            if liqee_active_assets.perps[i] {
-                check!(
-                    liqee_ma.perp_accounts[i].is_liquidatable(),
-                    MangoErrorCode::NotLiquidatable
-                )?;
-            }
-        }
-
-        let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
-        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
-
-        if liqee_ma.being_liquidated {
-            if init_health > ZERO_I80F48 {
-                liqee_ma.being_liquidated = false;
-                msg!("Account init_health above zero.");
-                return Ok(());
-            }
-        } else if maint_health >= ZERO_I80F48 {
-            // TODO - there is an issue here where you stack this instruction after ForceCancelOrders
-            //  and it causes the whole tx to fail and therefore being_liquidate flag to not be reversed
-            return Err(throw_err!(MangoErrorCode::NotLiquidatable));
-        } else {
-            liqee_ma.being_liquidated = true;
-        }
-
-        let mut total_settle = ZERO_I80F48;
-
-        // Iterate over all perp markets and transfer the quote position to liqor
-        let mut market_settle_log = [0.0; MAX_PAIRS];
-        for i in 0..mango_group.num_oracles {
-            if !health_cache.active_assets.perps[i] {
-                continue;
-            }
-            let liqee_pa = &mut liqee_ma.perp_accounts[i];
-            let liqor_pa = &mut liqor_ma.perp_accounts[i];
-
-            // Can only force settle on markets where base position == 0
-            if liqee_pa.base_position != 0 || liqee_pa.quote_position.is_zero() {
-                continue;
-            }
-
-            market_settle_log[i] = liqee_pa.quote_position.to_num();
-            total_settle += liqee_pa.quote_position;
-            liqee_pa.transfer_quote_position(liqor_pa, liqee_pa.quote_position);
-        }
-
-        // Now do the quote currency transfer from liqor to liqee on token side
-        transfer_token_internal(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut node_bank,
-            &mut liqor_ma,
-            &mut liqee_ma,
-            liqor_mango_account_ai.key,
-            liqee_mango_account_ai.key,
-            QUOTE_INDEX,
-            total_settle,
-        )?;
-        liqee_ma.is_bankrupt = liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
-
-        msg!(
-            "force_settle_quote_positions details: {{ \
-                \"liqee\": {}, \
-                \"liqor\": {}, \
-                \"settlements\": {:?}, \
-                }}",
-            liqee_mango_account_ai.key,
-            liqor_mango_account_ai.key,
-            market_settle_log,
-        );
-
-        Ok(())
-    }
-
-    #[inline(never)]
     /// swap tokens for perp quote position only and only if the base position in that market is 0
     fn liquidate_token_and_perp(
         program_id: &Pubkey,
@@ -3929,6 +3804,10 @@ impl Processor {
             advanced_orders_ai,     // write
             system_prog_ai,         // read
         ] = accounts;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
 
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
@@ -3966,8 +3845,8 @@ impl Processor {
     }
 
     /// Add a perp trigger order to the AdvancedOrders account
-    /// A trigger order works as follows:
-    /// If
+    /// The TriggerCondition specifies if trigger_price  must be above or below oracle price
+    /// When the condition is met, the order is executed as a regular perp order
     #[inline(never)]
     fn add_perp_trigger_order<'a>(
         program_id: &Pubkey,
@@ -3986,7 +3865,7 @@ impl Processor {
         check!(trigger_price.is_positive(), MangoErrorCode::InvalidParam)?; // Is this necessary?
 
         const NUM_FIXED: usize = 7;
-        // TODO - amend client functions
+        // TODO - *** amend client functions
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
@@ -3997,6 +3876,10 @@ impl Processor {
             perp_market_ai,         // read
             system_prog_ai,         // read
         ] = fixed_ais;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
@@ -4033,25 +3916,19 @@ impl Processor {
             &mango_account,
             &open_orders_ais,
         )?;
-        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
-        // update the being_liquidated flag
-        if mango_account.being_liquidated {
-            if pre_health >= ZERO_I80F48 {
-                mango_account.being_liquidated = false;
-            } else {
-                msg!("Failed to trigger order; MangoAccount is being liquidated.");
-                return cancel_all_advanced_orders(
-                    advanced_orders_ai,
-                    owner_ai,
-                    system_prog_ai,
-                    &mut advanced_orders,
-                );
-            }
-        }
+        // Only allow placing of trigger orders if account above Maint and not being liquidated
+        check!(
+            init_health >= ZERO_I80F48
+                || (!mango_account.being_liquidated && maint_health >= ZERO_I80F48),
+            MangoErrorCode::Default
+        )?;
+        mango_account.being_liquidated = false;
 
         // Note: no need to check health here, needs to be checked on trigger
-        // TODO: make sure liquidator cancels all advanced orders
+        // TODO: make sure liquidator cancels all advanced orders (why?)
         for i in 0..MAX_ADVANCED_ORDERS {
             if advanced_orders.orders[i].is_active {
                 continue;
@@ -4069,23 +3946,6 @@ impl Processor {
                 trigger_price,
             ));
 
-            // // TODO decide if to reject order if trigger price would insta trigger
-            // //      might be better for user if order still gets executed
-            // // buy-side triggers when current price is higher
-            // // sell-side triggers when current price is lower
-            // let current_price = mango_cache.get_price(market_index);
-            // if (side == Side::Bid
-            //     && trigger_price.checked_sub(current_price).unwrap().is_positive())
-            //     || (side == Side::Ask
-            //         && trigger_price.checked_sub(current_price).unwrap().is_negative())
-            // {
-            //     msg!(
-            //         "registered order would already trigger side={:?} trigger={} current={}",
-            //         side,
-            //         trigger_price.to_num::<f64>(),
-            //         current_price.to_num::<f64>()
-            //     )
-            // }
             invoke_transfer_lamports(
                 owner_ai,
                 advanced_orders_ai,
@@ -4097,12 +3957,61 @@ impl Processor {
         Err(throw_err!(MangoErrorCode::OutOfSpace))
     }
 
+    /// Remove the order and refund the fee
+    fn remove_advanced_order(
+        // ***
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        order_index: u8,
+    ) -> MangoResult<()> {
+        let order_index = order_index as usize;
+        check!(order_index < MAX_ADVANCED_ORDERS, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // read
+            owner_ai,               // write & signer
+            advanced_orders_ai,     // write
+            system_prog_ai,         // read
+        ] = accounts;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let mango_account =
+            MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        // No bankruptcy check; removing order is fine
+
+        let mut advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+
+        let order = &mut advanced_orders.orders[order_index];
+
+        if order.is_active {
+            order.is_active = false;
+            invoke_transfer_lamports(
+                advanced_orders_ai,
+                owner_ai,
+                system_prog_ai,
+                ADVANCED_ORDER_FEE,
+            )?;
+        }
+        Ok(())
+    }
+
     #[inline(never)]
     fn execute_perp_trigger_order<'a>(
         program_id: &Pubkey,
         accounts: &'a [AccountInfo<'a>],
         order_index: u8,
     ) -> MangoResult<()> {
+        let order_index = order_index as usize;
+        check!(order_index < MAX_ADVANCED_ORDERS, MangoErrorCode::InvalidParam)?;
         const NUM_FIXED: usize = 10;
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -4144,8 +4053,7 @@ impl Processor {
         }
 
         // Select the AdvancedOrder
-        let order: &mut PerpTriggerOrder =
-            cast_mut(&mut advanced_orders.orders[order_index as usize]);
+        let order: &mut PerpTriggerOrder = cast_mut(&mut advanced_orders.orders[order_index]);
         check!(order.is_active, MangoErrorCode::InvalidParam)?;
         check!(
             order.advanced_order_type == AdvancedOrderType::PerpTrigger,
@@ -4561,16 +4469,17 @@ impl Processor {
                 Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
             MangoInstruction::ForceSettleQuotePositions => {
+                // ***
                 msg!("DEPRECATED Mango: ForceSettleQuotePositions");
-                Self::force_settle_quote_positions(program_id, accounts)
-            }
-            MangoInstruction::InitAdvancedOrders => {
-                msg!("Mango: InitAdvancedOrders");
-                Self::init_advanced_orders(program_id, accounts)
+                Ok(())
             }
             MangoInstruction::PlaceSpotOrder2 { order } => {
                 msg!("Mango: PlaceSpotOrder2");
                 Self::place_spot_order2(program_id, accounts, order)
+            }
+            MangoInstruction::InitAdvancedOrders => {
+                msg!("Mango: InitAdvancedOrders");
+                Self::init_advanced_orders(program_id, accounts)
             }
             MangoInstruction::AddPerpTriggerOrder {
                 order_type,
@@ -4604,6 +4513,10 @@ impl Processor {
                     quantity,
                     trigger_price,
                 )
+            }
+            MangoInstruction::RemoveAdvancedOrder { order_index } => {
+                msg!("Mango: RemoveAdvancedOrder {}", order_index);
+                Self::remove_advanced_order(program_id, accounts, order_index)
             }
             MangoInstruction::ExecutePerpTriggerOrder { order_index } => {
                 msg!("Mango: ExecutePerpTriggerOrder {}", order_index);
