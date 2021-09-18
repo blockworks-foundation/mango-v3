@@ -1,6 +1,6 @@
 use crate::matching::{OrderType, Side};
-use crate::state::MAX_PAIRS;
 use crate::state::{AssetType, INFO_LEN};
+use crate::state::{TriggerCondition, MAX_PAIRS};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -608,9 +608,11 @@ pub enum MangoInstruction {
     /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
     /// 5. `[]` perp_market_ai
     /// 6. `[]` system_prog_ai
-    RegisterPerpStopOrder {
+    /// 7.. `[]` open_orders_ais - OpenOrders account for each serum dex market in margin basket
+    AddPerpTriggerOrder {
         order_type: OrderType,
         side: Side,
+        trigger_condition: TriggerCondition,
         reduce_only: bool, // only valid on perp order
         client_order_id: u64,
         price: i64,
@@ -628,7 +630,7 @@ pub enum MangoInstruction {
     /// 7. `[writable]` asks_ai - asks account for this PerpMarket
     /// 8. `[writable]` event_queue_ai - EventQueue for this PerpMarket
     /// 9. `[] system_prog_ai
-    ExecutePerpStopOrder {
+    ExecutePerpTriggerOrder {
         order_index: u8,
     },
 }
@@ -929,22 +931,27 @@ impl MangoInstruction {
             42 => {
                 let data_arr = array_ref![data, 0, 46];
                 let order = unpack_dex_new_order_v3(data_arr)?;
-                MangoInstruction::PlaceSpotOrder { order }
+                MangoInstruction::PlaceSpotOrder2 { order }
             }
             43 => {
-                let data_arr = array_ref![data, 0, 43];
+                let data_arr = array_ref![data, 0, 44];
                 let (
                     order_type,
                     side,
+                    trigger_condition, // *** TODO - add to client
                     reduce_only,
                     client_order_id,
                     price,
                     quantity,
                     trigger_price,
-                ) = array_refs![data_arr, 1, 1, 1, 8, 8, 8, 16];
-                MangoInstruction::RegisterPerpStopOrder {
+                ) = array_refs![data_arr, 1, 1, 1, 1, 8, 8, 8, 16];
+                MangoInstruction::AddPerpTriggerOrder {
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     side: Side::try_from_primitive(side[0]).ok()?,
+                    trigger_condition: TriggerCondition::try_from(u8::from_le_bytes(
+                        *trigger_condition,
+                    ))
+                    .unwrap(),
                     reduce_only: reduce_only[0] != 0,
                     client_order_id: u64::from_le_bytes(*client_order_id),
                     price: i64::from_le_bytes(*price),
@@ -955,7 +962,7 @@ impl MangoInstruction {
 
             44 => {
                 let order_index = array_ref![data, 0, 1][0];
-                MangoInstruction::ExecutePerpStopOrder { order_index }
+                MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }
             _ => {
                 return None;

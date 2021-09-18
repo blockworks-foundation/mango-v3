@@ -43,8 +43,8 @@ const MAX_RATE_ADJ: I80F48 = I80F48!(4); // TODO make this part of PerpMarket if
 const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
 pub const MAX_PERP_OPEN_ORDERS: usize = 64;
-pub const FREE_ORDER_SLOT: u8 = u8::MAX; // TODO add check to prevent markets more than 255
-pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
+pub const FREE_ORDER_SLOT: u8 = u8::MAX;
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9; // ***
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 
 declare_check_assert_macros!(SourceFileId::State);
@@ -2001,11 +2001,19 @@ pub const ADVANCED_ORDER_FEE: u64 = 500_000;
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, IntoPrimitive, TryFromPrimitive)]
 pub enum AdvancedOrderType {
-    PerpStop,
-    SpotStop,
+    PerpTrigger,
+    SpotTrigger, // Not implemented yet
+}
+#[repr(u8)]
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
+pub enum TriggerCondition {
+    Above,
+    Below,
 }
 
-const ADVANCED_ORDER_SIZE: usize = size_of::<PerpStop>();
+const ADVANCED_ORDER_SIZE: usize = size_of::<PerpTriggerOrder>();
 
 #[derive(Copy, Clone, Pod, TriviallyTransmutable)]
 #[repr(C)]
@@ -2017,24 +2025,57 @@ pub struct AnyAdvancedOrder {
 
 #[derive(Copy, Clone, Pod, TriviallyTransmutable)]
 #[repr(C)]
-pub struct PerpStop {
+pub struct PerpTriggerOrder {
     pub advanced_order_type: AdvancedOrderType,
     pub is_active: bool,
     pub market_index: u8,
     pub order_type: OrderType,
     pub side: Side,
-    pub reduce_only: bool, // only valid on perp order
-    pub padding: [u8; 2],
+    pub trigger_condition: TriggerCondition, // Bid & Below => Take profit on short, Bid & Above => stop loss on short
+    pub reduce_only: bool,                   // only valid on perp order
+    pub padding0: [u8; 1],
     pub client_order_id: u64,
     pub price: i64,
     pub quantity: i64,
     pub trigger_price: I80F48,
-    // example:
-    // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
-    // index_price < trigger_price
+
+    /// Padding for expansion
+    pub padding1: [u8; 32], // example:
+                            // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
+                            // index_price < trigger_price
 }
 
-const_assert_eq!(size_of::<AnyAdvancedOrder>(), size_of::<PerpStop>());
+impl PerpTriggerOrder {
+    pub fn new(
+        market_index: u8,
+        order_type: OrderType,
+        side: Side,
+        trigger_condition: TriggerCondition,
+        reduce_only: bool,
+        client_order_id: u64,
+        price: i64,
+        quantity: i64,
+        trigger_price: I80F48,
+    ) -> Self {
+        Self {
+            advanced_order_type: AdvancedOrderType::PerpTrigger,
+            is_active: true,
+            market_index,
+            order_type,
+            side,
+            trigger_condition,
+            reduce_only,
+            padding0: [0; 1],
+            client_order_id,
+            price,
+            quantity,
+            trigger_price,
+            padding1: [0u8; 32],
+        }
+    }
+}
+
+const_assert_eq!(size_of::<AnyAdvancedOrder>(), size_of::<PerpTriggerOrder>());
 
 pub const MAX_ADVANCED_ORDERS: usize = 32;
 #[derive(Copy, Clone, Pod, Loadable)]
