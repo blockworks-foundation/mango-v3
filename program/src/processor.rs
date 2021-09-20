@@ -560,7 +560,6 @@ impl Processor {
     }
     #[inline(never)]
     /// Change leverage, fees and liquidity mining params
-    /// Note: only mngo_per_period  and rate works right now; others not yet implemented; this is for safety
     fn change_perp_market_params(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
