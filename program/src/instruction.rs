@@ -223,13 +223,11 @@ pub enum MangoInstruction {
         order_type: OrderType,
     },
 
-    // ***
     CancelPerpOrderByClientId {
         client_order_id: u64,
         invalid_id_ok: bool,
     },
 
-    // ***
     CancelPerpOrder {
         order_id: i128,
         invalid_id_ok: bool,
@@ -302,6 +300,7 @@ pub enum MangoInstruction {
         market_index: usize,
     },
 
+    /// DEPRECATED - no longer makes sense
     /// Use this token's position and deposit to reduce borrows
     ///
     /// Accounts expected by this instruction (5):
@@ -577,6 +576,7 @@ pub enum MangoInstruction {
         limit: u8,
     },
 
+    /// DEPRECATED - will be gone in next release
     /// Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
