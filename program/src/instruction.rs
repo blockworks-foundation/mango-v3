@@ -593,6 +593,11 @@ pub enum MangoInstruction {
     ForceSettleQuotePositions,
 
     /// Initialize the advanced open orders account for a MangoAccount and set
+    // mango_group_ai,         // read
+    // mango_account_ai,       // write
+    // owner_ai,               // write & signer
+    // advanced_orders_ai,     // write
+    // system_prog_ai,         // read
     InitAdvancedOrders,
 
     /// Place an order on the Serum Dex using Mango account. Improved over PlaceSpotOrder
@@ -631,6 +636,15 @@ pub enum MangoInstruction {
     /// 8. `[writable]` event_queue_ai - EventQueue for this PerpMarket
     /// 9. `[] system_prog_ai
     ExecutePerpTriggerOrder {
+        order_index: u8,
+    },
+
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[writable,signer]` owner_ai - owner of MangoAccount
+    /// 3  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
+    /// 4. `[]` system_prog_ai
+    RemovePerpTriggerOrder {
         order_index: u8,
     },
 }
@@ -964,6 +978,11 @@ impl MangoInstruction {
                 let order_index = array_ref![data, 0, 1][0];
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }
+            45 => {
+                let order_index = array_ref![data, 0, 1][0];
+                MangoInstruction::RemovePerpTriggerOrder { order_index }
+            }
+
             _ => {
                 return None;
             }

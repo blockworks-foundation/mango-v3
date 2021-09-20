@@ -4143,9 +4143,11 @@ impl Processor {
             );
         }
 
+        let idx: usize = order_index.into();
+        check!(idx < MAX_ADVANCED_ORDERS, MangoErrorCode::InvalidOrderId);
+
         // Select the AdvancedOrder
-        let order: &mut PerpTriggerOrder =
-            cast_mut(&mut advanced_orders.orders[order_index as usize]);
+        let order: &mut PerpTriggerOrder = cast_mut(&mut advanced_orders.orders[idx]);
         check!(order.is_active, MangoErrorCode::InvalidParam)?;
         check!(
             order.advanced_order_type == AdvancedOrderType::PerpTrigger,
@@ -4259,6 +4261,43 @@ impl Processor {
         order.is_active = false;
         invoke_transfer_lamports(advanced_orders_ai, agent_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
         Ok(())
+    }
+
+    #[inline(never)]
+    fn remove_perp_trigger_order<'a>(
+        program_id: &Pubkey,
+        accounts: &'a [AccountInfo<'a>],
+        order_index: u8,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 5;
+        let fixed_ais = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // read
+            owner_ai,               // write & signer
+            advanced_orders_ai,     // write
+            system_prog_ai,         // read
+        ] = fixed_ais;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+
+        let idx: usize = order_index.into();
+        check!(
+            idx < MAX_ADVANCED_ORDERS && advanced_orders.orders[idx].is_active,
+            MangoErrorCode::InvalidOrderId
+        );
+
+        advanced_orders.orders[idx].is_active = false;
+
+        invoke_transfer_lamports(advanced_orders_ai, owner_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
+        return Ok(());
     }
 
     pub fn process<'a>(
@@ -4608,6 +4647,11 @@ impl Processor {
             MangoInstruction::ExecutePerpTriggerOrder { order_index } => {
                 msg!("Mango: ExecutePerpTriggerOrder {}", order_index);
                 Self::execute_perp_trigger_order(program_id, accounts, order_index)
+            }
+
+            MangoInstruction::RemovePerpTriggerOrder { order_index } => {
+                msg!("Mango: RemovePerpTriggerOrder {}", order_index);
+                Self::remove_perp_trigger_order(program_id, accounts, order_index)
             }
         }
     }
