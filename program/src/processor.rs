@@ -3824,7 +3824,7 @@ impl Processor {
             Pubkey::find_program_address(&[&mango_account_ai.key.to_bytes()], program_id);
         check!(&pda_address == advanced_orders_ai.key, MangoErrorCode::InvalidAccount)?;
 
-        let pda_signer_seeds: &[&[u8]] = &[&pda_address.to_bytes(), &[bump_seed]];
+        let pda_signer_seeds: &[&[u8]] = &[&mango_account_ai.key.to_bytes(), &[bump_seed]];
         let rent = Rent::get()?;
         create_pda_account(
             owner_ai,
