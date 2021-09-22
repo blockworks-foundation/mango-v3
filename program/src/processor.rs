@@ -4030,6 +4030,8 @@ impl Processor {
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
 
+        invoke_transfer_lamports(advanced_orders_ai, agent_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
+
         let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
 
@@ -4157,7 +4159,7 @@ impl Processor {
         }
 
         order.is_active = false;
-        invoke_transfer_lamports(advanced_orders_ai, agent_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
+
         Ok(())
     }
 
