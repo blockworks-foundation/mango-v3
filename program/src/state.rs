@@ -1049,9 +1049,12 @@ pub struct MangoAccount {
     pub info: [u8; INFO_LEN],
 
     /// Starts off as zero pubkey and points to the AdvancedOrders account
-    pub advanced_orders: Pubkey,
+    pub advanced_orders_key: Pubkey,
+
+    pub advanced_orders_bump_seed: u8,
+
     /// padding for expansions
-    pub padding: [u8; 38],
+    pub padding: [u8; 37],
 }
 
 impl MangoAccount {
@@ -2112,7 +2115,7 @@ impl AdvancedOrders {
             state.meta_data.data_type == DataType::AdvancedOrders as u8,
             MangoErrorCode::InvalidAccountState
         )?;
-        check!(&mango_account.advanced_orders == account.key, MangoErrorCode::InvalidAccount)?;
+        check!(&mango_account.advanced_orders_key == account.key, MangoErrorCode::InvalidAccount)?;
         Ok(state)
     }
 }
