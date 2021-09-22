@@ -7,7 +7,6 @@ use std::vec;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
-use mango_common::Loadable;
 use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
@@ -21,6 +20,9 @@ use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
 use spl_token::state::{Account, Mint};
+use switchboard_program::FastRoundResultAccountData;
+
+use mango_common::Loadable;
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::msrm_token;
@@ -38,8 +40,6 @@ use crate::state::{
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
-use solana_program::log::sol_log_compute_units;
-use switchboard_program::FastRoundResultAccountData;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -490,12 +490,6 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-
-        sol_log_compute_units();
-        let (pda_address, bump_seed) =
-            Pubkey::find_program_address(&[&mango_account_ai.key.to_bytes()], program_id);
-        sol_log_compute_units();
-        msg!("address {} bump seed {}", pda_address.to_string(), bump_seed);
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
 
@@ -3890,9 +3884,6 @@ impl Processor {
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
 
-        let mut advanced_orders =
-            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
-
         let market_index = mango_group
             .find_perp_market_index(perp_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
@@ -3923,12 +3914,18 @@ impl Processor {
         check!(
             init_health >= ZERO_I80F48
                 || (!mango_account.being_liquidated && maint_health >= ZERO_I80F48),
-            MangoErrorCode::Default
+            MangoErrorCode::InsufficientHealth
         )?;
         mango_account.being_liquidated = false;
 
         // Note: no need to check health here, needs to be checked on trigger
         // TODO: make sure liquidator cancels all advanced orders (why?)
+        // Transfer lamports before so we don't hit rust borrow checker
+        // If we don't succeed in adding the order, it will be reverted anyway
+        invoke_transfer_lamports(owner_ai, advanced_orders_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
+
+        let mut advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
         for i in 0..MAX_ADVANCED_ORDERS {
             if advanced_orders.orders[i].is_active {
                 continue;
@@ -3946,14 +3943,9 @@ impl Processor {
                 trigger_price,
             ));
 
-            invoke_transfer_lamports(
-                owner_ai,
-                advanced_orders_ai,
-                system_prog_ai,
-                ADVANCED_ORDER_FEE,
-            )?;
             return Ok(());
         }
+
         Err(throw_err!(MangoErrorCode::OutOfSpace))
     }
 

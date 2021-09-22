@@ -126,6 +126,7 @@ pub enum MangoInstruction {
     /// 2+... `[]` oracle_ais - flux aggregator feed accounts
     CachePrices,
 
+    /// DEPRECATED - caching of root banks now happens in update index
     /// Cache root banks
     ///
     /// Accounts expected: 2 + Root Banks
