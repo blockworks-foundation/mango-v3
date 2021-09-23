@@ -66,7 +66,8 @@ impl InnerNode {
 pub struct LeafNode {
     pub tag: u32,
     pub owner_slot: u8,
-    pub padding: [u8; 3],
+    pub order_type: OrderType, // *** this was added for TradingView move order
+    pub padding: [u8; 2],
     pub key: i128,
     pub owner: Pubkey,
     pub quantity: i64,
@@ -93,11 +94,13 @@ impl LeafNode {
         client_order_id: u64,
         timestamp: u64,
         best_initial: i64,
+        order_type: OrderType,
     ) -> Self {
         Self {
             tag: NodeTag::LeafNode.into(),
             owner_slot,
-            padding: [0; 3],
+            order_type,
+            padding: [0; 2],
             key,
             owner,
             quantity,
@@ -707,6 +710,7 @@ impl<'a> Book<'a> {
                 client_order_id,
                 now_ts,
                 best_initial,
+                order_type,
             );
             let _result = self.bids.insert_leaf(&new_bid)?;
 
@@ -836,6 +840,7 @@ impl<'a> Book<'a> {
                 client_order_id,
                 now_ts,
                 best_initial,
+                order_type,
             );
 
             msg!(
