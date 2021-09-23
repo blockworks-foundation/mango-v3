@@ -1051,10 +1051,8 @@ pub struct MangoAccount {
     /// Starts off as zero pubkey and points to the AdvancedOrders account
     pub advanced_orders_key: Pubkey,
 
-    pub advanced_orders_bump_seed: u8,
-
     /// padding for expansions
-    pub padding: [u8; 37],
+    pub padding: [u8; 38],
 }
 
 impl MangoAccount {
