@@ -966,6 +966,55 @@ impl HealthCache {
         }
     }
 
+    /// Simulate health after changes to taker base, taker quote, bids quantity and asks quantity
+    pub fn get_health_after_sim_perp(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        market_index: usize,
+        health_type: HealthType,
+
+        taker_base: i64,
+        taker_quote: i64,
+        bids_quantity: i64,
+        asks_quantity: i64,
+    ) -> MangoResult<I80F48> {
+        let (base, quote) = mango_account.perp_accounts[market_index].sim_get_val(
+            &mango_group.perp_markets[market_index],
+            &mango_cache.perp_market_cache[market_index],
+            mango_cache.price_cache[market_index].price,
+            taker_base,
+            taker_quote,
+            bids_quantity,
+            asks_quantity,
+        )?;
+
+        let (prev_base, prev_quote) = self.perp[market_index];
+        let pmi = &mango_group.perp_markets[market_index];
+
+        let (asset_weight, liab_weight) = match health_type {
+            HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
+            HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+        };
+
+        // Get health from val
+        let prev_perp_health = if prev_base.is_negative() {
+            prev_base * liab_weight + prev_quote
+        } else {
+            prev_base * asset_weight + prev_quote
+        };
+
+        let curr_perp_health = if base.is_negative() {
+            base * liab_weight + quote
+        } else {
+            base * asset_weight + quote
+        };
+
+        let h = self.health[health_type as usize].ok_or(throw!())?;
+        Ok(h + curr_perp_health - prev_perp_health)
+    }
+
     /// Update perp val and then update the healths
     pub fn update_perp_val(
         &mut self,
@@ -1623,6 +1672,40 @@ impl PerpAccount {
         }
     }
 
+    /// Return (base_val, quote_val) unweighted after simulating effect of
+    /// changes to taker_base, taker_quote, bids_quantity and asks_quantity
+    pub fn sim_get_val(
+        &self,
+        pmi: &PerpMarketInfo,
+        pmc: &PerpMarketCache,
+        price: I80F48,
+        taker_base: i64,
+        taker_quote: i64,
+        bids_quantity: i64,
+        asks_quantity: i64,
+    ) -> MangoResult<(I80F48, I80F48)> {
+        let taker_base = self.taker_base + taker_base;
+        let taker_quote = self.taker_quote + taker_quote;
+        let bids_quantity = self.bids_quantity + bids_quantity;
+        let asks_quantity = self.asks_quantity + asks_quantity;
+
+        let bids_base_net = self.base_position + taker_base + bids_quantity;
+        let asks_base_net = self.base_position + taker_base - asks_quantity;
+        if bids_base_net.abs() > asks_base_net.abs() {
+            let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
+            let quote = self.get_quote_position(pmc)
+                + I80F48::from_num(taker_quote * pmi.quote_lot_size)
+                - I80F48::from_num(bids_quantity * pmi.base_lot_size) * price;
+            Ok((base, quote))
+        } else {
+            let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
+            let quote = self.get_quote_position(pmc)
+                + I80F48::from_num(taker_quote * pmi.quote_lot_size)
+                + I80F48::from_num(asks_quantity * pmi.base_lot_size) * price;
+            Ok((base, quote))
+        }
+    }
+
     pub fn is_active(&self) -> bool {
         self.base_position != 0
             || !self.quote_position.is_zero()
@@ -1872,7 +1955,6 @@ impl PerpMarket {
 
         cache.short_funding = self.short_funding;
         cache.long_funding = self.long_funding;
-
         Ok(())
     }
 }

@@ -764,6 +764,8 @@ impl Processor {
                 last_update: now_ts,
             };
         }
+
+        // TODO - log funding
         Ok(())
     }
 
@@ -1296,6 +1298,9 @@ impl Processor {
 
         // See if we can remove this market from margin
         let open_orders = load_open_orders(open_orders_ais[market_index].unwrap())?;
+
+        // TODO - log what's in open orders
+
         mango_account.update_basket(market_index, &open_orders)?;
 
         let (post_base, post_quote) = {
@@ -3119,6 +3124,9 @@ impl Processor {
                 &mut liqee_ma.perp_accounts[liab_index],
                 &mut mango_cache.perp_market_cache[liab_index],
             )?;
+            // TODO - log the cached long funding and short funding
+            // TODO test compute limits on devnet
+
             msg!(
                 "perp_socialized_loss details: {{ \"liab_index\": {}, \"socialized_loss\":{} }}",
                 liab_index,
@@ -4102,6 +4110,18 @@ impl Processor {
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
+        // We know all orders are reduce only
+        // What happens when there's a StopLimit order. that order wouldn't get placed in normal perp order
+        // If limit order and placing it puts you below Init, then remove
+
+        /*
+           what if you execute the order against another account you own when orderbook is empty?
+               normally that order wouldn't succeed, but here it would
+
+           soln: limit order should be at least as much as what we want
+
+        */
+
         // If reduce_only, position must only go down
         let quantity = if order.reduce_only {
             let base_pos = mango_account.perp_accounts[market_index].base_position;
@@ -4117,32 +4137,74 @@ impl Processor {
         };
 
         if quantity != 0 {
-            book.new_order(
-                &mut event_queue,
-                &mut perp_market,
-                &mango_group.perp_markets[market_index],
-                &mut mango_account,
-                mango_account_ai.key,
-                market_index,
-                order.side,
-                order.price,
-                quantity,
-                order.order_type,
-                order.client_order_id,
-                now_ts,
-            )?;
+            let (taker_base, taker_quote, bids_quantity, asks_quantity) = match order.side {
+                Side::Bid => book.sim_new_bid(order.price, order.quantity, order.order_type)?,
+                Side::Ask => book.sim_new_ask(order.price, order.quantity, order.order_type)?,
+            };
 
-            health_cache.update_perp_val(
+            // simulate the effect on health
+            let sim_post_health = health_cache.get_health_after_sim_perp(
                 &mango_group,
                 &mango_cache,
                 &mango_account,
                 market_index,
+                HealthType::Init,
+                taker_base,
+                taker_quote,
+                bids_quantity,
+                asks_quantity,
             )?;
-            let post_health = health_cache.get_health(&mango_group, HealthType::Init);
-            check!(
-                post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
-                MangoErrorCode::InsufficientFunds
-            )?;
+
+            if sim_post_health >= ZERO_I80F48 || (health_up_only && sim_post_health >= pre_health) {
+                book.new_order(
+                    &mut event_queue,
+                    &mut perp_market,
+                    &mango_group.perp_markets[market_index],
+                    &mut mango_account,
+                    mango_account_ai.key,
+                    market_index,
+                    order.side,
+                    order.price,
+                    quantity,
+                    order.order_type,
+                    order.client_order_id,
+                    now_ts,
+                )?;
+
+                // TODO OPT - unnecessary, remove after testing
+                health_cache.update_perp_val(
+                    &mango_group,
+                    &mango_cache,
+                    &mango_account,
+                    market_index,
+                )?;
+                let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+                let pa = &mango_account.perp_accounts[market_index];
+                msg!("{:?} {:?}", sim_post_health, post_health);
+                msg!(
+                    "{} {} {} {} {} {} {} {}",
+                    taker_base,
+                    taker_quote,
+                    bids_quantity,
+                    asks_quantity,
+                    pa.taker_base,
+                    pa.taker_quote,
+                    pa.bids_quantity,
+                    pa.asks_quantity
+                );
+
+                check!(
+                    sim_post_health == post_health
+                        && taker_base == pa.taker_base
+                        && taker_quote == pa.taker_quote
+                        && bids_quantity == pa.bids_quantity
+                        && asks_quantity == pa.asks_quantity,
+                    MangoErrorCode::MathError
+                )?;
+            } else {
+                // normally this would be an InsufficientFunds error but we want to remove the AO and persist changes
+                msg!("Failed to place perp order due to insufficient funds")
+            }
         }
 
         order.is_active = false;

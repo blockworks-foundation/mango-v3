@@ -1,11 +1,8 @@
-use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::queue::{EventQueue, FillEvent, OutEvent};
-use crate::state::{
-    DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, MAX_PERP_OPEN_ORDERS,
-};
+use std::cell::RefMut;
+use std::convert::TryFrom;
+use std::mem::size_of;
+
 use bytemuck::{cast, cast_mut, cast_ref};
-use mango_common::Loadable;
-use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
@@ -15,9 +12,15 @@ use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::rent::Rent;
 use solana_program::sysvar::Sysvar;
 use static_assertions::const_assert_eq;
-use std::cell::RefMut;
-use std::convert::TryFrom;
-use std::mem::size_of;
+
+use mango_common::Loadable;
+use mango_macro::{Loadable, Pod};
+
+use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
+use crate::queue::{EventQueue, FillEvent, OutEvent};
+use crate::state::{
+    DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, MAX_PERP_OPEN_ORDERS,
+};
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -300,9 +303,44 @@ impl BookSide {
             Some(self.root_node)
         }
     }
+
     pub fn find_min(&self) -> Option<NodeHandle> {
         self.find_min_max(false)
     }
+
+    #[cfg(test)]
+    fn to_price_quantity_vec(&self, reverse: bool) -> Vec<(i64, i64)> {
+        let mut pqs = vec![];
+        let mut current: NodeHandle = match self.root() {
+            None => return pqs,
+            Some(node_handle) => node_handle,
+        };
+
+        let left = reverse as usize;
+        let right = !reverse as usize;
+        let mut stack = vec![];
+        loop {
+            let root_contents = self.get(current).unwrap(); // should never fail unless book is already fucked
+            match root_contents.case().unwrap() {
+                NodeRef::Inner(inner) => {
+                    stack.push(inner);
+                    current = inner.children[left];
+                }
+                NodeRef::Leaf(leaf) => {
+                    // if you hit leaf then pop stack and go right
+                    // all inner nodes on stack have already been visited to the left
+                    pqs.push((leaf.price(), leaf.quantity));
+                    match stack.pop() {
+                        None => return pqs,
+                        Some(inner) => {
+                            current = inner.children[right];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn find_min_max(&self, find_max: bool) -> Option<NodeHandle> {
         let mut root: NodeHandle = self.root()?;
 
@@ -591,6 +629,127 @@ impl<'a> Book<'a> {
                 now_ts,
             ),
         }
+    }
+
+    /// Iterate over the book and return
+    /// return changes to (taker_base, taker_quote, bids_quantity, asks_quantity)
+    pub fn sim_new_bid(
+        &self,
+        price: i64,
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        order_type: OrderType,
+    ) -> MangoResult<(i64, i64, i64, i64)> {
+        let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0, 0);
+
+        let (post_only, post_allowed) = match order_type {
+            OrderType::Limit => (false, true),
+            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
+            OrderType::PostOnly => (true, true),
+        };
+        let price = if order_type == OrderType::Market { i64::MAX } else { price };
+        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut stack = vec![];
+        let mut current = match self.asks.root() {
+            None => return Ok((taker_base, taker_quote, bids_quantity, asks_quantity)),
+            Some(node_handle) => node_handle,
+        };
+        while rem_quantity > 0 {
+            match self.asks.get(current).ok_or(throw!())?.case().ok_or(throw!())? {
+                NodeRef::Inner(inner) => {
+                    stack.push(inner);
+                    current = inner.children[0];
+                }
+                NodeRef::Leaf(best_ask) => {
+                    let best_ask_price = best_ask.price();
+                    if price < best_ask_price {
+                        break;
+                    } else if post_only {
+                        return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+                    }
+
+                    let match_quantity = rem_quantity.min(best_ask.quantity);
+                    rem_quantity -= match_quantity;
+
+                    taker_base += match_quantity;
+                    taker_quote -= match_quantity * best_ask_price;
+
+                    match stack.pop() {
+                        // if no more inner nodes on stack, we've processed whole book
+                        None => {
+                            break;
+                        }
+                        Some(inner) => {
+                            current = inner.children[1];
+                        }
+                    }
+                }
+            }
+        }
+
+        if rem_quantity > 0 && post_allowed {
+            bids_quantity += rem_quantity;
+        }
+        Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
+    }
+
+    pub fn sim_new_ask(
+        &self,
+        price: i64,
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        order_type: OrderType,
+    ) -> MangoResult<(i64, i64, i64, i64)> {
+        let (mut taker_base, mut taker_quote, bids_quantity, mut asks_quantity) = (0, 0, 0, 0);
+
+        let (post_only, post_allowed) = match order_type {
+            OrderType::Limit => (false, true),
+            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
+            OrderType::PostOnly => (true, true),
+        };
+        let price = if order_type == OrderType::Market { 0 } else { price };
+
+        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut stack = vec![];
+        let mut current = match self.bids.root() {
+            None => return Ok((taker_base, taker_quote, bids_quantity, asks_quantity)),
+            Some(node_handle) => node_handle,
+        };
+        while rem_quantity > 0 {
+            match self.bids.get(current).ok_or(throw!())?.case().ok_or(throw!())? {
+                NodeRef::Inner(inner) => {
+                    stack.push(inner);
+                    current = inner.children[1];
+                }
+                NodeRef::Leaf(best_bid) => {
+                    let best_bid_price = best_bid.price();
+                    if price > best_bid_price {
+                        break;
+                    } else if post_only {
+                        return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+                    }
+
+                    let match_quantity = rem_quantity.min(best_bid.quantity);
+                    rem_quantity -= match_quantity;
+
+                    taker_base -= match_quantity;
+                    taker_quote += match_quantity * best_bid_price;
+
+                    match stack.pop() {
+                        // if no more inner nodes on stack, we've processed whole book
+                        None => {
+                            break;
+                        }
+                        Some(inner) => {
+                            current = inner.children[0];
+                        }
+                    }
+                }
+            }
+        }
+
+        if rem_quantity > 0 && post_allowed {
+            asks_quantity += rem_quantity;
+        }
+        Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
     }
 
     #[inline(never)]
