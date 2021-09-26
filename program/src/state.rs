@@ -1201,12 +1201,12 @@ impl MangoAccount {
                 if open_orders.native_pc_total > 0 || open_orders.native_coin_total > 0 {
                     return false;
                 }
-                let pa = &self.perp_accounts[i];
-                // We know the bids and asks are empty to even be inside the liquidate function
-                // So no need to check that
-                if pa.quote_position.is_positive() || pa.base_position != 0 {
-                    return false;
-                }
+            }
+            let pa = &self.perp_accounts[i];
+            // We know the bids and asks are empty to even be inside the liquidate function
+            // So no need to check that
+            if pa.quote_position.is_positive() || pa.base_position != 0 {
+                return false;
             }
         }
         true
