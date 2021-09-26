@@ -303,6 +303,7 @@ pub enum MangoInstruction {
         market_index: usize,
     },
 
+    /// DEPRECATED - no longer makes sense
     /// Use this token's position and deposit to reduce borrows
     ///
     /// Accounts expected by this instruction (5):

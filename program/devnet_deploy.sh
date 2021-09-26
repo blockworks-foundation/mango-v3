@@ -31,7 +31,7 @@ cd ~/blockworks-foundation/serum-dex/dex
 anchor build --verifiable
 solana program deploy target/verifiable/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID
 
-VERSION=v1.7.10
+VERSION=v1.7.11
 sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
 
 ### Example Mango Client CLI commands to launch a new group from source/cli.ts in mango-client-v3
