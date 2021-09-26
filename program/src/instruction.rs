@@ -203,6 +203,8 @@ pub enum MangoInstruction {
         target_period_length: u64,
         /// amount MNGO rewarded per period
         mngo_per_period: u64,
+        /// Optional: Exponent in the liquidity mining formula; default 2
+        exp: u8,
     },
 
     /// Place an order on a perp market
@@ -222,7 +224,7 @@ pub enum MangoInstruction {
         side: Side,
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
         order_type: OrderType,
-        /// Optional to be backward compatible
+        /// Optional to be backward compatible; default false
         reduce_only: bool,
     },
 
@@ -556,6 +558,8 @@ pub enum MangoInstruction {
         target_period_length: Option<u64>,
         /// amount MNGO rewarded per period
         mngo_per_period: Option<u64>,
+        /// Optional: Exponent in the liquidity mining formula
+        exp: Option<u8>,
     },
 
     /// Transfer admin permissions over group to another account
@@ -718,6 +722,7 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
+                let exp = if data.len() > 144 { data[144] } else { 2 };
                 let data_arr = array_ref![data, 0, 144];
                 let (
                     maint_leverage,
@@ -744,34 +749,21 @@ impl MangoInstruction {
                     max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
                     target_period_length: u64::from_le_bytes(*target_period_length),
                     mngo_per_period: u64::from_le_bytes(*mngo_per_period),
+                    exp,
                 }
             }
             12 => {
-                if data.len() > 26 {
-                    let data_arr = array_ref![data, 0, 27];
-                    let (price, quantity, client_order_id, side, order_type, reduce_only) =
-                        array_refs![data_arr, 8, 8, 8, 1, 1, 1];
-
-                    MangoInstruction::PlacePerpOrder {
-                        price: i64::from_le_bytes(*price),
-                        quantity: i64::from_le_bytes(*quantity),
-                        client_order_id: u64::from_le_bytes(*client_order_id),
-                        side: Side::try_from_primitive(side[0]).ok()?,
-                        order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
-                        reduce_only: reduce_only[0] != 0,
-                    }
-                } else {
-                    let data_arr = array_ref![data, 0, 26];
-                    let (price, quantity, client_order_id, side, order_type) =
-                        array_refs![data_arr, 8, 8, 8, 1, 1];
-                    MangoInstruction::PlacePerpOrder {
-                        price: i64::from_le_bytes(*price),
-                        quantity: i64::from_le_bytes(*quantity),
-                        client_order_id: u64::from_le_bytes(*client_order_id),
-                        side: Side::try_from_primitive(side[0]).ok()?,
-                        order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
-                        reduce_only: false,
-                    }
+                let reduce_only = if data.len() > 26 { data[26] != 0 } else { false };
+                let data_arr = array_ref![data, 0, 26];
+                let (price, quantity, client_order_id, side, order_type) =
+                    array_refs![data_arr, 8, 8, 8, 1, 1];
+                MangoInstruction::PlacePerpOrder {
+                    price: i64::from_le_bytes(*price),
+                    quantity: i64::from_le_bytes(*quantity),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only,
                 }
             }
             13 => {
@@ -900,6 +892,9 @@ impl MangoInstruction {
             }
 
             37 => {
+                // ***
+                let exp =
+                    if data.len() > 137 { unpack_u8_opt(&[data[137], data[138]]) } else { None };
                 let data_arr = array_ref![data, 0, 137];
                 let (
                     maint_leverage,
@@ -923,6 +918,7 @@ impl MangoInstruction {
                     max_depth_bps: unpack_i80f48_opt(max_depth_bps),
                     target_period_length: unpack_u64_opt(target_period_length),
                     mngo_per_period: unpack_u64_opt(mngo_per_period),
+                    exp,
                 }
             }
 
@@ -986,6 +982,14 @@ impl MangoInstruction {
     }
     pub fn pack(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
+    }
+}
+
+fn unpack_u8_opt(data: &[u8; 2]) -> Option<u8> {
+    if data[0] == 0 {
+        None
+    } else {
+        Some(data[1])
     }
 }
 
@@ -1236,6 +1240,7 @@ pub fn add_perp_market(
         max_depth_bps,
         target_period_length,
         mngo_per_period,
+        exp: 2, // TODO add this to function signature
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })

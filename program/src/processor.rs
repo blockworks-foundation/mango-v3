@@ -5,6 +5,7 @@ use std::mem::size_of;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
+use borsh::BorshSerialize;
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
 use serum_dex::instruction::NewOrderInstructionV3;
@@ -13,6 +14,7 @@ use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::instruction::{AccountMeta, Instruction};
+use solana_program::log::sol_log_compute_units;
 use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::{IsInitialized, Pack};
@@ -30,7 +32,7 @@ use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
-use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
+use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, LoggableFillEvent, OutEvent};
 use crate::state::{
     load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrderType,
     AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
@@ -381,6 +383,7 @@ impl Processor {
         max_depth_bps: I80F48,
         target_period_length: u64,
         mngo_per_period: u64,
+        exp: u8,
     ) -> MangoResult<()> {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
@@ -391,6 +394,7 @@ impl Processor {
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+        check!(exp <= 8 && exp > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -461,7 +465,7 @@ impl Processor {
             max_depth_bps,
             target_period_length,
             mngo_per_period,
-            2,
+            exp,
         )?;
 
         Ok(())
@@ -567,6 +571,7 @@ impl Processor {
         max_depth_bps: Option<I80F48>,
         target_period_length: Option<u64>,
         mngo_per_period: Option<u64>,
+        exp: Option<u8>,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -588,7 +593,6 @@ impl Processor {
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         let mut info = &mut mango_group.perp_markets[market_index];
-        let mut lmi = &mut perp_market.liquidity_mining_info;
 
         // Unwrap params. Default to current state if Option is None
         let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
@@ -628,7 +632,13 @@ impl Processor {
             || max_depth_bps.is_some()
             || target_period_length.is_some()
             || mngo_per_period.is_some()
+            || exp.is_some()
         {
+            let exp = exp.unwrap_or(perp_market.meta_data.extra_info);
+            check!(exp > 0 && exp <= 8, MangoErrorCode::InvalidParam)?;
+            perp_market.meta_data.extra_info = exp;
+
+            let mut lmi = &mut perp_market.liquidity_mining_info;
             let rate = rate.unwrap_or(lmi.rate);
             let max_depth_bps = max_depth_bps.unwrap_or(lmi.max_depth_bps);
             let target_period_length = target_period_length.unwrap_or(lmi.target_period_length);
@@ -3503,32 +3513,37 @@ impl Processor {
                     }
 
                     // TODO OPT remove this log if we start hitting compute limits
-                    msg!(
-                        "FillEvent details: {{ \
-                            \"timestamp\": {}, \
-                            \"seq_num\": {}, \
-                            \"maker\": {}, \
-                            \"taker\": {}, \
-                            \"taker_side\": {}, \
-                            \"maker_order_id\": {}, \
-                            \"taker_order_id\": {}, \
-                            \"maker_fee\": {}, \
-                            \"taker_fee\": {}, \
-                            \"price\": {}, \
-                            \"quantity\": {} \
-                            }}",
-                        fill.timestamp,
-                        fill.seq_num,
-                        fill.maker.to_string(),
-                        fill.taker.to_string(),
-                        if fill.taker_side == Side::Bid { "bid" } else { "sell" },
-                        fill.maker_order_id,
-                        fill.taker_order_id,
-                        fill.maker_fee.to_num::<f64>(),
-                        fill.taker_fee.to_num::<f64>(),
-                        fill.price,
-                        fill.quantity
-                    );
+                    // sol_log_compute_units();
+                    // msg!(
+                    //     "FillEvent details: {{ \
+                    //         \"timestamp\": {}, \
+                    //         \"seq_num\": {}, \
+                    //         \"maker\": {}, \
+                    //         \"taker\": {}, \
+                    //         \"taker_side\": {}, \
+                    //         \"maker_order_id\": {}, \
+                    //         \"taker_order_id\": {}, \
+                    //         \"maker_fee\": {}, \
+                    //         \"taker_fee\": {}, \
+                    //         \"price\": {}, \
+                    //         \"quantity\": {} \
+                    //         }}",
+                    //     fill.timestamp,
+                    //     fill.seq_num,
+                    //     fill.maker.to_string(),
+                    //     fill.taker.to_string(),
+                    //     if fill.taker_side == Side::Bid { "bid" } else { "sell" },
+                    //     fill.maker_order_id,
+                    //     fill.taker_order_id,
+                    //     fill.maker_fee.to_num::<f64>(),
+                    //     fill.taker_fee.to_num::<f64>(),
+                    //     fill.price,
+                    //     fill.quantity
+                    // );
+                    sol_log_compute_units();
+                    msg!(base64::encode(LoggableFillEvent::from_fill(fill).try_to_vec().unwrap())
+                        .as_str());
+                    sol_log_compute_units();
                 }
                 EventType::Out => {
                     let out: &OutEvent = cast_ref(event);
@@ -4320,6 +4335,7 @@ impl Processor {
                 max_depth_bps,
                 target_period_length,
                 mngo_per_period,
+                exp,
             } => {
                 msg!("Mango: AddPerpMarket");
                 Self::add_perp_market(
@@ -4336,6 +4352,7 @@ impl Processor {
                     max_depth_bps,
                     target_period_length,
                     mngo_per_period,
+                    exp,
                 )
             }
             MangoInstruction::PlacePerpOrder {
@@ -4487,6 +4504,7 @@ impl Processor {
                 max_depth_bps,
                 target_period_length,
                 mngo_per_period,
+                exp,
             } => {
                 msg!("Mango: ChangePerpMarketParams");
                 Self::change_perp_market_params(
@@ -4501,6 +4519,7 @@ impl Processor {
                     max_depth_bps,
                     target_period_length,
                     mngo_per_period,
+                    exp,
                 )
             }
             MangoInstruction::SetGroupAdmin => {

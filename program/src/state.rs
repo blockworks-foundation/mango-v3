@@ -1572,6 +1572,11 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
+        // This param didn't exist in the past so 0 implies default value of 2
+        if perp_market.meta_data.extra_info == 0 {
+            perp_market.meta_data.extra_info = 2;
+        }
+
         let lmi = &mut perp_market.liquidity_mining_info;
         if lmi.rate == 0 || lmi.mngo_per_period == 0 {
             return Ok(());
@@ -1589,13 +1594,7 @@ impl PerpAccount {
         let time_factor = (time_final - time_initial).min(864_000);
         // TODO - check overflow possibilities here by throwing in reasonable large numbers
 
-        let exp = if perp_market.meta_data.extra_info == 0 {
-            2
-        } else {
-            perp_market.meta_data.extra_info
-        };
-
-        let mut points = pow_i80f48(dist_factor, exp)
+        let mut points = pow_i80f48(dist_factor, perp_market.meta_data.extra_info)
             .checked_mul(I80F48::from_num(time_factor))
             .unwrap()
             .checked_mul(I80F48::from_num(quantity))

@@ -2,6 +2,8 @@ use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
+
+use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use bytemuck::Pod;
 use fixed::types::I80F48;
 use mango_macro::Pod;
@@ -300,6 +302,61 @@ impl FillEvent {
         match side {
             Side::Bid => (self.quantity, -self.price * self.quantity),
             Side::Ask => (-self.quantity, self.price * self.quantity),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq, BorshDeserialize, BorshSerialize, BorshSchema)]
+pub struct LoggableFillEvent {
+    pub event_type: u8,
+    pub taker_side: u8, // side from the taker's POV
+    pub maker_slot: u8,
+    pub maker_out: bool, // true if maker order quantity == 0
+    pub timestamp: u64,
+    pub seq_num: u64, // note: usize same as u64
+
+    pub maker: Pubkey,
+    pub maker_order_id: i128,
+    pub maker_client_order_id: u64,
+    pub maker_fee: i128,
+
+    // The best bid/ask at the time the maker order was placed. Used for liquidity incentives
+    pub best_initial: i64,
+
+    // Timestamp of when the maker order was placed; copied over from the LeafNode
+    pub maker_timestamp: u64,
+
+    pub taker: Pubkey,
+    pub taker_order_id: i128,
+    pub taker_client_order_id: u64,
+    pub taker_fee: i128,
+
+    pub price: i64,
+    pub quantity: i64, // number of quote lots
+}
+
+impl LoggableFillEvent {
+    pub fn from_fill(fill: &FillEvent) -> Self {
+        Self {
+            event_type: fill.event_type,
+            taker_side: fill.taker_side as u8,
+            maker_slot: fill.maker_slot,
+            maker_out: fill.maker_out,
+            timestamp: fill.timestamp,
+            seq_num: fill.seq_num as u64,
+            maker: fill.maker,
+            maker_order_id: fill.maker_order_id,
+            maker_client_order_id: fill.maker_client_order_id,
+            maker_fee: fill.maker_fee.to_bits(),
+            best_initial: fill.best_initial,
+            maker_timestamp: fill.maker_timestamp,
+            taker: fill.taker,
+            taker_order_id: fill.taker_order_id,
+            taker_client_order_id: fill.taker_client_order_id,
+            taker_fee: fill.taker_fee.to_bits(),
+            price: fill.price,
+            quantity: fill.quantity,
         }
     }
 }
