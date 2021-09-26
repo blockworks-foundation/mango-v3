@@ -27,7 +27,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, OrderType, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut, split_open_orders};
+use crate::utils::{invert_side, pow_i80f48, remove_slop_mut, split_open_orders};
 
 pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -102,12 +102,27 @@ pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
     pub is_initialized: bool,
-    pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
+    pub extra_info: u8, // being used by PerpMarket to store liquidity mining param
+    pub padding: [u8; 4], // This makes explicit the 8 byte alignment padding
 }
 
 impl MetaData {
     pub fn new(data_type: DataType, version: u8, is_initialized: bool) -> Self {
-        Self { data_type: data_type as u8, version, is_initialized, padding: [0u8; 5] }
+        Self {
+            data_type: data_type as u8,
+            version,
+            is_initialized,
+            extra_info: 0,
+            padding: [0u8; 4],
+        }
+    }
+    pub fn new_with_extra(
+        data_type: DataType,
+        version: u8,
+        is_initialized: bool,
+        extra_info: u8,
+    ) -> Self {
+        Self { data_type: data_type as u8, version, is_initialized, extra_info, padding: [0u8; 4] }
     }
 }
 
@@ -1570,12 +1585,18 @@ impl PerpAccount {
         // TODO limit incentives to orders that were on book at least 5 seconds
         let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
         let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
-
+        // TODO - cap time_final - time_initial to 864_000 ~= 10 days this is to prevent overflow
+        let time_factor = (time_final - time_initial).min(864_000);
         // TODO - check overflow possibilities here by throwing in reasonable large numbers
-        let mut points = dist_factor
-            .checked_mul(dist_factor)
-            .unwrap()
-            .checked_mul(I80F48::from_num(time_final - time_initial))
+
+        let exp = if perp_market.meta_data.extra_info == 0 {
+            2
+        } else {
+            perp_market.meta_data.extra_info
+        };
+
+        let mut points = pow_i80f48(dist_factor, exp)
+            .checked_mul(I80F48::from_num(time_factor))
             .unwrap()
             .checked_mul(I80F48::from_num(quantity))
             .unwrap();
@@ -1801,6 +1822,7 @@ impl PerpMarket {
         max_depth_bps: I80F48,
         target_period_length: u64,
         mngo_per_period: u64,
+        exp: u8, // ***
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
@@ -1810,7 +1832,7 @@ impl PerpMarket {
         )?;
         check!(!state.meta_data.is_initialized, MangoErrorCode::Default)?;
 
-        state.meta_data = MetaData::new(DataType::PerpMarket, 0, true);
+        state.meta_data = MetaData::new_with_extra(DataType::PerpMarket, 0, true, exp);
         state.mango_group = *mango_group_ai.key;
         state.bids = *bids_ai.key;
         state.asks = *asks_ai.key;
@@ -1963,15 +1985,15 @@ pub fn load_market_state<'a>(
     market_account: &'a AccountInfo,
     program_id: &Pubkey,
 ) -> MangoResult<RefMut<'a, serum_dex::state::MarketState>> {
-    check_eq!(market_account.owner, program_id, MangoErrorCode::Default)?;
+    check_eq!(market_account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-    let state: RefMut<'a, serum_dex::state::MarketState>;
-    state = RefMut::map(market_account.try_borrow_mut_data()?, |data| {
-        let data_len = data.len() - 12;
-        let (_, rest) = data.split_at_mut(5);
-        let (mid, _) = rest.split_at_mut(data_len);
-        from_bytes_mut(mid)
-    });
+    let state: RefMut<'a, serum_dex::state::MarketState> =
+        RefMut::map(market_account.try_borrow_mut_data()?, |data| {
+            let data_len = data.len() - 12;
+            let (_, rest) = data.split_at_mut(5);
+            let (mid, _) = rest.split_at_mut(data_len);
+            from_bytes_mut(mid)
+        });
 
     state.check_flags()?;
     Ok(state)

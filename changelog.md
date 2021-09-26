@@ -10,3 +10,4 @@
 7. Remove ForceSettleQuotePositions because it mixes in the risk from all perp markets into USDC lending pool
 8. All cache valid checks are done independently of one another and have different valid_interval
 9. Remove CacheRootBank instruction
+10. Add new param for exponent in liquidity incentives

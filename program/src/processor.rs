@@ -461,6 +461,7 @@ impl Processor {
             max_depth_bps,
             target_period_length,
             mngo_per_period,
+            2,
         )?;
 
         Ok(())
