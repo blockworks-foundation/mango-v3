@@ -470,11 +470,13 @@ impl RootBank {
 
         msg!(
             "token_socialized_loss details: {{ \
+                \"mango_group_pk\": \"{}\", \
                 \"liab_index\": {}, \
-                \"native_loss\":{}, \
+                \"native_loss\": {}, \
                 \"percentage_loss\": {}, \
                 \"deposit_index\": {} \
                 }}",
+            bankrupt_account.mango_group,
             token_index,
             native_loss.to_num::<f64>(),
             percentage_loss.to_num::<f64>(),

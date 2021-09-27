@@ -694,9 +694,11 @@ impl Processor {
 
         msg!(
             "cache_prices details: {{ \
+            \"mango_group_pk\": \"{}\", \
             \"oracle_indexes\": {:?}, \
             \"oracle_prices\": {:?} \
         }}",
+            mango_group_ai.key,
             oracle_indexes,
             oracle_prices
         );
@@ -739,13 +741,17 @@ impl Processor {
 
         msg!(
             "cache_root_banks details: {{ \
+            \"mango_group_pk\": \"{}\", \
             \"token_indexes\": {:?}, \
-            \"deposit_indexes\": {:?} \
-            \"borrow_indexes\": {:?} \
+            \"deposit_indexes\": {:?}, \
+            \"borrow_indexes\": {:?}, \
+            \"redundant_field\": {}
         }}",
+            mango_group_ai.key,
             token_indexes,
             deposit_indexes,
-            borrow_indexes
+            borrow_indexes,
+            0
         );
 
         Ok(())
@@ -765,6 +771,11 @@ impl Processor {
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
+        let mut market_indexes = Vec::new();
+        let mut long_fundings = Vec::new();
+        let mut short_fundings = Vec::new();
+
         for perp_market_ai in perp_market_ais.iter() {
             let index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
             let perp_market =
@@ -774,9 +785,27 @@ impl Processor {
                 short_funding: perp_market.short_funding,
                 last_update: now_ts,
             };
+
+            market_indexes.push(index);
+            long_fundings.push(perp_market.long_funding.to_num::<f64>());
+            short_fundings.push(perp_market.short_funding.to_num::<f64>());
         }
 
-        // TODO - log funding
+        msg!(
+            "cache_perp_markets details: {{ \
+                \"mango_group_pk\": \"{}\", \
+                \"market_indexes\": {:?}, \
+                \"long_funding\": {:?}, \
+                \"short_funding\": {:?}, \
+                \"redundant_field\": {} \
+                }}",
+            mango_group_ai.key,
+            market_indexes,
+            long_fundings,
+            short_fundings,
+            0
+        );
+
         Ok(())
     }
 
@@ -1910,20 +1939,19 @@ impl Processor {
             a_settle,
         )?;
 
-        // Add redundant field - otherwise when there are 4 args msg! attempts to convert them all to u64
         msg!(
             "settle_pnl details: {{ \
-                \"mango_account_a\": {}, \
-                \"mango_account_b\": {}, \
+                \"mango_group_pk\": \"{}\", \
+                \"mango_account_a_pk\": \"{}\", \
+                \"mango_account_b_pk\": \"{}\", \
                 \"market_index\": {}, \
-                \"settlement\": {}, \
-                \"redundant_field\": {} \
+                \"settlement\": {}
                 }}",
+            mango_group_ai.key,
             mango_account_a_ai.key,
             mango_account_b_ai.key,
             market_index,
-            a_settle.to_num::<f64>(), // Will be positive if a has positive pnl and settling with b
-            0
+            a_settle.to_num::<f64>() // Will be positive if a has positive pnl and settling with b
         );
 
         Ok(())
@@ -2017,10 +2045,12 @@ impl Processor {
 
         msg!(
             "settle_fees details: {{ \
-                \"mango_account\": {}, \
+                \"mango_group_pk\": \"{}\", \
+                \"mango_account_pk\": \"{}\", \
                 \"market_index\": {}, \
-                \"settlement\": {}, \
+                \"settlement\": {} \
                 }}",
+            mango_group_ai.key,
             mango_account_ai.key,
             market_index,
             settlement.to_num::<f64>(), // Will be positive if a has positive pnl and settling with b
@@ -2121,7 +2151,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Ok(());
+                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2253,7 +2283,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Ok(());
+                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
             }
         } else if maint_health >= ZERO_I80F48 {
             msg!(
@@ -2357,7 +2387,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Ok(());
+                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2481,6 +2511,9 @@ impl Processor {
 
         msg!(
             "liquidate_token_and_token details: {{ \
+            \"mango_group_pk\": \"{}\", \
+            \"liqee_pk\": \"{}\", \
+            \"liqor_pk\": \"{}\", \
             \"asset_index\": {}, \
             \"liab_index\": {}, \
             \"asset_transfer\": {}, \
@@ -2489,6 +2522,9 @@ impl Processor {
             \"liab_price\": {}, \
             \"bankruptcy\": {} \
         }}",
+            mango_group_ai.key,
+            liqee_mango_account_ai.key,
+            liqor_mango_account_ai.key,
             asset_index,
             liab_index,
             asset_transfer.to_num::<f64>(),
@@ -2577,7 +2613,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Ok(());
+                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2771,6 +2807,9 @@ impl Processor {
 
         msg!(
             "liquidate_token_and_perp details: {{ \
+            \"mango_group_pk\": \"{}\", \
+            \"liqee_pk\": \"{}\", \
+            \"liqor_pk\": \"{}\", \
             \"asset_index\": {}, \
             \"liab_index\": {}, \
             \"asset_type\": \"{:?}\", \
@@ -2780,6 +2819,9 @@ impl Processor {
             \"asset_transfer\": {}, \
             \"actual_liab_transfer\": {} \
         }}",
+            mango_group_ai.key,
+            liqee_mango_account_ai.key,
+            liqor_mango_account_ai.key,
             asset_index,
             liab_index,
             asset_type,
@@ -2892,7 +2934,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Ok(());
+                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2982,8 +3024,21 @@ impl Processor {
 
         // TODO OPT make this more efficient
         msg!(
-            "liquidate_perp_market details: {{ \"market_index\": {}, \"base_transfer\": {}, \"quote_transfer\": {}, \"bankruptcy\": {} }}",
+            "liquidate_perp_market details: {{ \
+                \"mango_group_pk\": \"{}\", \
+                \"liqee_pk\": \"{}\", \
+                \"liqor_pk\": \"{}\", \
+                \"market_index\": {}, \
+                \"price\": {}, \
+                \"base_transfer\": {}, \
+                \"quote_transfer\": {}, \
+                \"bankruptcy\": {}
+            }}",
+            mango_group_ai.key,
+            liqee_mango_account_ai.key,
+            liqor_mango_account_ai.key,
             market_index,
+            price,
             base_transfer,
             quote_transfer.to_num::<f64>(),
             liqee_ma.is_bankrupt,
@@ -3113,7 +3168,16 @@ impl Processor {
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
             msg!(
-                "perp_bankruptcy details: {{ \"liab_index\": {}, \"insurance_transfer\": {} }}",
+                "perp_bankruptcy details: {{ \
+                    \"mango_group_pk\": \"{}\", \
+                    \"liqee_pk\": \"{}\", \
+                    \"liqor_pk\": \"{}\", \
+                    \"liab_index\": {}, \
+                    \"insurance_transfer\": {} \
+                }}",
+                mango_group_ai.key,
+                liqee_mango_account_ai.key,
+                liqor_mango_account_ai.key,
                 liab_index,
                 liab_transfer_u64
             );
@@ -3139,7 +3203,16 @@ impl Processor {
             // TODO test compute limits on devnet
 
             msg!(
-                "perp_socialized_loss details: {{ \"liab_index\": {}, \"socialized_loss\":{} }}",
+                "perp_socialized_loss details: {{ \
+                    \"mango_group_pk\": \"{}\", \
+                    \"liqee_pk\": \"{}\", \
+                    \"liqor_pk\": \"{}\", \
+                    \"liab_index\": {}, \
+                    \"socialized_loss\":{} \
+                }}",
+                mango_group_ai.key,
+                liqee_mango_account_ai.key,
+                liqor_mango_account_ai.key,
                 liab_index,
                 (quote_position / (I80F48::from_num(perp_market.open_interest))).to_num::<f64>()
             );
@@ -3321,7 +3394,16 @@ impl Processor {
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
             msg!(
-                "token_bankruptcy details: {{ \"liab_index\": {}, \"insurance_transfer\": {} }}",
+                "token_bankruptcy details: {{ \
+                    \"mango_group_pk\": \"{}\", \
+                    \"liqee_pk\": \"{}\", \
+                    \"liqor_pk\": \"{}\", \
+                    \"liab_index\": {}, \
+                    \"insurance_transfer\": {} \
+                }}",
+                mango_group_ai.key,
+                liqee_mango_account_ai.key,
+                liqor_mango_account_ai.key,
                 liab_index,
                 insurance_transfer
             );
@@ -3386,10 +3468,12 @@ impl Processor {
 
         msg!(
             "update_root_bank details: {{ \
+            \"mango_group_pk\": \"{}\", \
             \"token_index\": {}, \
-            \"deposit_index\": {} \
+            \"deposit_index\": {}, \
             \"borrow_index\": {} \
         }}",
+            mango_group_ai.key,
             index,
             root_bank.deposit_index.to_num::<f64>(),
             root_bank.borrow_index.to_num::<f64>(),
@@ -4823,8 +4907,9 @@ fn checked_change_net(
     if native_quantity.is_negative() {
         checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)?;
         msg!(
-            "checked_sub_net details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
-            mango_account_pk,
+            "checked_sub_net details: {{ \"mango_group_pk\": \"{}\", \"mango_account_pk\": \"{}\", \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
+            mango_account.mango_group,
+            mango_account_pk, 
             token_index,
             mango_account.deposits[token_index].to_num::<f64>(),
             mango_account.borrows[token_index].to_num::<f64>(),
@@ -4832,7 +4917,8 @@ fn checked_change_net(
     } else if native_quantity.is_positive() {
         checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)?;
         msg!(
-            "checked_add_net details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
+            "checked_add_net details: {{ \"mango_group_pk\": \"{}\", \"mango_account_pk\": \"{}\", \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
+            mango_account.mango_group,
             mango_account_pk,
             token_index,
             mango_account.deposits[token_index].to_num::<f64>(),
