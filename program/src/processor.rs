@@ -3405,8 +3405,8 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
-        // Limit may be max 5 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 4);
+        // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
+        let limit = min(limit, 10);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -3512,37 +3512,12 @@ impl Processor {
                         )?;
                     }
 
-                    // TODO OPT remove this log if we start hitting compute limits
-                    // sol_log_compute_units();
-                    // msg!(
-                    //     "FillEvent details: {{ \
-                    //         \"timestamp\": {}, \
-                    //         \"seq_num\": {}, \
-                    //         \"maker\": {}, \
-                    //         \"taker\": {}, \
-                    //         \"taker_side\": {}, \
-                    //         \"maker_order_id\": {}, \
-                    //         \"taker_order_id\": {}, \
-                    //         \"maker_fee\": {}, \
-                    //         \"taker_fee\": {}, \
-                    //         \"price\": {}, \
-                    //         \"quantity\": {} \
-                    //         }}",
-                    //     fill.timestamp,
-                    //     fill.seq_num,
-                    //     fill.maker.to_string(),
-                    //     fill.taker.to_string(),
-                    //     if fill.taker_side == Side::Bid { "bid" } else { "sell" },
-                    //     fill.maker_order_id,
-                    //     fill.taker_order_id,
-                    //     fill.maker_fee.to_num::<f64>(),
-                    //     fill.taker_fee.to_num::<f64>(),
-                    //     fill.price,
-                    //     fill.quantity
-                    // );
                     sol_log_compute_units();
-                    msg!(base64::encode(LoggableFillEvent::from_fill(fill).try_to_vec().unwrap())
-                        .as_str());
+                    msg!(
+                        "event:[\"LoggableFillEvent\", \"{}\"]",
+                        base64::encode(LoggableFillEvent::from_fill(fill).try_to_vec().unwrap())
+                            .as_str()
+                    );
                     sol_log_compute_units();
                 }
                 EventType::Out => {
@@ -4125,18 +4100,6 @@ impl Processor {
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-
-        // We know all orders are reduce only
-        // What happens when there's a StopLimit order. that order wouldn't get placed in normal perp order
-        // If limit order and placing it puts you below Init, then remove
-
-        /*
-           what if you execute the order against another account you own when orderbook is empty?
-               normally that order wouldn't succeed, but here it would
-
-           soln: limit order should be at least as much as what we want
-
-        */
 
         // If reduce_only, position must only go down
         let quantity = if order.reduce_only {
@@ -4822,6 +4785,8 @@ fn checked_change_net(
 ) -> MangoResult<()> {
     if native_quantity.is_negative() {
         checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)?;
+        sol_log_compute_units();
+
         msg!(
             "checked_sub_net details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
             mango_account_pk,
@@ -4829,8 +4794,10 @@ fn checked_change_net(
             mango_account.deposits[token_index].to_num::<f64>(),
             mango_account.borrows[token_index].to_num::<f64>(),
         );
+        sol_log_compute_units();
     } else if native_quantity.is_positive() {
         checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)?;
+        sol_log_compute_units();
         msg!(
             "checked_add_net details: {{ \"mango_account_pk\": {}, \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
             mango_account_pk,
@@ -4838,6 +4805,7 @@ fn checked_change_net(
             mango_account.deposits[token_index].to_num::<f64>(),
             mango_account.borrows[token_index].to_num::<f64>(),
         );
+        sol_log_compute_units();
     }
     Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
 }

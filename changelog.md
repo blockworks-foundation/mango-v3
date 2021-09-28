@@ -11,6 +11,7 @@
 8. All cache valid checks are done independently of one another and have different valid_interval
 9. Remove CacheRootBank instruction
 10. Add new param for exponent in liquidity incentives
+11. FillEvent logging is now done via LoggableFillEvent borsh serialized and base64 encoded to save compute
 
 ## v3.0.5
 Deployed: September 26, 16:40 UTC
