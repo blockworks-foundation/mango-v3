@@ -2151,7 +2151,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+                return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2283,7 +2283,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+                return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
             msg!(
@@ -2387,7 +2387,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+                return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2613,7 +2613,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+                return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
@@ -2934,7 +2934,7 @@ impl Processor {
             if init_health > ZERO_I80F48 {
                 liqee_ma.being_liquidated = false;
                 msg!("Account init_health above zero.");
-                return Err(throw_err!(MangoErrorCode::NotLiquidatable));
+                return Ok(());
             }
         } else if maint_health >= ZERO_I80F48 {
             return Err(throw_err!(MangoErrorCode::NotLiquidatable));
