@@ -5,7 +5,6 @@ use std::mem::size_of;
 use std::vec;
 
 use arrayref::{array_ref, array_refs};
-use borsh::BorshSerialize;
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
 use serum_dex::instruction::NewOrderInstructionV3;
@@ -32,7 +31,7 @@ use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
-use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, LoggableFillEvent, OutEvent};
+use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrderType,
     AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
@@ -42,6 +41,7 @@ use crate::state::{
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
+use anchor_lang::prelude::emit;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -3600,11 +3600,7 @@ impl Processor {
                     }
 
                     sol_log_compute_units();
-                    msg!(
-                        "event:[\"LoggableFillEvent\", \"{}\"]",
-                        base64::encode(LoggableFillEvent::from_fill(fill).try_to_vec().unwrap())
-                            .as_str()
-                    );
+                    emit!(fill.to_fill_log());
                     sol_log_compute_units();
                 }
                 EventType::Out => {
@@ -4246,18 +4242,6 @@ impl Processor {
                 )?;
                 let post_health = health_cache.get_health(&mango_group, HealthType::Init);
                 let pa = &mango_account.perp_accounts[market_index];
-                msg!("{:?} {:?}", sim_post_health, post_health);
-                msg!(
-                    "{} {} {} {} {} {} {} {}",
-                    taker_base,
-                    taker_quote,
-                    bids_quantity,
-                    asks_quantity,
-                    pa.taker_base,
-                    pa.taker_quote,
-                    pa.bids_quantity,
-                    pa.asks_quantity
-                );
 
                 check!(
                     sim_post_health == post_health
@@ -5270,12 +5254,10 @@ fn program_transfer_lamports(
     dst_ai: &AccountInfo,
     quantity: u64,
 ) -> MangoResult<()> {
-    let src_lamports =
-        src_ai.lamports().checked_sub(quantity).ok_or(throw_err!(MangoErrorCode::MathError))?;
+    let src_lamports = src_ai.lamports().checked_sub(quantity).ok_or(math_err!())?;
     **src_ai.lamports.borrow_mut() = src_lamports;
 
-    let dst_lamports =
-        dst_ai.lamports().checked_add(quantity).ok_or(throw_err!(MangoErrorCode::MathError))?;
+    let dst_lamports = dst_ai.lamports().checked_add(quantity).ok_or(math_err!())?;
     **dst_ai.lamports.borrow_mut() = dst_lamports;
     Ok(())
 }

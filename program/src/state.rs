@@ -1977,7 +1977,10 @@ impl PerpMarket {
             // would be appreciated. Luckily, this will be an extremely rare situation.
             ZERO_I80F48
         } else {
-            account.quote_position.checked_div(I80F48::from_num(self.open_interest)).unwrap()
+            account
+                .quote_position
+                .checked_div(I80F48::from_num(self.open_interest))
+                .ok_or(math_err!())?
         };
 
         self.long_funding -= socialized_loss;
@@ -2153,9 +2156,7 @@ pub struct PerpTriggerOrder {
     pub trigger_price: I80F48,
 
     /// Padding for expansion
-    pub padding1: [u8; 32], // example:
-                            // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
-                            // index_price < trigger_price
+    pub padding1: [u8; 32],
 }
 
 impl PerpTriggerOrder {
@@ -2229,16 +2230,3 @@ impl AdvancedOrders {
         Ok(state)
     }
 }
-
-/*
-Advanced Order Types
-
-1. Allow user to create an AdvancedOrders account and store the pubkey in his MangoAccount
-2. Allow user to add AdvancedOrder to AdvancedOrders account
-3. Another instruction to let anyone trigger the AdvancedOrders on the account
-    - give the initiator an incentive to keep track of these AdvancedOrders and trigger them
-
-incentive
-5e-6
-fee = 0.0005
- */
