@@ -1968,7 +1968,7 @@ impl PerpMarket {
         &mut self,
         account: &mut PerpAccount,
         cache: &mut PerpMarketCache,
-    ) -> MangoResult<()> {
+    ) -> MangoResult<I80F48> {
         // TODO convert into only socializing on one side
         // native USDC per contract open interest
         let socialized_loss = if self.open_interest == 0 {
@@ -1985,7 +1985,7 @@ impl PerpMarket {
 
         cache.short_funding = self.short_funding;
         cache.long_funding = self.long_funding;
-        Ok(())
+        Ok(socialized_loss)
     }
 }
 

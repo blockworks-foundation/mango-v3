@@ -3198,7 +3198,7 @@ impl Processor {
             let mut perp_market =
                 PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
-            perp_market.socialize_loss(
+            let socialized_loss = perp_market.socialize_loss(
                 &mut liqee_ma.perp_accounts[liab_index],
                 &mut mango_cache.perp_market_cache[liab_index],
             )?;
@@ -3217,7 +3217,7 @@ impl Processor {
                 liqee_mango_account_ai.key,
                 liqor_mango_account_ai.key,
                 liab_index,
-                (quote_position / (I80F48::from_num(perp_market.open_interest))).to_num::<f64>()
+                socialized_loss.to_num::<f64>()
             );
         }
 
