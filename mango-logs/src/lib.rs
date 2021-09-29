@@ -38,22 +38,57 @@ pub struct FillLog {
 pub struct TokenBalanceLog {
     pub mango_group: Pubkey,
     pub mango_account: Pubkey,
-    pub token_index: usize,
+    pub token_index: u64, // IDL doesn't support usize
     pub deposit: i128, // on client convert i128 to I80F48 easily by passing in the BN to I80F48 ctor
     pub borrow: i128,
 }
 
 #[event]
-pub struct LiquidateTokenAndTokenLog {
+pub struct CachePricesLog {
     // TODO
 }
 
+#[event]
+pub struct CacheRootBanksLog {
+    // TODO
+}
+#[event]
+pub struct CachePerpMarketsLog {
+    // TODO
+}
+#[event]
+pub struct SettlePnlLog {
+    // TODO
+}
+#[event]
+pub struct SettleFeesLog {
+    // TODO
+}
+#[event]
+pub struct LiquidateTokenAndTokenLog {
+    // TODO
+}
 #[event]
 pub struct LiquidateTokenAndPerpLog {
     // TODO
 }
-
 #[event]
 pub struct LiquidatePerpMarketLog {
+    // TODO
+}
+#[event]
+pub struct PerpBankruptcyLog {
+    // TODO
+}
+#[event]
+pub struct PerpSocializedLossLog {
+    // TODO
+}
+#[event]
+pub struct TokenBankruptcyLog {
+    // TODO
+}
+#[event]
+pub struct UpdateRootBankLog {
     // TODO
 }

@@ -42,6 +42,7 @@ use crate::state::{
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
+use mango_logs::TokenBalanceLog;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -4856,30 +4857,17 @@ fn checked_change_net(
 ) -> MangoResult<()> {
     if native_quantity.is_negative() {
         checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)?;
-        sol_log_compute_units();
-
-        msg!(
-            "checked_sub_net details: {{ \"mango_group_pk\": \"{}\", \"mango_account_pk\": \"{}\", \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
-            mango_account.mango_group,
-            mango_account_pk, 
-            token_index,
-            mango_account.deposits[token_index].to_num::<f64>(),
-            mango_account.borrows[token_index].to_num::<f64>(),
-        );
-        sol_log_compute_units();
     } else if native_quantity.is_positive() {
         checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)?;
-        sol_log_compute_units();
-        msg!(
-            "checked_add_net details: {{ \"mango_group_pk\": \"{}\", \"mango_account_pk\": \"{}\", \"token_index\": {}, \"deposit\": {}, \"borrow\": {} }}",
-            mango_account.mango_group,
-            mango_account_pk,
-            token_index,
-            mango_account.deposits[token_index].to_num::<f64>(),
-            mango_account.borrows[token_index].to_num::<f64>(),
-        );
-        sol_log_compute_units();
     }
+    emit!(TokenBalanceLog {
+        mango_group: mango_account.mango_group,
+        mango_account: *mango_account_pk,
+        token_index: token_index as u64,
+        deposit: mango_account.deposits[token_index].to_bits(),
+        borrow: mango_account.borrows[token_index].to_bits()
+    });
+
     Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
 }
 
