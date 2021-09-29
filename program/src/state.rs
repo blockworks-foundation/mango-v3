@@ -1971,8 +1971,15 @@ impl PerpMarket {
     ) -> MangoResult<()> {
         // TODO convert into only socializing on one side
         // native USDC per contract open interest
-        let socialized_loss = account.quote_position / (I80F48::from_num(self.open_interest));
-        account.quote_position = ZERO_I80F48;
+        let socialized_loss = if self.open_interest == 0 {
+            // This is kind of an unfortunate situation. This means socialized loss occurs on the
+            // last person to call settle_pnl on their profits. Any advice on better mechanism
+            // would be appreciated. Luckily, this will be an extremely rare situation.
+            ZERO_I80F48
+        } else {
+            account.quote_position.checked_div(I80F48::from_num(self.open_interest)).unwrap()
+        };
+
         self.long_funding -= socialized_loss;
         self.short_funding += socialized_loss;
 
