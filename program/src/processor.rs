@@ -42,7 +42,7 @@ use crate::state::{
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
-use mango_logs::TokenBalanceLog;
+use mango_logs::{CachePricesLog, CacheRootBanksLog, TokenBalanceLog};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -681,7 +681,6 @@ impl Processor {
 
         let mut oracle_indexes = Vec::new();
         let mut oracle_prices = Vec::new();
-
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
             let oracle_price = read_oracle(&mango_group, oracle_index, oracle_ai)?;
@@ -689,20 +688,11 @@ impl Processor {
             mango_cache.price_cache[oracle_index] =
                 PriceCache { price: oracle_price, last_update: now_ts };
 
-            oracle_indexes.push(oracle_index);
-            oracle_prices.push(oracle_price.to_num::<f64>());
+            oracle_indexes.push(oracle_index as u64);
+            oracle_prices.push(oracle_price.to_bits());
         }
 
-        msg!(
-            "cache_prices details: {{ \
-            \"mango_group_pk\": \"{}\", \
-            \"oracle_indexes\": {:?}, \
-            \"oracle_prices\": {:?} \
-        }}",
-            mango_group_ai.key,
-            oracle_indexes,
-            oracle_prices
-        );
+        emit!(CachePricesLog { mango_group: *mango_group_ai.key, oracle_indexes, oracle_prices });
 
         Ok(())
     }
@@ -735,26 +725,16 @@ impl Processor {
                 last_update: now_ts,
             };
 
-            token_indexes.push(index);
-            deposit_indexes.push(root_bank.deposit_index.to_num::<f64>());
-            borrow_indexes.push(root_bank.borrow_index.to_num::<f64>())
+            token_indexes.push(index as u64);
+            deposit_indexes.push(root_bank.deposit_index.to_bits());
+            borrow_indexes.push(root_bank.borrow_index.to_bits())
         }
-
-        msg!(
-            "cache_root_banks details: {{ \
-            \"mango_group_pk\": \"{}\", \
-            \"token_indexes\": {:?}, \
-            \"deposit_indexes\": {:?}, \
-            \"borrow_indexes\": {:?}, \
-            \"redundant_field\": {}
-        }}",
-            mango_group_ai.key,
+        emit!(CacheRootBanksLog {
+            mango_group: *mango_group_ai.key,
             token_indexes,
             deposit_indexes,
-            borrow_indexes,
-            0
-        );
-
+            borrow_indexes
+        });
         Ok(())
     }
 
@@ -3494,7 +3474,7 @@ impl Processor {
         limit: usize,
     ) -> MangoResult<()> {
         // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 4);
+        let limit = min(limit, 10);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -3601,7 +3581,7 @@ impl Processor {
                     }
 
                     sol_log_compute_units();
-                    emit!(fill.to_fill_log());
+                    emit!(fill.to_fill_log(*mango_group_ai.key));
                     sol_log_compute_units();
                 }
                 EventType::Out => {

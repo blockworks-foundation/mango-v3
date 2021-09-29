@@ -12,6 +12,7 @@ solana config set --url $CLUSTER_URL
 
 cd ~/blockworks-foundation/mango-v3/
 
+
 mkdir target/devnet
 cargo build-bpf --features devnet --bpf-out-dir target/devnet
 
@@ -23,6 +24,9 @@ cargo build-bpf --features devnet --bpf-out-dir target/devnet
 # devnet.2
 MANGO_PROGRAM_ID="4skJ85cdxQAFVKbcGgfun8iZPL7BadVYXG3kGEGkufqA"
 solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
+anchor build -p mango_logs
+cp ~/blockworks-foundation/mango-v3/target/idl/mango_logs.json ~/blockworks-foundation/mango-client-v3/src/mango_logs.json
+
 #solana program deploy target/devnet/mango.so --keypair $KEYPAIR --output json-compact
 
 # serum dex

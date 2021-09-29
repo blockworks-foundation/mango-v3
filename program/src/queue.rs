@@ -305,8 +305,9 @@ impl FillEvent {
         }
     }
 
-    pub fn to_fill_log(&self) -> FillLog {
+    pub fn to_fill_log(&self, mango_group: Pubkey) -> FillLog {
         FillLog {
+            mango_group,
             taker_side: self.taker_side as u8,
             maker_slot: self.maker_slot,
             maker_out: self.maker_out,

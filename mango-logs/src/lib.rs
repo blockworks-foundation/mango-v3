@@ -8,6 +8,7 @@ pub mod mango_logs {}
 
 #[event]
 pub struct FillLog {
+    pub mango_group: Pubkey,
     pub taker_side: u8, // side from the taker's POV
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
@@ -33,7 +34,6 @@ pub struct FillLog {
     pub price: i64,
     pub quantity: i64, // number of quote lots
 }
-
 #[event]
 pub struct TokenBalanceLog {
     pub mango_group: Pubkey,
@@ -45,13 +45,18 @@ pub struct TokenBalanceLog {
 
 #[event]
 pub struct CachePricesLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub oracle_indexes: Vec<u64>,
+    pub oracle_prices: Vec<i128>, // I80F48 format
 }
-
 #[event]
 pub struct CacheRootBanksLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub token_indexes: Vec<u64>,    // usize
+    pub deposit_indexes: Vec<i128>, // I80F48
+    pub borrow_indexes: Vec<i128>,  // I80F48
 }
+
 #[event]
 pub struct CachePerpMarketsLog {
     // TODO
