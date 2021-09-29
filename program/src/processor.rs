@@ -3023,6 +3023,7 @@ impl Processor {
         }
 
         // TODO OPT make this more efficient
+        sol_log_compute_units();
         msg!(
             "liquidate_perp_market details: {{ \
                 \"mango_group_pk\": \"{}\", \
@@ -3038,11 +3039,13 @@ impl Processor {
             liqee_mango_account_ai.key,
             liqor_mango_account_ai.key,
             market_index,
-            price,
+            price.to_num::<f64>(),
             base_transfer,
             quote_transfer.to_num::<f64>(),
             liqee_ma.is_bankrupt,
         );
+        sol_log_compute_units();
+
         Ok(())
     }
 
@@ -3490,7 +3493,7 @@ impl Processor {
         limit: usize,
     ) -> MangoResult<()> {
         // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 10);
+        let limit = min(limit, 4);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
