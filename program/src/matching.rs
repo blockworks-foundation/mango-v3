@@ -213,6 +213,7 @@ pub enum OrderType {
     ImmediateOrCancel = 1,
     PostOnly = 2,
     Market = 3,
+    PostOnlySlide = 4, // ***
 }
 
 #[derive(
@@ -609,7 +610,7 @@ impl<'a> Book<'a> {
                 mango_account,
                 mango_account_pk,
                 market_index,
-                if order_type == OrderType::Market { i64::MAX } else { price },
+                price,
                 quantity,
                 order_type,
                 client_order_id,
@@ -622,7 +623,7 @@ impl<'a> Book<'a> {
                 mango_account,
                 mango_account_pk,
                 market_index,
-                if order_type == OrderType::Market { 0 } else { price },
+                price,
                 quantity,
                 order_type,
                 client_order_id,
@@ -641,12 +642,21 @@ impl<'a> Book<'a> {
     ) -> MangoResult<(i64, i64, i64, i64)> {
         let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0, 0);
 
-        let (post_only, post_allowed) = match order_type {
-            OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
-            OrderType::PostOnly => (true, true),
+        let (post_only, post_allowed, price) = match order_type {
+            OrderType::Limit => (false, true, price),
+            OrderType::ImmediateOrCancel => (false, false, price),
+            OrderType::PostOnly => (true, true, price),
+            OrderType::Market => (false, false, i64::MAX),
+            OrderType::PostOnlySlide => {
+                let price = if let Some(best_ask_price) = self.get_best_ask_price() {
+                    price.min(best_ask_price.checked_sub(1).ok_or(math_err!())?)
+                } else {
+                    price
+                };
+                (true, true, price)
+            }
         };
-        let price = if order_type == OrderType::Market { i64::MAX } else { price };
+
         let mut rem_quantity = quantity; // base lots (aka contracts)
         let mut stack = vec![];
         let mut current = match self.asks.root() {
@@ -700,12 +710,20 @@ impl<'a> Book<'a> {
     ) -> MangoResult<(i64, i64, i64, i64)> {
         let (mut taker_base, mut taker_quote, bids_quantity, mut asks_quantity) = (0, 0, 0, 0);
 
-        let (post_only, post_allowed) = match order_type {
-            OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
-            OrderType::PostOnly => (true, true),
+        let (post_only, post_allowed, price) = match order_type {
+            OrderType::Limit => (false, true, price),
+            OrderType::ImmediateOrCancel => (false, false, price),
+            OrderType::PostOnly => (true, true, price),
+            OrderType::Market => (false, false, i64::MAX),
+            OrderType::PostOnlySlide => {
+                let price = if let Some(best_bid_price) = self.get_best_bid_price() {
+                    price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
+                } else {
+                    price
+                };
+                (true, true, price)
+            }
         };
-        let price = if order_type == OrderType::Market { 0 } else { price };
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
         let mut stack = vec![];
@@ -769,10 +787,19 @@ impl<'a> Book<'a> {
     ) -> MangoResult<()> {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
-        let (post_only, post_allowed) = match order_type {
-            OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
-            OrderType::PostOnly => (true, true),
+        let (post_only, post_allowed, price) = match order_type {
+            OrderType::Limit => (false, true, price),
+            OrderType::ImmediateOrCancel => (false, false, price),
+            OrderType::PostOnly => (true, true, price),
+            OrderType::Market => (false, false, i64::MAX),
+            OrderType::PostOnlySlide => {
+                let price = if let Some(best_ask_price) = self.get_best_ask_price() {
+                    price.min(best_ask_price.checked_sub(1).ok_or(math_err!())?)
+                } else {
+                    price
+                };
+                (true, true, price)
+            }
         };
 
         let order_id = market.gen_order_id(Side::Bid, price);
@@ -902,10 +929,19 @@ impl<'a> Book<'a> {
         now_ts: u64,
     ) -> MangoResult<()> {
         // TODO proper error handling
-        let (post_only, post_allowed) = match order_type {
-            OrderType::Limit => (false, true),
-            OrderType::ImmediateOrCancel | OrderType::Market => (false, false),
-            OrderType::PostOnly => (true, true),
+        let (post_only, post_allowed, price) = match order_type {
+            OrderType::Limit => (false, true, price),
+            OrderType::ImmediateOrCancel => (false, false, price),
+            OrderType::PostOnly => (true, true, price),
+            OrderType::Market => (false, false, i64::MAX),
+            OrderType::PostOnlySlide => {
+                let price = if let Some(best_bid_price) = self.get_best_bid_price() {
+                    price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
+                } else {
+                    price
+                };
+                (true, true, price)
+            }
         };
         let order_id = market.gen_order_id(Side::Ask, price);
 

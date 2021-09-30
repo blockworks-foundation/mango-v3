@@ -320,8 +320,8 @@ impl Processor {
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidSignerKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
         let oracle_type = determine_oracle_type(oracle_ai);
         match oracle_type {
@@ -357,8 +357,8 @@ impl Processor {
         ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::Default)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(mango_group.find_oracle_index(oracle_ai.key).is_some(), MangoErrorCode::Default)?;
 
         let oracle_type = determine_oracle_type(oracle_ai);
