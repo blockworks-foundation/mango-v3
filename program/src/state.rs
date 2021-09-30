@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::log::sol_log_compute_units;
-use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
@@ -426,6 +425,7 @@ impl RootBank {
         Ok(())
     }
 
+    /// Socialize the loss on lenders and return (native_loss, percentage_loss)
     pub fn socialize_loss(
         &mut self,
         program_id: &Pubkey,
@@ -433,7 +433,7 @@ impl RootBank {
         mango_cache: &mut MangoCache,
         bankrupt_account: &mut MangoAccount,
         node_bank_ais: &[AccountInfo; MAX_NODE_BANKS],
-    ) -> MangoResult<()> {
+    ) -> MangoResult<(I80F48, I80F48)> {
         let mut static_deposits = ZERO_I80F48;
 
         for i in 0..self.num_node_banks {
@@ -467,23 +467,7 @@ impl RootBank {
                 break;
             }
         }
-
-        msg!(
-            "token_socialized_loss details: {{ \
-                \"mango_group_pk\": \"{}\", \
-                \"liab_index\": {}, \
-                \"native_loss\": {}, \
-                \"percentage_loss\": {}, \
-                \"deposit_index\": {} \
-                }}",
-            bankrupt_account.mango_group,
-            token_index,
-            native_loss.to_num::<f64>(),
-            percentage_loss.to_num::<f64>(),
-            self.deposit_index.to_num::<f64>(),
-        );
-
-        Ok(())
+        Ok((native_loss, percentage_loss))
     }
 }
 

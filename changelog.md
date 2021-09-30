@@ -12,6 +12,9 @@
 9. Remove CacheRootBank instruction
 10. Add new param for exponent in liquidity incentives
 11. FillEvent logging is now done via LoggableFillEvent borsh serialized and base64 encoded to save compute
+12. Added mango-logs and replaced all logging with more efficient Anchor event
+13. Added logging of OpenOrders balance to keep full track of acocunt value
+14. TODO add PostOnlySlide
 
 ## v3.0.5
 Deployed: September 26, 16:40 UTC

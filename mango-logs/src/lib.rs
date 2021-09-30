@@ -1,8 +1,16 @@
 use anchor_lang::prelude::*;
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
-// This is a dummy program to take advantage of Anchor events
+// Log to Program Log with a prologue so transaction scraper knows following line is valid mango log
+#[macro_export]
+macro_rules! mango_emit {
+    ($e:expr) => {
+        msg!("mango-log");
+        emit!($e);
+    };
+}
 
+// This is a dummy program to take advantage of Anchor events
 #[program]
 pub mod mango_logs {}
 
@@ -59,41 +67,113 @@ pub struct CacheRootBanksLog {
 
 #[event]
 pub struct CachePerpMarketsLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub market_indexes: Vec<u64>,
+    pub long_fundings: Vec<i128>,  // I80F48
+    pub short_fundings: Vec<i128>, // I80F48
 }
+
 #[event]
 pub struct SettlePnlLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub mango_account_a: Pubkey,
+    pub mango_account_b: Pubkey,
+    pub market_index: u64,
+    pub settlement: i128, // I80F48
 }
+
 #[event]
 pub struct SettleFeesLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub market_index: u64,
+    pub settlement: i128, // I80F48
 }
+
 #[event]
 pub struct LiquidateTokenAndTokenLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub liqee: Pubkey,
+    pub liqor: Pubkey,
+    pub asset_index: u64,
+    pub liab_index: u64,
+    pub asset_transfer: i128, // I80F48
+    pub liab_transfer: i128,  // I80F48
+    pub asset_price: i128,    // I80F48
+    pub liab_price: i128,     // I80F48
+    pub bankruptcy: bool,
 }
+
 #[event]
 pub struct LiquidateTokenAndPerpLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub liqee: Pubkey,
+    pub liqor: Pubkey,
+    pub asset_index: u64,
+    pub liab_index: u64,
+    pub asset_type: u8,
+    pub liab_type: u8,
+    pub asset_price: i128,    // I80F48
+    pub liab_price: i128,     // I80F48
+    pub asset_transfer: i128, // I80F48
+    pub liab_transfer: i128,  // I80F48
+    pub bankruptcy: bool,
 }
+
 #[event]
 pub struct LiquidatePerpMarketLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub liqee: Pubkey,
+    pub liqor: Pubkey,
+    pub market_index: u64,
+    pub price: i128, // I80F48
+    pub base_transfer: i64,
+    pub quote_transfer: i128, // I80F48
+    pub bankruptcy: bool,
 }
+
 #[event]
 pub struct PerpBankruptcyLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub liqee: Pubkey,
+    pub liqor: Pubkey,
+    pub liab_index: u64,
+    pub insurance_transfer: u64,
+    pub socialized_loss: i128,     // I80F48
+    pub cache_long_funding: i128,  // I80F48
+    pub cache_short_funding: i128, // I80F48
 }
-#[event]
-pub struct PerpSocializedLossLog {
-    // TODO
-}
+
 #[event]
 pub struct TokenBankruptcyLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub liqee: Pubkey,
+    pub liqor: Pubkey,
+    pub liab_index: u64,
+    pub insurance_transfer: u64,
+    /// This is in native units for the liab token NOT static units
+    pub socialized_loss: i128, // I80F48
+    pub percentage_loss: i128,     // I80F48
+    pub cache_deposit_index: i128, // I80F48
 }
+
 #[event]
 pub struct UpdateRootBankLog {
-    // TODO
+    pub mango_group: Pubkey,
+    pub token_index: u64,
+    pub deposit_index: i128, // I80F48
+    pub borrow_index: i128,  // I80F48
+}
+
+#[event]
+pub struct OpenOrdersBalanceLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub market_index: u64,
+    pub base_total: u64,
+    pub base_free: u64,
+    /// this field does not include the referrer_rebates; need to add that in to get true total
+    pub quote_total: u64,
+    pub quote_free: u64,
+    pub referrer_rebates_accrued: u64,
 }
