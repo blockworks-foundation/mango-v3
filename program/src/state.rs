@@ -1558,6 +1558,8 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
+        sol_log_compute_units();
+
         // This param didn't exist in the past so 0 implies default value of 2
         if perp_market.meta_data.extra_info == 0 {
             perp_market.meta_data.extra_info = 2;
@@ -1592,8 +1594,6 @@ impl PerpAccount {
         let points_in_period = I80F48::from_num(lmi.mngo_left).checked_div(lmi.rate).unwrap();
 
         if points >= points_in_period {
-            sol_log_compute_units();
-
             self.mngo_accrued += lmi.mngo_left;
             points -= points_in_period;
 
@@ -1605,8 +1605,6 @@ impl PerpAccount {
             lmi.rate = lmi.rate.checked_mul(rate_adj).unwrap();
             lmi.period_start = time_final;
             lmi.mngo_left = lmi.mngo_per_period;
-
-            sol_log_compute_units(); // To figure out how much rate adjust costs
         }
 
         let mngo_earned =
@@ -1614,6 +1612,8 @@ impl PerpAccount {
 
         self.mngo_accrued += mngo_earned;
         lmi.mngo_left -= mngo_earned;
+
+        sol_log_compute_units(); // To figure out how much rate adjust costs
 
         Ok(())
     }

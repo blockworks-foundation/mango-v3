@@ -900,6 +900,7 @@ impl<'a> Book<'a> {
             );
             let _result = self.bids.insert_leaf(&new_bid)?;
 
+            // TODO OPT remove if PlacePerpOrder needs more compute
             msg!(
                 "bid on book client_id={} quantity={} price={}",
                 client_order_id,
@@ -1038,6 +1039,7 @@ impl<'a> Book<'a> {
                 order_type,
             );
 
+            // TODO OPT remove if PlacePerpOrder needs more compute
             msg!(
                 "ask on book client_id={} quantity={} price={}",
                 client_order_id,

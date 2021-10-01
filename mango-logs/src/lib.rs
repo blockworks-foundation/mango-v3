@@ -177,3 +177,12 @@ pub struct OpenOrdersBalanceLog {
     pub quote_free: u64,
     pub referrer_rebates_accrued: u64,
 }
+
+#[event]
+pub struct MngoAccrual {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub market_index: u64,
+    /// incremental mngo accrual from canceling/filling this order or set of orders
+    pub mngo_accrual: u64,
+}

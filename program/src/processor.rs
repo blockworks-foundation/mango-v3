@@ -43,8 +43,9 @@ use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
 use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, LiquidatePerpMarketLog,
-    LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, OpenOrdersBalanceLog, PerpBankruptcyLog,
-    SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateRootBankLog,
+    LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrual, OpenOrdersBalanceLog,
+    PerpBankruptcyLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
+    UpdateRootBankLog,
 };
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -1747,7 +1748,7 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
         let mut perp_market =
@@ -1771,6 +1772,7 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         let perp_account = &mut mango_account.perp_accounts[market_index];
+        let mngo_start = perp_account.mngo_accrued;
         perp_account.apply_incentives(
             &mut perp_market,
             side,
@@ -1781,6 +1783,12 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
             order.quantity,
         )?;
+        mango_emit!(MngoAccrual {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
+            mngo_accrual: perp_account.mngo_accrued - mngo_start
+        });
 
         Ok(())
     }
@@ -1810,7 +1818,7 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
         let mut perp_market =
@@ -1830,6 +1838,7 @@ impl Processor {
         let order = book.cancel_order(order_id, side)?;
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+        let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
         mango_account.perp_accounts[market_index].apply_incentives(
             &mut perp_market,
             side,
@@ -1840,6 +1849,12 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
             order.quantity,
         )?;
+        mango_emit!(MngoAccrual {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
+            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+        });
 
         Ok(())
     }
@@ -1875,7 +1890,15 @@ impl Processor {
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        book.cancel_all_with_incentives(&mut mango_account, &mut perp_market, market_index, limit)
+        let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
+        book.cancel_all_with_incentives(&mut mango_account, &mut perp_market, market_index, limit)?;
+        mango_emit!(MngoAccrual {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
+            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+        });
+        Ok(())
     }
 
     #[inline(never)]
@@ -3506,6 +3529,7 @@ impl Processor {
                                 mango_group_ai.key,
                             )?,
                         };
+                        let pre_mngo = ma.perp_accounts[market_index].mngo_accrued;
                         ma.execute_maker(
                             market_index,
                             &mut perp_market,
@@ -3520,6 +3544,12 @@ impl Processor {
                             perp_market_cache,
                             fill,
                         )?;
+                        mango_emit!(MngoAccrual {
+                            mango_group: *mango_group_ai.key,
+                            mango_account: fill.maker,
+                            market_index: market_index as u64,
+                            mngo_accrual: ma.perp_accounts[market_index].mngo_accrued - pre_mngo
+                        });
                     } else {
                         let mut maker =
                             match mango_account_ais.iter().find(|ai| ai.key == &fill.maker) {
@@ -3545,6 +3575,7 @@ impl Processor {
                                     mango_group_ai.key,
                                 )?,
                             };
+                        let pre_mngo = maker.perp_accounts[market_index].mngo_accrued;
 
                         maker.execute_maker(
                             market_index,
@@ -3560,6 +3591,12 @@ impl Processor {
                             perp_market_cache,
                             fill,
                         )?;
+                        mango_emit!(MngoAccrual {
+                            mango_group: *mango_group_ai.key,
+                            mango_account: fill.maker,
+                            market_index: market_index as u64,
+                            mngo_accrual: maker.perp_accounts[market_index].mngo_accrued - pre_mngo
+                        });
                     }
                     mango_emit!(fill.to_fill_log(*mango_group_ai.key));
                 }
