@@ -179,7 +179,7 @@ pub struct OpenOrdersBalanceLog {
 }
 
 #[event]
-pub struct MngoAccrual {
+pub struct MngoAccrualLog {
     pub mango_group: Pubkey,
     pub mango_account: Pubkey,
     pub market_index: u64,

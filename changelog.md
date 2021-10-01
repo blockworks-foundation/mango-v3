@@ -16,6 +16,7 @@
 13. Added logging of OpenOrders balance to keep full track of acocunt value
 14. Added PostOnlySlide for Perp orders (including trigger)
 15. Added OrderType into LeafNode for ability to modify order on TradingView
+16. Added MngoAccrualLog
 
 ## v3.0.5
 Deployed: September 26, 16:40 UTC

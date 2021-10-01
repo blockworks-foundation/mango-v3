@@ -43,7 +43,7 @@ use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
 use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, LiquidatePerpMarketLog,
-    LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrual, OpenOrdersBalanceLog,
+    LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog,
     PerpBankruptcyLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
     UpdateRootBankLog,
 };
@@ -1783,7 +1783,7 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
             order.quantity,
         )?;
-        mango_emit!(MngoAccrual {
+        mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -1849,7 +1849,7 @@ impl Processor {
             Clock::get()?.unix_timestamp as u64,
             order.quantity,
         )?;
-        mango_emit!(MngoAccrual {
+        mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -1892,7 +1892,7 @@ impl Processor {
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
         book.cancel_all_with_incentives(&mut mango_account, &mut perp_market, market_index, limit)?;
-        mango_emit!(MngoAccrual {
+        mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -3544,7 +3544,7 @@ impl Processor {
                             perp_market_cache,
                             fill,
                         )?;
-                        mango_emit!(MngoAccrual {
+                        mango_emit!(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
                             market_index: market_index as u64,
@@ -3591,7 +3591,7 @@ impl Processor {
                             perp_market_cache,
                             fill,
                         )?;
-                        mango_emit!(MngoAccrual {
+                        mango_emit!(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
                             market_index: market_index as u64,
