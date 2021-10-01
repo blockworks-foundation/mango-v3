@@ -171,12 +171,32 @@ async fn test_match_spot_order() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
+    let expected_deposits_vec: Vec<(usize, HashMap<usize, I80F48>)> = vec![
+        (
+            bidder_user_index, // User index
+            [
+                (mint_index, ZERO_I80F48),
+                (QUOTE_INDEX, ZERO_I80F48),
+            ].iter().cloned().collect(),
+        ),
+        (
+            asker_user_index, // User index
+            [
+                (mint_index, ZERO_I80F48),
+                (QUOTE_INDEX, test.to_native(&quote_mint, 9978.0)), // taker fee: 0.22% of base price
+            ].iter().cloned().collect(),
+        ),
+    ];
+    for expected_deposits in expected_deposits_vec {
+        assert_deposits(&mango_group_cookie, expected_deposits);
+    }
+
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
         (
             mint_index, // Mint index
             bidder_user_index, // User index
             [
-                ("quote_free", test.to_native(&quote_mint, 3.0)), // serum_dex fee
+                ("quote_free", test.to_native(&quote_mint, 3.0)), // maker fee: -0.03% of base_price
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", test.to_native(&mint, base_size)),
                 ("base_locked", ZERO_I80F48),
@@ -186,7 +206,7 @@ async fn test_match_spot_order() {
             mint_index, // Mint index
             asker_user_index, // User index
             [
-                ("quote_free", ZERO_I80F48),
+                ("quote_free", test.to_native(&quote_mint, 4.4)), // referrer rebate: 1/5 of taker fee
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
@@ -197,7 +217,6 @@ async fn test_match_spot_order() {
     for expected_values in expected_values_vec {
         assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
     }
-
 }
 
 #[tokio::test]
@@ -258,6 +277,7 @@ async fn test_match_and_settle_spot_order() {
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
+
     let expected_deposits_vec: Vec<(usize, HashMap<usize, I80F48>)> = vec![
         (
             bidder_user_index, // User index
@@ -270,7 +290,10 @@ async fn test_match_and_settle_spot_order() {
             asker_user_index, // User index
             [
                 (mint_index, ZERO_I80F48),
-                (QUOTE_INDEX, I80F48::from_num(9982399999 as i64).checked_add(I80F48::from_num(0.999999998578915 as f64)).unwrap()), //TODO: Explain this
+                // Match the fractional I80F48 result, which is not exactly 9982.4
+                // The result is 10000, minus taker fee (22), plus referrer rebate (4.4).
+                (QUOTE_INDEX, test.to_native_fixedint(
+                    &quote_mint, I80F48::from_num(9982) + I80F48::from_num(4) / 10)),
             ].iter().cloned().collect(),
         ),
     ];
@@ -278,4 +301,30 @@ async fn test_match_and_settle_spot_order() {
         assert_deposits(&mango_group_cookie, expected_deposits);
     }
 
+    let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
+        (
+            mint_index, // Mint index
+            bidder_user_index, // User index
+            [
+                ("quote_free", ZERO_I80F48),
+                ("quote_locked", ZERO_I80F48),
+                ("base_free", ZERO_I80F48),
+                ("base_locked", ZERO_I80F48),
+            ].iter().cloned().collect(),
+        ),
+        (
+            mint_index, // Mint index
+            asker_user_index, // User index
+            [
+                ("quote_free", ZERO_I80F48),
+                ("quote_locked", ZERO_I80F48),
+                ("base_free", ZERO_I80F48),
+                ("base_locked", ZERO_I80F48),
+            ].iter().cloned().collect(),
+        ),
+    ];
+
+    for expected_values in expected_values_vec {
+        assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
+    }
 }
