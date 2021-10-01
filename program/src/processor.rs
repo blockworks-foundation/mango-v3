@@ -4219,6 +4219,16 @@ impl Processor {
             )?;
 
             if sim_post_health >= ZERO_I80F48 || (health_up_only && sim_post_health >= pre_health) {
+                let (taker_base, taker_quote, bids_quantity, asks_quantity) = {
+                    let pa = &mango_account.perp_accounts[market_index];
+                    (
+                        pa.taker_base + taker_base,
+                        pa.taker_quote + taker_quote,
+                        pa.bids_quantity + bids_quantity,
+                        pa.asks_quantity + asks_quantity,
+                    )
+                };
+
                 book.new_order(
                     &mut event_queue,
                     &mut perp_market,
