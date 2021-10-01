@@ -5182,14 +5182,6 @@ fn invoke_init_open_orders<'a>(
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
 
-// Returns asset_weight and liab_weight
-fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
-    (
-        (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
-        (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
-    )
-}
-
 /*
 TODO test order types
  */
@@ -5275,4 +5267,12 @@ fn cancel_all_advanced_orders<'a>(
         }
     }
     program_transfer_lamports(advanced_orders_ai, agent_ai, total_fee)
+}
+
+// Returns asset_weight and liab_weight
+fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
+    (
+        (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
+        (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
+    )
 }
