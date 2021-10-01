@@ -3944,7 +3944,6 @@ impl Processor {
         check!(price.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(quantity.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(trigger_price.is_positive(), MangoErrorCode::InvalidParam)?; // Is this necessary?
-        check!(reduce_only, MangoErrorCode::InvalidParam)?; // necessary restriction for now
 
         const NUM_FIXED: usize = 7;
         // TODO - *** amend client functions
