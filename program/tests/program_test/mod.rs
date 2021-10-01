@@ -655,6 +655,11 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub fn to_native_fixedint(&mut self, mint: &MintCookie, size: I80F48) -> I80F48 {
+        return I80F48::from_num(mint.unit) * size;
+    }
+
+    #[allow(dead_code)]
     pub async fn with_root_bank(
         &mut self,
         mango_group: &MangoGroup,
