@@ -266,12 +266,15 @@ impl Processor {
             padding: [0u8; 7],
         };
 
+        let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
+        let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
+
         mango_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
-            maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
-            init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
-            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
-            init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
+            maint_asset_weight,
+            init_asset_weight,
+            maint_liab_weight,
+            init_liab_weight,
             liquidation_fee,
         };
 
@@ -419,12 +422,15 @@ impl Processor {
         // Make sure perp market at this index not already initialized
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
+        let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
+        let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
+
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
-            maint_asset_weight: (maint_leverage - ONE_I80F48).checked_div(maint_leverage).unwrap(),
-            init_asset_weight: (init_leverage - ONE_I80F48).checked_div(init_leverage).unwrap(),
-            maint_liab_weight: (maint_leverage + ONE_I80F48).checked_div(maint_leverage).unwrap(),
-            init_liab_weight: (init_leverage + ONE_I80F48).checked_div(init_leverage).unwrap(),
+            maint_asset_weight,
+            init_asset_weight,
+            maint_liab_weight,
+            init_liab_weight,
             liquidation_fee,
             maker_fee,
             taker_fee,
@@ -554,7 +560,6 @@ impl Processor {
     }
     #[inline(never)]
     /// Change leverage, fees and liquidity mining params
-    /// Note: only mngo_per_period  and rate works right now; others not yet implemented; this is for safety
     fn change_perp_market_params(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -592,12 +597,12 @@ impl Processor {
 
         // Unwrap params. Default to current state if Option is None
         let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
-            ((x - ONE_I80F48).checked_div(x).unwrap(), (x + ONE_I80F48).checked_div(x).unwrap())
+            get_leverage_weights(x)
         } else {
             (info.maint_asset_weight, info.maint_liab_weight)
         };
         let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
-            ((x - ONE_I80F48).checked_div(x).unwrap(), (x + ONE_I80F48).checked_div(x).unwrap())
+            get_leverage_weights(x)
         } else {
             (info.init_asset_weight, info.init_liab_weight)
         };
@@ -4537,6 +4542,14 @@ fn invoke_init_open_orders<'a>(
         rent_ai.clone(),
     ];
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
+
+// Returns asset_weight and liab_weight
+fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
+    (
+        (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
+        (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
+    )
 }
 
 /*
