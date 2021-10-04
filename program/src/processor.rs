@@ -42,10 +42,10 @@ use crate::state::{
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
 use mango_logs::{
-    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, LiquidatePerpMarketLog,
-    LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog,
-    PerpBankruptcyLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
-    UpdateRootBankLog, WithdrawLog, DepositLog, RedeemMngoLog,
+    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, DepositLog,
+    LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog,
+    OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
+    TokenBalanceLog, TokenBankruptcyLog, UpdateRootBankLog, WithdrawLog,
 };
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -542,7 +542,7 @@ impl Processor {
             mango_account: *mango_account_ai.key,
             owner: *owner_ai.key,
             token_index: token_index as u64,
-            quantity: deposit.to_bits(), 
+            quantity,
         });
 
         Ok(())
@@ -899,7 +899,7 @@ impl Processor {
             mango_account: *mango_account_ai.key,
             owner: *owner_ai.key,
             token_index: token_index as u64,
-            quantity: withdraw.to_bits(), 
+            quantity,
         });
 
         Ok(())
@@ -3775,7 +3775,7 @@ impl Processor {
         mango_emit!(RedeemMngoLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
-            redeemed_mngo: redeemed_mngo.to_bits(),
+            redeemed_mngo: mngo,
         });
 
         Ok(())
@@ -4315,11 +4315,7 @@ impl Processor {
         program_transfer_lamports(advanced_orders_ai, agent_ai, ADVANCED_ORDER_FEE)
     }
 
-    pub fn process(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        data: &[u8],
-    ) -> MangoResult<()> {
+    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         match instruction {
