@@ -1,11 +1,11 @@
-anchor_version = "0.16.0"
-solana_version = "1.7.11"
+anchor_version = "0.16.2"
 
 [workspace]
 members = [
     "common",
     "mango-macro",
-    "program"
+    "program",
+    "mango-logs"
 ]
 
 [provider]
@@ -17,3 +17,6 @@ mango = "mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68"
 
 [programs.devnet]
 mango = "5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
+
+[programs.localnet]
+mango_logs = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"

@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::log::sol_log_compute_units;
-use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
@@ -426,6 +425,7 @@ impl RootBank {
         Ok(())
     }
 
+    /// Socialize the loss on lenders and return (native_loss, percentage_loss)
     pub fn socialize_loss(
         &mut self,
         program_id: &Pubkey,
@@ -433,7 +433,7 @@ impl RootBank {
         mango_cache: &mut MangoCache,
         bankrupt_account: &mut MangoAccount,
         node_bank_ais: &[AccountInfo; MAX_NODE_BANKS],
-    ) -> MangoResult<()> {
+    ) -> MangoResult<(I80F48, I80F48)> {
         let mut static_deposits = ZERO_I80F48;
 
         for i in 0..self.num_node_banks {
@@ -467,23 +467,7 @@ impl RootBank {
                 break;
             }
         }
-
-        msg!(
-            "token_socialized_loss details: {{ \
-                \"mango_group_pk\": \"{}\", \
-                \"liab_index\": {}, \
-                \"native_loss\": {}, \
-                \"percentage_loss\": {}, \
-                \"deposit_index\": {} \
-                }}",
-            bankrupt_account.mango_group,
-            token_index,
-            native_loss.to_num::<f64>(),
-            percentage_loss.to_num::<f64>(),
-            self.deposit_index.to_num::<f64>(),
-        );
-
-        Ok(())
+        Ok((native_loss, percentage_loss))
     }
 }
 
@@ -1574,6 +1558,8 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
+        sol_log_compute_units();
+
         // This param didn't exist in the past so 0 implies default value of 2
         if perp_market.meta_data.extra_info == 0 {
             perp_market.meta_data.extra_info = 2;
@@ -1608,8 +1594,6 @@ impl PerpAccount {
         let points_in_period = I80F48::from_num(lmi.mngo_left).checked_div(lmi.rate).unwrap();
 
         if points >= points_in_period {
-            sol_log_compute_units();
-
             self.mngo_accrued += lmi.mngo_left;
             points -= points_in_period;
 
@@ -1621,8 +1605,6 @@ impl PerpAccount {
             lmi.rate = lmi.rate.checked_mul(rate_adj).unwrap();
             lmi.period_start = time_final;
             lmi.mngo_left = lmi.mngo_per_period;
-
-            sol_log_compute_units(); // To figure out how much rate adjust costs
         }
 
         let mngo_earned =
@@ -1630,6 +1612,8 @@ impl PerpAccount {
 
         self.mngo_accrued += mngo_earned;
         lmi.mngo_left -= mngo_earned;
+
+        sol_log_compute_units(); // To figure out how much rate adjust costs
 
         Ok(())
     }
@@ -1968,17 +1952,27 @@ impl PerpMarket {
         &mut self,
         account: &mut PerpAccount,
         cache: &mut PerpMarketCache,
-    ) -> MangoResult<()> {
+    ) -> MangoResult<I80F48> {
         // TODO convert into only socializing on one side
         // native USDC per contract open interest
-        let socialized_loss = account.quote_position / (I80F48::from_num(self.open_interest));
-        account.quote_position = ZERO_I80F48;
+        let socialized_loss = if self.open_interest == 0 {
+            // This is kind of an unfortunate situation. This means socialized loss occurs on the
+            // last person to call settle_pnl on their profits. Any advice on better mechanism
+            // would be appreciated. Luckily, this will be an extremely rare situation.
+            ZERO_I80F48
+        } else {
+            account
+                .quote_position
+                .checked_div(I80F48::from_num(self.open_interest))
+                .ok_or(math_err!())?
+        };
+
         self.long_funding -= socialized_loss;
         self.short_funding += socialized_loss;
 
         cache.short_funding = self.short_funding;
         cache.long_funding = self.long_funding;
-        Ok(())
+        Ok(socialized_loss)
     }
 }
 
@@ -2146,9 +2140,7 @@ pub struct PerpTriggerOrder {
     pub trigger_price: I80F48,
 
     /// Padding for expansion
-    pub padding1: [u8; 32], // example:
-                            // If it's a stop limit, and it's a sell, then place an order `quantity` at `limit_price` if
-                            // index_price < trigger_price
+    pub padding1: [u8; 32],
 }
 
 impl PerpTriggerOrder {
@@ -2222,16 +2214,3 @@ impl AdvancedOrders {
         Ok(state)
     }
 }
-
-/*
-Advanced Order Types
-
-1. Allow user to create an AdvancedOrders account and store the pubkey in his MangoAccount
-2. Allow user to add AdvancedOrder to AdvancedOrders account
-3. Another instruction to let anyone trigger the AdvancedOrders on the account
-    - give the initiator an incentive to keep track of these AdvancedOrders and trigger them
-
-incentive
-5e-6
-fee = 0.0005
- */
