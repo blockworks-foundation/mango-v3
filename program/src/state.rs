@@ -1333,11 +1333,11 @@ impl MangoAccount {
         true
     }
 
-    pub fn checked_unpack_open_orders<'a>(
+    pub fn checked_unpack_open_orders<'a, 'b>(
         &self,
         mango_group: &MangoGroup,
-        open_orders_ais: &'a [AccountInfo<'a>],
-    ) -> MangoResult<Vec<Option<&'a AccountInfo<'a>>>> {
+        open_orders_ais: &'a [AccountInfo<'b>],
+    ) -> MangoResult<Vec<Option<&'a AccountInfo<'b>>>> {
         let mut unpacked = vec![None; MAX_PAIRS];
         for i in 0..mango_group.num_oracles {
             if self.in_margin_basket[i] {
