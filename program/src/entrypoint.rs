@@ -4,9 +4,9 @@ use solana_program::{
 };
 
 entrypoint!(process_instruction);
-pub fn process_instruction<'a>(
+pub fn process_instruction(
     program_id: &Pubkey,
-    accounts: &'a [AccountInfo<'a>],
+    accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
     Processor::process(program_id, accounts, instruction_data).map_err(|e| {

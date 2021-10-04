@@ -1170,9 +1170,9 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn place_spot_order2<'a>(
+    fn place_spot_order2(
         program_id: &Pubkey,
-        accounts: &'a [AccountInfo<'a>],
+        accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 22;
@@ -3930,9 +3930,9 @@ impl Processor {
     /// The TriggerCondition specifies if trigger_price  must be above or below oracle price
     /// When the condition is met, the order is executed as a regular perp order
     #[inline(never)]
-    fn add_perp_trigger_order<'a>(
+    fn add_perp_trigger_order(
         program_id: &Pubkey,
-        accounts: &'a [AccountInfo<'a>],
+        accounts: &[AccountInfo],
         order_type: OrderType,
         side: Side,
         trigger_condition: TriggerCondition,
@@ -4081,9 +4081,9 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn execute_perp_trigger_order<'a>(
+    fn execute_perp_trigger_order(
         program_id: &Pubkey,
-        accounts: &'a [AccountInfo<'a>],
+        accounts: &[AccountInfo],
         order_index: u8,
     ) -> MangoResult<()> {
         let order_index = order_index as usize;
@@ -4286,9 +4286,9 @@ impl Processor {
         program_transfer_lamports(advanced_orders_ai, agent_ai, ADVANCED_ORDER_FEE)
     }
 
-    pub fn process<'a>(
+    pub fn process(
         program_id: &Pubkey,
-        accounts: &'a [AccountInfo<'a>],
+        accounts: &[AccountInfo],
         data: &[u8],
     ) -> MangoResult<()> {
         let instruction =
