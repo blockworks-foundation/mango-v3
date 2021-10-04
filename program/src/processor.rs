@@ -4113,7 +4113,7 @@ impl Processor {
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
-            mango_account_ai,       // read
+            mango_account_ai,       // write
             advanced_orders_ai,     // write
             agent_ai,               // write
             mango_cache_ai,         // read

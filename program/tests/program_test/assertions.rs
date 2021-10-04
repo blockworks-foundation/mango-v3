@@ -230,9 +230,9 @@ pub async fn assert_vault_net_deposit_diff(
     total_net = total_net.checked_round().unwrap();
 
     let mut vault_amount = ZERO_I80F48;
-    for node_bank_pk in root_bank.node_banks {
-      if node_bank_pk != Pubkey::default() {
-          let node_bank = test.load_account::<NodeBank>(node_bank_pk).await;
+    for node_bank_pk in root_bank.node_banks.iter() {
+      if *node_bank_pk != Pubkey::default() {
+          let node_bank = test.load_account::<NodeBank>(*node_bank_pk).await;
           let balance = test.get_token_balance(node_bank.vault).await;
           vault_amount += I80F48::from_num(balance);
       }
