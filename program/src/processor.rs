@@ -45,7 +45,7 @@ use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, LiquidatePerpMarketLog,
     LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog,
     PerpBankruptcyLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
-    UpdateRootBankLog,
+    UpdateRootBankLog, WithdrawLog, DepositLog, RedeemMngoLog,
 };
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -525,15 +525,27 @@ impl Processor {
         // Check validity of root bank cache
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
+        let deposit = I80F48::from_num(quantity);
         root_bank_cache.check_valid(&mango_group, now_ts)?;
+
         checked_change_net(
             root_bank_cache,
             &mut node_bank,
             &mut mango_account,
             mango_account_ai.key,
             token_index,
-            I80F48::from_num(quantity),
-        )
+            deposit,
+        )?;
+
+        mango_emit!(DepositLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            owner: *owner_ai.key,
+            token_index: token_index as u64,
+            quantity: deposit.to_bits(), 
+        });
+
+        Ok(())
     }
 
     // TODO create client functions and instruction.rs
@@ -881,6 +893,14 @@ impl Processor {
         let health = health_cache.get_health(&mango_group, HealthType::Init);
 
         check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+
+        mango_emit!(WithdrawLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            owner: *owner_ai.key,
+            token_index: token_index as u64,
+            quantity: withdraw.to_bits(), 
+        });
 
         Ok(())
     }
@@ -3742,14 +3762,23 @@ impl Processor {
         let now_ts = Clock::get()?.unix_timestamp as u64;
         mngo_bank_cache.check_valid(&mango_group, now_ts)?;
 
+        let redeemed_mngo = I80F48::from_num(mngo);
         checked_change_net(
             mngo_bank_cache,
             &mut mngo_node_bank,
             &mut mango_account,
             mango_account_ai.key,
             mngo_index,
-            I80F48::from_num(mngo),
-        )
+            redeemed_mngo,
+        )?;
+
+        mango_emit!(RedeemMngoLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            redeemed_mngo: redeemed_mngo.to_bits(),
+        });
+
+        Ok(())
     }
 
     #[inline(never)]
