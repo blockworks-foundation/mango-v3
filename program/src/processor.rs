@@ -748,6 +748,7 @@ impl Processor {
             deposit_indexes,
             borrow_indexes
         });
+
         Ok(())
     }
 
