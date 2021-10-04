@@ -186,3 +186,28 @@ pub struct MngoAccrualLog {
     /// incremental mngo accrual from canceling/filling this order or set of orders
     pub mngo_accrual: u64,
 }
+
+#[event]
+pub struct WithdrawLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub owner: Pubkey,
+    pub token_index: u64,
+    pub quantity: i128,  // I80F48
+}
+
+#[event]
+pub struct DepositLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub owner: Pubkey,
+    pub token_index: u64,
+    pub quantity: i128,  // I80F48
+}
+
+#[event]
+pub struct RedeemMngoLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub redeemed_mngo: i128,  // I80F48
+}
