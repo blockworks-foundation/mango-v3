@@ -545,20 +545,39 @@ pub enum MangoInstruction {
     /// 1. `[writable]` perp_market_ai - PerpMarket
     /// 2. `[signer]` admin_ai - MangoGroup admin
     ChangePerpMarketParams {
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         maint_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         init_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         liquidation_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         maker_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         taker_fee: Option<I80F48>,
+
         /// Starting rate for liquidity mining
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         rate: Option<I80F48>,
+
         /// depth liquidity mining works for
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         max_depth_bps: Option<I80F48>,
+
         /// target length in seconds of one period
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         target_period_length: Option<u64>,
+
         /// amount MNGO rewarded per period
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         mngo_per_period: Option<u64>,
+
         /// Optional: Exponent in the liquidity mining formula
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         exp: Option<u8>,
     },
 
@@ -1793,4 +1812,25 @@ pub fn liquidate_token_and_token(
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+/// Serialize Option<T> as (bool, T). This gives the binary representation
+/// a fixed width, instead of it becoming one byte for None.
+fn serialize_option_fixed_width<S: serde::Serializer, T: Sized + Default + Serialize>(
+    opt: &Option<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeTuple;
+    let mut tup = serializer.serialize_tuple(2)?;
+    match opt {
+        Some(value) => {
+            tup.serialize_element(&true)?;
+            tup.serialize_element(&value)?;
+        }
+        None => {
+            tup.serialize_element(&false)?;
+            tup.serialize_element(&T::default())?;
+        }
+    };
+    tup.end()
 }
