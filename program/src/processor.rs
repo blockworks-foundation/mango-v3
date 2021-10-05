@@ -37,7 +37,8 @@ use crate::state::{
     MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpTriggerOrder,
     PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
     UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
-    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
@@ -2732,6 +2733,7 @@ impl Processor {
                 .min(max_liab_transfer)
                 .min(asset_implied_liab_transfer);
 
+            // Transfer the negative quote position from liqee to liqor
             liqee_ma.perp_accounts[liab_index].transfer_quote_position(
                 &mut liqor_ma.perp_accounts[liab_index],
                 -actual_liab_transfer,
@@ -2740,24 +2742,16 @@ impl Processor {
             asset_transfer =
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
-            // Transfer collater into liqor
-            checked_change_net(
-                bank_cache,
-                &mut node_bank,
-                &mut liqor_ma,
-                liqor_mango_account_ai.key,
-                asset_index,
-                asset_transfer,
-            )?;
-
-            // Transfer collateral out of liqee
-            checked_change_net(
+            // Transfer collateral from liqee to liqor
+            transfer_token_internal(
                 bank_cache,
                 &mut node_bank,
                 &mut liqee_ma,
+                &mut liqor_ma,
                 liqee_mango_account_ai.key,
+                liqor_mango_account_ai.key,
                 asset_index,
-                -asset_transfer,
+                asset_transfer,
             )?;
 
             health_cache.update_token_val(
@@ -2813,26 +2807,19 @@ impl Processor {
             asset_transfer =
                 actual_liab_transfer * liab_price * asset_fee / (liab_fee * asset_price);
 
-            // Transfer liabilities into liqor
-            checked_change_net(
+            // Transfer liabilities from liqee to liqor (i.e. increase liqee and decrease liqor)
+            transfer_token_internal(
                 bank_cache,
                 &mut node_bank,
                 &mut liqor_ma,
-                liqor_mango_account_ai.key,
-                liab_index,
-                -actual_liab_transfer,
-            )?;
-
-            // Transfer liabilities out of liqee
-            checked_change_net(
-                bank_cache,
-                &mut node_bank,
                 &mut liqee_ma,
+                liqor_mango_account_ai.key,
                 liqee_mango_account_ai.key,
                 liab_index,
                 actual_liab_transfer,
             )?;
 
+            // Transfer positive quote position from liqee to liqor
             liqee_ma.perp_accounts[asset_index]
                 .transfer_quote_position(&mut liqor_ma.perp_accounts[asset_index], asset_transfer);
 
@@ -3779,6 +3766,7 @@ impl Processor {
         mango_emit!(RedeemMngoLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
             redeemed_mngo: mngo,
         });
 

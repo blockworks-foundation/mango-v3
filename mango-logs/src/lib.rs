@@ -209,5 +209,6 @@ pub struct DepositLog {
 pub struct RedeemMngoLog {
     pub mango_group: Pubkey,
     pub mango_account: Pubkey,
+    pub market_index: u64,
     pub redeemed_mngo: u64,
 }
