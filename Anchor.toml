@@ -1,11 +1,10 @@
-anchor_version = "0.16.2"
+anchor_version = "0.17.0"
 
 [workspace]
 members = [
     "common",
     "mango-macro",
-    "program",
-    "mango-logs"
+    "program"
 ]
 
 [provider]
@@ -17,6 +16,3 @@ mango = "mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68"
 
 [programs.devnet]
 mango = "5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
-
-[programs.localnet]
-mango_logs = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
