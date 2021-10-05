@@ -208,6 +208,7 @@ impl AsRef<AnyNode> for LeafNode {
     Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
 )]
 #[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
 pub enum OrderType {
     Limit = 0,
     ImmediateOrCancel = 1,
@@ -220,6 +221,7 @@ pub enum OrderType {
     Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
 )]
 #[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
 pub enum Side {
     Bid = 0,
     Ask = 1,

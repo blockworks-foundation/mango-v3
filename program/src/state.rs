@@ -89,6 +89,7 @@ pub enum HealthType {
     Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
 )]
 #[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
 pub enum AssetType {
     Token = 0,
     Perp = 1,
@@ -2104,10 +2105,11 @@ pub enum AdvancedOrderType {
     PerpTrigger,
     SpotTrigger, // Not implemented yet
 }
-#[repr(u8)]
 #[derive(
     Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
 )]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
 pub enum TriggerCondition {
     Above,
     Below,
