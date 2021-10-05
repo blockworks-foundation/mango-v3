@@ -33,6 +33,7 @@ pub const MAX_NODE_BANKS: usize = 8;
 pub const QUOTE_INDEX: usize = MAX_TOKENS - 1;
 pub const ZERO_I80F48: I80F48 = I80F48!(0);
 pub const ONE_I80F48: I80F48 = I80F48!(1);
+pub const NEG_ONE_I80F48: I80F48 = I80F48!(-1);
 pub const DAY: I80F48 = I80F48!(86400);
 pub const YEAR: I80F48 = I80F48!(31536000);
 

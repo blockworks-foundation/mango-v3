@@ -34,7 +34,7 @@ use crate::state::{
     HealthCache, HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
     TokenInfo, UserActiveAssets, FREE_ORDER_SLOT, INFO_LEN, MAX_NODE_BANKS, MAX_PAIRS,
-    MAX_PERP_OPEN_ORDERS, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use switchboard_program::FastRoundResultAccountData;
@@ -526,7 +526,6 @@ impl Processor {
             I80F48::from_num(quantity),
         )
     }
-
     // TODO create client functions and instruction.rs
     #[inline(never)]
     #[allow(unused)]
@@ -2245,9 +2244,10 @@ impl Processor {
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
             let liqee_init_health = health_cache.get_health(&mango_group, HealthType::Init);
-            if liqee_init_health >= ZERO_I80F48 {
-                liqee_ma.being_liquidated = false;
-            }
+
+            // this is equivalent to one native USDC or 1e-6 USDC
+            // This is used as threshold to flip flag instead of 0 because of dust issues
+            liqee_ma.being_liquidated = liqee_init_health < NEG_ONE_I80F48;
         }
 
         msg!(
@@ -2662,7 +2662,9 @@ impl Processor {
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
             let liqee_init_health = health_cache.get_health(&mango_group, HealthType::Init);
-            liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
+            // this is equivalent to one native USDC or 1e-6 USDC
+            // This is used as threshold to flip flag instead of 0 because of dust issues
+            liqee_ma.being_liquidated = liqee_init_health < NEG_ONE_I80F48;
         }
 
         msg!(
@@ -2873,7 +2875,9 @@ impl Processor {
                 liqee_ma.check_enter_bankruptcy(&mango_group, liqee_open_orders_ais);
         } else {
             let liqee_init_health = health_cache.get_health(&mango_group, HealthType::Init);
-            liqee_ma.being_liquidated = liqee_init_health < ZERO_I80F48;
+            // this is equivalent to one native USDC or 1e-6 USDC
+            // This is used as threshold to flip flag instead of 0 because of dust issues
+            liqee_ma.being_liquidated = liqee_init_health < NEG_ONE_I80F48;
         }
 
         // TODO OPT make this more efficient
