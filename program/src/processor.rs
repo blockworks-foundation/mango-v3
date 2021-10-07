@@ -831,7 +831,8 @@ impl Processor {
 
         // Borrow if withdrawing more than deposits
         let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index)?;
-        let withdraw = I80F48::from_num(quantity);
+        let withdraw =
+            if quantity == u64::MAX { native_deposit } else { I80F48::from_num(quantity) };
         check!(native_deposit >= withdraw || allow_borrow, MangoErrorCode::InsufficientFunds)?;
         checked_change_net(
             root_bank_cache,
