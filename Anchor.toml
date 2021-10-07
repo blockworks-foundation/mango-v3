@@ -4,7 +4,8 @@ anchor_version = "0.17.0"
 members = [
     "common",
     "mango-macro",
-    "program"
+    "program",
+    "mango-logs"
 ]
 
 [provider]

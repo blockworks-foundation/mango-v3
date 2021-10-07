@@ -865,9 +865,16 @@ impl Processor {
 
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
 
-        // Borrow if withdrawing more than deposits
         let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index)?;
-        let withdraw = I80F48::from_num(quantity);
+        // if quantity is u64 max, interpret as a request to get all
+        let (withdraw, quantity) = if quantity == u64::MAX && !allow_borrow {
+            let floored = native_deposit.checked_floor().unwrap();
+            (floored, floored.to_num::<u64>())
+        } else {
+            (I80F48::from_num(quantity), quantity)
+        };
+
+        // Borrow if withdrawing more than deposits
         check!(native_deposit >= withdraw || allow_borrow, MangoErrorCode::InsufficientFunds)?;
         checked_change_net(
             root_bank_cache,
@@ -893,6 +900,9 @@ impl Processor {
         let health = health_cache.get_health(&mango_group, HealthType::Init);
 
         check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+
+        // If health is above Init then being liquidated should be false anyway
+        mango_account.being_liquidated = false;
 
         mango_emit!(WithdrawLog {
             mango_group: *mango_group_ai.key,
@@ -3675,6 +3685,7 @@ impl Processor {
 
         perp_market.update_funding(&mango_group, &book, &mango_cache, market_index, now_ts)?;
 
+        // TODO - remove
         msg!(
             "{{\"long_funding\":{}, \"short_funding\":{}}}",
             perp_market.long_funding.to_num::<f64>(),
