@@ -338,8 +338,6 @@ impl MangoProgramTest {
             users.push(user_key);
         }
 
-
-
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
         mints = mints[..num_mints].to_vec();

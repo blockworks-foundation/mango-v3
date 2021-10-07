@@ -1,8 +1,8 @@
 mod program_test;
-use solana_program_test::*;
-use program_test::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
+use program_test::*;
+use solana_program_test::*;
 
 #[tokio::test]
 async fn test_add_all_markets_to_mango_group() {
@@ -25,10 +25,8 @@ async fn test_add_all_markets_to_mango_group() {
     let user_index = 0;
     println!("Performing deposit");
 
-    let user_deposits =
-        arrange_deposit_all_scenario(&mut test, user_index, 1000000.0, 1000000.0);
+    let user_deposits = arrange_deposit_all_scenario(&mut test, user_index, 1000000.0, 1000000.0);
 
     // === Act ===
     deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
-
 }

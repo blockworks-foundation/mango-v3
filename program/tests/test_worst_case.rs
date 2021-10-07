@@ -1,11 +1,11 @@
 mod program_test;
-use mango::{state::*};
-use program_test::*;
+use fixed::types::I80F48;
+use mango::state::*;
+use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
-use program_test::assertions::*;
+use program_test::*;
 use solana_program_test::*;
-use fixed::types::I80F48;
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -39,20 +39,30 @@ async fn test_worst_case_v1() {
     }
 
     // Deposit amounts
-    let user_deposits = vec![
-        (user_index, test.quote_index, base_price * num_orders as f64),
-    ];
+    let user_deposits = vec![(user_index, test.quote_index, base_price * num_orders as f64)];
 
     // Spot Orders
     let mut user_spot_orders = vec![];
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        user_spot_orders.push((user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price));
+        user_spot_orders.push((
+            user_index,
+            mint_index,
+            serum_dex::matching::Side::Bid,
+            base_size,
+            base_price,
+        ));
     }
 
     // Perp Orders
     let mut user_perp_orders = vec![];
     for mint_index in 0..num_orders {
-        user_perp_orders.push((user_index, mint_index, mango::matching::Side::Bid, base_size, base_price));
+        user_perp_orders.push((
+            user_index,
+            mint_index,
+            mango::matching::Side::Bid,
+            base_size,
+            base_price,
+        ));
     }
 
     // === Act ===
@@ -79,7 +89,10 @@ async fn test_worst_case_v1() {
                 ("quote_locked", test.to_native(&quote_mint, base_price * base_size)),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ));
     }
 
@@ -88,7 +101,6 @@ async fn test_worst_case_v1() {
     }
 
     assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
-
 }
 
 #[tokio::test]
@@ -125,9 +137,18 @@ async fn test_worst_case_v2() {
 
     // Deposit amounts
     let mut user_deposits = vec![
-        (borrower_user_index, test.quote_index, 2.0 * base_price * base_order_size * num_orders as f64), // NOTE: If depositing exact amount throws insufficient
+        (
+            borrower_user_index,
+            test.quote_index,
+            2.0 * base_price * base_order_size * num_orders as f64,
+        ), // NOTE: If depositing exact amount throws insufficient
     ];
-    user_deposits.extend(arrange_deposit_all_scenario(&mut test, lender_user_index, base_deposit_size, 0.0));
+    user_deposits.extend(arrange_deposit_all_scenario(
+        &mut test,
+        lender_user_index,
+        base_deposit_size,
+        0.0,
+    ));
 
     // Withdraw amounts
     let mut user_withdraws = vec![];
@@ -138,15 +159,26 @@ async fn test_worst_case_v2() {
     // Spot Orders
     let mut user_spot_orders = vec![];
     for mint_index in 0..num_orders.min(MAX_NUM_IN_MARGIN_BASKET as usize) {
-        user_spot_orders.push((lender_user_index, mint_index, serum_dex::matching::Side::Ask, base_order_size, base_price));
+        user_spot_orders.push((
+            lender_user_index,
+            mint_index,
+            serum_dex::matching::Side::Ask,
+            base_order_size,
+            base_price,
+        ));
     }
 
     // Perp Orders
     let mut user_perp_orders = vec![];
     for mint_index in 0..num_orders {
-        user_perp_orders.push((lender_user_index, mint_index, mango::matching::Side::Ask, base_order_size, base_price));
+        user_perp_orders.push((
+            lender_user_index,
+            mint_index,
+            mango::matching::Side::Ask,
+            base_order_size,
+            base_price,
+        ));
     }
-
 
     // === Act ===
     // Step 1: Make deposits
@@ -161,10 +193,17 @@ async fn test_worst_case_v2() {
     for mint_index in 0..num_orders {
         let base_mint = test.with_mint(mint_index);
         let base_deposit_amount = (base_deposit_size * base_mint.unit) as u64;
-        let lender_base_deposit =
-            &mango_group_cookie.mango_accounts[lender_user_index].mango_account
-            .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index).unwrap();
-        assert_ne!(lender_base_deposit.to_string(), I80F48::from_num(base_deposit_amount).to_string());
+        let lender_base_deposit = &mango_group_cookie.mango_accounts[lender_user_index]
+            .mango_account
+            .get_native_deposit(
+                &mango_group_cookie.mango_cache.root_bank_cache[mint_index],
+                mint_index,
+            )
+            .unwrap();
+        assert_ne!(
+            lender_base_deposit.to_string(),
+            I80F48::from_num(base_deposit_amount).to_string()
+        );
     }
 
     // Step 4: Place spot orders
@@ -188,7 +227,10 @@ async fn test_worst_case_v2() {
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", test.to_native(&mint, base_size)),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ));
     }
 
@@ -197,5 +239,4 @@ async fn test_worst_case_v2() {
     }
 
     assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
-
 }
