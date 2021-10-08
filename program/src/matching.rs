@@ -662,7 +662,12 @@ impl<'a> Book<'a> {
         let mut rem_quantity = quantity; // base lots (aka contracts)
         let mut stack = vec![];
         let mut current = match self.asks.root() {
-            None => return Ok((taker_base, taker_quote, bids_quantity, asks_quantity)),
+            None => {
+                if rem_quantity > 0 && post_allowed {
+                    bids_quantity += rem_quantity;
+                }
+                return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+            },
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {
@@ -730,7 +735,12 @@ impl<'a> Book<'a> {
         let mut rem_quantity = quantity; // base lots (aka contracts)
         let mut stack = vec![];
         let mut current = match self.bids.root() {
-            None => return Ok((taker_base, taker_quote, bids_quantity, asks_quantity)),
+            None => {
+                if rem_quantity > 0 && post_allowed {
+                    asks_quantity += rem_quantity;
+                }
+                return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+            },
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {
