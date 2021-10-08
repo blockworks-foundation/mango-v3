@@ -46,7 +46,7 @@ use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, DepositLog,
     LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog,
     OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
-    TokenBalanceLog, TokenBankruptcyLog, UpdateRootBankLog, WithdrawLog,
+    TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
 };
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -797,7 +797,6 @@ impl Processor {
             long_fundings.push(perp_market.long_funding.to_bits());
             short_fundings.push(perp_market.short_funding.to_bits());
         }
-
         mango_emit!(CachePerpMarketsLog {
             mango_group: *mango_group_ai.key,
             market_indexes,
@@ -3663,7 +3662,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
-            mango_cache_ai,     // read
+            mango_cache_ai,     // write ***
             perp_market_ai,     // write
             bids_ai,            // read
             asks_ai,            // read
@@ -3671,7 +3670,8 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let mut mango_cache =
+            MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -3684,13 +3684,19 @@ impl Processor {
         let now_ts = clock.unix_timestamp as u64;
 
         perp_market.update_funding(&mango_group, &book, &mango_cache, market_index, now_ts)?;
+        mango_cache.perp_market_cache[market_index] = PerpMarketCache {
+            long_funding: perp_market.long_funding,
+            short_funding: perp_market.short_funding,
+            last_update: now_ts,
+        };
 
-        // TODO - remove
-        msg!(
-            "{{\"long_funding\":{}, \"short_funding\":{}}}",
-            perp_market.long_funding.to_num::<f64>(),
-            perp_market.short_funding.to_num::<f64>()
-        );
+        // *** only need to use UpdateFundingLog; don't worry about CachePerpMarket log
+        mango_emit!(UpdateFundingLog {
+            mango_group: *mango_group_ai.key,
+            market_index: market_index as u64,
+            long_funding: perp_market.long_funding.to_bits(),
+            short_funding: perp_market.short_funding.to_bits(),
+        });
 
         Ok(())
     }

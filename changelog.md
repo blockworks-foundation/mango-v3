@@ -18,7 +18,8 @@
 15. Added OrderType into LeafNode for ability to modify order on TradingView
 16. Added MngoAccrualLog
 17. added DepositLog, WithdrawLog, RedeemMngoLog
-18. sending u64::MAX in withdraw function withdraws the total a
+18. sending u64::MAX in withdraw function withdraws total amount in deposit
+19. UpdateFunding now takes in MangoCache as writable and caches the result and UpdateFundingLog is emitted
 
 ## v3.0.6
 Deployed: October 5, 2:00 UTC

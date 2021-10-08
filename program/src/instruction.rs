@@ -1453,14 +1453,14 @@ pub fn settle_pnl(
 pub fn update_funding(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey, // read
-    mango_cache_pk: &Pubkey, // read
+    mango_cache_pk: &Pubkey, // write
     perp_market_pk: &Pubkey, // write
     bids_pk: &Pubkey,        // read
     asks_pk: &Pubkey,        // read
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
-        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*mango_cache_pk, false),
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new_readonly(*bids_pk, false),
         AccountMeta::new_readonly(*asks_pk, false),

@@ -166,6 +166,14 @@ pub struct UpdateRootBankLog {
 }
 
 #[event]
+pub struct UpdateFundingLog {
+    pub mango_group: Pubkey,
+    pub market_index: u64,
+    pub long_funding: i128,  // I80F48
+    pub short_funding: i128, // I80F48
+}
+
+#[event]
 pub struct OpenOrdersBalanceLog {
     pub mango_group: Pubkey,
     pub mango_account: Pubkey,
