@@ -313,7 +313,11 @@ impl MangoProgramTest {
             let user_key = Keypair::new();
             test.add_account(
                 user_key.pubkey(),
-                solana_sdk::account::Account::new(u32::MAX as u64, 0, &user_key.pubkey()),
+                solana_sdk::account::Account::new(
+                    u32::MAX as u64,
+                    0,
+                    &solana_sdk::system_program::id(),
+                ),
             );
 
             // give every user 10^18 (< 2^60) of every token
@@ -377,9 +381,7 @@ impl MangoProgramTest {
 
         transaction.sign(&all_signers, self.context.last_blockhash);
 
-        self.context.banks_client.process_transaction(transaction).await.unwrap();
-
-        Ok(())
+        self.context.banks_client.process_transaction(transaction).await
     }
 
     #[allow(dead_code)]
@@ -1052,7 +1054,7 @@ impl MangoProgramTest {
     ) {
         let mango_program_id = self.mango_program_id;
         let mut root_bank_pks = Vec::new();
-        for token in mango_group.tokens {
+        for token in mango_group.tokens.iter() {
             if token.root_bank != Pubkey::default() {
                 root_bank_pks.push(token.root_bank);
             }

@@ -11,13 +11,14 @@
 8. All cache valid checks are done independently of one another and have different valid_interval
 9. Remove CacheRootBank instruction
 10. Add new param for exponent in liquidity incentives
-11. FillEvent logging is now done via LoggableFillEvent borsh serialized and base64 encoded to save compute
+11. FillEvent logging is now done via FillLog borsh serialized and base64 encoded to save compute
 12. Added mango-logs and replaced all logging with more efficient Anchor event
 13. Added logging of OpenOrders balance to keep full track of acocunt value
 14. Added PostOnlySlide for Perp orders (including trigger)
 15. Added OrderType into LeafNode for ability to modify order on TradingView
 16. Added MngoAccrualLog
 17. added DepositLog, WithdrawLog, RedeemMngoLog
+18. sending u64::MAX in withdraw function withdraws the total a
 
 ## v3.0.6
 Deployed: October 5, 2:00 UTC
