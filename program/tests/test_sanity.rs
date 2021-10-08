@@ -55,10 +55,5 @@ async fn test_vault_net_deposit_diff() {
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
-    assert_vault_net_deposit_diff(
-        &mut test,
-        &mut mango_group_cookie,
-        mint_index,
-    ).await;
-
+    assert_vault_net_deposit_diff(&mut test, &mut mango_group_cookie, mint_index).await;
 }
