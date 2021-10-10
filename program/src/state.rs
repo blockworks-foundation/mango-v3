@@ -259,6 +259,16 @@ impl MangoGroup {
             .iter()
             .position(|perp_market_info| &perp_market_info.perp_market == perp_market_pk)
     }
+    pub fn get_token_asset_weight(&self, token_index: usize, health_type: HealthType) -> I80F48 {
+        if token_index == QUOTE_INDEX {
+            ONE_I80F48
+        } else {
+            match health_type {
+                HealthType::Maint => self.spot_markets[token_index].maint_asset_weight,
+                HealthType::Init => self.spot_markets[token_index].init_asset_weight,
+            }
+        }
+    }
 }
 
 /// This is the root bank for one token's lending and borrowing info

@@ -5333,3 +5333,20 @@ fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
         (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
     )
 }
+
+/// Calculate the max native units to withdraw
+#[cfg(feature = "no-entrypoint")]
+pub fn max_withdrawable(
+    group: &MangoGroup,
+    mango_cache: &MangoCache,
+    token_index: usize,
+    health: I80F48,
+) -> u64 {
+    if health.is_positive() {
+        let price = mango_cache.get_price(token_index);
+        let init_asset_weight = group.get_token_asset_weight(token_index, HealthType::Init);
+        (health / (price * init_asset_weight)).checked_floor().unwrap()
+    } else {
+        0
+    }
+}

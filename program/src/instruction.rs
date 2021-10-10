@@ -1406,33 +1406,33 @@ pub fn force_cancel_perp_orders(
 
 pub fn init_advanced_orders(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey,         // read
-    mango_account_pk: &Pubkey,       // write
-    owner_pk: &Pubkey,               // write & signer
-    advanced_orders_pk: &Pubkey,     // write
-    system_prog_pk: &Pubkey,         // read
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // write
+    owner_pk: &Pubkey,           // write & signer
+    advanced_orders_pk: &Pubkey, // write
+    system_prog_pk: &Pubkey,     // read
 ) -> Result<Instruction, ProgramError> {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new(*owner_pk, true),
         AccountMeta::new(*advanced_orders_pk, false),
         AccountMeta::new_readonly(*system_prog_pk, false),
     ];
-    let instr = MangoInstruction::InitAdvancedOrders { };
+    let instr = MangoInstruction::InitAdvancedOrders {};
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
 pub fn add_perp_trigger_order(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey,         // read
-    mango_account_pk: &Pubkey,       // read
-    owner_pk: &Pubkey,               // write & signer
-    advanced_orders_pk: &Pubkey,     // write
-    mango_cache_pk: &Pubkey,         // read
-    perp_market_pk: &Pubkey,         // read
-    system_prog_pk: &Pubkey,         // read
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // read
+    owner_pk: &Pubkey,           // write & signer
+    advanced_orders_pk: &Pubkey, // write
+    mango_cache_pk: &Pubkey,     // read
+    perp_market_pk: &Pubkey,     // read
+    system_prog_pk: &Pubkey,     // read
     order_type: OrderType,
     side: Side,
     trigger_condition: TriggerCondition,
@@ -1442,7 +1442,7 @@ pub fn add_perp_trigger_order(
     quantity: i64,
     trigger_price: I80F48,
 ) -> Result<Instruction, ProgramError> {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new_readonly(*mango_account_pk, false),
         AccountMeta::new(*owner_pk, true),
@@ -1467,14 +1467,14 @@ pub fn add_perp_trigger_order(
 
 pub fn remove_advanced_order(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey,         // read
-    mango_account_pk: &Pubkey,       // read
-    owner_pk: &Pubkey,               // write & signer
-    advanced_orders_pk: &Pubkey,     // write
-    system_prog_pk: &Pubkey,         // read
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // read
+    owner_pk: &Pubkey,           // write & signer
+    advanced_orders_pk: &Pubkey, // write
+    system_prog_pk: &Pubkey,     // read
     order_index: u8,
 ) -> Result<Instruction, ProgramError> {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new_readonly(*mango_account_pk, false),
         AccountMeta::new(*owner_pk, true),
@@ -1488,18 +1488,18 @@ pub fn remove_advanced_order(
 
 pub fn execute_perp_trigger_order(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey,         // read
-    mango_account_pk: &Pubkey,       // write
-    advanced_orders_pk: &Pubkey,     // write
-    agent_pk: &Pubkey,               // write & signer
-    mango_cache_pk: &Pubkey,         // read
-    perp_market_pk: &Pubkey,         // write
-    bids_pk: &Pubkey,                // write
-    asks_pk: &Pubkey,                // write
-    event_queue_pk: &Pubkey,         // write
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // write
+    advanced_orders_pk: &Pubkey, // write
+    agent_pk: &Pubkey,           // write & signer
+    mango_cache_pk: &Pubkey,     // read
+    perp_market_pk: &Pubkey,     // write
+    bids_pk: &Pubkey,            // write
+    asks_pk: &Pubkey,            // write
+    event_queue_pk: &Pubkey,     // write
     order_index: u8,
 ) -> Result<Instruction, ProgramError> {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new(*advanced_orders_pk, false),
@@ -1510,7 +1510,7 @@ pub fn execute_perp_trigger_order(
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
-    let instr = MangoInstruction::ExecutePerpTriggerOrder{ order_index };
+    let instr = MangoInstruction::ExecutePerpTriggerOrder { order_index };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
