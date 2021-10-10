@@ -1523,6 +1523,28 @@ impl MangoAccount {
         }
         None
     }
+
+    /// Calculate the max native units to withdraw
+    pub fn max_withdrawable(
+        &self,
+        group: &MangoGroup,
+        mango_cache: &MangoCache,
+        token_index: usize,
+        health: I80F48,
+    ) -> MangoResult<u64> {
+        if health.is_positive() && self.deposits[token_index].is_positive() {
+            let price = mango_cache.get_price(token_index);
+            let init_asset_weight = group.get_token_asset_weight(token_index, HealthType::Init);
+            let health_implied = (health / (price * init_asset_weight)).checked_floor().unwrap();
+            let native_deposits: I80F48 = self
+                .get_native_deposit(&mango_cache.root_bank_cache[token_index], token_index)?
+                .checked_floor()
+                .unwrap();
+            Ok(native_deposits.min(health_implied).to_num())
+        } else {
+            Ok(0)
+        }
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
