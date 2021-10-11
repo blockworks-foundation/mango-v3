@@ -4292,20 +4292,6 @@ impl Processor {
                 )?;
                 let post_health = health_cache.get_health(&mango_group, HealthType::Init);
                 let pa = &mango_account.perp_accounts[market_index];
-
-                msg!("{:?} {:?}", sim_post_health, post_health);
-                msg!(
-                    "{} {} {} {} {} {} {} {}",
-                    taker_base,
-                    taker_quote,
-                    bids_quantity,
-                    asks_quantity,
-                    pa.taker_base,
-                    pa.taker_quote,
-                    pa.bids_quantity,
-                    pa.asks_quantity
-                );
-
                 check!(
                     sim_post_health == post_health
                         && taker_base == pa.taker_base
