@@ -3624,7 +3624,7 @@ impl Processor {
                             mngo_accrual: maker.perp_accounts[market_index].mngo_accrued - pre_mngo
                         });
                     }
-                    mango_emit!(fill.to_fill_log(*mango_group_ai.key));
+                    mango_emit!(fill.to_fill_log(*mango_group_ai.key, market_index));
                 }
                 EventType::Out => {
                     let out: &OutEvent = cast_ref(event);

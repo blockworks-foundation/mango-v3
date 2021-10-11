@@ -17,6 +17,7 @@ pub mod mango_logs {}
 #[event]
 pub struct FillLog {
     pub mango_group: Pubkey,
+    pub market_index: u64,
     pub taker_side: u8, // side from the taker's POV
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
@@ -40,8 +41,9 @@ pub struct FillLog {
     pub taker_fee: i128,
 
     pub price: i64,
-    pub quantity: i64, // number of quote lots
+    pub quantity: i64, // number of base lots
 }
+
 #[event]
 pub struct TokenBalanceLog {
     pub mango_group: Pubkey,
