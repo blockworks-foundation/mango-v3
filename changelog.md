@@ -1,6 +1,7 @@
 # Mango Program Change Log
 
 ## v3.1.0
+Deployed: Oct 11, 2021 at 16:57:51 UTC
 1. Add reduce only to PlacePerpOrder
 2. Add Market OrderType to PlacePerpOrder
 3. Reduce MAX_IN_MARGIN_BASKET to 9 from 10 to reflect tx size limits
