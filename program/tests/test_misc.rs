@@ -23,6 +23,12 @@ async fn test_i80f48() {
     println!("{:#0128b}", r.to_bits())
 }
 
+#[tokio::test]
+async fn serum_dex_error() {
+    let error_code = 0x1000594;
+    println!("file: {} line: {}", error_code >> 24, error_code & 0xffffff);
+}
+
 // #[tokio::test]
 // async fn test_fixmul() {
 //     let y = I80F48::from_bits(fixmul(ONE_I80F48.to_bits(), ONE_I80F48.to_bits()));

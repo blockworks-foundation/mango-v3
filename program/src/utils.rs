@@ -2,6 +2,7 @@ use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 
 use crate::error::MangoResult;
 use crate::matching::Side;
+use crate::state::ONE_I80F48;
 use fixed::types::I80F48;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
@@ -66,4 +67,19 @@ pub fn split_open_orders(
         I80F48::from_num(open_orders.native_coin_free),
         I80F48::from_num(open_orders.native_coin_total - open_orders.native_coin_free),
     )
+}
+
+/// exponentiate by squaring; send in 1 / base if you want neg
+pub fn pow_i80f48(mut base: I80F48, mut exp: u8) -> I80F48 {
+    let mut result = ONE_I80F48;
+    loop {
+        if exp & 1 == 1 {
+            result *= base;
+        }
+        exp >>= 1;
+        if exp == 0 {
+            break result;
+        }
+        base = base.checked_mul(base).unwrap();
+    }
 }

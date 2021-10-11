@@ -1,11 +1,11 @@
 mod program_test;
 use fixed::types::I80F48;
+use mango::state::{QUOTE_INDEX, ZERO_I80F48};
 use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
-use mango::state::{ZERO_I80F48, QUOTE_INDEX};
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -100,23 +100,23 @@ async fn test_place_spot_order() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
-        (
-            mint_index, // Mint index
-            user_index, // User index
-            [
-                ("quote_free", ZERO_I80F48),
-                ("quote_locked", test.to_native(&quote_mint, base_price * base_size)),
-                ("base_free", ZERO_I80F48),
-                ("base_locked", ZERO_I80F48),
-            ].iter().cloned().collect(),
-        )
-    ];
+    let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![(
+        mint_index, // Mint index
+        user_index, // User index
+        [
+            ("quote_free", ZERO_I80F48),
+            ("quote_locked", test.to_native(&quote_mint, base_price * base_size)),
+            ("base_free", ZERO_I80F48),
+            ("base_locked", ZERO_I80F48),
+        ]
+        .iter()
+        .cloned()
+        .collect(),
+    )];
 
     for expected_values in expected_values_vec {
         assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
     }
-
 }
 
 #[tokio::test]
@@ -174,17 +174,17 @@ async fn test_match_spot_order() {
     let expected_deposits_vec: Vec<(usize, HashMap<usize, I80F48>)> = vec![
         (
             bidder_user_index, // User index
-            [
-                (mint_index, ZERO_I80F48),
-                (QUOTE_INDEX, ZERO_I80F48),
-            ].iter().cloned().collect(),
+            [(mint_index, ZERO_I80F48), (QUOTE_INDEX, ZERO_I80F48)].iter().cloned().collect(),
         ),
         (
             asker_user_index, // User index
             [
                 (mint_index, ZERO_I80F48),
                 (QUOTE_INDEX, test.to_native(&quote_mint, 9978.0)), // taker fee: 0.22% of base price
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
     ];
     for expected_deposits in expected_deposits_vec {
@@ -193,24 +193,30 @@ async fn test_match_spot_order() {
 
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
         (
-            mint_index, // Mint index
+            mint_index,        // Mint index
             bidder_user_index, // User index
             [
                 ("quote_free", test.to_native(&quote_mint, 3.0)), // maker fee: -0.03% of base_price
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", test.to_native(&mint, base_size)),
                 ("base_locked", ZERO_I80F48),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
         (
-            mint_index, // Mint index
+            mint_index,       // Mint index
             asker_user_index, // User index
             [
                 ("quote_free", test.to_native(&quote_mint, 4.4)), // referrer rebate: 1/5 of taker fee
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
     ];
 
@@ -256,12 +262,10 @@ async fn test_match_and_settle_spot_order() {
     ];
 
     // Matched Spot Orders
-    let matched_spot_orders = vec![
-        vec![
-            (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
-            (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
-        ],
-    ];
+    let matched_spot_orders = vec![vec![
+        (bidder_user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
+        (asker_user_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
+    ]];
 
     // === Act ===
     // Step 1: Make deposits
@@ -284,7 +288,10 @@ async fn test_match_and_settle_spot_order() {
             [
                 (mint_index, test.to_native(&mint, 1.0)),
                 (QUOTE_INDEX, test.to_native(&quote_mint, 3.0)), // serum_dex fee
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
         (
             asker_user_index, // User index
@@ -292,9 +299,17 @@ async fn test_match_and_settle_spot_order() {
                 (mint_index, ZERO_I80F48),
                 // Match the fractional I80F48 result, which is not exactly 9982.4
                 // The result is 10000, minus taker fee (22), plus referrer rebate (4.4).
-                (QUOTE_INDEX, test.to_native_fixedint(
-                    &quote_mint, I80F48::from_num(9982) + I80F48::from_num(4) / 10)),
-            ].iter().cloned().collect(),
+                (
+                    QUOTE_INDEX,
+                    test.to_native_fixedint(
+                        &quote_mint,
+                        I80F48::from_num(9982) + I80F48::from_num(4) / 10,
+                    ),
+                ),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
     ];
     for expected_deposits in expected_deposits_vec {
@@ -303,24 +318,30 @@ async fn test_match_and_settle_spot_order() {
 
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![
         (
-            mint_index, // Mint index
+            mint_index,        // Mint index
             bidder_user_index, // User index
             [
                 ("quote_free", ZERO_I80F48),
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
         (
-            mint_index, // Mint index
+            mint_index,       // Mint index
             asker_user_index, // User index
             [
                 ("quote_free", ZERO_I80F48),
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
-            ].iter().cloned().collect(),
+            ]
+            .iter()
+            .cloned()
+            .collect(),
         ),
     ];
 

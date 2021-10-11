@@ -1,0 +1,20 @@
+[package]
+name = "mango-logs"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "mango_logs"
+doctest = false
+
+[features]
+no-entrypoint = []
+no-idl = []
+cpi = ["no-entrypoint"]
+devnet = []
+default = []
+
+[dependencies]
+anchor-lang = "0.16.2"

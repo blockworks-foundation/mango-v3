@@ -2,8 +2,10 @@ use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
+
 use bytemuck::Pod;
 use fixed::types::I80F48;
+use mango_logs::FillLog;
 use mango_macro::Pod;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use safe_transmute::{self, trivial::TriviallyTransmutable};
@@ -300,6 +302,30 @@ impl FillEvent {
         match side {
             Side::Bid => (self.quantity, -self.price * self.quantity),
             Side::Ask => (-self.quantity, self.price * self.quantity),
+        }
+    }
+
+    pub fn to_fill_log(&self, mango_group: Pubkey, market_index: usize) -> FillLog {
+        FillLog {
+            mango_group,
+            market_index: market_index as u64,
+            taker_side: self.taker_side as u8,
+            maker_slot: self.maker_slot,
+            maker_out: self.maker_out,
+            timestamp: self.timestamp,
+            seq_num: self.seq_num as u64,
+            maker: self.maker,
+            maker_order_id: self.maker_order_id,
+            maker_client_order_id: self.maker_client_order_id,
+            maker_fee: self.maker_fee.to_num(),
+            best_initial: self.best_initial,
+            maker_timestamp: self.maker_timestamp,
+            taker: self.taker,
+            taker_order_id: self.taker_order_id,
+            taker_client_order_id: self.taker_client_order_id,
+            taker_fee: self.taker_fee.to_num(),
+            price: self.price,
+            quantity: self.quantity,
         }
     }
 }

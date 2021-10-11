@@ -1,6 +1,6 @@
 use crate::matching::{OrderType, Side};
-use crate::state::MAX_PAIRS;
 use crate::state::{AssetType, INFO_LEN};
+use crate::state::{TriggerCondition, MAX_PAIRS};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -126,6 +126,7 @@ pub enum MangoInstruction {
     /// 2+... `[]` oracle_ais - flux aggregator feed accounts
     CachePrices,
 
+    /// DEPRECATED - caching of root banks now happens in update index
     /// Cache root banks
     ///
     /// Accounts expected: 2 + Root Banks
@@ -202,6 +203,8 @@ pub enum MangoInstruction {
         target_period_length: u64,
         /// amount MNGO rewarded per period
         mngo_per_period: u64,
+        /// Optional: Exponent in the liquidity mining formula; default 2
+        exp: u8,
     },
 
     /// Place an order on a perp market
@@ -221,6 +224,8 @@ pub enum MangoInstruction {
         side: Side,
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
         order_type: OrderType,
+        /// Optional to be backward compatible; default false
+        reduce_only: bool,
     },
 
     CancelPerpOrderByClientId {
@@ -540,19 +545,40 @@ pub enum MangoInstruction {
     /// 1. `[writable]` perp_market_ai - PerpMarket
     /// 2. `[signer]` admin_ai - MangoGroup admin
     ChangePerpMarketParams {
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         maint_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         init_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         liquidation_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         maker_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         taker_fee: Option<I80F48>,
+
         /// Starting rate for liquidity mining
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         rate: Option<I80F48>,
+
         /// depth liquidity mining works for
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         max_depth_bps: Option<I80F48>,
+
         /// target length in seconds of one period
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         target_period_length: Option<u64>,
+
         /// amount MNGO rewarded per period
+        #[serde(serialize_with = "serialize_option_fixed_width")]
         mngo_per_period: Option<u64>,
+
+        /// Optional: Exponent in the liquidity mining formula
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        exp: Option<u8>,
     },
 
     /// Transfer admin permissions over group to another account
@@ -576,7 +602,7 @@ pub enum MangoInstruction {
         limit: u8,
     },
 
-    /// DEPRECATED - will be gone in next release
+    /// DEPRECATED - No longer valid instruction as of release 3.0.5
     /// Liqor takes on all the quote positions where base_position == 0
     /// Equivalent amount of quote currency is credited/debited in deposits/borrows.
     /// This is very similar to the settle_pnl function, but is forced for Sick accounts
@@ -591,6 +617,53 @@ pub enum MangoInstruction {
     /// 6. `[writable]` node_bank_ai - NodeBank
     /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
     ForceSettleQuotePositions,
+
+    /// Place an order on the Serum Dex using Mango account. Improved over PlaceSpotOrder
+    /// by reducing the tx size
+    PlaceSpotOrder2 {
+        order: serum_dex::instruction::NewOrderInstructionV3,
+    },
+
+    /// Initialize the advanced open orders account for a MangoAccount and set
+    InitAdvancedOrders,
+
+    /// Add a trigger order which executes if the trigger condition is met.
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[writable, signer]` owner_ai - owner of MangoAccount
+    /// 3  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
+    /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 5. `[]` perp_market_ai
+    /// 6. `[]` system_prog_ai
+    /// 7.. `[]` open_orders_ais - OpenOrders account for each serum dex market in margin basket
+    AddPerpTriggerOrder {
+        order_type: OrderType,
+        side: Side,
+        trigger_condition: TriggerCondition,
+        reduce_only: bool, // only valid on perp order
+        client_order_id: u64,
+        price: i64,
+        quantity: i64,
+        trigger_price: I80F48,
+    },
+    /// Remove the order at the order_index
+    RemoveAdvancedOrder {
+        order_index: u8,
+    },
+
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2  `[writable]` advanced_orders_ai - the AdvanceOrdersAccount of owner
+    /// 3. `[writable,signer]` agent_ai - operator of the execution service (receives lamports)
+    /// 4. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 5. `[writable]` perp_market_ai
+    /// 6. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 7. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 8. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 9. `[] system_prog_ai
+    ExecutePerpTriggerOrder {
+        order_index: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -668,6 +741,7 @@ impl MangoInstruction {
             }
             10 => MangoInstruction::AddOracle,
             11 => {
+                let exp = if data.len() > 144 { data[144] } else { 2 };
                 let data_arr = array_ref![data, 0, 144];
                 let (
                     maint_leverage,
@@ -694,9 +768,11 @@ impl MangoInstruction {
                     max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
                     target_period_length: u64::from_le_bytes(*target_period_length),
                     mngo_per_period: u64::from_le_bytes(*mngo_per_period),
+                    exp,
                 }
             }
             12 => {
+                let reduce_only = if data.len() > 26 { data[26] != 0 } else { false };
                 let data_arr = array_ref![data, 0, 26];
                 let (price, quantity, client_order_id, side, order_type) =
                     array_refs![data_arr, 8, 8, 8, 1, 1];
@@ -706,10 +782,10 @@ impl MangoInstruction {
                     client_order_id: u64::from_le_bytes(*client_order_id),
                     side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only,
                 }
             }
             13 => {
-                // ***
                 let data_arr = array_ref![data, 0, 9];
                 let (client_order_id, invalid_id_ok) = array_refs![data_arr, 8, 1];
 
@@ -719,7 +795,6 @@ impl MangoInstruction {
                 }
             }
             14 => {
-                // ***
                 let data_arr = array_ref![data, 0, 17];
                 let (order_id, invalid_id_ok) = array_refs![data_arr, 16, 1];
                 MangoInstruction::CancelPerpOrder {
@@ -836,6 +911,9 @@ impl MangoInstruction {
             }
 
             37 => {
+                // ***
+                let exp =
+                    if data.len() > 137 { unpack_u8_opt(&[data[137], data[138]]) } else { None };
                 let data_arr = array_ref![data, 0, 137];
                 let (
                     maint_leverage,
@@ -859,6 +937,7 @@ impl MangoInstruction {
                     max_depth_bps: unpack_i80f48_opt(max_depth_bps),
                     target_period_length: unpack_u64_opt(target_period_length),
                     mngo_per_period: unpack_u64_opt(mngo_per_period),
+                    exp,
                 }
             }
 
@@ -870,7 +949,51 @@ impl MangoInstruction {
             }
 
             40 => MangoInstruction::ForceSettleQuotePositions,
+            41 => {
+                // ***
+                let data_arr = array_ref![data, 0, 46];
+                let order = unpack_dex_new_order_v3(data_arr)?;
+                MangoInstruction::PlaceSpotOrder2 { order }
+            }
 
+            // ***
+            42 => MangoInstruction::InitAdvancedOrders,
+
+            43 => {
+                let data_arr = array_ref![data, 0, 44];
+                let (
+                    order_type,
+                    side,
+                    trigger_condition, // *** TODO - add to client
+                    reduce_only,
+                    client_order_id,
+                    price,
+                    quantity,
+                    trigger_price,
+                ) = array_refs![data_arr, 1, 1, 1, 1, 8, 8, 8, 16];
+                MangoInstruction::AddPerpTriggerOrder {
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    trigger_condition: TriggerCondition::try_from(u8::from_le_bytes(
+                        *trigger_condition,
+                    ))
+                    .unwrap(),
+                    reduce_only: reduce_only[0] != 0,
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    price: i64::from_le_bytes(*price),
+                    quantity: i64::from_le_bytes(*quantity),
+                    trigger_price: I80F48::from_le_bytes(*trigger_price),
+                }
+            }
+
+            44 => {
+                let order_index = array_ref![data, 0, 1][0];
+                MangoInstruction::RemoveAdvancedOrder { order_index }
+            }
+            45 => {
+                let order_index = array_ref![data, 0, 1][0];
+                MangoInstruction::ExecutePerpTriggerOrder { order_index }
+            }
             _ => {
                 return None;
             }
@@ -878,6 +1001,14 @@ impl MangoInstruction {
     }
     pub fn pack(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
+    }
+}
+
+fn unpack_u8_opt(data: &[u8; 2]) -> Option<u8> {
+    if data[0] == 0 {
+        None
+    } else {
+        Some(data[1])
     }
 }
 
@@ -1128,6 +1259,7 @@ pub fn add_perp_market(
         max_depth_bps,
         target_period_length,
         mngo_per_period,
+        exp: 2, // TODO add this to function signature
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -1149,6 +1281,7 @@ pub fn place_perp_order(
     quantity: i64,
     client_order_id: u64,
     order_type: OrderType,
+    reduce_only: bool,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1162,8 +1295,14 @@ pub fn place_perp_order(
     ];
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
-    let instr =
-        MangoInstruction::PlacePerpOrder { side, price, quantity, client_order_id, order_type };
+    let instr = MangoInstruction::PlacePerpOrder {
+        side,
+        price,
+        quantity,
+        client_order_id,
+        order_type,
+        reduce_only,
+    };
     let data = instr.pack();
 
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -1265,6 +1404,117 @@ pub fn force_cancel_perp_orders(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn init_advanced_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // write
+    owner_pk: &Pubkey,           // write & signer
+    advanced_orders_pk: &Pubkey, // write
+    system_prog_pk: &Pubkey,     // read
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new(*advanced_orders_pk, false),
+        AccountMeta::new_readonly(*system_prog_pk, false),
+    ];
+    let instr = MangoInstruction::InitAdvancedOrders {};
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn add_perp_trigger_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // read
+    owner_pk: &Pubkey,           // write & signer
+    advanced_orders_pk: &Pubkey, // write
+    mango_cache_pk: &Pubkey,     // read
+    perp_market_pk: &Pubkey,     // read
+    system_prog_pk: &Pubkey,     // read
+    order_type: OrderType,
+    side: Side,
+    trigger_condition: TriggerCondition,
+    reduce_only: bool,
+    client_order_id: u64,
+    price: i64,
+    quantity: i64,
+    trigger_price: I80F48,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new(*advanced_orders_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*perp_market_pk, false),
+        AccountMeta::new_readonly(*system_prog_pk, false),
+    ];
+    let instr = MangoInstruction::AddPerpTriggerOrder {
+        order_type,
+        side,
+        trigger_condition,
+        reduce_only,
+        client_order_id,
+        price,
+        quantity,
+        trigger_price,
+    };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn remove_advanced_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // read
+    owner_pk: &Pubkey,           // write & signer
+    advanced_orders_pk: &Pubkey, // write
+    system_prog_pk: &Pubkey,     // read
+    order_index: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new(*advanced_orders_pk, false),
+        AccountMeta::new_readonly(*system_prog_pk, false),
+    ];
+    let instr = MangoInstruction::RemoveAdvancedOrder { order_index };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn execute_perp_trigger_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // write
+    advanced_orders_pk: &Pubkey, // write
+    agent_pk: &Pubkey,           // write & signer
+    mango_cache_pk: &Pubkey,     // read
+    perp_market_pk: &Pubkey,     // write
+    bids_pk: &Pubkey,            // write
+    asks_pk: &Pubkey,            // write
+    event_queue_pk: &Pubkey,     // write
+    order_index: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*advanced_orders_pk, false),
+        AccountMeta::new(*agent_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+    ];
+    let instr = MangoInstruction::ExecutePerpTriggerOrder { order_index };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn consume_events(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,      // read
@@ -1314,14 +1564,14 @@ pub fn settle_pnl(
 pub fn update_funding(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey, // read
-    mango_cache_pk: &Pubkey, // read
+    mango_cache_pk: &Pubkey, // write
     perp_market_pk: &Pubkey, // write
     bids_pk: &Pubkey,        // read
     asks_pk: &Pubkey,        // read
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
-        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*mango_cache_pk, false),
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new_readonly(*bids_pk, false),
         AccountMeta::new_readonly(*asks_pk, false),
@@ -1673,4 +1923,25 @@ pub fn liquidate_token_and_token(
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+/// Serialize Option<T> as (bool, T). This gives the binary representation
+/// a fixed width, instead of it becoming one byte for None.
+fn serialize_option_fixed_width<S: serde::Serializer, T: Sized + Default + Serialize>(
+    opt: &Option<T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeTuple;
+    let mut tup = serializer.serialize_tuple(2)?;
+    match opt {
+        Some(value) => {
+            tup.serialize_element(&true)?;
+            tup.serialize_element(&value)?;
+        }
+        None => {
+            tup.serialize_element(&false)?;
+            tup.serialize_element(&T::default())?;
+        }
+    };
+    tup.end()
 }

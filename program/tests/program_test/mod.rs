@@ -22,15 +22,7 @@ use solana_sdk::{
 };
 use spl_token::{state::*, *};
 
-use mango::{
-    entrypoint::*,
-    ids::*,
-    instruction::*,
-    matching::*,
-    oracle::*,
-    state::*,
-    utils::*
-};
+use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*};
 
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
@@ -321,7 +313,11 @@ impl MangoProgramTest {
             let user_key = Keypair::new();
             test.add_account(
                 user_key.pubkey(),
-                solana_sdk::account::Account::new(u32::MAX as u64, 0, &user_key.pubkey()),
+                solana_sdk::account::Account::new(
+                    u32::MAX as u64,
+                    0,
+                    &solana_sdk::system_program::id(),
+                ),
             );
 
             // give every user 10^18 (< 2^60) of every token
@@ -345,8 +341,6 @@ impl MangoProgramTest {
             }
             users.push(user_key);
         }
-
-
 
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
@@ -387,9 +381,7 @@ impl MangoProgramTest {
 
         transaction.sign(&all_signers, self.context.last_blockhash);
 
-        self.context.banks_client.process_transaction(transaction).await.unwrap();
-
-        Ok(())
+        self.context.banks_client.process_transaction(transaction).await
     }
 
     #[allow(dead_code)]
@@ -429,8 +421,7 @@ impl MangoProgramTest {
             clock.epoch,
         );
         let open_orders = load_open_orders(&acc).unwrap();
-        let (quote_free, quote_locked, base_free, base_locked) =
-            split_open_orders(&open_orders);
+        let (quote_free, quote_locked, base_free, base_locked) = split_open_orders(&open_orders);
         return (quote_free, quote_locked, base_free, base_locked);
     }
 
@@ -696,6 +687,7 @@ impl MangoProgramTest {
         order_price: u64,
         order_id: u64,
         order_type: OrderType,
+        reduce_only: bool,
     ) {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
@@ -722,6 +714,7 @@ impl MangoProgramTest {
             order_size as i64,
             order_id,
             order_type,
+            reduce_only,
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
@@ -1061,7 +1054,7 @@ impl MangoProgramTest {
     ) {
         let mango_program_id = self.mango_program_id;
         let mut root_bank_pks = Vec::new();
-        for token in mango_group.tokens {
+        for token in mango_group.tokens.iter() {
             if token.root_bank != Pubkey::default() {
                 root_bank_pks.push(token.root_bank);
             }

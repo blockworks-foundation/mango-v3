@@ -1,6 +1,6 @@
 [package]
 name = "mango"
-version = "3.0.6"
+version = "3.1.0"
 authors = ["blockworks"]
 edition = "2018"
 
@@ -27,7 +27,9 @@ static_assertions = "^1.1.0"
 safe-transmute = "^0.11.1"
 mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
+mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
 switchboard-program = "^0.1.52"
+anchor-lang = "^0.16.2"
 
 [dev-dependencies]
 solana-sdk = "^1.7.10"

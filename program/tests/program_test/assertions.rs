@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use solana_program::pubkey::Pubkey;
+use crate::*;
 use fixed::types::I80F48;
 use mango::state::*;
-use crate::*;
+use solana_program::pubkey::Pubkey;
+use std::collections::HashMap;
 
 #[allow(dead_code)]
 pub fn assert_deposits(
@@ -11,9 +11,13 @@ pub fn assert_deposits(
 ) {
     let (user_index, expected_value) = expected_values;
     for (mint_index, expected_deposit) in expected_value.iter() {
-        let actual_deposit =
-            &mango_group_cookie.mango_accounts[user_index].mango_account
-            .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[*mint_index], *mint_index).unwrap();
+        let actual_deposit = &mango_group_cookie.mango_accounts[user_index]
+            .mango_account
+            .get_native_deposit(
+                &mango_group_cookie.mango_cache.root_bank_cache[*mint_index],
+                *mint_index,
+            )
+            .unwrap();
         println!(
             "==\nUser: {}, Mint: {}\nExpected deposit: {}, Actual deposit: {}\n==",
             user_index,
@@ -30,16 +34,11 @@ pub fn assert_open_spot_orders(
     mango_group_cookie: &MangoGroupCookie,
     user_spot_orders: &Vec<(usize, usize, serum_dex::matching::Side, f64, f64)>,
 ) {
-
     for i in 0..user_spot_orders.len() {
         let (user_index, mint_index, _, _, _) = user_spot_orders[i];
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
-        assert_ne!(
-            mango_account.spot_open_orders[mint_index],
-            Pubkey::default()
-        );
+        assert_ne!(mango_account.spot_open_orders[mint_index], Pubkey::default());
     }
-
 }
 
 #[allow(dead_code)]
@@ -49,11 +48,8 @@ pub async fn assert_user_spot_orders(
     expected_values: (usize, usize, HashMap<&str, I80F48>),
 ) {
     let (mint_index, user_index, expected_value) = expected_values;
-    let (actual_quote_free, actual_quote_locked, actual_base_free, actual_base_locked) = test.get_oo_info(
-        &mango_group_cookie,
-        user_index,
-        mint_index,
-    ).await;
+    let (actual_quote_free, actual_quote_locked, actual_base_free, actual_base_locked) =
+        test.get_oo_info(&mango_group_cookie, user_index, mint_index).await;
 
     println!("User index: {}", user_index);
     if let Some(quote_free) = expected_value.get("quote_free") {
@@ -126,7 +122,6 @@ pub fn assert_open_perp_orders(
     user_perp_orders: &Vec<(usize, usize, mango::matching::Side, f64, f64)>,
     starting_order_id: u64,
 ) {
-
     let mut perp_orders_map: HashMap<String, usize> = HashMap::new();
 
     for i in 0..user_perp_orders.len() {
@@ -140,13 +135,9 @@ pub fn assert_open_perp_orders(
         let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
         let client_order_id = mango_account.client_order_ids[perp_orders_map[&perp_orders_map_key]];
         let order_side = mango_account.order_side[perp_orders_map[&perp_orders_map_key]];
-        assert_eq!(
-            client_order_id,
-            starting_order_id + i as u64,
-        );
+        assert_eq!(client_order_id, starting_order_id + i as u64,);
         assert_eq!(order_side, arranged_order_side);
     }
-
 }
 
 // #[allow(dead_code)]
@@ -192,11 +183,7 @@ pub fn assert_open_perp_orders(
 //     }
 // }
 
-fn get_net(
-    mango_account: &MangoAccount,
-    bank_cache: &RootBankCache,
-    mint_index: usize
-) -> I80F48 {
+fn get_net(mango_account: &MangoAccount, bank_cache: &RootBankCache, mint_index: usize) -> I80F48 {
     if mango_account.deposits[mint_index].is_positive() {
         mango_account.deposits[mint_index].checked_mul(bank_cache.deposit_index).unwrap()
     } else if mango_account.borrows[mint_index].is_positive() {
@@ -212,35 +199,30 @@ pub async fn assert_vault_net_deposit_diff(
     mango_group_cookie: &MangoGroupCookie,
     mint_index: usize,
 ) {
-
     let mango_cache = mango_group_cookie.mango_cache;
     let root_bank_cache = mango_cache.root_bank_cache[mint_index];
-    let (_root_bank_pk, root_bank) = test.with_root_bank(
-      &mango_group_cookie.mango_group, mint_index).await;
+    let (_root_bank_pk, root_bank) =
+        test.with_root_bank(&mango_group_cookie.mango_group, mint_index).await;
 
     let mut total_net = ZERO_I80F48;
     for mango_account in &mango_group_cookie.mango_accounts {
-        total_net += get_net(
-          &mango_account.mango_account,
-          &root_bank_cache,
-          mint_index,
-        );
+        total_net += get_net(&mango_account.mango_account, &root_bank_cache, mint_index);
     }
 
     total_net = total_net.checked_round().unwrap();
 
     let mut vault_amount = ZERO_I80F48;
     for node_bank_pk in root_bank.node_banks {
-      if node_bank_pk != Pubkey::default() {
-          let node_bank = test.load_account::<NodeBank>(node_bank_pk).await;
-          let balance = test.get_token_balance(node_bank.vault).await;
-          vault_amount += I80F48::from_num(balance);
-      }
+        if node_bank_pk != Pubkey::default() {
+            let node_bank = test.load_account::<NodeBank>(node_bank_pk).await;
+            let balance = test.get_token_balance(node_bank.vault).await;
+            vault_amount += I80F48::from_num(balance);
+        }
+
     }
 
     println!("total_net: {}", total_net.to_string());
     println!("vault_amount: {}", vault_amount.to_string());
 
     assert!(total_net == vault_amount);
-
 }

@@ -1,8 +1,8 @@
 mod program_test;
-use mango::{matching::*};
-use program_test::*;
+use mango::matching::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
+use program_test::*;
 use solana_program_test::*;
 
 #[tokio::test]
@@ -34,7 +34,7 @@ async fn test_funding_rate() {
     let clock = test.get_clock().await;
     let start_time = clock.unix_timestamp;
     let end_time = start_time + 3600 * 48; // 48 Hours
-    // TODO: Figure out assertion
+                                           // TODO: Figure out assertion
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -46,12 +46,10 @@ async fn test_funding_rate() {
     ];
 
     // Matched Perp Orders
-    let matched_perp_orders = vec![
-        vec![
-            (asker_user_index, mint_index, mango::matching::Side::Ask, base_size, base_price),
-            (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
-        ],
-    ];
+    let matched_perp_orders = vec![vec![
+        (asker_user_index, mint_index, mango::matching::Side::Ask, base_size, base_price),
+        (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
+    ]];
 
     // Perp Orders
     let user_perp_orders = vec![
@@ -70,8 +68,13 @@ async fn test_funding_rate() {
     place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
 
     // Step 4: Record / Log quote positions before funding
-    let bidder_quote_position_before = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
-    let asker_quote_position_before = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    let bidder_quote_position_before = mango_group_cookie.mango_accounts[bidder_user_index]
+        .mango_account
+        .perp_accounts[mint_index]
+        .quote_position;
+    let asker_quote_position_before =
+        mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index]
+            .quote_position;
     println!("bidder_quote_position before: {}", bidder_quote_position_before.to_string());
     println!("asker_quote_position before: {}", asker_quote_position_before.to_string());
 
@@ -87,11 +90,15 @@ async fn test_funding_rate() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let bidder_quote_position_after = mango_group_cookie.mango_accounts[bidder_user_index].mango_account.perp_accounts[mint_index].quote_position;
-    let asker_quote_position_after = mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index].quote_position;
+    let bidder_quote_position_after = mango_group_cookie.mango_accounts[bidder_user_index]
+        .mango_account
+        .perp_accounts[mint_index]
+        .quote_position;
+    let asker_quote_position_after =
+        mango_group_cookie.mango_accounts[asker_user_index].mango_account.perp_accounts[mint_index]
+            .quote_position;
     println!("bidder_quote_position after: {}", bidder_quote_position_after.to_string());
     println!("asker_quote_position after: {}", asker_quote_position_after.to_string());
-
 }
 
 // bidder_quote_position after 0 hours: -10100000000.000015631940187

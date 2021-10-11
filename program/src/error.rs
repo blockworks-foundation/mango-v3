@@ -95,6 +95,8 @@ pub enum MangoErrorCode {
     InvalidParam,
     #[error("MangoErrorCode::InvalidAccount")]
     InvalidAccount,
+    #[error("MangoErrorCode::InvalidAccountState")]
+    InvalidAccountState,
     #[error("MangoErrorCode::SignerNecessary")]
     SignerNecessary,
     #[error("MangoErrorCode::InsufficientLiquidity Not enough deposits in this node bank")]
@@ -111,6 +113,8 @@ pub enum MangoErrorCode {
     InvalidPriceCache,
     #[error("MangoErrorCode::InvalidPerpMarketCache Cache the perp market to resolve")]
     InvalidPerpMarketCache,
+    #[error("MangoErrorCode::TriggerConditionFalse The trigger condition for this TriggerOrder is not met")]
+    TriggerConditionFalse,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

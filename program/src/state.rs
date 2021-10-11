@@ -7,25 +7,26 @@ use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
 use enumflags2::BitFlags;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use mango_common::Loadable;
-use mango_macro::{Loadable, Pod};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::log::sol_log_compute_units;
-use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use spl_token::state::Account;
 
+use mango_common::Loadable;
+use mango_macro::{Loadable, Pod, TriviallyTransmutable};
+use static_assertions::const_assert_eq;
+
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
-use crate::matching::{Book, LeafNode, Side};
+use crate::matching::{Book, LeafNode, OrderType, Side};
 use crate::queue::FillEvent;
-use crate::utils::{invert_side, remove_slop_mut, split_open_orders};
+use crate::utils::{invert_side, pow_i80f48, remove_slop_mut, split_open_orders};
 
 pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -42,8 +43,8 @@ const MAX_RATE_ADJ: I80F48 = I80F48!(4); // TODO make this part of PerpMarket if
 const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
 pub const MAX_PERP_OPEN_ORDERS: usize = 64;
-pub const FREE_ORDER_SLOT: u8 = u8::MAX; // TODO add check to prevent markets more than 255
-pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 10;
+pub const FREE_ORDER_SLOT: u8 = u8::MAX;
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9; // ***
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 
 declare_check_assert_macros!(SourceFileId::State);
@@ -74,6 +75,7 @@ pub enum DataType {
     Asks,
     MangoCache,
     EventQueue,
+    AdvancedOrders,
 }
 
 const NUM_HEALTHS: usize = 2;
@@ -88,6 +90,7 @@ pub enum HealthType {
     Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
 )]
 #[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
 pub enum AssetType {
     Token = 0,
     Perp = 1,
@@ -100,12 +103,27 @@ pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
     pub is_initialized: bool,
-    pub padding: [u8; 5], // This makes explicit the 8 byte alignment padding
+    pub extra_info: u8, // being used by PerpMarket to store liquidity mining param
+    pub padding: [u8; 4], // This makes explicit the 8 byte alignment padding
 }
 
 impl MetaData {
     pub fn new(data_type: DataType, version: u8, is_initialized: bool) -> Self {
-        Self { data_type: data_type as u8, version, is_initialized, padding: [0u8; 5] }
+        Self {
+            data_type: data_type as u8,
+            version,
+            is_initialized,
+            extra_info: 0,
+            padding: [0u8; 4],
+        }
+    }
+    pub fn new_with_extra(
+        data_type: DataType,
+        version: u8,
+        is_initialized: bool,
+        extra_info: u8,
+    ) -> Self {
+        Self { data_type: data_type as u8, version, is_initialized, extra_info, padding: [0u8; 4] }
     }
 }
 
@@ -240,6 +258,16 @@ impl MangoGroup {
         self.perp_markets
             .iter()
             .position(|perp_market_info| &perp_market_info.perp_market == perp_market_pk)
+    }
+    pub fn get_token_asset_weight(&self, token_index: usize, health_type: HealthType) -> I80F48 {
+        if token_index == QUOTE_INDEX {
+            ONE_I80F48
+        } else {
+            match health_type {
+                HealthType::Maint => self.spot_markets[token_index].maint_asset_weight,
+                HealthType::Init => self.spot_markets[token_index].init_asset_weight,
+            }
+        }
     }
 }
 
@@ -409,6 +437,7 @@ impl RootBank {
         Ok(())
     }
 
+    /// Socialize the loss on lenders and return (native_loss, percentage_loss)
     pub fn socialize_loss(
         &mut self,
         program_id: &Pubkey,
@@ -416,7 +445,7 @@ impl RootBank {
         mango_cache: &mut MangoCache,
         bankrupt_account: &mut MangoAccount,
         node_bank_ais: &[AccountInfo; MAX_NODE_BANKS],
-    ) -> MangoResult<()> {
+    ) -> MangoResult<(I80F48, I80F48)> {
         let mut static_deposits = ZERO_I80F48;
 
         for i in 0..self.num_node_banks {
@@ -450,21 +479,7 @@ impl RootBank {
                 break;
             }
         }
-
-        msg!(
-            "token_socialized_loss details: {{ \
-                \"liab_index\": {}, \
-                \"native_loss\":{}, \
-                \"percentage_loss\": {}, \
-                \"deposit_index\": {} \
-                }}",
-            token_index,
-            native_loss.to_num::<f64>(),
-            percentage_loss.to_num::<f64>(),
-            self.deposit_index.to_num::<f64>(),
-        );
-
-        Ok(())
+        Ok((native_loss, percentage_loss))
     }
 }
 
@@ -574,6 +589,15 @@ pub struct PriceCache {
     pub last_update: u64,
 }
 
+impl PriceCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidPriceCache
+        )
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct RootBankCache {
@@ -582,12 +606,30 @@ pub struct RootBankCache {
     pub last_update: u64,
 }
 
+impl RootBankCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - (mango_group.valid_interval * 2),
+            MangoErrorCode::InvalidRootBankCache
+        )
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PerpMarketCache {
     pub long_funding: I80F48,
     pub short_funding: I80F48,
     pub last_update: u64,
+}
+
+impl PerpMarketCache {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        check!(
+            self.last_update >= now_ts - mango_group.valid_interval,
+            MangoErrorCode::InvalidPerpMarketCache
+        )
+    }
 }
 
 #[derive(Copy, Clone, Pod, Loadable)]
@@ -648,35 +690,20 @@ impl MangoCache {
         active_assets: &UserActiveAssets,
         now_ts: u64,
     ) -> MangoResult<()> {
-        let valid_start = now_ts - mango_group.valid_interval;
-        check!(
-            self.root_bank_cache[QUOTE_INDEX].last_update >= valid_start,
-            MangoErrorCode::InvalidRootBankCache
-        )?;
-
         for i in 0..mango_group.num_oracles {
             if active_assets.spot[i] || active_assets.perps[i] {
-                check!(
-                    self.price_cache[i].last_update >= valid_start,
-                    MangoErrorCode::InvalidPriceCache
-                )?;
+                self.price_cache[i].check_valid(&mango_group, now_ts)?;
             }
 
             if active_assets.spot[i] {
-                check!(
-                    self.root_bank_cache[i].last_update >= valid_start,
-                    MangoErrorCode::InvalidRootBankCache
-                )?;
+                self.root_bank_cache[i].check_valid(&mango_group, now_ts)?;
             }
 
             if active_assets.perps[i] {
-                check!(
-                    self.perp_market_cache[i].last_update >= valid_start,
-                    MangoErrorCode::InvalidPerpMarketCache
-                )?;
+                self.perp_market_cache[i].check_valid(&mango_group, now_ts)?;
             }
         }
-        Ok(())
+        self.root_bank_cache[QUOTE_INDEX].check_valid(&mango_group, now_ts)
     }
 
     pub fn get_price(&self, i: usize) -> I80F48 {
@@ -771,7 +798,39 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    &open_orders_ais[i],
+                    if *open_orders_ais[i].key == Pubkey::default() {
+                        None
+                    } else {
+                        Some(&open_orders_ais[i])
+                    },
+                )?;
+            }
+
+            if self.active_assets.perps[i] {
+                self.perp[i] = mango_account.perp_accounts[i].get_val(
+                    &mango_group.perp_markets[i],
+                    &mango_cache.perp_market_cache[i],
+                    mango_cache.price_cache[i].price,
+                )?;
+            }
+        }
+        Ok(())
+    }
+    pub fn init_vals_with_orders_vec(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ais: &Vec<Option<&AccountInfo>>,
+    ) -> MangoResult<()> {
+        self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
+        for i in 0..mango_group.num_oracles {
+            if self.active_assets.spot[i] {
+                self.spot[i] = mango_account.get_spot_val(
+                    &mango_cache.root_bank_cache[i],
+                    mango_cache.price_cache[i].price,
+                    i,
+                    open_orders_ais[i],
                 )?;
             }
 
@@ -861,7 +920,7 @@ impl HealthCache {
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
             market_index,
-            open_orders_ai,
+            if *open_orders_ai.key == Pubkey::default() { None } else { Some(open_orders_ai) },
         )?;
 
         let (prev_base, prev_quote) = self.spot[market_index];
@@ -918,6 +977,55 @@ impl HealthCache {
                 token_index,
             )
         }
+    }
+
+    /// Simulate health after changes to taker base, taker quote, bids quantity and asks quantity
+    pub fn get_health_after_sim_perp(
+        &self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        market_index: usize,
+        health_type: HealthType,
+
+        taker_base: i64,
+        taker_quote: i64,
+        bids_quantity: i64,
+        asks_quantity: i64,
+    ) -> MangoResult<I80F48> {
+        let (base, quote) = mango_account.perp_accounts[market_index].sim_get_val(
+            &mango_group.perp_markets[market_index],
+            &mango_cache.perp_market_cache[market_index],
+            mango_cache.price_cache[market_index].price,
+            taker_base,
+            taker_quote,
+            bids_quantity,
+            asks_quantity,
+        )?;
+
+        let (prev_base, prev_quote) = self.perp[market_index];
+        let pmi = &mango_group.perp_markets[market_index];
+
+        let (asset_weight, liab_weight) = match health_type {
+            HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
+            HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+        };
+
+        // Get health from val
+        let prev_perp_health = if prev_base.is_negative() {
+            prev_base * liab_weight + prev_quote
+        } else {
+            prev_base * asset_weight + prev_quote
+        };
+
+        let curr_perp_health = if base.is_negative() {
+            base * liab_weight + quote
+        } else {
+            base * asset_weight + quote
+        };
+
+        let h = self.health[health_type as usize].ok_or(throw!())?;
+        Ok(h + curr_perp_health - prev_perp_health)
     }
 
     /// Update perp val and then update the healths
@@ -1001,8 +1109,12 @@ pub struct MangoAccount {
     /// This account cannot do anything except go through `resolve_bankruptcy`
     pub is_bankrupt: bool,
     pub info: [u8; INFO_LEN],
+
+    /// Starts off as zero pubkey and points to the AdvancedOrders account
+    pub advanced_orders_key: Pubkey,
+
     /// padding for expansions
-    pub padding: [u8; 70],
+    pub padding: [u8; 38],
 }
 
 impl MangoAccount {
@@ -1014,15 +1126,15 @@ impl MangoAccount {
         // load_mut checks for size already
         // mango account must be rent exempt to even be initialized
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        let mango_account = Self::load_mut(account)?;
+        let mango_account: RefMut<'a, Self> = Self::load_mut(account)?;
 
         check_eq!(
             mango_account.meta_data.data_type,
             DataType::MangoAccount as u8,
-            MangoErrorCode::Default
+            MangoErrorCode::InvalidAccountState
         )?;
-        check!(mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
-        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::Default)?;
+        check!(mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check_eq!(&mango_account.mango_group, mango_group_pk, MangoErrorCode::InvalidAccount)?;
 
         Ok(mango_account)
     }
@@ -1117,13 +1229,13 @@ impl MangoAccount {
         bank_cache: &RootBankCache,
         price: I80F48,
         market_index: usize,
-        open_orders_ai: &AccountInfo,
+        open_orders_ai: Option<&AccountInfo>,
     ) -> MangoResult<(I80F48, I80F48)> {
         let base_net = self.get_net(bank_cache, market_index);
-        if !self.in_margin_basket[market_index] || *open_orders_ai.key == Pubkey::default() {
+        if !self.in_margin_basket[market_index] || open_orders_ai.is_none() {
             Ok((base_net * price, ZERO_I80F48))
         } else {
-            let open_orders = load_open_orders(open_orders_ai)?;
+            let open_orders = load_open_orders(open_orders_ai.unwrap())?;
             let (quote_free, quote_locked, base_free, base_locked) =
                 split_open_orders(&open_orders);
 
@@ -1233,6 +1345,25 @@ impl MangoAccount {
         true
     }
 
+    pub fn checked_unpack_open_orders<'a, 'b>(
+        &self,
+        mango_group: &MangoGroup,
+        open_orders_ais: &'a [AccountInfo<'b>],
+    ) -> MangoResult<Vec<Option<&'a AccountInfo<'b>>>> {
+        let mut unpacked = vec![None; MAX_PAIRS];
+        for i in 0..mango_group.num_oracles {
+            if self.in_margin_basket[i] {
+                let open_orders_ai = open_orders_ais
+                    .iter()
+                    .find(|ai| ai.key == &self.spot_open_orders[i])
+                    .ok_or(throw_err!(MangoErrorCode::InvalidOpenOrdersAccount))?;
+
+                check_open_orders(open_orders_ai, &mango_group.signer_key)?;
+                unpacked[i] = Some(open_orders_ai);
+            }
+        }
+        Ok(unpacked)
+    }
     pub fn check_open_orders(
         &self,
         mango_group: &MangoGroup,
@@ -1392,6 +1523,28 @@ impl MangoAccount {
         }
         None
     }
+
+    /// Calculate the max native units to withdraw
+    pub fn max_withdrawable(
+        &self,
+        group: &MangoGroup,
+        mango_cache: &MangoCache,
+        token_index: usize,
+        health: I80F48,
+    ) -> MangoResult<u64> {
+        if health.is_positive() && self.deposits[token_index].is_positive() {
+            let price = mango_cache.get_price(token_index);
+            let init_asset_weight = group.get_token_asset_weight(token_index, HealthType::Init);
+            let health_implied = (health / (price * init_asset_weight)).checked_floor().unwrap();
+            let native_deposits: I80F48 = self
+                .get_native_deposit(&mango_cache.root_bank_cache[token_index], token_index)?
+                .checked_floor()
+                .unwrap();
+            Ok(native_deposits.min(health_implied).to_num())
+        } else {
+            Ok(0)
+        }
+    }
 }
 
 #[derive(Copy, Clone, Pod)]
@@ -1439,6 +1592,13 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
+        sol_log_compute_units();
+
+        // This param didn't exist in the past so 0 implies default value of 2
+        if perp_market.meta_data.extra_info == 0 {
+            perp_market.meta_data.extra_info = 2;
+        }
+
         let lmi = &mut perp_market.liquidity_mining_info;
         if lmi.rate == 0 || lmi.mngo_per_period == 0 {
             return Ok(());
@@ -1452,12 +1612,12 @@ impl PerpAccount {
         // TODO limit incentives to orders that were on book at least 5 seconds
         let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
         let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
-
+        // TODO - cap time_final - time_initial to 864_000 ~= 10 days this is to prevent overflow
+        let time_factor = (time_final - time_initial).min(864_000);
         // TODO - check overflow possibilities here by throwing in reasonable large numbers
-        let mut points = dist_factor
-            .checked_mul(dist_factor)
-            .unwrap()
-            .checked_mul(I80F48::from_num(time_final - time_initial))
+
+        let mut points = pow_i80f48(dist_factor, perp_market.meta_data.extra_info)
+            .checked_mul(I80F48::from_num(time_factor))
             .unwrap()
             .checked_mul(I80F48::from_num(quantity))
             .unwrap();
@@ -1468,8 +1628,6 @@ impl PerpAccount {
         let points_in_period = I80F48::from_num(lmi.mngo_left).checked_div(lmi.rate).unwrap();
 
         if points >= points_in_period {
-            sol_log_compute_units();
-
             self.mngo_accrued += lmi.mngo_left;
             points -= points_in_period;
 
@@ -1481,8 +1639,6 @@ impl PerpAccount {
             lmi.rate = lmi.rate.checked_mul(rate_adj).unwrap();
             lmi.period_start = time_final;
             lmi.mngo_left = lmi.mngo_per_period;
-
-            sol_log_compute_units(); // To figure out how much rate adjust costs
         }
 
         let mngo_earned =
@@ -1490,6 +1646,8 @@ impl PerpAccount {
 
         self.mngo_accrued += mngo_earned;
         lmi.mngo_left -= mngo_earned;
+
+        sol_log_compute_units(); // To figure out how much rate adjust costs
 
         Ok(())
     }
@@ -1550,6 +1708,40 @@ impl PerpAccount {
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
                 + I80F48::from_num(self.asks_quantity * pmi.base_lot_size) * price;
+            Ok((base, quote))
+        }
+    }
+
+    /// Return (base_val, quote_val) unweighted after simulating effect of
+    /// changes to taker_base, taker_quote, bids_quantity and asks_quantity
+    pub fn sim_get_val(
+        &self,
+        pmi: &PerpMarketInfo,
+        pmc: &PerpMarketCache,
+        price: I80F48,
+        taker_base: i64,
+        taker_quote: i64,
+        bids_quantity: i64,
+        asks_quantity: i64,
+    ) -> MangoResult<(I80F48, I80F48)> {
+        let taker_base = self.taker_base + taker_base;
+        let taker_quote = self.taker_quote + taker_quote;
+        let bids_quantity = self.bids_quantity + bids_quantity;
+        let asks_quantity = self.asks_quantity + asks_quantity;
+
+        let bids_base_net = self.base_position + taker_base + bids_quantity;
+        let asks_base_net = self.base_position + taker_base - asks_quantity;
+        if bids_base_net.abs() > asks_base_net.abs() {
+            let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
+            let quote = self.get_quote_position(pmc)
+                + I80F48::from_num(taker_quote * pmi.quote_lot_size)
+                - I80F48::from_num(bids_quantity * pmi.base_lot_size) * price;
+            Ok((base, quote))
+        } else {
+            let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
+            let quote = self.get_quote_position(pmc)
+                + I80F48::from_num(taker_quote * pmi.quote_lot_size)
+                + I80F48::from_num(asks_quantity * pmi.base_lot_size) * price;
             Ok((base, quote))
         }
     }
@@ -1649,6 +1841,7 @@ impl PerpMarket {
         max_depth_bps: I80F48,
         target_period_length: u64,
         mngo_per_period: u64,
+        exp: u8, // ***
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
@@ -1658,7 +1851,7 @@ impl PerpMarket {
         )?;
         check!(!state.meta_data.is_initialized, MangoErrorCode::Default)?;
 
-        state.meta_data = MetaData::new(DataType::PerpMarket, 0, true);
+        state.meta_data = MetaData::new_with_extra(DataType::PerpMarket, 0, true, exp);
         state.mango_group = *mango_group_ai.key;
         state.bids = *bids_ai.key;
         state.asks = *asks_ai.key;
@@ -1737,10 +1930,8 @@ impl PerpMarket {
     ) -> MangoResult<()> {
         // Get the index price from cache, ensure it's not outdated
         let price_cache = &mango_cache.price_cache[market_index];
-        check!(
-            now_ts <= price_cache.last_update + mango_group.valid_interval,
-            MangoErrorCode::InvalidCache
-        )?;
+        price_cache.check_valid(&mango_group, now_ts)?;
+
         let index_price = price_cache.price;
         // Get current book price & compare it to index price
 
@@ -1795,18 +1986,27 @@ impl PerpMarket {
         &mut self,
         account: &mut PerpAccount,
         cache: &mut PerpMarketCache,
-    ) -> MangoResult<()> {
+    ) -> MangoResult<I80F48> {
         // TODO convert into only socializing on one side
         // native USDC per contract open interest
-        let socialized_loss = account.quote_position / (I80F48::from_num(self.open_interest));
-        account.quote_position = ZERO_I80F48;
+        let socialized_loss = if self.open_interest == 0 {
+            // This is kind of an unfortunate situation. This means socialized loss occurs on the
+            // last person to call settle_pnl on their profits. Any advice on better mechanism
+            // would be appreciated. Luckily, this will be an extremely rare situation.
+            ZERO_I80F48
+        } else {
+            account
+                .quote_position
+                .checked_div(I80F48::from_num(self.open_interest))
+                .ok_or(math_err!())?
+        };
+
         self.long_funding -= socialized_loss;
         self.short_funding += socialized_loss;
 
         cache.short_funding = self.short_funding;
         cache.long_funding = self.long_funding;
-
-        Ok(())
+        Ok(socialized_loss)
     }
 }
 
@@ -1814,15 +2014,15 @@ pub fn load_market_state<'a>(
     market_account: &'a AccountInfo,
     program_id: &Pubkey,
 ) -> MangoResult<RefMut<'a, serum_dex::state::MarketState>> {
-    check_eq!(market_account.owner, program_id, MangoErrorCode::Default)?;
+    check_eq!(market_account.owner, program_id, MangoErrorCode::InvalidOwner)?;
 
-    let state: RefMut<'a, serum_dex::state::MarketState>;
-    state = RefMut::map(market_account.try_borrow_mut_data()?, |data| {
-        let data_len = data.len() - 12;
-        let (_, rest) = data.split_at_mut(5);
-        let (mid, _) = rest.split_at_mut(data_len);
-        from_bytes_mut(mid)
-    });
+    let state: RefMut<'a, serum_dex::state::MarketState> =
+        RefMut::map(market_account.try_borrow_mut_data()?, |data| {
+            let data_len = data.len() - 12;
+            let (_, rest) = data.split_at_mut(5);
+            let (mid, _) = rest.split_at_mut(data_len);
+            from_bytes_mut(mid)
+        });
 
     state.check_flags()?;
     Ok(state)
@@ -1928,3 +2128,124 @@ pub struct OrderBookStateHeader {
 }
 unsafe impl Zeroable for OrderBookStateHeader {}
 unsafe impl Pod for OrderBookStateHeader {}
+
+/// Quantity in lamports for the agent who triggers the AdvancedOrder
+pub const ADVANCED_ORDER_FEE: u64 = 500_000;
+
+#[repr(u8)]
+#[derive(Copy, Clone, PartialEq, IntoPrimitive, TryFromPrimitive)]
+pub enum AdvancedOrderType {
+    PerpTrigger,
+    SpotTrigger, // Not implemented yet
+}
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum TriggerCondition {
+    Above,
+    Below,
+}
+
+const ADVANCED_ORDER_SIZE: usize = size_of::<PerpTriggerOrder>();
+
+#[derive(Copy, Clone, Pod, TriviallyTransmutable)]
+#[repr(C)]
+pub struct AnyAdvancedOrder {
+    pub advanced_order_type: AdvancedOrderType,
+    pub is_active: bool,
+    pub padding: [u8; ADVANCED_ORDER_SIZE - 2],
+}
+
+#[derive(Copy, Clone, Pod, TriviallyTransmutable)]
+#[repr(C)]
+pub struct PerpTriggerOrder {
+    pub advanced_order_type: AdvancedOrderType,
+    pub is_active: bool,
+    pub market_index: u8,
+    pub order_type: OrderType,
+    pub side: Side,
+    pub trigger_condition: TriggerCondition, // Bid & Below => Take profit on short, Bid & Above => stop loss on short
+    pub reduce_only: bool,                   // only valid on perp order
+    pub padding0: [u8; 1],
+    pub client_order_id: u64,
+    pub price: i64,
+    pub quantity: i64,
+    pub trigger_price: I80F48,
+
+    /// Padding for expansion
+    pub padding1: [u8; 32],
+}
+
+impl PerpTriggerOrder {
+    pub fn new(
+        market_index: u8,
+        order_type: OrderType,
+        side: Side,
+        trigger_condition: TriggerCondition,
+        reduce_only: bool,
+        client_order_id: u64,
+        price: i64,
+        quantity: i64,
+        trigger_price: I80F48,
+    ) -> Self {
+        Self {
+            advanced_order_type: AdvancedOrderType::PerpTrigger,
+            is_active: true,
+            market_index,
+            order_type,
+            side,
+            trigger_condition,
+            reduce_only,
+            padding0: [0; 1],
+            client_order_id,
+            price,
+            quantity,
+            trigger_price,
+            padding1: [0u8; 32],
+        }
+    }
+}
+
+const_assert_eq!(size_of::<AnyAdvancedOrder>(), size_of::<PerpTriggerOrder>());
+
+pub const MAX_ADVANCED_ORDERS: usize = 32;
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct AdvancedOrders {
+    pub meta_data: MetaData,
+    pub orders: [AnyAdvancedOrder; MAX_ADVANCED_ORDERS],
+}
+
+impl AdvancedOrders {
+    pub fn init(account: &AccountInfo, program_id: &Pubkey, rent: &Rent) -> MangoResult<()> {
+        let mut state: RefMut<Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(
+            rent.is_exempt(account.lamports(), size_of::<Self>()),
+            MangoErrorCode::AccountNotRentExempt
+        )?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        state.meta_data = MetaData::new(DataType::AdvancedOrders, 0, true);
+
+        Ok(())
+    }
+
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_account: &MangoAccount,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        let state: RefMut<'a, Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(
+            state.meta_data.data_type == DataType::AdvancedOrders as u8,
+            MangoErrorCode::InvalidAccountState
+        )?;
+        check!(&mango_account.advanced_orders_key == account.key, MangoErrorCode::InvalidAccount)?;
+        Ok(state)
+    }
+}

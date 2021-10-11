@@ -4,6 +4,7 @@ use std::num::NonZeroU64;
 
 use solana_program::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
+use solana_sdk::transport::TransportError;
 
 use mango::{ids::*, matching::*, queue::*, state::*, utils::*};
 
@@ -11,6 +12,7 @@ use crate::*;
 
 pub const STARTING_SPOT_ORDER_ID: u64 = 0;
 pub const STARTING_PERP_ORDER_ID: u64 = 10_000;
+pub const STARTING_ADVANCED_ORDER_ID: u64 = 20_000;
 
 #[derive(Copy, Clone)]
 pub struct MintCookie {
@@ -39,6 +41,8 @@ pub struct MangoGroupCookie {
     pub current_spot_order_id: u64,
 
     pub current_perp_order_id: u64,
+
+    pub current_advanced_order_id: u64,
 
     pub users_with_spot_event: Vec<Vec<usize>>,
 
@@ -107,6 +111,7 @@ impl MangoGroupCookie {
             perp_markets: vec![],
             current_spot_order_id: STARTING_SPOT_ORDER_ID,
             current_perp_order_id: STARTING_PERP_ORDER_ID,
+            current_advanced_order_id: STARTING_ADVANCED_ORDER_ID,
             users_with_spot_event: vec![Vec::new(); test.num_mints - 1],
             users_with_perp_event: vec![Vec::new(); test.num_mints - 1],
         }
@@ -308,6 +313,7 @@ impl MangoGroupCookie {
 
 pub struct MangoAccountCookie {
     pub address: Pubkey,
+    pub user: Keypair,
 
     pub mango_account: MangoAccount,
 }
@@ -334,7 +340,80 @@ impl MangoAccountCookie {
         .unwrap()];
         test.process_transaction(&instructions, Some(&[&user])).await.unwrap();
         let mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
-        MangoAccountCookie { address: mango_account_pk, mango_account: mango_account }
+        MangoAccountCookie { address: mango_account_pk, user, mango_account }
+    }
+}
+
+pub struct AdvancedOrdersCookie {
+    pub address: Pubkey,
+
+    pub advanced_orders: AdvancedOrders,
+}
+
+impl AdvancedOrdersCookie {
+    #[allow(dead_code)]
+    pub async fn init(
+        test: &mut MangoProgramTest,
+        mango_account_cookie: &MangoAccountCookie,
+    ) -> Self {
+        let mango_program_id = test.mango_program_id;
+        let mango_account = &mango_account_cookie.mango_account;
+        let user = &mango_account_cookie.user;
+        let user_pk = user.pubkey();
+        assert!(user_pk == mango_account.owner);
+
+        let (advanced_orders_pk, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_account_cookie.address.to_bytes()],
+            &mango_program_id,
+        );
+
+        let instructions = [mango::instruction::init_advanced_orders(
+            &mango_program_id,
+            &mango_account.mango_group,
+            &mango_account_cookie.address,
+            &user_pk,
+            &advanced_orders_pk,
+            &solana_sdk::system_program::id(),
+        )
+        .unwrap()];
+        test.process_transaction(&instructions, Some(&[user])).await.unwrap();
+        let advanced_orders = test.load_account::<AdvancedOrders>(advanced_orders_pk).await;
+        AdvancedOrdersCookie { address: advanced_orders_pk, advanced_orders }
+    }
+
+    #[allow(dead_code)]
+    pub async fn remove_advanced_order(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_cookie: &mut MangoGroupCookie,
+        user_index: usize,
+        order_index: u8,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = test.mango_program_id;
+        let mango_account_cookie = &mango_group_cookie.mango_accounts[user_index];
+        let mango_account_pk = mango_account_cookie.address;
+        let user = &mango_account_cookie.user;
+        let user_pk = user.pubkey();
+        let mango_group_pk = mango_group_cookie.address;
+
+        let instructions = [mango::instruction::remove_advanced_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user_pk,
+            &self.address,
+            &solana_sdk::system_program::id(),
+            order_index,
+        )
+        .unwrap()];
+
+        let result = test.process_transaction(&instructions, Some(&[&user])).await;
+
+        if result.is_ok() {
+            self.advanced_orders = test.load_account::<AdvancedOrders>(self.address).await;
+        }
+
+        result
     }
 }
 
@@ -556,6 +635,7 @@ impl PerpMarketCookie {
             order_price,
             mango_group_cookie.current_perp_order_id,
             mango::matching::OrderType::Limit,
+            false,
         )
         .await;
 
@@ -563,5 +643,109 @@ impl PerpMarketCookie {
             .load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address)
             .await;
         mango_group_cookie.current_perp_order_id += 1;
+    }
+
+    #[allow(dead_code)]
+    pub async fn add_trigger_order(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_cookie: &mut MangoGroupCookie,
+        advanced_orders_cookie: &mut AdvancedOrdersCookie,
+        user_index: usize,
+        order_type: mango::matching::OrderType,
+        side: mango::matching::Side,
+        trigger_condition: TriggerCondition,
+        price: f64,
+        quantity: f64,
+        trigger_price: I80F48,
+    ) {
+        let mango_program_id = test.mango_program_id;
+        let mango_account_cookie = &mango_group_cookie.mango_accounts[user_index];
+        let mango_account_pk = mango_account_cookie.address;
+        let user = &mango_account_cookie.user;
+        let user_pk = user.pubkey();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let perp_market_pk = self.address;
+        let order_quantity = test.base_size_number_to_lots(&self.mint, quantity);
+        let order_price = test.price_number_to_lots(&self.mint, price);
+        let order_id = mango_group_cookie.current_advanced_order_id;
+
+        let instructions = [mango::instruction::add_perp_trigger_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user_pk,
+            &advanced_orders_cookie.address,
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &solana_sdk::system_program::id(),
+            order_type,
+            side,
+            trigger_condition,
+            false,
+            order_id,
+            order_price as i64,
+            order_quantity as i64,
+            trigger_price,
+        )
+        .unwrap()];
+
+        test.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+
+        mango_group_cookie.mango_accounts[user_index].mango_account =
+            test.load_account::<MangoAccount>(mango_account_pk).await;
+        mango_group_cookie.current_advanced_order_id += 1;
+
+        advanced_orders_cookie.advanced_orders =
+            test.load_account::<AdvancedOrders>(advanced_orders_cookie.address).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn execute_trigger_order(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_cookie: &mut MangoGroupCookie,
+        advanced_orders_cookie: &mut AdvancedOrdersCookie,
+        user_index: usize,
+        agent_user_index: usize,
+        order_index: u8,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = test.mango_program_id;
+        let mango_account_cookie = &mango_group_cookie.mango_accounts[user_index];
+        let mango_account_pk = mango_account_cookie.address;
+        let agent_user =
+            Keypair::from_base58_string(&test.users[agent_user_index].to_base58_string());
+        let agent_user_pk = agent_user.pubkey();
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let perp_market = self.perp_market;
+        let perp_market_pk = self.address;
+
+        let instructions = [mango::instruction::execute_perp_trigger_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &advanced_orders_cookie.address,
+            &agent_user_pk,
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &perp_market.event_queue,
+            order_index,
+        )
+        .unwrap()];
+
+        let result = test.process_transaction(&instructions, Some(&[&agent_user])).await;
+
+        if result.is_ok() {
+            mango_group_cookie.mango_accounts[user_index].mango_account =
+                test.load_account::<MangoAccount>(mango_account_pk).await;
+            advanced_orders_cookie.advanced_orders =
+                test.load_account::<AdvancedOrders>(advanced_orders_cookie.address).await;
+        }
+
+        result
     }
 }
