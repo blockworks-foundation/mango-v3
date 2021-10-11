@@ -4240,8 +4240,8 @@ impl Processor {
 
         if quantity != 0 {
             let (taker_base, taker_quote, bids_quantity, asks_quantity) = match order.side {
-                Side::Bid => book.sim_new_bid(order.price, order.quantity, order.order_type)?,
-                Side::Ask => book.sim_new_ask(order.price, order.quantity, order.order_type)?,
+                Side::Bid => book.sim_new_bid(order.price, quantity, order.order_type)?,
+                Side::Ask => book.sim_new_ask(order.price, quantity, order.order_type)?,
             };
 
             // simulate the effect on health
