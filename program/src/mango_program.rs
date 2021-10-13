@@ -1,4 +1,4 @@
-use solana_program::declare_id;
+use anchor_lang::declare_id;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 

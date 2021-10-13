@@ -2,3 +2,4 @@ program/target
 common/target
 mango-macro/target
 target
+.DS_Store
