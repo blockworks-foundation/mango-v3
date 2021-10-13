@@ -3,7 +3,7 @@ use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 
 #[cfg(feature = "devnet")]
-declare_id!("5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E");
+declare_id!("4skJ85cdxQAFVKbcGgfun8iZPL7BadVYXG3kGEGkufqA");
 #[cfg(not(feature = "devnet"))]
 declare_id!("mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68");
 
