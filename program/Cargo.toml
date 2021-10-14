@@ -6,6 +6,7 @@ edition = "2018"
 
 [features]
 no-entrypoint = []
+declare-id = []
 test-bpf = []
 devnet = []
 

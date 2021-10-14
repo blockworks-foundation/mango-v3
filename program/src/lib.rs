@@ -12,7 +12,7 @@ pub mod queue;
 pub mod state;
 pub mod utils;
 
-#[cfg(feature = "anchor-cpi")]
+#[cfg(feature = "declare-id")]
 pub mod mango_program;
 
 #[cfg(not(feature = "no-entrypoint"))]
