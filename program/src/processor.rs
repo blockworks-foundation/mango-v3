@@ -2801,9 +2801,12 @@ impl Processor {
             };
 
             let native_borrows = liqee_ma.get_native_borrow(bank_cache, liab_index)?;
-
-            let deficit_max_liab: I80F48 = -init_health
-                / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+            let deficit_max_liab = if liab_index == QUOTE_INDEX {
+                native_borrows
+            } else {
+                -init_health
+                    / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee))
+            };
 
             // Max liab transferred to reach asset_i == 0
             let asset_implied_liab_transfer =

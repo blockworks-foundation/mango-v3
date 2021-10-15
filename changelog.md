@@ -1,5 +1,10 @@
 # Mango Program Change Log
 
+## v3.1.1
+Deployed: Oct 15, 2021 at 17:45:59 UTC
+
+1. Fixed bug in liquidate_token_and_perp div by zero bug
+
 ## v3.1.0
 Deployed: Oct 11, 2021 at 16:57:51 UTC
 1. Add reduce only to PlacePerpOrder

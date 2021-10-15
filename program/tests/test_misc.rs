@@ -25,7 +25,7 @@ async fn test_i80f48() {
 
 #[tokio::test]
 async fn serum_dex_error() {
-    let error_code = 0x1000594;
+    let error_code = 0x2a;
     println!("file: {} line: {}", error_code >> 24, error_code & 0xffffff);
 }
 
