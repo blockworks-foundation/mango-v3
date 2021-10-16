@@ -4079,6 +4079,7 @@ impl Processor {
     }
 
     /// Remove the order and refund the fee
+    #[inline(never)]
     fn remove_advanced_order(
         // ***
         program_id: &Pubkey,
@@ -4313,6 +4314,62 @@ impl Processor {
         program_transfer_lamports(advanced_orders_ai, agent_ai, ADVANCED_ORDER_FEE)
     }
 
+    /// Create a MangoAccount PDA and initialize it
+    #[inline(never)]
+    #[allow(dead_code)]
+    fn create_mango_account(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        account_num: u64,
+        bump: u8,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // write & signer
+            system_prog_ai,         // read
+        ] = accounts;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mango_account_seeds: &[&[u8]] = &[
+            &mango_group_ai.key.to_bytes(),
+            &owner_ai.key.to_bytes(),
+            &account_num.to_le_bytes(),
+            &[bump],
+        ];
+        let mango_account_address = Pubkey::create_program_address(mango_account_seeds, program_id)
+            .map_err(|_e| throw_err!(MangoErrorCode::InvalidSeeds))?;
+        check!(&mango_account_address == mango_account_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        let rent = Rent::get()?;
+        // TODO - test passing in MangoAccount that already has some data in it
+        create_pda_account(
+            owner_ai,
+            &rent,
+            size_of::<MangoAccount>(),
+            program_id,
+            system_prog_ai,
+            mango_account_ai,
+            mango_account_seeds,
+        )?;
+
+        let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
+
+        mango_account.mango_group = *mango_group_ai.key;
+        mango_account.owner = *owner_ai.key;
+        mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
+        mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
+
+        Ok(())
+    }
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
