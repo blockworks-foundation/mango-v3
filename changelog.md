@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.1.2
+Deployed: 
+1. Allow for 0 max depth bps
+
 ## v3.1.1
 Deployed: Oct 15, 2021 at 17:45:59 UTC
 

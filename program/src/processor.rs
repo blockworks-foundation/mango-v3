@@ -4079,8 +4079,8 @@ impl Processor {
     }
 
     /// Remove the order and refund the fee
+    #[inline(never)]
     fn remove_advanced_order(
-        // ***
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order_index: u8,
