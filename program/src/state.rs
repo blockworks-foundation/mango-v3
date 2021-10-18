@@ -11,7 +11,6 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
-use solana_program::log::sol_log_compute_units;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
@@ -1592,13 +1591,7 @@ impl PerpAccount {
         time_final: u64,
         quantity: i64,
     ) -> MangoResult<()> {
-        sol_log_compute_units();
-
-        // This param didn't exist in the past so 0 implies default value of 2
-        if perp_market.meta_data.extra_info == 0 {
-            perp_market.meta_data.extra_info = 2;
-        }
-
+        // TODO v3.2 depending on perp market version apply incentives in different way
         let lmi = &mut perp_market.liquidity_mining_info;
         if lmi.rate == 0 || lmi.mngo_per_period == 0 {
             return Ok(());
@@ -1610,17 +1603,26 @@ impl PerpAccount {
         };
 
         // TODO limit incentives to orders that were on book at least 5 seconds
-        let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
-        let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
-        // TODO - cap time_final - time_initial to 864_000 ~= 10 days this is to prevent overflow
-        let time_factor = (time_final - time_initial).min(864_000);
-        // TODO - check overflow possibilities here by throwing in reasonable large numbers
+        // cap time_final - time_initial to 864_000 ~= 10 days this is to prevent overflow
+        let time_factor = I80F48::from_num((time_final - time_initial).min(864_000));
+        let quantity = I80F48::from_num(quantity);
 
-        let mut points = pow_i80f48(dist_factor, perp_market.meta_data.extra_info)
-            .checked_mul(I80F48::from_num(time_factor))
-            .unwrap()
-            .checked_mul(I80F48::from_num(quantity))
-            .unwrap();
+        // special case that only rewards top of book
+        let mut points = if lmi.max_depth_bps.is_zero() {
+            if best == price {
+                time_factor.checked_mul(quantity).unwrap()
+            } else {
+                return Ok(());
+            }
+        } else {
+            let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
+            let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
+            pow_i80f48(dist_factor, perp_market.meta_data.extra_info)
+                .checked_mul(time_factor)
+                .unwrap()
+                .checked_mul(quantity)
+                .unwrap()
+        };
 
         // TODO OPT remove this sanity check if confident
         check!(!points.is_negative(), MangoErrorCode::MathError)?;
@@ -1646,8 +1648,6 @@ impl PerpAccount {
 
         self.mngo_accrued += mngo_earned;
         lmi.mngo_left -= mngo_earned;
-
-        sol_log_compute_units(); // To figure out how much rate adjust costs
 
         Ok(())
     }
@@ -1779,7 +1779,7 @@ pub struct LiquidityMiningInfo {
     /// Used to convert liquidity points to MNGO
     pub rate: I80F48,
 
-    pub max_depth_bps: I80F48,
+    pub max_depth_bps: I80F48, // instead of max depth bps, this should be max num contracts
 
     /// start timestamp of current liquidity incentive period; gets updated when mngo_left goes to 0
     pub period_start: u64,

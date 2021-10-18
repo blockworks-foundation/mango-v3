@@ -964,7 +964,7 @@ impl MangoInstruction {
                 let (
                     order_type,
                     side,
-                    trigger_condition, // *** TODO - add to client
+                    trigger_condition,
                     reduce_only,
                     client_order_id,
                     price,
