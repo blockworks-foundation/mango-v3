@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.1.2
+Deployed: Oct 18, 2021 at 22:12:08 UTC | Slot: 102,256,816
+1. Allow for 0 max depth bps
+
 ## v3.1.1
 Deployed: Oct 15, 2021 at 17:45:59 UTC
 
