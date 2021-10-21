@@ -70,7 +70,8 @@ pub struct LeafNode {
     pub tag: u32,
     pub owner_slot: u8,
     pub order_type: OrderType, // *** this was added for TradingView move order
-    pub padding: [u8; 2],
+    pub version: u8,           // ***
+    pub padding: [u8; 1],
     pub key: i128,
     pub owner: Pubkey,
     pub quantity: i64,
@@ -90,6 +91,7 @@ impl LeafNode {
     }
 
     pub fn new(
+        version: u8,
         owner_slot: u8,
         key: i128,
         owner: Pubkey,
@@ -103,7 +105,8 @@ impl LeafNode {
             tag: NodeTag::LeafNode.into(),
             owner_slot,
             order_type,
-            padding: [0; 2],
+            version,
+            padding: [0; 1],
             key,
             owner,
             quantity,
@@ -214,7 +217,7 @@ pub enum OrderType {
     ImmediateOrCancel = 1,
     PostOnly = 2,
     Market = 3,
-    PostOnlySlide = 4, // ***
+    PostOnlySlide = 4,
 }
 
 #[derive(
@@ -242,7 +245,88 @@ pub struct BookSide {
     pub nodes: [AnyNode; MAX_BOOK_NODES], // TODO make this variable length
 }
 
+pub struct BookSideIter<'a> {
+    book_side: &'a BookSide,
+    stack: Vec<&'a InnerNode>,
+    current: NodeHandle,
+    next_leaf: Option<&'a LeafNode>,
+    left: usize,
+    right: usize,
+}
+
+impl<'a> BookSideIter<'a> {
+    pub fn new(book_side: &'a BookSide) -> Self {
+        let (left, right) =
+            if book_side.meta_data.data_type == DataType::Bids as u8 { (1, 0) } else { (0, 1) };
+        let mut stack = vec![];
+        let mut current = book_side.root_node;
+        if book_side.leaf_count == 0 {
+            Self { book_side, stack, current, next_leaf: None, left, right }
+        } else {
+            loop {
+                match book_side.get(current).unwrap().case().unwrap() {
+                    NodeRef::Inner(inner) => {
+                        stack.push(inner);
+                        current = inner.children[left];
+                    }
+                    NodeRef::Leaf(leaf) => {
+                        return Self {
+                            book_side,
+                            stack,
+                            current,
+                            next_leaf: Some(leaf),
+                            left,
+                            right,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for BookSideIter<'a> {
+    type Item = &'a LeafNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // if next leaf is None just return it
+        // else pop the stack and keep processing until next leaf
+
+        if self.next_leaf.is_none() {
+            return self.next_leaf;
+        }
+
+        // start popping from stack and processing
+        let current_leaf = self.next_leaf;
+        match self.stack.pop() {
+            None => {
+                self.next_leaf = None;
+                return current_leaf;
+            }
+            Some(inner) => {
+                self.current = inner.children[self.right];
+            }
+        }
+
+        loop {
+            match self.book_side.get(self.current).unwrap().case().unwrap() {
+                NodeRef::Inner(inner) => {
+                    self.stack.push(inner);
+                    self.current = inner.children[self.left];
+                }
+                NodeRef::Leaf(leaf) => {
+                    self.next_leaf = Some(leaf);
+                    return current_leaf;
+                }
+            }
+        }
+    }
+}
+
 impl BookSide {
+    pub fn iter(&self) -> BookSideIter {
+        BookSideIter::new(self)
+    }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -588,6 +672,52 @@ impl<'a> Book<'a> {
         Some(self.asks.get_min()?.price())
     }
 
+    /// Get the quantity of bids above and including the price
+    pub fn get_bids_size_above(&self, price: i64) -> i64 {
+        let mut s = 0;
+        for bid in self.bids.iter() {
+            if price < bid.price() {
+                break;
+            }
+            s += bid.quantity;
+        }
+        s
+    }
+
+    /// Get the quantity of asks below and including the price
+    pub fn get_asks_size_below(&self, price: i64) -> i64 {
+        let mut s = 0;
+        for ask in self.asks.iter() {
+            if price > ask.price() {
+                break;
+            }
+            s += ask.quantity;
+        }
+        s
+    }
+    /// Get the quantity of bids above this order id. Will return full size of book if order id not found
+    pub fn get_bids_size_above_order(&self, order_id: i128) -> i64 {
+        let mut s = 0;
+        for bid in self.bids.iter() {
+            if bid.key == order_id {
+                break;
+            }
+            s += bid.quantity;
+        }
+        s
+    }
+
+    /// Get the quantity of bids above this order id. Will return full size of book if order id not found
+    pub fn get_asks_size_below_order(&self, order_id: i128) -> i64 {
+        let mut s = 0;
+        for ask in self.asks.iter() {
+            if ask.key == order_id {
+                break;
+            }
+            s += ask.quantity;
+        }
+        s
+    }
     #[inline(never)]
     pub fn new_order(
         &mut self,
@@ -660,48 +790,67 @@ impl<'a> Book<'a> {
         };
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
-        let mut stack = vec![];
-        let mut current = match self.asks.root() {
-            None => {
-                if rem_quantity > 0 && post_allowed {
-                    bids_quantity += rem_quantity;
-                }
+        for best_ask in self.asks.iter() {
+            let best_ask_price = best_ask.price();
+            if price < best_ask_price {
+                break;
+            } else if post_only {
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-            },
-            Some(node_handle) => node_handle,
-        };
-        while rem_quantity > 0 {
-            match self.asks.get(current).ok_or(throw!())?.case().ok_or(throw!())? {
-                NodeRef::Inner(inner) => {
-                    stack.push(inner);
-                    current = inner.children[0];
-                }
-                NodeRef::Leaf(best_ask) => {
-                    let best_ask_price = best_ask.price();
-                    if price < best_ask_price {
-                        break;
-                    } else if post_only {
-                        return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-                    }
+            }
 
-                    let match_quantity = rem_quantity.min(best_ask.quantity);
-                    rem_quantity -= match_quantity;
+            let match_quantity = rem_quantity.min(best_ask.quantity);
+            taker_base += match_quantity;
+            taker_quote -= match_quantity * best_ask_price;
 
-                    taker_base += match_quantity;
-                    taker_quote -= match_quantity * best_ask_price;
-
-                    match stack.pop() {
-                        // if no more inner nodes on stack, we've processed whole book
-                        None => {
-                            break;
-                        }
-                        Some(inner) => {
-                            current = inner.children[1];
-                        }
-                    }
-                }
+            rem_quantity -= match_quantity;
+            if rem_quantity == 0 {
+                break;
             }
         }
+
+        // let mut stack = vec![];
+        // let mut current = match self.asks.root() {
+        //     None => {
+        //         if rem_quantity > 0 && post_allowed {
+        //             bids_quantity += rem_quantity;
+        //         }
+        //         return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+        //     }
+        //     Some(node_handle) => node_handle,
+        // };
+        //
+        // while rem_quantity > 0 {
+        //     match self.asks.get(current).ok_or(throw!())?.case().ok_or(throw!())? {
+        //         NodeRef::Inner(inner) => {
+        //             stack.push(inner);
+        //             current = inner.children[0];
+        //         }
+        //         NodeRef::Leaf(best_ask) => {
+        //             let best_ask_price = best_ask.price();
+        //             if price < best_ask_price {
+        //                 break;
+        //             } else if post_only {
+        //                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+        //             }
+        //
+        //             let match_quantity = rem_quantity.min(best_ask.quantity);
+        //             rem_quantity -= match_quantity;
+        //
+        //             taker_base += match_quantity;
+        //             taker_quote -= match_quantity * best_ask_price;
+        //
+        //             match stack.pop() {
+        //                 // if no more inner nodes on stack, we've processed whole book
+        //                 None => {
+        //                     break;
+        //                 }
+        //                 Some(inner) => {
+        //                     current = inner.children[1];
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
 
         if rem_quantity > 0 && post_allowed {
             bids_quantity += rem_quantity;
@@ -740,7 +889,7 @@ impl<'a> Book<'a> {
                     asks_quantity += rem_quantity;
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-            },
+            }
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {
@@ -892,15 +1041,22 @@ impl<'a> Book<'a> {
                 let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
-            let best_initial = match self.get_best_bid_price() {
-                None => price,
-                Some(p) => p,
+            // iterate through book on the bid side
+            // TODO test the iter function works
+            let best_initial = if market.meta_data.version == 1 {
+                self.get_bids_size_above(price)
+            } else {
+                match self.get_best_bid_price() {
+                    None => price,
+                    Some(p) => p,
+                }
             };
 
             let owner_slot = mango_account
                 .next_order_slot()
                 .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
             let new_bid = LeafNode::new(
+                market.meta_data.version,
                 owner_slot as u8,
                 order_id,
                 *mango_account_pk,
@@ -1032,15 +1188,21 @@ impl<'a> Book<'a> {
                 event_queue.push_back(cast(event)).unwrap();
                 let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
-            let best_initial = match self.get_best_ask_price() {
-                None => price,
-                Some(p) => p,
+
+            let best_initial = if market.meta_data.version == 1 {
+                self.get_asks_size_below(price)
+            } else {
+                match self.get_best_ask_price() {
+                    None => price,
+                    Some(p) => p,
+                }
             };
 
             let owner_slot = mango_account
                 .next_order_slot()
                 .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
             let new_ask = LeafNode::new(
+                market.meta_data.version,
                 owner_slot as u8,
                 order_id,
                 *mango_account_pk,
@@ -1135,7 +1297,7 @@ impl<'a> Book<'a> {
                     // technically these should be the same. Can enable this check to be extra sure
                     // check!(i == order.owner_slot as usize, MathError)?;
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
-                    mango_account.perp_accounts[market_index].apply_incentives(
+                    mango_account.perp_accounts[market_index].apply_price_incentives(
                         perp_market,
                         order_side,
                         order.price(),

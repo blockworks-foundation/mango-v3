@@ -1808,7 +1808,7 @@ impl Processor {
 
         let perp_account = &mut mango_account.perp_accounts[market_index];
         let mngo_start = perp_account.mngo_accrued;
-        perp_account.apply_incentives(
+        perp_account.apply_price_incentives(
             &mut perp_market,
             side,
             order.price(),
@@ -1865,16 +1865,24 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
 
-        let best_final = match side {
-            Side::Bid => book.get_best_bid_price().unwrap(),
-            Side::Ask => book.get_best_ask_price().unwrap(),
+        let best_final = if perp_market.meta_data.version == 1 {
+            match side {
+                Side::Bid => book.get_bids_size_above_order(order_id),
+                Side::Ask => book.get_asks_size_below_order(order_id),
+            }
+        } else {
+            match side {
+                Side::Bid => book.get_best_bid_price().unwrap(),
+                Side::Ask => book.get_best_ask_price().unwrap(),
+            }
         };
 
         let order = book.cancel_order(order_id, side)?;
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+
         let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
-        mango_account.perp_accounts[market_index].apply_incentives(
+        mango_account.perp_accounts[market_index].apply_price_incentives(
             &mut perp_market,
             side,
             order.price(),
