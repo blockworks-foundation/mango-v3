@@ -519,7 +519,7 @@ impl Processor {
         check!(exp <= 8 && exp > 0, MangoErrorCode::InvalidParam)?;
         check!(num_events >= 64, MangoErrorCode::InvalidParam)?;
 
-        const NUM_FIXED: usize = 11;
+        const NUM_FIXED: usize = 13;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -532,19 +532,22 @@ impl Processor {
             mngo_mint_ai,   // read  ***
             mngo_vault_ai,  // read, write
             admin_ai,       // read, signer  *** needs to have money
+            signer_ai,      // read
             system_prog_ai, // read   ***
-            token_prog_ai   // read ***
+            token_prog_ai,  // read ***
+            rent_ai   // read ***
         ] = accounts;
         check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check!(
             system_prog_ai.key == &solana_program::system_program::id(),
             MangoErrorCode::InvalidProgramId
         )?;
+        check!(rent_ai.key == &solana_program::sysvar::rent::ID, MangoErrorCode::InvalidAccount)?;
 
         let rent = Rent::get()?; // dynamically load rent sysvar
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-
+        check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
@@ -645,6 +648,21 @@ impl Processor {
             mngo_vault_seeds,
         )?;
 
+        solana_program::program::invoke(
+            &spl_token::instruction::initialize_account2(
+                token_prog_ai.key,
+                mngo_vault_ai.key,
+                mngo_mint_ai.key,
+                signer_ai.key,
+            )?,
+            &[
+                mngo_vault_ai.clone(),
+                mngo_mint_ai.clone(),
+                signer_ai.clone(),
+                rent_ai.clone(),
+                token_prog_ai.clone(),
+            ],
+        )?;
         let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
         let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
         mango_group.perp_markets[market_index] = PerpMarketInfo {

@@ -1580,39 +1580,39 @@ impl PerpAccount {
     }
 
     /// New form of incentives introduced in v3.2. This will apply incentives to the top N contracts
-    pub fn apply_size_incentives(
-        &mut self,
-        perp_market: &mut PerpMarket,
-        side: Side,
-        price: i64,
-        best_initial: i64,
-        best_final: i64,
-        time_initial: u64,
-        time_final: u64,
-        quantity: i64,
-    ) -> MangoResult {
-        let lmi = &mut perp_market.liquidity_mining_info;
-        if lmi.rate == 0 || lmi.mngo_per_period == 0 {
-            return Ok(());
-        }
-
-        let time_factor = (time_final - time_initial).min(864_000) as i128;
-        let quantity = quantity as i128;
-
-        // reinterpreted as number of contracts
-        let max_depth_size = lmi.max_depth_bps.to_num::<i128>();
-        let best = best_final.max(best_initial) as i128;
-        let size_dist_factor = max(max_depth_size - best, 0);
-        let points = size_dist_factor
-            .checked_pow(perp_market.meta_data.extra_info as u32)
-            .unwrap()
-            .checked_mul(time_factor)
-            .unwrap()
-            .checked_mul(quantity)
-            .unwrap();
-
-        Ok(())
-    }
+    // pub fn apply_size_incentives(
+    //     &mut self,
+    //     perp_market: &mut PerpMarket,
+    //     side: Side,
+    //     price: i64,
+    //     best_initial: i64,
+    //     best_final: i64,
+    //     time_initial: u64,
+    //     time_final: u64,
+    //     quantity: i64,
+    // ) -> MangoResult {
+    //     let lmi = &mut perp_market.liquidity_mining_info;
+    //     if lmi.rate == 0 || lmi.mngo_per_period == 0 {
+    //         return Ok(());
+    //     }
+    //
+    //     let time_factor = (time_final - time_initial).min(864_000) as i128;
+    //     let quantity = quantity as i128;
+    //
+    //     // reinterpreted as number of contracts
+    //     let max_depth_size = lmi.max_depth_bps.to_num::<i128>();
+    //     let best = best_final.max(best_initial) as i128;
+    //     let size_dist_factor = max(max_depth_size - best, 0);
+    //     let points = size_dist_factor
+    //         .checked_pow(perp_market.meta_data.extra_info as u32)
+    //         .unwrap()
+    //         .checked_mul(time_factor)
+    //         .unwrap()
+    //         .checked_mul(quantity)
+    //         .unwrap();
+    //
+    //     Ok(())
+    // }
     pub fn apply_price_incentives(
         &mut self,
         perp_market: &mut PerpMarket,
