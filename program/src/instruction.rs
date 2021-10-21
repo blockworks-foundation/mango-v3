@@ -664,6 +664,46 @@ pub enum MangoInstruction {
     ExecutePerpTriggerOrder {
         order_index: u8,
     },
+
+    /// Create the necessary PDAs for the perp market and initialize them and add to MangoGroup
+    ///
+    /// Accounts expected by this instruction (13):
+    ///
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[]` oracle_ai
+    /// 2. `[writable]` perp_market_ai
+    /// 3. `[writable]` event_queue_ai
+    /// 4. `[writable]` bids_ai
+    /// 5. `[writable]` asks_ai
+    /// 6. `[]` mngo_mint_ai - mngo token mint
+    /// 7. `[writable]` mngo_vault_ai - the vault from which liquidity incentives will be paid out for this market
+    /// 8. `[signer]` admin_ai
+    /// 9. `[]` signer_ai
+    /// 10. `[]` system_prog_ai - system program
+    /// 11. `[]` token_prog_ai - SPL token program
+    /// 12. `[]` rent_ai - rent sysvar because SPL token program requires it
+    CreatePerpMarket {
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
+        liquidation_fee: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
+        base_lot_size: i64,
+        quote_lot_size: i64,
+        /// Number of events in the EventQueue
+        num_events: usize,
+        /// Starting rate for liquidity mining
+        rate: I80F48,
+        /// v0: depth in bps for liquidity mining; v1: depth in contract size
+        max_depth_bps: I80F48,
+        /// target length in seconds of one period
+        target_period_length: u64,
+        /// amount MNGO rewarded per period
+        mngo_per_period: u64,
+        /// Optional: Exponent in the liquidity mining formula; default 2
+        exp: u8,
+        version: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -993,6 +1033,41 @@ impl MangoInstruction {
             45 => {
                 let order_index = array_ref![data, 0, 1][0];
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
+            }
+            46 => {
+                let data_arr = array_ref![data, 0, 154];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    base_lot_size,
+                    quote_lot_size,
+                    num_events,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                    exp,
+                    version,
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 8, 16, 16, 8, 8, 1, 1];
+                MangoInstruction::CreatePerpMarket {
+                    maint_leverage: I80F48::from_le_bytes(*maint_leverage),
+                    init_leverage: I80F48::from_le_bytes(*init_leverage),
+                    liquidation_fee: I80F48::from_le_bytes(*liquidation_fee),
+                    maker_fee: I80F48::from_le_bytes(*maker_fee),
+                    taker_fee: I80F48::from_le_bytes(*taker_fee),
+                    base_lot_size: i64::from_le_bytes(*base_lot_size),
+                    quote_lot_size: i64::from_le_bytes(*quote_lot_size),
+                    num_events: u64::from_le_bytes(*num_events) as usize,
+                    rate: I80F48::from_le_bytes(*rate),
+                    max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
+                    target_period_length: u64::from_le_bytes(*target_period_length),
+                    mngo_per_period: u64::from_le_bytes(*mngo_per_period),
+                    exp: exp[0],
+                    version: version[0],
+                }
             }
             _ => {
                 return None;

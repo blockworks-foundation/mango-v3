@@ -4526,7 +4526,6 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         account_num: u64,
-        bump: u8,
     ) -> MangoResult {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -4543,20 +4542,13 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-
-        let mango_account_seeds: &[&[u8]] = &[
-            &mango_group_ai.key.to_bytes(),
-            &owner_ai.key.to_bytes(),
-            &account_num.to_le_bytes(),
-            &[bump],
-        ];
-        let mango_account_address = Pubkey::create_program_address(mango_account_seeds, program_id)
-            .map_err(|_e| throw_err!(MangoErrorCode::InvalidSeeds))?;
-        check!(&mango_account_address == mango_account_ai.key, MangoErrorCode::InvalidAccount)?;
-
         let rent = Rent::get()?;
+
+        let mango_account_seeds: &[&[u8]] =
+            &[&mango_group_ai.key.as_ref(), &owner_ai.key.as_ref(), &account_num.to_le_bytes()];
         // TODO - test passing in MangoAccount that already has some data in it
-        create_pda_account(
+        seed_and_create_pda(
+            program_id,
             owner_ai,
             &rent,
             size_of::<MangoAccount>(),
@@ -4565,7 +4557,6 @@ impl Processor {
             mango_account_ai,
             mango_account_seeds,
         )?;
-
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
 
         mango_account.mango_group = *mango_group_ai.key;
@@ -4927,6 +4918,42 @@ impl Processor {
             MangoInstruction::ExecutePerpTriggerOrder { order_index } => {
                 msg!("Mango: ExecutePerpTriggerOrder {}", order_index);
                 Self::execute_perp_trigger_order(program_id, accounts, order_index)
+            }
+            MangoInstruction::CreatePerpMarket {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                maker_fee,
+                taker_fee,
+                base_lot_size,
+                quote_lot_size,
+                num_events,
+                rate,
+                max_depth_bps,
+                target_period_length,
+                mngo_per_period,
+                exp,
+                version,
+            } => {
+                msg!("Mango: CreatePerpMarket");
+                Self::create_perp_market(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    base_lot_size,
+                    quote_lot_size,
+                    num_events,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                    exp,
+                    version,
+                )
             }
         }
     }
