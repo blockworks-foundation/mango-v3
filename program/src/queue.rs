@@ -3,7 +3,6 @@ use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
 
-use bytemuck::Pod;
 use fixed::types::I80F48;
 use mango_logs::FillLog;
 use mango_macro::Pod;
@@ -24,8 +23,8 @@ declare_check_assert_macros!(SourceFileId::Queue);
 // also can't tie it to token withdrawn because during bull market, liqs will be depositing all base tokens and withdrawing quote
 //
 
-pub trait QueueHeader: Pod {
-    type Item: Pod + Copy;
+pub trait QueueHeader: bytemuck::Pod {
+    type Item: bytemuck::Pod + Copy;
 
     fn head(&self) -> usize;
     fn set_head(&mut self, value: usize);

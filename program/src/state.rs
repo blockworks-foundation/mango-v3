@@ -3,7 +3,7 @@ use std::cmp::{max, min};
 use std::convert::identity;
 use std::mem::size_of;
 
-use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut, Pod, Zeroable};
+use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut};
 use enumflags2::BitFlags;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
@@ -2106,7 +2106,7 @@ fn strip_dex_padding_mut<'a>(acc: &'a AccountInfo) -> MangoResult<RefMut<'a, [u8
     Ok(unpadded_data)
 }
 
-fn strip_data_header_mut<'a, H: Pod, D: Pod>(
+fn strip_data_header_mut<'a, H: bytemuck::Pod, D: bytemuck::Pod>(
     orig_data: RefMut<'a, [u8]>,
 ) -> MangoResult<(RefMut<'a, H>, RefMut<'a, [D]>)> {
     let (header, inner): (RefMut<'a, [H]>, RefMut<'a, [D]>) =
@@ -2161,8 +2161,8 @@ pub fn load_asks_mut<'a>(
 pub struct OrderBookStateHeader {
     pub account_flags: u64, // Initialized, (Bids or Asks)
 }
-unsafe impl Zeroable for OrderBookStateHeader {}
-unsafe impl Pod for OrderBookStateHeader {}
+unsafe impl bytemuck::Zeroable for OrderBookStateHeader {}
+unsafe impl bytemuck::Pod for OrderBookStateHeader {}
 
 /// Quantity in lamports for the agent who triggers the AdvancedOrder
 pub const ADVANCED_ORDER_FEE: u64 = 500_000;
