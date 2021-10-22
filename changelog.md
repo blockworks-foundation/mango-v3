@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.1.3
+Deployed:
+1. Change rate adjustment for liquidity mining to 10 so changes are fast
+
 ## v3.1.2
 Deployed: Oct 18, 2021 at 22:12:08 UTC | Slot: 102,256,816
 1. Allow for 0 max depth bps
