@@ -218,7 +218,6 @@ pub async fn assert_vault_net_deposit_diff(
             let balance = test.get_token_balance(node_bank.vault).await;
             vault_amount += I80F48::from_num(balance);
         }
-
     }
 
     println!("total_net: {}", total_net.to_string());

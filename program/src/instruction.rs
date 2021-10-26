@@ -696,7 +696,6 @@ pub enum MangoInstruction {
     /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
     /// 3. `[writable]` advanced_orders_ai - the advanced orders account
     CloseAdvancedOrders,
-
 }
 
 impl MangoInstruction {

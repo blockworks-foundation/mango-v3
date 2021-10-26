@@ -667,7 +667,7 @@ impl<'a> Book<'a> {
                     bids_quantity += rem_quantity;
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-            },
+            }
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {
@@ -740,7 +740,7 @@ impl<'a> Book<'a> {
                     asks_quantity += rem_quantity;
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-            },
+            }
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {

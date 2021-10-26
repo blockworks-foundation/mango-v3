@@ -37,8 +37,8 @@ use crate::state::{
     MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpTriggerOrder,
     PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
     UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
-    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX,
-    ZERO_I80F48,
+    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
+    QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
@@ -230,7 +230,11 @@ impl Processor {
         // Check no perp positions or orders
         for perp_account in mango_account.perp_accounts.iter() {
             check_eq!(perp_account.base_position, 0, MangoErrorCode::InvalidAccountState)?;
-            check_eq!(perp_account.quote_position, ZERO_I80F48, MangoErrorCode::InvalidAccountState)?;
+            check_eq!(
+                perp_account.quote_position,
+                ZERO_I80F48,
+                MangoErrorCode::InvalidAccountState
+            )?;
 
             check!(perp_account.is_liquidatable(), MangoErrorCode::InvalidAccountState)?;
         }
@@ -4076,7 +4080,10 @@ impl Processor {
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
-        check!(&mango_account.advanced_orders_key == advanced_orders_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.advanced_orders_key == advanced_orders_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
@@ -4095,7 +4102,7 @@ impl Processor {
 
         advanced_orders.meta_data.is_initialized = false;
         mango_account.advanced_orders_key = Pubkey::default();
-        
+
         Ok(())
     }
 
