@@ -469,9 +469,7 @@ impl BookSide {
 
     fn remove_by_key(&mut self, search_key: i128) -> Option<LeafNode> {
         let mut parent_h = self.root()?;
-        let mut child_h;
-        let mut crit_bit;
-        match self.get(parent_h).unwrap().case().unwrap() {
+        let (mut child_h, mut crit_bit) = match self.get(parent_h).unwrap().case().unwrap() {
             NodeRef::Leaf(&leaf) if leaf.key == search_key => {
                 assert_eq!(self.leaf_count, 1);
                 self.root_node = 0;
@@ -480,20 +478,13 @@ impl BookSide {
                 return Some(leaf);
             }
             NodeRef::Leaf(_) => return None,
-            NodeRef::Inner(inner) => {
-                let (ch, cb) = inner.walk_down(search_key);
-                child_h = ch;
-                crit_bit = cb;
-            }
-        }
+            NodeRef::Inner(inner) => inner.walk_down(search_key),
+        };
         loop {
             match self.get(child_h).unwrap().case().unwrap() {
                 NodeRef::Inner(inner) => {
-                    let (grandchild_h, grandchild_crit_bit) = inner.walk_down(search_key);
                     parent_h = child_h;
-                    child_h = grandchild_h;
-                    crit_bit = grandchild_crit_bit;
-                    continue;
+                    (child_h, crit_bit) = inner.walk_down(search_key);
                 }
                 NodeRef::Leaf(&leaf) => {
                     if leaf.key != search_key {
@@ -1010,6 +1001,7 @@ impl<'a> Book<'a> {
                 info.taker_fee,
                 best_ask_price,
                 match_quantity,
+                best_ask.version,
             );
             event_queue.push_back(cast(fill)).unwrap();
 
@@ -1158,6 +1150,7 @@ impl<'a> Book<'a> {
                 info.taker_fee,
                 best_bid_price,
                 match_quantity,
+                best_bid.version,
             );
 
             event_queue.push_back(cast(fill)).unwrap();

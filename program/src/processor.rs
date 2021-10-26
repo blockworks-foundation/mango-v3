@@ -379,7 +379,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// Initialize perp market including orderbooks and queues
+    /// *** DEPRECATED Initialize perp market including orderbooks and queues
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -481,6 +481,7 @@ impl Processor {
             mngo_per_period,
             exp,
             0,
+            0,
         )?;
 
         Ok(())
@@ -505,7 +506,8 @@ impl Processor {
         target_period_length: u64,
         mngo_per_period: u64,
         exp: u8,
-        version: u8, // ***
+        version: u8,       // ***
+        lm_size_shift: u8, // ***
     ) -> MangoResult {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
@@ -514,6 +516,9 @@ impl Processor {
         check!(base_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(quote_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+        if version == 1 {
+            check!(max_depth_bps.int() == max_depth_bps, MangoErrorCode::InvalidParam)?;
+        }
         check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
         check!(exp <= 8 && exp > 0, MangoErrorCode::InvalidParam)?;
@@ -562,6 +567,7 @@ impl Processor {
         // Create and Initialize the PerpMarket
         let perp_market_seeds =
             &[mango_group_ai.key.as_ref(), b"PerpMarket", oracle_ai.key.as_ref()];
+        // TODO - what if oracle changes later?
         seed_and_create_pda(
             program_id,
             admin_ai,
@@ -590,6 +596,7 @@ impl Processor {
             mngo_per_period,
             exp,
             version,
+            lm_size_shift,
         )?;
 
         // Create and Initialize the Bids
@@ -777,8 +784,9 @@ impl Processor {
 
         Ok(())
     }
+
     #[inline(never)]
-    /// Change leverage, fees and liquidity mining params
+    /// *** DEPRECATED Change leverage, fees and liquidity mining params
     fn change_perp_market_params(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -854,9 +862,9 @@ impl Processor {
             || mngo_per_period.is_some()
             || exp.is_some()
         {
-            let exp = exp.unwrap_or(perp_market.meta_data.extra_info);
+            let exp = exp.unwrap_or(perp_market.meta_data.extra_info[0]);
             check!(exp > 0 && exp <= 8, MangoErrorCode::InvalidParam)?;
-            perp_market.meta_data.extra_info = exp;
+            perp_market.meta_data.extra_info[0] = exp;
 
             let mut lmi = &mut perp_market.liquidity_mining_info;
             let rate = rate.unwrap_or(lmi.rate);
@@ -880,6 +888,157 @@ impl Processor {
             lmi.mngo_per_period = mngo_per_period;
         }
 
+        Ok(())
+    }
+
+    #[inline(never)]
+    #[allow(dead_code)]
+    /// Change leverage, fees and liquidity mining params
+    fn change_perp_market_params2(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        maker_fee: Option<I80F48>,
+        taker_fee: Option<I80F48>,
+        rate: Option<I80F48>,
+        max_depth_bps: Option<I80F48>,
+        target_period_length: Option<u64>,
+        mngo_per_period: Option<u64>,
+        exp: Option<u8>,
+        version: Option<u8>,
+        lm_size_shift: Option<u8>,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // write
+            perp_market_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let mut info = &mut mango_group.perp_markets[market_index];
+
+        // Unwrap params. Default to current state if Option is None
+        let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
+            get_leverage_weights(x)
+        } else {
+            (info.maint_asset_weight, info.maint_liab_weight)
+        };
+        let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
+            get_leverage_weights(x)
+        } else {
+            (info.init_asset_weight, info.init_liab_weight)
+        };
+
+        let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
+        let maker_fee = maker_fee.unwrap_or(info.maker_fee);
+        let taker_fee = taker_fee.unwrap_or(info.taker_fee);
+
+        // params check
+        check!(init_asset_weight > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_asset_weight > init_asset_weight, MangoErrorCode::InvalidParam)?;
+        // maint leverage may only increase to prevent unforeseen liquidations
+        check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
+
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+
+        // Set the params on MangoGroup PerpMarketInfo
+        info.maker_fee = maker_fee;
+        info.taker_fee = taker_fee;
+        info.liquidation_fee = liquidation_fee;
+        info.maint_asset_weight = maint_asset_weight;
+        info.init_asset_weight = init_asset_weight;
+        info.maint_liab_weight = maint_liab_weight;
+        info.init_liab_weight = init_liab_weight;
+
+        let version = version.unwrap_or(perp_market.meta_data.version);
+        check!(version == 0 || version == 1, MangoErrorCode::InvalidParam)?;
+
+        // TODO add size_lm_depth_decimals
+
+        // If any of the LM params are changed, reset LM then change.
+        if rate.is_some()
+            || max_depth_bps.is_some()
+            || target_period_length.is_some()
+            || mngo_per_period.is_some()
+            || exp.is_some()
+            || lm_size_shift.is_some()
+        {
+            if version == 0 {
+                let exp = exp.unwrap_or(perp_market.meta_data.extra_info[0]);
+                check!(exp > 0 && exp <= 8, MangoErrorCode::InvalidParam)?;
+                let lm_size_shift = lm_size_shift.unwrap_or(perp_market.meta_data.extra_info[1]);
+
+                perp_market.meta_data.extra_info[0] = exp;
+                perp_market.meta_data.extra_info[1] = lm_size_shift;
+
+                let mut lmi = &mut perp_market.liquidity_mining_info;
+                let rate = rate.unwrap_or(lmi.rate);
+                let max_depth_bps = max_depth_bps.unwrap_or(lmi.max_depth_bps);
+                let target_period_length = target_period_length.unwrap_or(lmi.target_period_length);
+                let mngo_per_period = mngo_per_period.unwrap_or(lmi.mngo_per_period);
+
+                // Check params are valid
+                check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+                check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+                check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+
+                // Reset liquidity incentives
+                lmi.mngo_left = mngo_per_period;
+                lmi.period_start = Clock::get()?.unix_timestamp as u64;
+
+                // Set new params
+                lmi.rate = rate;
+                lmi.max_depth_bps = max_depth_bps;
+                lmi.target_period_length = target_period_length;
+                lmi.mngo_per_period = mngo_per_period;
+            } else {
+                let exp = exp.unwrap_or(perp_market.meta_data.extra_info[0]);
+                let lm_size_shift = lm_size_shift.unwrap_or(perp_market.meta_data.extra_info[1]);
+                check!(exp > 0 && exp <= 4, MangoErrorCode::InvalidParam)?;
+                perp_market.meta_data.extra_info[0] = exp;
+                perp_market.meta_data.extra_info[1] = lm_size_shift;
+                let mut lmi = &mut perp_market.liquidity_mining_info;
+                let rate = rate.unwrap_or(lmi.rate);
+                let max_depth_bps = max_depth_bps.unwrap_or(lmi.max_depth_bps);
+                let target_period_length = target_period_length.unwrap_or(lmi.target_period_length);
+                let mngo_per_period = mngo_per_period.unwrap_or(lmi.mngo_per_period);
+
+                // Check params are valid
+                check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+                check!(max_depth_bps.int() == max_depth_bps, MangoErrorCode::InvalidParam)?;
+                check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+                check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+
+                // Reset liquidity incentives
+                lmi.mngo_left = mngo_per_period;
+                lmi.period_start = Clock::get()?.unix_timestamp as u64;
+
+                // Set new params
+                lmi.rate = rate;
+                lmi.max_depth_bps = max_depth_bps;
+                lmi.target_period_length = target_period_length;
+                lmi.mngo_per_period = mngo_per_period;
+            }
+        } else {
+            // If version was changed and LM params stay same, that's an error probably
+            check!(version == perp_market.meta_data.version, MangoErrorCode::InvalidParam)?;
+        }
+
+        perp_market.meta_data.version = version;
         Ok(())
     }
 
@@ -1841,9 +2000,7 @@ impl Processor {
             mango_account_ai.key,
             QUOTE_INDEX,
             I80F48::from_num(pre_quote - post_quote),
-        )?;
-
-        Ok(())
+        )
     }
 
     #[inline(never)]
@@ -1994,33 +2151,55 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-
-        let best_final = match side {
-            Side::Bid => book.get_best_bid_price().unwrap(),
-            Side::Ask => book.get_best_ask_price().unwrap(),
+        let best_final = if perp_market.meta_data.version == 0 {
+            match side {
+                Side::Bid => book.get_best_bid_price().unwrap(),
+                Side::Ask => book.get_best_ask_price().unwrap(),
+            }
+        } else {
+            match side {
+                Side::Bid => book.get_bids_size_above_order(order_id),
+                Side::Ask => book.get_asks_size_below_order(order_id),
+            }
         };
 
         let order = book.cancel_order(order_id, side)?;
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
-        let perp_account = &mut mango_account.perp_accounts[market_index];
-        let mngo_start = perp_account.mngo_accrued;
-        perp_account.apply_price_incentives(
-            &mut perp_market,
-            side,
-            order.price(),
-            order.best_initial,
-            best_final,
-            order.timestamp,
-            Clock::get()?.unix_timestamp as u64,
-            order.quantity,
-        )?;
+        // If order version doesn't match the perp market version, no incentives
+        if order.version != perp_market.meta_data.version {
+            return Ok(());
+        }
+
+        let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
+        if perp_market.meta_data.version == 0 {
+            mango_account.perp_accounts[market_index].apply_price_incentives(
+                &mut perp_market,
+                side,
+                order.price(),
+                order.best_initial,
+                best_final,
+                order.timestamp,
+                Clock::get()?.unix_timestamp as u64,
+                order.quantity,
+            )?;
+        } else {
+            mango_account.perp_accounts[market_index].apply_size_incentives(
+                &mut perp_market,
+                order.best_initial,
+                best_final,
+                order.timestamp,
+                Clock::get()?.unix_timestamp as u64,
+                order.quantity,
+            )?;
+        }
+
         mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
-            mngo_accrual: perp_account.mngo_accrued - mngo_start
+            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
         });
 
         Ok(())
@@ -2063,15 +2242,15 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
 
-        let best_final = if perp_market.meta_data.version == 1 {
-            match side {
-                Side::Bid => book.get_bids_size_above_order(order_id),
-                Side::Ask => book.get_asks_size_below_order(order_id),
-            }
-        } else {
+        let best_final = if perp_market.meta_data.version == 0 {
             match side {
                 Side::Bid => book.get_best_bid_price().unwrap(),
                 Side::Ask => book.get_best_ask_price().unwrap(),
+            }
+        } else {
+            match side {
+                Side::Bid => book.get_bids_size_above_order(order_id),
+                Side::Ask => book.get_asks_size_below_order(order_id),
             }
         };
 
@@ -2079,17 +2258,34 @@ impl Processor {
         check_eq!(&order.owner, mango_account_ai.key, MangoErrorCode::InvalidOrderId)?;
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
+        // If order version doesn't match the perp market version, no incentives
+        if order.version != perp_market.meta_data.version {
+            return Ok(());
+        }
+
         let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
-        mango_account.perp_accounts[market_index].apply_price_incentives(
-            &mut perp_market,
-            side,
-            order.price(),
-            order.best_initial,
-            best_final,
-            order.timestamp,
-            Clock::get()?.unix_timestamp as u64,
-            order.quantity,
-        )?;
+        if perp_market.meta_data.version == 0 {
+            mango_account.perp_accounts[market_index].apply_price_incentives(
+                &mut perp_market,
+                side,
+                order.price(),
+                order.best_initial,
+                best_final,
+                order.timestamp,
+                Clock::get()?.unix_timestamp as u64,
+                order.quantity,
+            )?;
+        } else {
+            mango_account.perp_accounts[market_index].apply_size_incentives(
+                &mut perp_market,
+                order.best_initial,
+                best_final,
+                order.timestamp,
+                Clock::get()?.unix_timestamp as u64,
+                order.quantity,
+            )?;
+        }
+
         mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
@@ -4566,6 +4762,7 @@ impl Processor {
 
         Ok(())
     }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -4934,6 +5131,7 @@ impl Processor {
                 mngo_per_period,
                 exp,
                 version,
+                lm_size_shift, // ***
             } => {
                 msg!("Mango: CreatePerpMarket");
                 Self::create_perp_market(
@@ -4953,6 +5151,39 @@ impl Processor {
                     mngo_per_period,
                     exp,
                     version,
+                    lm_size_shift,
+                )
+            }
+            MangoInstruction::ChangePerpMarketParams2 {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                maker_fee,
+                taker_fee,
+                rate,
+                max_depth_bps,
+                target_period_length,
+                mngo_per_period,
+                exp,
+                version,
+                lm_size_shift,
+            } => {
+                msg!("Mango: ChangePerpMarketParams2");
+                Self::change_perp_market_params2(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                    exp,
+                    version,
+                    lm_size_shift,
                 )
             }
         }

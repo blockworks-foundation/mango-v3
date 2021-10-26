@@ -1,5 +1,11 @@
 # Mango Program Change Log
 
+## v3.2.0
+Deployed:
+1. Added Size LM functionality
+2. Added ChangePerpMarketParams2
+3. Added CreatePerpMarket which uses PDAs
+
 ## v3.1.3
 Deployed:
 1. Change rate adjustment for liquidity mining to 10 so changes are fast

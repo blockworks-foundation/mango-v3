@@ -228,7 +228,8 @@ pub struct FillEvent {
     pub taker_side: Side, // side from the taker's POV
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
-    pub padding: [u8; 4],
+    pub version: u8,     // ***
+    pub padding: [u8; 3],
     pub timestamp: u64,
     pub seq_num: usize, // note: usize same as u64
 
@@ -273,13 +274,15 @@ impl FillEvent {
         taker_fee: I80F48,
         price: i64,
         quantity: i64,
+        version: u8,
     ) -> FillEvent {
         Self {
             event_type: EventType::Fill as u8,
             taker_side,
             maker_slot,
             maker_out,
-            padding: [0u8; 4],
+            version,
+            padding: [0u8; 3],
             timestamp,
             seq_num,
             maker,

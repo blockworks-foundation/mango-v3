@@ -700,9 +700,56 @@ pub enum MangoInstruction {
         target_period_length: u64,
         /// amount MNGO rewarded per period
         mngo_per_period: u64,
-        /// Optional: Exponent in the liquidity mining formula; default 2
         exp: u8,
         version: u8,
+        /// Helps with integer overflow
+        lm_size_shift: u8,
+    },
+
+    /// Change the params for perp market.
+    ///
+    /// Accounts expected by this instruction (3):
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` perp_market_ai - PerpMarket
+    /// 2. `[signer]` admin_ai - MangoGroup admin
+    ChangePerpMarketParams2 {
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        maint_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        init_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        liquidation_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        maker_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        taker_fee: Option<I80F48>,
+
+        /// Starting rate for liquidity mining
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        rate: Option<I80F48>,
+
+        /// depth liquidity mining works for
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        max_depth_bps: Option<I80F48>,
+
+        /// target length in seconds of one period
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        target_period_length: Option<u64>,
+
+        /// amount MNGO rewarded per period
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        mngo_per_period: Option<u64>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        exp: Option<u8>,
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        version: Option<u8>,
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        lm_size_shift: Option<u8>,
     },
 }
 
@@ -1035,7 +1082,8 @@ impl MangoInstruction {
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }
             46 => {
-                let data_arr = array_ref![data, 0, 154];
+                // ***
+                let data_arr = array_ref![data, 0, 155];
                 let (
                     maint_leverage,
                     init_leverage,
@@ -1051,7 +1099,8 @@ impl MangoInstruction {
                     mngo_per_period,
                     exp,
                     version,
-                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 8, 16, 16, 8, 8, 1, 1];
+                    lm_size_shift,
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 8, 16, 16, 8, 8, 1, 1, 1];
                 MangoInstruction::CreatePerpMarket {
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
@@ -1067,6 +1116,39 @@ impl MangoInstruction {
                     mngo_per_period: u64::from_le_bytes(*mngo_per_period),
                     exp: exp[0],
                     version: version[0],
+                    lm_size_shift: lm_size_shift[0],
+                }
+            }
+            47 => {
+                let data_arr = array_ref![data, 0, 143];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                    exp,
+                    version,
+                    lm_size_shift,
+                ) = array_refs![data_arr, 17, 17, 17, 17, 17, 17, 17, 9, 9, 2, 2, 2];
+
+                MangoInstruction::ChangePerpMarketParams2 {
+                    maint_leverage: unpack_i80f48_opt(maint_leverage),
+                    init_leverage: unpack_i80f48_opt(init_leverage),
+                    liquidation_fee: unpack_i80f48_opt(liquidation_fee),
+                    maker_fee: unpack_i80f48_opt(maker_fee),
+                    taker_fee: unpack_i80f48_opt(taker_fee),
+                    rate: unpack_i80f48_opt(rate),
+                    max_depth_bps: unpack_i80f48_opt(max_depth_bps),
+                    target_period_length: unpack_u64_opt(target_period_length),
+                    mngo_per_period: unpack_u64_opt(mngo_per_period),
+                    exp: unpack_u8_opt(exp),
+                    version: unpack_u8_opt(version),
+                    lm_size_shift: unpack_u8_opt(lm_size_shift),
                 }
             }
             _ => {

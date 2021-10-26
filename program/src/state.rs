@@ -102,27 +102,21 @@ pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
     pub is_initialized: bool,
-    pub extra_info: u8, // being used by PerpMarket to store liquidity mining param
-    pub padding: [u8; 4], // This makes explicit the 8 byte alignment padding
+    // *** being used by PerpMarket to store liquidity mining param
+    pub extra_info: [u8; 5],
 }
 
 impl MetaData {
     pub fn new(data_type: DataType, version: u8, is_initialized: bool) -> Self {
-        Self {
-            data_type: data_type as u8,
-            version,
-            is_initialized,
-            extra_info: 0,
-            padding: [0u8; 4],
-        }
+        Self { data_type: data_type as u8, version, is_initialized, extra_info: [0; 5] }
     }
     pub fn new_with_extra(
         data_type: DataType,
         version: u8,
         is_initialized: bool,
-        extra_info: u8,
+        extra_info: [u8; 5],
     ) -> Self {
-        Self { data_type: data_type as u8, version, is_initialized, extra_info, padding: [0u8; 4] }
+        Self { data_type: data_type as u8, version, is_initialized, extra_info }
     }
 }
 
@@ -1474,16 +1468,30 @@ impl MangoAccount {
         perp_market.fees_accrued += fees;
         pa.quote_position += quote - fees;
 
-        pa.apply_price_incentives(
-            perp_market,
-            side,
-            fill.price,
-            fill.best_initial,
-            fill.price,
-            fill.maker_timestamp,
-            fill.timestamp,
-            fill.quantity,
-        )?;
+        // if versions don't match, no LM
+        if perp_market.meta_data.version == fill.version {
+            if fill.version == 0 {
+                pa.apply_price_incentives(
+                    perp_market,
+                    side,
+                    fill.price,
+                    fill.best_initial,
+                    fill.price,
+                    fill.maker_timestamp,
+                    fill.timestamp,
+                    fill.quantity,
+                )?;
+            } else {
+                pa.apply_size_incentives(
+                    perp_market,
+                    fill.best_initial,
+                    0,
+                    fill.maker_timestamp,
+                    fill.timestamp,
+                    fill.quantity,
+                )?;
+            }
+        }
 
         if fill.maker_out {
             self.remove_order(fill.maker_slot as usize, base_change.abs())
@@ -1579,40 +1587,78 @@ impl PerpAccount {
         self.taker_quote -= quote_change;
     }
 
+    fn convert_points(
+        &mut self,
+        lmi: &mut LiquidityMiningInfo,
+        time_final: u64,
+        mut points: I80F48,
+    ) {
+        let points_in_period = I80F48::from_num(lmi.mngo_left).checked_div(lmi.rate).unwrap();
+
+        if points >= points_in_period {
+            self.mngo_accrued += lmi.mngo_left;
+            points -= points_in_period;
+
+            let rate_adj = I80F48::from_num(time_final - lmi.period_start)
+                .checked_div(I80F48::from_num(lmi.target_period_length))
+                .unwrap()
+                .clamp(MIN_RATE_ADJ, MAX_RATE_ADJ);
+
+            lmi.rate = lmi.rate.checked_mul(rate_adj).unwrap();
+            lmi.period_start = time_final;
+            lmi.mngo_left = lmi.mngo_per_period;
+        }
+
+        // quantity is capped at max_depth_size - size_dist (i.e. only the amount that fits inside range)
+        let mngo_earned =
+            points.checked_mul(lmi.rate).unwrap().to_num::<u64>().min(lmi.mngo_per_period); // limit mngo payout to max mngo in a period
+
+        self.mngo_accrued += mngo_earned;
+        lmi.mngo_left -= mngo_earned;
+    }
+
     /// New form of incentives introduced in v3.2. This will apply incentives to the top N contracts
-    // pub fn apply_size_incentives(
-    //     &mut self,
-    //     perp_market: &mut PerpMarket,
-    //     side: Side,
-    //     price: i64,
-    //     best_initial: i64,
-    //     best_final: i64,
-    //     time_initial: u64,
-    //     time_final: u64,
-    //     quantity: i64,
-    // ) -> MangoResult {
-    //     let lmi = &mut perp_market.liquidity_mining_info;
-    //     if lmi.rate == 0 || lmi.mngo_per_period == 0 {
-    //         return Ok(());
-    //     }
-    //
-    //     let time_factor = (time_final - time_initial).min(864_000) as i128;
-    //     let quantity = quantity as i128;
-    //
-    //     // reinterpreted as number of contracts
-    //     let max_depth_size = lmi.max_depth_bps.to_num::<i128>();
-    //     let best = best_final.max(best_initial) as i128;
-    //     let size_dist_factor = max(max_depth_size - best, 0);
-    //     let points = size_dist_factor
-    //         .checked_pow(perp_market.meta_data.extra_info as u32)
-    //         .unwrap()
-    //         .checked_mul(time_factor)
-    //         .unwrap()
-    //         .checked_mul(quantity)
-    //         .unwrap();
-    //
-    //     Ok(())
-    // }
+    pub fn apply_size_incentives(
+        &mut self,
+        perp_market: &mut PerpMarket,
+        best_initial: i64,
+        best_final: i64,
+        time_initial: u64,
+        time_final: u64,
+        quantity: i64,
+    ) -> MangoResult {
+        let lmi = &mut perp_market.liquidity_mining_info;
+        if lmi.rate == 0 || lmi.mngo_per_period == 0 {
+            return Ok(());
+        }
+
+        // TODO - consider limiting time instead of choosing the worse of two positions
+        let time_factor = I80F48::from_num((time_final - time_initial).min(864_000));
+
+        // reinterpreted as number of contracts
+        // TODO - max_depth_bps must be some number between 1 - 100 so there are no overflows on high exp
+        //      maybe on overflow we just set points equal to max?
+        let max_depth_size = lmi.max_depth_bps;
+        let size_dist = I80F48::from_num(best_final.max(best_initial));
+        let size_dist_factor = max_depth_size - size_dist;
+        if !size_dist_factor.is_positive() {
+            return Ok(());
+        }
+
+        let quantity = I80F48::from_num(quantity).min(size_dist_factor);
+        let exp = perp_market.meta_data.extra_info[0];
+        let lm_size_shift = perp_market.meta_data.extra_info[1];
+        let size_dist_factor = size_dist_factor >> lm_size_shift;
+        let points = pow_i80f48(size_dist_factor, exp)
+            .checked_mul(time_factor)
+            .unwrap()
+            .checked_mul(quantity)
+            .unwrap();
+
+        self.convert_points(lmi, time_final, points);
+
+        Ok(())
+    }
     pub fn apply_price_incentives(
         &mut self,
         perp_market: &mut PerpMarket,
@@ -1624,7 +1670,7 @@ impl PerpAccount {
         time_initial: u64,
         time_final: u64,
         quantity: i64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // TODO v3.2 depending on perp market version apply incentives in different way
         let lmi = &mut perp_market.liquidity_mining_info;
         if lmi.rate == 0 || lmi.mngo_per_period == 0 {
@@ -1642,7 +1688,7 @@ impl PerpAccount {
         let quantity = I80F48::from_num(quantity);
 
         // special case that only rewards top of book
-        let mut points = if lmi.max_depth_bps.is_zero() {
+        let points = if lmi.max_depth_bps.is_zero() {
             if best == price {
                 time_factor.checked_mul(quantity).unwrap()
             } else {
@@ -1651,7 +1697,7 @@ impl PerpAccount {
         } else {
             let dist_bps = I80F48::from_num((best - price).abs() * 10_000) / I80F48::from_num(best);
             let dist_factor: I80F48 = max(lmi.max_depth_bps - dist_bps, ZERO_I80F48);
-            pow_i80f48(dist_factor, perp_market.meta_data.extra_info)
+            pow_i80f48(dist_factor, perp_market.meta_data.extra_info[0])
                 .checked_mul(time_factor)
                 .unwrap()
                 .checked_mul(quantity)
@@ -1660,29 +1706,7 @@ impl PerpAccount {
 
         // TODO OPT remove this sanity check if confident
         check!(!points.is_negative(), MangoErrorCode::MathError)?;
-
-        let points_in_period = I80F48::from_num(lmi.mngo_left).checked_div(lmi.rate).unwrap();
-
-        if points >= points_in_period {
-            self.mngo_accrued += lmi.mngo_left;
-            points -= points_in_period;
-
-            let rate_adj = I80F48::from_num(time_final - lmi.period_start)
-                .checked_div(I80F48::from_num(lmi.target_period_length))
-                .unwrap()
-                .clamp(MIN_RATE_ADJ, MAX_RATE_ADJ);
-
-            lmi.rate = lmi.rate.checked_mul(rate_adj).unwrap();
-            lmi.period_start = time_final;
-            lmi.mngo_left = lmi.mngo_per_period;
-        }
-
-        let mngo_earned =
-            points.checked_mul(lmi.rate).unwrap().to_num::<u64>().min(lmi.mngo_per_period); // limit mngo payout to max mngo in a period
-
-        self.mngo_accrued += mngo_earned;
-        lmi.mngo_left -= mngo_earned;
-
+        self.convert_points(lmi, time_final, points);
         Ok(())
     }
 
@@ -1875,8 +1899,9 @@ impl PerpMarket {
         max_depth_bps: I80F48,
         target_period_length: u64,
         mngo_per_period: u64,
-        exp: u8,     // ***
-        version: u8, // ***
+        exp: u8,           // ***
+        version: u8,       // ***
+        lm_size_shift: u8, // ***  how to right shift the depth number to prevent overflow
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
@@ -1886,7 +1911,12 @@ impl PerpMarket {
         )?;
         check!(!state.meta_data.is_initialized, MangoErrorCode::Default)?;
 
-        state.meta_data = MetaData::new_with_extra(DataType::PerpMarket, version, true, exp);
+        state.meta_data = MetaData::new_with_extra(
+            DataType::PerpMarket,
+            version,
+            true,
+            [exp, lm_size_shift, 0, 0, 0],
+        );
         state.mango_group = *mango_group_ai.key;
         state.bids = *bids_ai.key;
         state.asks = *asks_ai.key;
