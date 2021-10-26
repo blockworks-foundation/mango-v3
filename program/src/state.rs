@@ -38,8 +38,8 @@ pub const DAY: I80F48 = I80F48!(86400);
 pub const YEAR: I80F48 = I80F48!(31536000);
 
 pub const DUST_THRESHOLD: I80F48 = I80F48!(0.000001); // TODO make this part of MangoGroup state
-const MAX_RATE_ADJ: I80F48 = I80F48!(10); // TODO make this part of PerpMarket if we want per market flexibility
-const MIN_RATE_ADJ: I80F48 = I80F48!(0.1);
+const MAX_RATE_ADJ: I80F48 = I80F48!(4); // TODO make this part of PerpMarket if we want per market flexibility
+const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
 pub const MAX_PERP_OPEN_ORDERS: usize = 64;
 pub const FREE_ORDER_SLOT: u8 = u8::MAX;
