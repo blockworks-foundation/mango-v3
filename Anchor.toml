@@ -16,4 +16,4 @@ wallet = "~/.config/solana/id.json"
 mango = "mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68"
 
 [programs.devnet]
-mango = "5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
+mango = "4skJ85cdxQAFVKbcGgfun8iZPL7BadVYXG3kGEGkufqA"

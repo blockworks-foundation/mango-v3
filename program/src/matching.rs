@@ -383,6 +383,14 @@ impl BookSide {
         }
     }
 
+    pub fn remove_min(&mut self) -> Option<LeafNode> {
+        self.remove_by_key(self.get(self.find_min()?)?.key()?)
+    }
+
+    pub fn remove_max(&mut self) -> Option<LeafNode> {
+        self.remove_by_key(self.get(self.find_max()?)?.key()?)
+    }
+
     fn remove_by_key(&mut self, search_key: i128) -> Option<LeafNode> {
         let mut parent_h = self.root()?;
         let mut child_h;
@@ -667,7 +675,7 @@ impl<'a> Book<'a> {
                     bids_quantity += rem_quantity;
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-            },
+            }
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {
@@ -740,7 +748,7 @@ impl<'a> Book<'a> {
                     asks_quantity += rem_quantity;
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-            },
+            }
             Some(node_handle) => node_handle,
         };
         while rem_quantity > 0 {
@@ -876,8 +884,7 @@ impl<'a> Book<'a> {
         if rem_quantity > 0 && post_allowed {
             if self.bids.is_full() {
                 // If this bid is higher than lowest bid, boot that bid and insert this one
-                let min_bid_handle = self.bids.find_min().unwrap();
-                let min_bid = self.bids.get(min_bid_handle).unwrap().as_leaf().unwrap();
+                let min_bid = self.bids.remove_min().unwrap();
                 check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
                 let event = OutEvent::new(
                     Side::Bid,
@@ -888,8 +895,6 @@ impl<'a> Book<'a> {
                     min_bid.quantity,
                 );
                 event_queue.push_back(cast(event)).unwrap();
-
-                let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
             let best_initial = match self.get_best_bid_price() {
@@ -1016,10 +1021,9 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
-            if self.bids.is_full() {
+            if self.asks.is_full() {
                 // If this asks is lower than highest ask, boot that ask and insert this one
-                let max_ask_handle = self.asks.find_min().unwrap();
-                let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
+                let max_ask = self.asks.remove_max().unwrap();
                 check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
                 let event = OutEvent::new(
                     Side::Ask,
@@ -1030,7 +1034,6 @@ impl<'a> Book<'a> {
                     max_ask.quantity,
                 );
                 event_queue.push_back(cast(event)).unwrap();
-                let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
             let best_initial = match self.get_best_ask_price() {
                 None => price,
