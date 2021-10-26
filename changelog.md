@@ -1,14 +1,15 @@
 # Mango Program Change Log
-## v3.1.4
-Deployed: Oct 26, 2021 at 17:04:50 UTC | Slot: 103,646,150
-1. fixed bug when book is full 
-2. Adjusted max rate adj back to 4 for LM
 
 ## v3.2.0
 Deployed:
 1. Added Size LM functionality
 2. Added ChangePerpMarketParams2
 3. Added CreatePerpMarket which uses PDAs
+
+## v3.1.4
+Deployed: Oct 26, 2021 at 17:04:50 UTC | Slot: 103,646,150
+1. fixed bug when book is full 
+2. Adjusted max rate adj back to 4 for LM
 
 ## v3.1.3
 Deployed:

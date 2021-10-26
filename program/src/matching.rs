@@ -85,9 +85,14 @@ pub struct LeafNode {
     pub timestamp: u64,
 }
 
+#[inline(always)]
+fn key_to_price(key: i128) -> i64 {
+    (key >> 64) as i64
+}
 impl LeafNode {
+    #[inline(always)]
     pub fn price(&self) -> i64 {
-        (self.key >> 64) as i64
+        key_to_price(self.key)
     }
 
     pub fn new(
@@ -380,6 +385,15 @@ impl BookSide {
             _ => None,
         }
     }
+
+    pub fn remove_min(&mut self) -> Option<LeafNode> {
+        self.remove_by_key(self.get(self.find_min()?)?.key()?)
+    }
+
+    pub fn remove_max(&mut self) -> Option<LeafNode> {
+        self.remove_by_key(self.get(self.find_max()?)?.key()?)
+    }
+
     pub fn find_max(&self) -> Option<NodeHandle> {
         self.find_min_max(true)
     }
@@ -550,12 +564,8 @@ impl BookSide {
             _ => unreachable!(),
         };
 
-        let next_free_list_head: u32;
-        {
-            let free_list_item: &FreeNode = cast_ref(node);
-            next_free_list_head = free_list_item.next;
-        }
-        self.free_list_head = next_free_list_head;
+        // TODO - test borrow checker
+        self.free_list_head = cast_ref::<AnyNode, FreeNode>(node).next;
         self.free_list_len -= 1;
         *node = *val;
         Ok(key)
@@ -1017,8 +1027,7 @@ impl<'a> Book<'a> {
         if rem_quantity > 0 && post_allowed {
             if self.bids.is_full() {
                 // If this bid is higher than lowest bid, boot that bid and insert this one
-                let min_bid_handle = self.bids.find_min().unwrap();
-                let min_bid = self.bids.get(min_bid_handle).unwrap().as_leaf().unwrap();
+                let min_bid = self.bids.remove_min().unwrap();
                 check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
                 let event = OutEvent::new(
                     Side::Bid,
@@ -1029,8 +1038,6 @@ impl<'a> Book<'a> {
                     min_bid.quantity,
                 );
                 event_queue.push_back(cast(event)).unwrap();
-
-                let _removed_node = self.bids.remove(min_bid_handle).unwrap();
             }
 
             // iterate through book on the bid side
@@ -1165,10 +1172,9 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
-            if self.bids.is_full() {
+            if self.asks.is_full() {
                 // If this asks is lower than highest ask, boot that ask and insert this one
-                let max_ask_handle = self.asks.find_min().unwrap();
-                let max_ask = self.asks.get(max_ask_handle).unwrap().as_leaf().unwrap();
+                let max_ask = self.asks.remove_max().unwrap();
                 check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
                 let event = OutEvent::new(
                     Side::Ask,
@@ -1179,7 +1185,6 @@ impl<'a> Book<'a> {
                     max_ask.quantity,
                 );
                 event_queue.push_back(cast(event)).unwrap();
-                let _removed_node = self.asks.remove(max_ask_handle).unwrap();
             }
 
             let best_initial = if market.meta_data.version == 1 {
@@ -1263,13 +1268,133 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
-    pub fn cancel_all_with_incentives(
+    pub fn cancel_all_with_size_incentives(
+        &mut self,
+        mango_account: &mut MangoAccount,
+        mango_account_pk: &Pubkey,
+        perp_market: &mut PerpMarket,
+        market_index: usize,
+        mut limit: u8,
+    ) -> MangoResult {
+        /*
+        iterate through book and find each order owned by user
+        create an order list of orders and best_final for each order
+        iterate through that list and cancel one by one
+         */
+        // TODO - test different limits
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
+        let (mut min_bid, mut max_ask) = (i64::MAX, 0);
+        for i in 0..MAX_PERP_OPEN_ORDERS {
+            if mango_account.order_market[i] != market_index as u8 {
+                continue;
+            }
+            let price = key_to_price(mango_account.orders[i]);
+            let side = mango_account.order_side[i];
+            match side {
+                Side::Bid => {
+                    min_bid = min_bid.min(price);
+                }
+                Side::Ask => {
+                    max_ask = max_ask.max(price);
+                }
+            }
+        }
+
+        // First do bids
+        let mut bids_and_sizes = vec![];
+        let mut cuml_bids = 0;
+        for bid in self.bids.iter() {
+            if bid.price() < min_bid {
+                break;
+            }
+            if &bid.owner == mango_account_pk {
+                bids_and_sizes.push((bid.key, cuml_bids))
+            } else {
+                cuml_bids += bid.quantity;
+            }
+        }
+        for (key, cuml_size) in bids_and_sizes {
+            if limit == 0 {
+                return Ok(());
+            }
+
+            match self.cancel_order(key, Side::Bid) {
+                Ok(order) => {
+                    mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+                    if order.version != perp_market.meta_data.version {
+                        continue;
+                    }
+                    mango_account.perp_accounts[market_index].apply_size_incentives(
+                        perp_market,
+                        order.best_initial,
+                        cuml_size,
+                        order.timestamp,
+                        now_ts,
+                        order.quantity,
+                    )?;
+                }
+                Err(_) => {
+                    // Invalid state because we know it's on the book
+                }
+            }
+            limit -= 1;
+        }
+
+        // Asks
+        // TODO - what if book is large and your last order is deep in book? Need to test this case
+        let mut asks_and_sizes = vec![];
+        let mut cuml_asks = 0;
+        for ask in self.asks.iter() {
+            if ask.price() > max_ask {
+                break;
+            }
+            // TODO OPT - figure out cost of checking pubkey
+            if &ask.owner == mango_account_pk {
+                asks_and_sizes.push((ask.key, cuml_asks));
+            } else {
+                cuml_asks += ask.quantity;
+            }
+        }
+
+        for (key, cuml_size) in asks_and_sizes {
+            if limit == 0 {
+                return Ok(());
+            }
+            match self.cancel_order(key, Side::Ask) {
+                Ok(order) => {
+                    mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+                    if order.version != perp_market.meta_data.version {
+                        continue;
+                    }
+                    mango_account.perp_accounts[market_index].apply_size_incentives(
+                        perp_market,
+                        order.best_initial,
+                        cuml_size,
+                        order.timestamp,
+                        now_ts,
+                        order.quantity,
+                    )?;
+                }
+                Err(_) => {
+                    // Invalid state because we know it's on the book
+                }
+            }
+            limit -= 1;
+        }
+
+        Ok(())
+    }
+
+    /// Cancel all the orders for MangoAccount for this PerpMarket up to `limit`
+    /// Only used when PerpMarket version == 0
+    pub fn cancel_all_with_price_incentives(
         &mut self,
         mango_account: &mut MangoAccount,
         perp_market: &mut PerpMarket,
         market_index: usize,
         mut limit: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let now_ts = Clock::get()?.unix_timestamp as u64;
 
         for i in 0..MAX_PERP_OPEN_ORDERS {
@@ -1290,6 +1415,9 @@ impl<'a> Book<'a> {
                     // technically these should be the same. Can enable this check to be extra sure
                     // check!(i == order.owner_slot as usize, MathError)?;
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+                    if order.version != perp_market.meta_data.version {
+                        continue;
+                    }
                     mango_account.perp_accounts[market_index].apply_price_incentives(
                         perp_market,
                         order_side,

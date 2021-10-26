@@ -50,6 +50,7 @@ use mango_logs::{
     OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
     TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
 };
+use solana_program::log::sol_log_compute_units;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -2301,7 +2302,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         limit: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -2328,7 +2329,28 @@ impl Processor {
 
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
-        book.cancel_all_with_incentives(&mut mango_account, &mut perp_market, market_index, limit)?;
+
+        if perp_market.meta_data.version == 0 {
+            sol_log_compute_units();
+            book.cancel_all_with_price_incentives(
+                &mut mango_account,
+                &mut perp_market,
+                market_index,
+                limit,
+            )?;
+            sol_log_compute_units();
+        } else {
+            sol_log_compute_units();
+            book.cancel_all_with_size_incentives(
+                &mut mango_account,
+                mango_account_ai.key,
+                &mut perp_market,
+                market_index,
+                limit,
+            )?;
+            sol_log_compute_units();
+        }
+
         mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
