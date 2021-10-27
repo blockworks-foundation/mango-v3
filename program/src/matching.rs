@@ -500,7 +500,7 @@ impl BookSide {
                     parent_h = child_h;
                     (child_h, crit_bit) = inner.walk_down(search_key);
                 }
-                NodeRef::Leaf(&leaf) => {
+                NodeRef::Leaf(leaf) => {
                     if leaf.key != search_key {
                         return None;
                     }
@@ -635,7 +635,7 @@ impl BookSide {
     }
 
     pub fn is_full(&self) -> bool {
-        self.free_list_len == 0 && self.bump_index == self.nodes.len()
+        self.free_list_len <= 1 && self.bump_index >= self.nodes.len() - 1
     }
 }
 
@@ -674,50 +674,50 @@ impl<'a> Book<'a> {
     }
 
     /// Get the quantity of bids above and including the price
-    pub fn get_bids_size_above(&self, price: i64) -> i64 {
+    pub fn get_bids_size_above(&self, price: i64, max_depth: i64) -> i64 {
         let mut s = 0;
         for bid in self.bids.iter() {
-            if price < bid.price() {
+            if price < bid.price() || s >= max_depth {
                 break;
             }
             s += bid.quantity;
         }
-        s
+        s.min(max_depth)
     }
 
     /// Get the quantity of asks below and including the price
-    pub fn get_asks_size_below(&self, price: i64) -> i64 {
+    pub fn get_asks_size_below(&self, price: i64, max_depth: i64) -> i64 {
         let mut s = 0;
         for ask in self.asks.iter() {
-            if price > ask.price() {
+            if price > ask.price() || s >= max_depth {
                 break;
             }
             s += ask.quantity;
         }
-        s
+        s.min(max_depth)
     }
     /// Get the quantity of bids above this order id. Will return full size of book if order id not found
-    pub fn get_bids_size_above_order(&self, order_id: i128) -> i64 {
+    pub fn get_bids_size_above_order(&self, order_id: i128, max_depth: i64) -> i64 {
         let mut s = 0;
         for bid in self.bids.iter() {
-            if bid.key == order_id {
+            if bid.key == order_id || s >= max_depth {
                 break;
             }
             s += bid.quantity;
         }
-        s
+        s.min(max_depth)
     }
 
     /// Get the quantity of bids above this order id. Will return full size of book if order id not found
-    pub fn get_asks_size_below_order(&self, order_id: i128) -> i64 {
+    pub fn get_asks_size_below_order(&self, order_id: i128, max_depth: i64) -> i64 {
         let mut s = 0;
         for ask in self.asks.iter() {
-            if ask.key == order_id {
+            if ask.key == order_id || s >= max_depth {
                 break;
             }
             s += ask.quantity;
         }
-        s
+        s.min(max_depth)
     }
     #[inline(never)]
     pub fn new_order(
@@ -1043,7 +1043,8 @@ impl<'a> Book<'a> {
             // iterate through book on the bid side
             // TODO test the iter function works
             let best_initial = if market.meta_data.version == 1 {
-                self.get_bids_size_above(price)
+                let max_depth: i64 = market.liquidity_mining_info.max_depth_bps.to_num();
+                self.get_bids_size_above(price, max_depth)
             } else {
                 match self.get_best_bid_price() {
                     None => price,
@@ -1188,7 +1189,8 @@ impl<'a> Book<'a> {
             }
 
             let best_initial = if market.meta_data.version == 1 {
-                self.get_asks_size_below(price)
+                let max_depth: i64 = market.liquidity_mining_info.max_depth_bps.to_num();
+                self.get_asks_size_below(price, max_depth)
             } else {
                 match self.get_best_ask_price() {
                     None => price,
@@ -1268,57 +1270,180 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
+    // #[allow(dead_code)]
+    // pub fn cancel_all_with_size_incentives0(
+    //     &mut self,
+    //     mango_account: &mut MangoAccount,
+    //     mango_account_pk: &Pubkey,
+    //     perp_market: &mut PerpMarket,
+    //     market_index: usize,
+    //     mut limit: u8,
+    // ) -> MangoResult {
+    //     let now_ts = Clock::get()?.unix_timestamp as u64;
+    //
+    //     let (mut min_bid, mut max_ask) = (i64::MAX, 0);
+    //     for i in 0..MAX_PERP_OPEN_ORDERS {
+    //         if mango_account.order_market[i] != market_index as u8 {
+    //             continue;
+    //         }
+    //         let price = key_to_price(mango_account.orders[i]);
+    //         let side = mango_account.order_side[i];
+    //         match side {
+    //             Side::Bid => {
+    //                 min_bid = min_bid.min(price);
+    //             }
+    //             Side::Ask => {
+    //                 max_ask = max_ask.max(price);
+    //             }
+    //         }
+    //     }
+    //
+    //     // First do bids
+    //     let mut bids_and_sizes = vec![];
+    //     let mut cuml_bids = 0;
+    //     for bid in self.bids.iter() {
+    //         if bid.price() < min_bid {
+    //             break;
+    //         }
+    //         if &bid.owner == mango_account_pk {
+    //             bids_and_sizes.push((bid.key, cuml_bids))
+    //         } else {
+    //             cuml_bids += bid.quantity;
+    //         }
+    //     }
+    //
+    //     for (key, cuml_size) in bids_and_sizes {
+    //         if limit == 0 {
+    //             return Ok(());
+    //         }
+    //         msg!("{} {}", key, cuml_size);
+    //         match self.cancel_order(key, Side::Bid) {
+    //             Ok(order) => {
+    //                 mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+    //                 if order.version != perp_market.meta_data.version {
+    //                     continue;
+    //                 }
+    //                 mango_account.perp_accounts[market_index].apply_size_incentives(
+    //                     perp_market,
+    //                     order.best_initial,
+    //                     cuml_size,
+    //                     order.timestamp,
+    //                     now_ts,
+    //                     order.quantity,
+    //                 )?;
+    //             }
+    //             Err(_) => {
+    //                 // Invalid state because we know it's on the book
+    //             }
+    //         }
+    //         limit -= 1;
+    //     }
+    //
+    //     // // Asks
+    //     // // TODO - what if book is large and your last order is deep in book? Need to test this case
+    //     let mut asks_and_sizes = vec![];
+    //     let mut cuml_asks = 0;
+    //     for ask in self.asks.iter() {
+    //         if ask.price() > max_ask {
+    //             break;
+    //         }
+    //         // TODO OPT - figure out cost of checking pubkey
+    //         if &ask.owner == mango_account_pk {
+    //             asks_and_sizes.push((ask.key, cuml_asks));
+    //         } else {
+    //             cuml_asks += ask.quantity;
+    //         }
+    //     }
+    //
+    //     for (key, cuml_size) in asks_and_sizes {
+    //         if limit == 0 {
+    //             return Ok(());
+    //         }
+    //         msg!("{} {}", key, cuml_size);
+    //
+    //         match self.cancel_order(key, Side::Ask) {
+    //             Ok(order) => {
+    //                 mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
+    //                 if order.version != perp_market.meta_data.version {
+    //                     continue;
+    //                 }
+    //                 mango_account.perp_accounts[market_index].apply_size_incentives(
+    //                     perp_market,
+    //                     order.best_initial,
+    //                     cuml_size,
+    //                     order.timestamp,
+    //                     now_ts,
+    //                     order.quantity,
+    //                 )?;
+    //             }
+    //             Err(_) => {
+    //                 // Invalid state because we know it's on the book
+    //             }
+    //         }
+    //         limit -= 1;
+    //     }
+    //
+    //     Ok(())
+    // }
+
     pub fn cancel_all_with_size_incentives(
         &mut self,
         mango_account: &mut MangoAccount,
-        mango_account_pk: &Pubkey,
         perp_market: &mut PerpMarket,
         market_index: usize,
         mut limit: u8,
     ) -> MangoResult {
-        /*
-        iterate through book and find each order owned by user
-        create an order list of orders and best_final for each order
-        iterate through that list and cancel one by one
-         */
         // TODO - test different limits
         let now_ts = Clock::get()?.unix_timestamp as u64;
+        let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
 
-        let (mut min_bid, mut max_ask) = (i64::MAX, 0);
+        let mut bids_keys = vec![];
+        let mut asks_keys = vec![];
         for i in 0..MAX_PERP_OPEN_ORDERS {
             if mango_account.order_market[i] != market_index as u8 {
                 continue;
             }
-            let price = key_to_price(mango_account.orders[i]);
-            let side = mango_account.order_side[i];
-            match side {
-                Side::Bid => {
-                    min_bid = min_bid.min(price);
-                }
-                Side::Ask => {
-                    max_ask = max_ask.max(price);
-                }
+            match mango_account.order_side[i] {
+                Side::Bid => bids_keys.push(mango_account.orders[i]),
+                Side::Ask => asks_keys.push(mango_account.orders[i]),
             }
         }
+        bids_keys.sort();
+        asks_keys.sort_by(|a, b| b.cmp(a));
 
         // First do bids
         let mut bids_and_sizes = vec![];
         let mut cuml_bids = 0;
+
         for bid in self.bids.iter() {
-            if bid.price() < min_bid {
-                break;
-            }
-            if &bid.owner == mango_account_pk {
-                bids_and_sizes.push((bid.key, cuml_bids))
-            } else {
-                cuml_bids += bid.quantity;
+            match bids_keys.last() {
+                None => break,
+                Some(&last) => {
+                    if bid.key > last {
+                        cuml_bids += bid.quantity;
+                    } else if bid.key == last {
+                        bids_and_sizes.push((bid.key, cuml_bids));
+                        bids_keys.pop();
+                    } else {
+                        cuml_bids += bid.quantity;
+                        bids_keys.pop();
+                    }
+
+                    if cuml_bids >= max_depth {
+                        for bid_key in bids_keys {
+                            bids_and_sizes.push((bid_key, max_depth));
+                        }
+                        break;
+                    }
+                }
             }
         }
+
         for (key, cuml_size) in bids_and_sizes {
             if limit == 0 {
                 return Ok(());
             }
-
+            // msg!("{} {} {}", key, cuml_size, key_to_price(key));
             match self.cancel_order(key, Side::Bid) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
@@ -1341,19 +1466,30 @@ impl<'a> Book<'a> {
             limit -= 1;
         }
 
-        // Asks
-        // TODO - what if book is large and your last order is deep in book? Need to test this case
+        // // Asks
+        // // TODO - what if book is large and your last order is deep in book? Need to test this case
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
         for ask in self.asks.iter() {
-            if ask.price() > max_ask {
-                break;
-            }
-            // TODO OPT - figure out cost of checking pubkey
-            if &ask.owner == mango_account_pk {
-                asks_and_sizes.push((ask.key, cuml_asks));
-            } else {
-                cuml_asks += ask.quantity;
+            match asks_keys.last() {
+                None => break,
+                Some(&last) => {
+                    if ask.key < last {
+                        cuml_asks += ask.quantity;
+                    } else if ask.key == last {
+                        asks_and_sizes.push((ask.key, cuml_asks));
+                        asks_keys.pop();
+                    } else {
+                        cuml_asks += ask.quantity;
+                        asks_keys.pop();
+                    }
+                    if cuml_asks >= max_depth {
+                        for ask_key in asks_keys {
+                            asks_and_sizes.push((ask_key, max_depth))
+                        }
+                        break;
+                    }
+                }
             }
         }
 
@@ -1361,6 +1497,8 @@ impl<'a> Book<'a> {
             if limit == 0 {
                 return Ok(());
             }
+            // msg!("{} {} {}", key, cuml_size, key_to_price(key));
+
             match self.cancel_order(key, Side::Ask) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;

@@ -561,6 +561,14 @@ impl Processor {
             (signer_ai, &mango_signer_seeds)
         };
 
+        let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
+
+        // This will catch the issue if oracle_ai.key == Pubkey::Default
+        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
+
+        // Make sure perp market at this index not already initialized
+        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
+
         // Initialize the Bids
         let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
 
@@ -570,14 +578,6 @@ impl Processor {
         // Initialize the EventQueue
         // TODO: check that the event queue is reasonably large
         let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
-
-        let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-
-        // This will catch the issue if oracle_ai.key == Pubkey::Default
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
-
-        // Make sure perp market at this index not already initialized
-        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
         // Create PDA and Initialize MNGO vault
         let mngo_vault_seeds =
@@ -2133,9 +2133,10 @@ impl Processor {
                 Side::Ask => book.get_best_ask_price().unwrap(),
             }
         } else {
+            let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id),
-                Side::Ask => book.get_asks_size_below_order(order_id),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
             }
         };
 
@@ -2224,9 +2225,10 @@ impl Processor {
                 Side::Ask => book.get_best_ask_price().unwrap(),
             }
         } else {
+            let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id),
-                Side::Ask => book.get_asks_size_below_order(order_id),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
             }
         };
 
@@ -2318,7 +2320,6 @@ impl Processor {
             sol_log_compute_units();
             book.cancel_all_with_size_incentives(
                 &mut mango_account,
-                mango_account_ai.key,
                 &mut perp_market,
                 market_index,
                 limit,
