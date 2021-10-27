@@ -690,8 +690,6 @@ pub enum MangoInstruction {
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
-        /// Number of events in the EventQueue
-        num_events: usize,
         /// Starting rate for liquidity mining
         rate: I80F48,
         /// v0: depth in bps for liquidity mining; v1: depth in contract size
@@ -1083,7 +1081,7 @@ impl MangoInstruction {
             }
             46 => {
                 // ***
-                let data_arr = array_ref![data, 0, 155];
+                let data_arr = array_ref![data, 0, 147];
                 let (
                     maint_leverage,
                     init_leverage,
@@ -1092,7 +1090,6 @@ impl MangoInstruction {
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
-                    num_events,
                     rate,
                     max_depth_bps,
                     target_period_length,
@@ -1100,7 +1097,7 @@ impl MangoInstruction {
                     exp,
                     version,
                     lm_size_shift,
-                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 8, 16, 16, 8, 8, 1, 1, 1];
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8, 1, 1, 1];
                 MangoInstruction::CreatePerpMarket {
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
@@ -1109,7 +1106,6 @@ impl MangoInstruction {
                     taker_fee: I80F48::from_le_bytes(*taker_fee),
                     base_lot_size: i64::from_le_bytes(*base_lot_size),
                     quote_lot_size: i64::from_le_bytes(*quote_lot_size),
-                    num_events: u64::from_le_bytes(*num_events) as usize,
                     rate: I80F48::from_le_bytes(*rate),
                     max_depth_bps: I80F48::from_le_bytes(*max_depth_bps),
                     target_period_length: u64::from_le_bytes(*target_period_length),

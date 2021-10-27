@@ -30,9 +30,7 @@ use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
-use crate::queue::{
-    AnyEvent, EventQueue, EventQueueHeader, EventType, FillEvent, LiquidateEvent, OutEvent,
-};
+use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrderType,
     AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
@@ -488,9 +486,10 @@ impl Processor {
         Ok(())
     }
 
-    /// *** Create the PerpMarket and associated PDAs and initialize them
+    /// Create the PerpMarket and associated PDAs and initialize them.
+    /// Bids, Asks and EventQueue are not PDAs. They must be created beforehand and owner assigned
+    /// to Mango program id
     #[inline(never)]
-    #[allow(dead_code)]
     fn create_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -501,8 +500,7 @@ impl Processor {
         taker_fee: I80F48,
         base_lot_size: i64,
         quote_lot_size: i64,
-        num_events: usize, // ***
-        rate: I80F48,      // starting rate for liquidity mining
+        rate: I80F48, // starting rate for liquidity mining
         max_depth_bps: I80F48,
         target_period_length: u64,
         mngo_per_period: u64,
@@ -523,7 +521,6 @@ impl Processor {
         check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
         check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
         check!(exp <= 8 && exp > 0, MangoErrorCode::InvalidParam)?;
-        check!(num_events >= 64, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 13;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -536,12 +533,12 @@ impl Processor {
             bids_ai,        // write
             asks_ai,        // write
             mngo_mint_ai,   // read  ***
-            mngo_vault_ai,  // read, write
+            mngo_vault_ai,  // write
             admin_ai,       // write, signer  *** needs to have money
             signer_ai,      // write  ***
             system_prog_ai, // read   ***
             token_prog_ai,  // read ***
-            rent_ai   // read ***
+            rent_ai         // read ***
         ] = accounts;
         check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check!(
@@ -564,6 +561,16 @@ impl Processor {
             (signer_ai, &mango_signer_seeds)
         };
 
+        // Initialize the Bids
+        let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
+
+        // Initialize the Asks
+        let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent)?;
+
+        // Initialize the EventQueue
+        // TODO: check that the event queue is reasonably large
+        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
+
         let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
         // This will catch the issue if oracle_ai.key == Pubkey::Default
@@ -572,10 +579,40 @@ impl Processor {
         // Make sure perp market at this index not already initialized
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
-        // Create and Initialize the PerpMarket
+        // Create PDA and Initialize MNGO vault
+        let mngo_vault_seeds =
+            &[perp_market_ai.key.as_ref(), token_prog_ai.key.as_ref(), mngo_mint_ai.key.as_ref()];
+        seed_and_create_pda(
+            program_id,
+            funder_ai,
+            &rent,
+            spl_token::state::Account::LEN,
+            &spl_token::id(),
+            system_prog_ai,
+            mngo_vault_ai,
+            mngo_vault_seeds,
+            funder_seeds,
+        )?;
+
+        solana_program::program::invoke_unchecked(
+            &spl_token::instruction::initialize_account2(
+                token_prog_ai.key,
+                mngo_vault_ai.key,
+                mngo_mint_ai.key,
+                signer_ai.key,
+            )?,
+            &[
+                mngo_vault_ai.clone(),
+                mngo_mint_ai.clone(),
+                signer_ai.clone(),
+                rent_ai.clone(),
+                token_prog_ai.clone(),
+            ],
+        )?;
+
+        // Create PerpMarket PDA and Initialize the PerpMarket
         let perp_market_seeds =
             &[mango_group_ai.key.as_ref(), b"PerpMarket", oracle_ai.key.as_ref()];
-        // TODO - what if oracle changes later?
         seed_and_create_pda(
             program_id,
             funder_ai,
@@ -587,6 +624,7 @@ impl Processor {
             perp_market_seeds,
             funder_seeds,
         )?;
+
         let _perp_market = PerpMarket::load_and_init(
             perp_market_ai,
             program_id,
@@ -608,81 +646,6 @@ impl Processor {
             lm_size_shift,
         )?;
 
-        // Create and Initialize the Bids
-        let bids_seeds = &[perp_market_ai.key.as_ref(), b"Bids"];
-        seed_and_create_pda(
-            program_id,
-            funder_ai,
-            &rent,
-            size_of::<BookSide>(),
-            program_id,
-            system_prog_ai,
-            bids_ai,
-            bids_seeds,
-            funder_seeds,
-        )?;
-        let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
-
-        // Create and Initialize the Asks
-        let asks_seeds = &[perp_market_ai.key.as_ref(), b"Asks"];
-        seed_and_create_pda(
-            program_id,
-            funder_ai,
-            &rent,
-            size_of::<BookSide>(),
-            program_id,
-            system_prog_ai,
-            asks_ai,
-            asks_seeds,
-            funder_seeds,
-        )?;
-        let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent)?;
-
-        // Create and Initialize the EventQueue
-        let event_queue_seeds = &[perp_market_ai.key.as_ref(), b"EventQueue"];
-        seed_and_create_pda(
-            program_id,
-            funder_ai,
-            &rent,
-            size_of::<EventQueueHeader>() + num_events * size_of::<AnyEvent>(),
-            program_id,
-            system_prog_ai,
-            event_queue_ai,
-            event_queue_seeds,
-            funder_seeds,
-        )?;
-        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
-
-        // Create and Initialize MNGO vault
-        let mngo_vault_seeds =
-            &[perp_market_ai.key.as_ref(), token_prog_ai.key.as_ref(), mngo_mint_ai.key.as_ref()];
-        seed_and_create_pda(
-            program_id,
-            funder_ai,
-            &rent,
-            spl_token::state::Account::LEN,
-            &spl_token::id(),
-            system_prog_ai,
-            mngo_vault_ai,
-            mngo_vault_seeds,
-            funder_seeds,
-        )?;
-
-        solana_program::program::invoke(
-            &spl_token::instruction::initialize_account2(
-                token_prog_ai.key,
-                mngo_vault_ai.key,
-                mngo_mint_ai.key,
-                signer_ai.key,
-            )?,
-            &[
-                mngo_vault_ai.clone(),
-                mngo_mint_ai.clone(),
-                signer_ai.clone(),
-                rent_ai.clone(),
-                token_prog_ai.clone(),
-            ],
-        )?;
         let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
         let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
         mango_group.perp_markets[market_index] = PerpMarketInfo {
@@ -5166,7 +5129,6 @@ impl Processor {
                 taker_fee,
                 base_lot_size,
                 quote_lot_size,
-                num_events,
                 rate,
                 max_depth_bps,
                 target_period_length,
@@ -5186,7 +5148,6 @@ impl Processor {
                     taker_fee,
                     base_lot_size,
                     quote_lot_size,
-                    num_events,
                     rate,
                     max_depth_bps,
                     target_period_length,
@@ -5311,7 +5272,7 @@ fn invoke_settle_funds<'a>(
         token_prog_ai.clone(),
         quote_vault_ai.clone(),
     ];
-    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+    solana_program::program::invoke_signed_unchecked(&instruction, &account_infos, signers_seeds)
 }
 
 fn invoke_cancel_order<'a>(
@@ -5739,7 +5700,11 @@ fn invoke_new_order<'a>(
             signer_ai.clone(),
             msrm_or_srm_vault_ai.clone(),
         ];
-        solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+        solana_program::program::invoke_signed_unchecked(
+            &instruction,
+            &account_infos,
+            signers_seeds,
+        )
     } else {
         let account_infos = [
             dex_prog_ai.clone(), // Have to add account of the program id
@@ -5756,7 +5721,11 @@ fn invoke_new_order<'a>(
             token_prog_ai.clone(),
             signer_ai.clone(),
         ];
-        solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+        solana_program::program::invoke_signed_unchecked(
+            &instruction,
+            &account_infos,
+            signers_seeds,
+        )
     }
 }
 
@@ -5841,18 +5810,11 @@ fn create_pda_account<'a>(
     new_pda_signer_seeds: &[&[u8]],
     funder_seeds: &[&[u8]],
 ) -> ProgramResult {
-    let mut all_signer_seeds = vec![new_pda_signer_seeds];
-    if !funder_seeds.is_empty() {
-        all_signer_seeds.push(funder_seeds);
-    }
     if new_pda_account.lamports() > 0 {
         let required_lamports =
             rent.minimum_balance(space).max(1).saturating_sub(new_pda_account.lamports());
-        let mut transfer_seeds = vec![];
-        if !funder_seeds.is_empty() {
-            transfer_seeds.push(funder_seeds);
-        }
 
+        let transfer_seeds = if funder_seeds.is_empty() { vec![] } else { vec![funder_seeds] };
         if required_lamports > 0 {
             invoke_transfer_lamports(
                 funder,
@@ -5866,16 +5828,21 @@ fn create_pda_account<'a>(
         solana_program::program::invoke_signed(
             &solana_program::system_instruction::allocate(new_pda_account.key, space as u64),
             &[new_pda_account.clone(), system_program.clone()],
-            all_signer_seeds.as_slice(),
+            &[new_pda_signer_seeds],
         )?;
 
         solana_program::program::invoke_signed(
             &solana_program::system_instruction::assign(new_pda_account.key, owner),
             &[new_pda_account.clone(), system_program.clone()],
-            all_signer_seeds.as_slice(),
+            &[new_pda_signer_seeds],
         )
     } else {
-        solana_program::program::invoke_signed(
+        let all_signer_seeds = if funder_seeds.is_empty() {
+            vec![new_pda_signer_seeds]
+        } else {
+            vec![funder_seeds, new_pda_signer_seeds]
+        };
+        solana_program::program::invoke_signed_unchecked(
             &solana_program::system_instruction::create_account(
                 funder.key,
                 new_pda_account.key,
