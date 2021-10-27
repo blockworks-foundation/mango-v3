@@ -61,6 +61,7 @@ declare_check_assert_macros!(SourceFileId::State);
 // quote_positions: I80F48 - native quote currency
 // price: I80F48 - native quote per native base
 // price: i64 - quote lots per base lot
+//
 
 #[repr(u8)]
 #[derive(IntoPrimitive, TryFromPrimitive)]
@@ -1609,7 +1610,6 @@ impl PerpAccount {
             lmi.mngo_left = lmi.mngo_per_period;
         }
 
-        // quantity is capped at max_depth_size - size_dist (i.e. only the amount that fits inside range)
         let mngo_earned =
             points.checked_mul(lmi.rate).unwrap().to_num::<u64>().min(lmi.mngo_per_period); // limit mngo payout to max mngo in a period
 

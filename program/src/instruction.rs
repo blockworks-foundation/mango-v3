@@ -677,8 +677,8 @@ pub enum MangoInstruction {
     /// 5. `[writable]` asks_ai
     /// 6. `[]` mngo_mint_ai - mngo token mint
     /// 7. `[writable]` mngo_vault_ai - the vault from which liquidity incentives will be paid out for this market
-    /// 8. `[signer]` admin_ai
-    /// 9. `[]` signer_ai
+    /// 8. `[signer, writable]` admin_ai - writable if admin_ai is also funder
+    /// 9. `[writable]` signer_ai - optionally writable if funder is signer_ai
     /// 10. `[]` system_prog_ai - system program
     /// 11. `[]` token_prog_ai - SPL token program
     /// 12. `[]` rent_ai - rent sysvar because SPL token program requires it

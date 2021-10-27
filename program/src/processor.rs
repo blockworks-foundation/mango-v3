@@ -537,8 +537,8 @@ impl Processor {
             asks_ai,        // write
             mngo_mint_ai,   // read  ***
             mngo_vault_ai,  // read, write
-            admin_ai,       // read, signer  *** needs to have money
-            signer_ai,      // read
+            admin_ai,       // write, signer  *** needs to have money
+            signer_ai,      // write  ***
             system_prog_ai, // read   ***
             token_prog_ai,  // read ***
             rent_ai   // read ***
@@ -557,6 +557,13 @@ impl Processor {
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
+        let mango_signer_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        let (funder_ai, funder_seeds): (&AccountInfo, &[&[u8]]) = if admin_ai.data_is_empty() {
+            (admin_ai, &[])
+        } else {
+            (signer_ai, &mango_signer_seeds)
+        };
+
         let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
         // This will catch the issue if oracle_ai.key == Pubkey::Default
@@ -571,13 +578,14 @@ impl Processor {
         // TODO - what if oracle changes later?
         seed_and_create_pda(
             program_id,
-            admin_ai,
+            funder_ai,
             &rent,
             size_of::<PerpMarket>(),
             program_id,
             system_prog_ai,
             perp_market_ai,
             perp_market_seeds,
+            funder_seeds,
         )?;
         let _perp_market = PerpMarket::load_and_init(
             perp_market_ai,
@@ -604,13 +612,14 @@ impl Processor {
         let bids_seeds = &[perp_market_ai.key.as_ref(), b"Bids"];
         seed_and_create_pda(
             program_id,
-            admin_ai,
+            funder_ai,
             &rent,
             size_of::<BookSide>(),
             program_id,
             system_prog_ai,
             bids_ai,
             bids_seeds,
+            funder_seeds,
         )?;
         let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
 
@@ -618,13 +627,14 @@ impl Processor {
         let asks_seeds = &[perp_market_ai.key.as_ref(), b"Asks"];
         seed_and_create_pda(
             program_id,
-            admin_ai,
+            funder_ai,
             &rent,
             size_of::<BookSide>(),
             program_id,
             system_prog_ai,
             asks_ai,
             asks_seeds,
+            funder_seeds,
         )?;
         let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent)?;
 
@@ -632,13 +642,14 @@ impl Processor {
         let event_queue_seeds = &[perp_market_ai.key.as_ref(), b"EventQueue"];
         seed_and_create_pda(
             program_id,
-            admin_ai,
+            funder_ai,
             &rent,
             size_of::<EventQueueHeader>() + num_events * size_of::<AnyEvent>(),
             program_id,
             system_prog_ai,
             event_queue_ai,
             event_queue_seeds,
+            funder_seeds,
         )?;
         let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
 
@@ -647,13 +658,14 @@ impl Processor {
             &[perp_market_ai.key.as_ref(), token_prog_ai.key.as_ref(), mngo_mint_ai.key.as_ref()];
         seed_and_create_pda(
             program_id,
-            admin_ai,
+            funder_ai,
             &rent,
             spl_token::state::Account::LEN,
             &spl_token::id(),
             system_prog_ai,
             mngo_vault_ai,
             mngo_vault_seeds,
+            funder_seeds,
         )?;
 
         solana_program::program::invoke(
@@ -4381,6 +4393,7 @@ impl Processor {
             system_prog_ai,
             advanced_orders_ai,
             pda_signer_seeds,
+            &[],
         )?;
 
         // initialize the AdvancedOrders account
@@ -4475,7 +4488,13 @@ impl Processor {
         // TODO: make sure liquidator cancels all advanced orders (why?)
         // Transfer lamports before so we don't hit rust borrow checker
         // If we don't succeed in adding the order, it will be reverted anyway
-        invoke_transfer_lamports(owner_ai, advanced_orders_ai, system_prog_ai, ADVANCED_ORDER_FEE)?;
+        invoke_transfer_lamports(
+            owner_ai,
+            advanced_orders_ai,
+            system_prog_ai,
+            ADVANCED_ORDER_FEE,
+            &[],
+        )?;
 
         let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
@@ -4774,6 +4793,7 @@ impl Processor {
             system_prog_ai,
             mango_account_ai,
             mango_account_seeds,
+            &[],
         )?;
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
 
@@ -5778,10 +5798,12 @@ fn invoke_transfer_lamports<'a>(
     dst_ai: &AccountInfo<'a>,
     system_prog_ai: &AccountInfo<'a>,
     quantity: u64,
+    signers_seeds: &[&[&[u8]]],
 ) -> ProgramResult {
-    solana_program::program::invoke(
+    solana_program::program::invoke_signed(
         &solana_program::system_instruction::transfer(src_ai.key, dst_ai.key, quantity),
         &[src_ai.clone(), dst_ai.clone(), system_prog_ai.clone()],
+        signers_seeds,
     )
 }
 
@@ -5794,6 +5816,7 @@ fn seed_and_create_pda<'a>(
     system_program: &AccountInfo<'a>,
     pda_account: &AccountInfo<'a>,
     seeds: &[&[u8]],
+    funder_seeds: &[&[u8]],
 ) -> ProgramResult {
     let (pda_address, bump) = Pubkey::find_program_address(seeds, program_id);
     check!(&pda_address == pda_account.key, MangoErrorCode::InvalidAccount)?;
@@ -5805,6 +5828,7 @@ fn seed_and_create_pda<'a>(
         system_program,
         pda_account,
         &[seeds, &[&[bump]]].concat(),
+        funder_seeds,
     )
 }
 fn create_pda_account<'a>(
@@ -5815,25 +5839,40 @@ fn create_pda_account<'a>(
     system_program: &AccountInfo<'a>,
     new_pda_account: &AccountInfo<'a>,
     new_pda_signer_seeds: &[&[u8]],
+    funder_seeds: &[&[u8]],
 ) -> ProgramResult {
+    let mut all_signer_seeds = vec![new_pda_signer_seeds];
+    if !funder_seeds.is_empty() {
+        all_signer_seeds.push(funder_seeds);
+    }
     if new_pda_account.lamports() > 0 {
         let required_lamports =
             rent.minimum_balance(space).max(1).saturating_sub(new_pda_account.lamports());
+        let mut transfer_seeds = vec![];
+        if !funder_seeds.is_empty() {
+            transfer_seeds.push(funder_seeds);
+        }
 
         if required_lamports > 0 {
-            invoke_transfer_lamports(funder, new_pda_account, system_program, required_lamports)?;
+            invoke_transfer_lamports(
+                funder,
+                new_pda_account,
+                system_program,
+                required_lamports,
+                transfer_seeds.as_slice(),
+            )?;
         }
 
         solana_program::program::invoke_signed(
             &solana_program::system_instruction::allocate(new_pda_account.key, space as u64),
             &[new_pda_account.clone(), system_program.clone()],
-            &[new_pda_signer_seeds],
+            all_signer_seeds.as_slice(),
         )?;
 
         solana_program::program::invoke_signed(
             &solana_program::system_instruction::assign(new_pda_account.key, owner),
             &[new_pda_account.clone(), system_program.clone()],
-            &[new_pda_signer_seeds],
+            all_signer_seeds.as_slice(),
         )
     } else {
         solana_program::program::invoke_signed(
@@ -5845,7 +5884,7 @@ fn create_pda_account<'a>(
                 owner,
             ),
             &[funder.clone(), new_pda_account.clone(), system_program.clone()],
-            &[new_pda_signer_seeds],
+            all_signer_seeds.as_slice(),
         )
     }
 }
