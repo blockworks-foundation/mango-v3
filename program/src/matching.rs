@@ -21,7 +21,6 @@ use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
     DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, MAX_PERP_OPEN_ORDERS,
 };
-use solana_program::log::sol_log_compute_units;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -678,7 +677,7 @@ impl<'a> Book<'a> {
     pub fn get_bids_size_above(&self, price: i64, max_depth: i64) -> i64 {
         let mut s = 0;
         for bid in self.bids.iter() {
-            if price < bid.price() || s >= max_depth {
+            if price > bid.price() || s >= max_depth {
                 break;
             }
             s += bid.quantity;
@@ -690,7 +689,7 @@ impl<'a> Book<'a> {
     pub fn get_asks_size_below(&self, price: i64, max_depth: i64) -> i64 {
         let mut s = 0;
         for ask in self.asks.iter() {
-            if price > ask.price() || s >= max_depth {
+            if price < ask.price() || s >= max_depth {
                 break;
             }
             s += ask.quantity;
@@ -1023,15 +1022,14 @@ impl<'a> Book<'a> {
             }
 
             // iterate through book on the bid side
-            // TODO test the iter function works
-            let best_initial = if market.meta_data.version == 1 {
-                let max_depth: i64 = market.liquidity_mining_info.max_depth_bps.to_num();
-                self.get_bids_size_above(price, max_depth)
-            } else {
+            let best_initial = if market.meta_data.version == 0 {
                 match self.get_best_bid_price() {
                     None => price,
                     Some(p) => p,
                 }
+            } else {
+                let max_depth: i64 = market.liquidity_mining_info.max_depth_bps.to_num();
+                self.get_bids_size_above(price, max_depth)
             };
 
             let owner_slot = mango_account
@@ -1170,14 +1168,14 @@ impl<'a> Book<'a> {
                 event_queue.push_back(cast(event)).unwrap();
             }
 
-            let best_initial = if market.meta_data.version == 1 {
-                let max_depth: i64 = market.liquidity_mining_info.max_depth_bps.to_num();
-                self.get_asks_size_below(price, max_depth)
-            } else {
+            let best_initial = if market.meta_data.version == 0 {
                 match self.get_best_ask_price() {
                     None => price,
                     Some(p) => p,
                 }
+            } else {
+                let max_depth: i64 = market.liquidity_mining_info.max_depth_bps.to_num();
+                self.get_asks_size_below(price, max_depth)
             };
 
             let owner_slot = mango_account
@@ -1420,13 +1418,11 @@ impl<'a> Book<'a> {
                 }
             }
         }
-        sol_log_compute_units();
 
         for (key, cuml_size) in bids_and_sizes {
             if limit == 0 {
                 return Ok(());
             }
-            // msg!("{} {} {}", key, cuml_size, key_to_price(key));
             match self.cancel_order(key, Side::Bid) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
@@ -1479,8 +1475,6 @@ impl<'a> Book<'a> {
             if limit == 0 {
                 return Ok(());
             }
-            // msg!("{} {} {}", key, cuml_size, key_to_price(key));
-
             match self.cancel_order(key, Side::Ask) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;

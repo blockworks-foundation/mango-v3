@@ -48,7 +48,6 @@ use mango_logs::{
     OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
     TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
 };
-use solana_program::log::sol_log_compute_units;
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -2308,23 +2307,19 @@ impl Processor {
         let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
 
         if perp_market.meta_data.version == 0 {
-            sol_log_compute_units();
             book.cancel_all_with_price_incentives(
                 &mut mango_account,
                 &mut perp_market,
                 market_index,
                 limit,
             )?;
-            sol_log_compute_units();
         } else {
-            sol_log_compute_units();
             book.cancel_all_with_size_incentives(
                 &mut mango_account,
                 &mut perp_market,
                 market_index,
                 limit,
             )?;
-            sol_log_compute_units();
         }
 
         mango_emit!(MngoAccrualLog {
