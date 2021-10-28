@@ -2065,7 +2065,7 @@ impl PerpMarket {
                 .checked_div(I80F48::from_num(self.open_interest))
                 .ok_or(math_err!())?
         };
-
+        account.quote_position = ZERO_I80F48;
         self.long_funding -= socialized_loss;
         self.short_funding += socialized_loss;
 
