@@ -228,7 +228,7 @@ pub struct FillEvent {
     pub taker_side: Side, // side from the taker's POV
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
-    pub version: u8,     // ***
+    pub version: u8,
     pub padding: [u8; 3],
     pub timestamp: u64,
     pub seq_num: usize, // note: usize same as u64

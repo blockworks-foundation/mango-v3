@@ -505,8 +505,8 @@ impl Processor {
         target_period_length: u64,
         mngo_per_period: u64,
         exp: u8,
-        version: u8,       // ***
-        lm_size_shift: u8, // ***
+        version: u8,
+        lm_size_shift: u8,
     ) -> MangoResult {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
@@ -532,13 +532,13 @@ impl Processor {
             event_queue_ai, // write
             bids_ai,        // write
             asks_ai,        // write
-            mngo_mint_ai,   // read  ***
+            mngo_mint_ai,   // read 
             mngo_vault_ai,  // write
-            admin_ai,       // write, signer  *** needs to have money
-            signer_ai,      // write  ***
-            system_prog_ai, // read   ***
-            token_prog_ai,  // read ***
-            rent_ai         // read ***
+            admin_ai,       // signer (write if admin has SOL and no data)
+            signer_ai,      // write  (if admin has data and is owned by governance)
+            system_prog_ai, // read
+            token_prog_ai,  // read
+            rent_ai         // read
         ] = accounts;
         check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check!(
@@ -4065,7 +4065,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
-            mango_cache_ai,     // write ***
+            mango_cache_ai,     // write
             perp_market_ai,     // write
             bids_ai,            // read
             asks_ai,            // read
@@ -4093,7 +4093,7 @@ impl Processor {
             last_update: now_ts,
         };
 
-        // *** only need to use UpdateFundingLog; don't worry about CachePerpMarket log
+        // only need to use UpdateFundingLog; don't worry about CachePerpMarket log
         mango_emit!(UpdateFundingLog {
             mango_group: *mango_group_ai.key,
             market_index: market_index as u64,
@@ -4389,7 +4389,6 @@ impl Processor {
         check!(trigger_price.is_positive(), MangoErrorCode::InvalidParam)?; // Is this necessary?
 
         const NUM_FIXED: usize = 7;
-        // TODO - *** amend client functions
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
@@ -5069,7 +5068,6 @@ impl Processor {
                 Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
             MangoInstruction::ForceSettleQuotePositions => {
-                // ***
                 msg!("DEPRECATED Mango: ForceSettleQuotePositions");
                 Ok(())
             }
@@ -5136,7 +5134,7 @@ impl Processor {
                 mngo_per_period,
                 exp,
                 version,
-                lm_size_shift, // ***
+                lm_size_shift,
             } => {
                 msg!("Mango: CreatePerpMarket");
                 Self::create_perp_market(

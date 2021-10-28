@@ -996,7 +996,6 @@ impl MangoInstruction {
             }
 
             37 => {
-                // ***
                 let exp =
                     if data.len() > 137 { unpack_u8_opt(&[data[137], data[138]]) } else { None };
                 let data_arr = array_ref![data, 0, 137];
@@ -1035,13 +1034,11 @@ impl MangoInstruction {
 
             40 => MangoInstruction::ForceSettleQuotePositions,
             41 => {
-                // ***
                 let data_arr = array_ref![data, 0, 46];
                 let order = unpack_dex_new_order_v3(data_arr)?;
                 MangoInstruction::PlaceSpotOrder2 { order }
             }
 
-            // ***
             42 => MangoInstruction::InitAdvancedOrders,
 
             43 => {
@@ -1080,7 +1077,6 @@ impl MangoInstruction {
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }
             46 => {
-                // ***
                 let data_arr = array_ref![data, 0, 147];
                 let (
                     maint_leverage,

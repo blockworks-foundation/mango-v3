@@ -43,7 +43,7 @@ const MIN_RATE_ADJ: I80F48 = I80F48!(0.25);
 pub const INFO_LEN: usize = 32;
 pub const MAX_PERP_OPEN_ORDERS: usize = 64;
 pub const FREE_ORDER_SLOT: u8 = u8::MAX;
-pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9; // ***
+pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 
 declare_check_assert_macros!(SourceFileId::State);
@@ -103,7 +103,7 @@ pub struct MetaData {
     pub data_type: u8,
     pub version: u8,
     pub is_initialized: bool,
-    // *** being used by PerpMarket to store liquidity mining param
+    // being used by PerpMarket to store liquidity mining param
     pub extra_info: [u8; 5],
 }
 
@@ -1899,9 +1899,9 @@ impl PerpMarket {
         max_depth_bps: I80F48,
         target_period_length: u64,
         mngo_per_period: u64,
-        exp: u8,           // ***
-        version: u8,       // ***
-        lm_size_shift: u8, // ***  how to right shift the depth number to prevent overflow
+        exp: u8,
+        version: u8,
+        lm_size_shift: u8, // right shift the depth number to prevent overflow
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut state = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;

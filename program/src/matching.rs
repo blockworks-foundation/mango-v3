@@ -21,6 +21,7 @@ use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
     DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, MAX_PERP_OPEN_ORDERS,
 };
+use solana_program::log::sol_log_compute_units;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -69,8 +70,8 @@ impl InnerNode {
 pub struct LeafNode {
     pub tag: u32,
     pub owner_slot: u8,
-    pub order_type: OrderType, // *** this was added for TradingView move order
-    pub version: u8,           // ***
+    pub order_type: OrderType, // this was added for TradingView move order
+    pub version: u8,
     pub padding: [u8; 1],
     pub key: i128,
     pub owner: Pubkey,
@@ -90,11 +91,6 @@ fn key_to_price(key: i128) -> i64 {
     (key >> 64) as i64
 }
 impl LeafNode {
-    #[inline(always)]
-    pub fn price(&self) -> i64 {
-        key_to_price(self.key)
-    }
-
     pub fn new(
         version: u8,
         owner_slot: u8,
@@ -119,6 +115,11 @@ impl LeafNode {
             best_initial,
             timestamp,
         }
+    }
+
+    #[inline(always)]
+    pub fn price(&self) -> i64 {
+        key_to_price(self.key)
     }
 }
 
@@ -791,67 +792,48 @@ impl<'a> Book<'a> {
         };
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
-        for best_ask in self.asks.iter() {
-            let best_ask_price = best_ask.price();
-            if price < best_ask_price {
-                break;
-            } else if post_only {
+        let mut stack = vec![];
+        let mut current = match self.asks.root() {
+            None => {
+                if rem_quantity > 0 && post_allowed {
+                    bids_quantity += rem_quantity;
+                }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
             }
+            Some(node_handle) => node_handle,
+        };
+        while rem_quantity > 0 {
+            match self.asks.get(current).ok_or(throw!())?.case().ok_or(throw!())? {
+                NodeRef::Inner(inner) => {
+                    stack.push(inner);
+                    current = inner.children[0];
+                }
+                NodeRef::Leaf(best_ask) => {
+                    let best_ask_price = best_ask.price();
+                    if price < best_ask_price {
+                        break;
+                    } else if post_only {
+                        return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
+                    }
 
-            let match_quantity = rem_quantity.min(best_ask.quantity);
-            taker_base += match_quantity;
-            taker_quote -= match_quantity * best_ask_price;
+                    let match_quantity = rem_quantity.min(best_ask.quantity);
+                    rem_quantity -= match_quantity;
 
-            rem_quantity -= match_quantity;
-            if rem_quantity == 0 {
-                break;
+                    taker_base += match_quantity;
+                    taker_quote -= match_quantity * best_ask_price;
+
+                    match stack.pop() {
+                        // if no more inner nodes on stack, we've processed whole book
+                        None => {
+                            break;
+                        }
+                        Some(inner) => {
+                            current = inner.children[1];
+                        }
+                    }
+                }
             }
         }
-
-        // let mut stack = vec![];
-        // let mut current = match self.asks.root() {
-        //     None => {
-        //         if rem_quantity > 0 && post_allowed {
-        //             bids_quantity += rem_quantity;
-        //         }
-        //         return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-        //     }
-        //     Some(node_handle) => node_handle,
-        // };
-        //
-        // while rem_quantity > 0 {
-        //     match self.asks.get(current).ok_or(throw!())?.case().ok_or(throw!())? {
-        //         NodeRef::Inner(inner) => {
-        //             stack.push(inner);
-        //             current = inner.children[0];
-        //         }
-        //         NodeRef::Leaf(best_ask) => {
-        //             let best_ask_price = best_ask.price();
-        //             if price < best_ask_price {
-        //                 break;
-        //             } else if post_only {
-        //                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
-        //             }
-        //
-        //             let match_quantity = rem_quantity.min(best_ask.quantity);
-        //             rem_quantity -= match_quantity;
-        //
-        //             taker_base += match_quantity;
-        //             taker_quote -= match_quantity * best_ask_price;
-        //
-        //             match stack.pop() {
-        //                 // if no more inner nodes on stack, we've processed whole book
-        //                 None => {
-        //                     break;
-        //                 }
-        //                 Some(inner) => {
-        //                     current = inner.children[1];
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
 
         if rem_quantity > 0 && post_allowed {
             bids_quantity += rem_quantity;
@@ -942,7 +924,7 @@ impl<'a> Book<'a> {
         mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
@@ -1438,6 +1420,7 @@ impl<'a> Book<'a> {
                 }
             }
         }
+        sol_log_compute_units();
 
         for (key, cuml_size) in bids_and_sizes {
             if limit == 0 {
@@ -1466,8 +1449,7 @@ impl<'a> Book<'a> {
             limit -= 1;
         }
 
-        // // Asks
-        // // TODO - what if book is large and your last order is deep in book? Need to test this case
+        // Asks
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
         for ask in self.asks.iter() {
