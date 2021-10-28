@@ -4,7 +4,8 @@
 Deployed:
 1. Added Size LM functionality
 2. Added ChangePerpMarketParams2
-3. Added CreatePerpMarket which uses PDAs
+3. Added CreatePerpMarket which uses PDAs for MNGO vault and PerpMarket
+4. Updated to solana 1.8.1 and anchor 0.18.0
 
 ## v3.1.4
 Deployed: Oct 26, 2021 at 17:04:50 UTC | Slot: 103,646,150
