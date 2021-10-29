@@ -5337,17 +5337,23 @@ fn read_oracle(
     token_index: usize,
     oracle_ai: &AccountInfo,
 ) -> MangoResult<I80F48> {
-    let quote_decimals: u8 = mango_group.tokens[QUOTE_INDEX].decimals;
+    let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
+    let base_decimals = if mango_group.tokens[token_index].is_empty() {
+        6
+    } else {
+        mango_group.tokens[token_index].decimals as i32
+    };
+
     let oracle_type = determine_oracle_type(oracle_ai);
+
     let price = match oracle_type {
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
-
-            let decimals = (quote_decimals as i32)
+            let decimals = quote_decimals
                 .checked_add(price_account.expo)
                 .unwrap()
-                .checked_sub(mango_group.tokens[token_index].decimals as i32)
+                .checked_sub(base_decimals)
                 .unwrap();
 
             let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
@@ -5366,9 +5372,8 @@ fn read_oracle(
             let result =
                 FastRoundResultAccountData::deserialize(&oracle_ai.try_borrow_data()?).unwrap();
             let value = I80F48::from_num(result.result.result);
-            let decimals = (quote_decimals as i32)
-                .checked_sub(mango_group.tokens[token_index].decimals as i32)
-                .unwrap();
+
+            let decimals = quote_decimals.checked_sub(base_decimals).unwrap();
             if decimals < 0 {
                 let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
                 value.checked_div(decimal_adj).unwrap()
