@@ -1,12 +1,16 @@
 # Mango Program Change Log
 
-## v3.2.0
+## v3.2.1
 Deployed:
+1. If perp market is added before spot market, fix decimals to 6
+2. remove ChangePerpMarketParams and AddPerpMarket
+
+## v3.2.0
+Deployed: Oct 28, 2021 at 23:53:49 UTC | Slot: 104,038,884
 1. Added Size LM functionality
 2. Added ChangePerpMarketParams2
 3. Added CreatePerpMarket which uses PDAs for MNGO vault and PerpMarket
 4. Updated to solana 1.8.1 and anchor 0.18.0
-5. fixed bug in read_oracle to allow non-SPL perps
 
 ## v3.1.4
 Deployed: Oct 26, 2021 at 17:04:50 UTC | Slot: 103,646,150
