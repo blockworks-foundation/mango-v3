@@ -115,6 +115,8 @@ pub enum MangoErrorCode {
     InvalidPerpMarketCache,
     #[error("MangoErrorCode::TriggerConditionFalse The trigger condition for this TriggerOrder is not met")]
     TriggerConditionFalse,
+    #[error("MangoErrorCode::InvalidSeeds Invalid seeds. Unable to create PDA")]
+    InvalidSeeds,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

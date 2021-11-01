@@ -17,10 +17,9 @@ async fn test_size() {
 
 #[tokio::test]
 async fn test_i80f48() {
-    let hundred = I80F48::from_num(100);
-    let million = I80F48::from_num(1_000_000);
-    let r: I80F48 = hundred / million;
-    println!("{:#0128b}", r.to_bits())
+    let x = I80F48::from_num(500000.000123);
+    let y = x >> 13;
+    println!("y: {:?}", y);
 }
 
 #[tokio::test]

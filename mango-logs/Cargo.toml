@@ -17,4 +17,4 @@ devnet = []
 default = []
 
 [dependencies]
-anchor-lang = "0.17.0"
+anchor-lang = "0.18.0"
