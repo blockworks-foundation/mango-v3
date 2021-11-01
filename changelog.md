@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.1
-Deployed:
+Deployed: Nov 1, 2021 at 18:09:05 UTC | Slot: 104,689,370
 1. If perp market is added before spot market, fix decimals to 6
 2. remove ChangePerpMarketParams
 
