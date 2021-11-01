@@ -1968,9 +1968,12 @@ impl PerpMarket {
     ) -> MangoResult<RefMut<'a, Self>> {
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         let state = Self::load_mut(account)?;
-        check!(state.meta_data.is_initialized, MangoErrorCode::Default)?;
-        check!(state.meta_data.data_type == DataType::PerpMarket as u8, MangoErrorCode::Default)?;
-        check!(mango_group_pk == &state.mango_group, MangoErrorCode::Default)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(
+            state.meta_data.data_type == DataType::PerpMarket as u8,
+            MangoErrorCode::InvalidAccountState
+        )?;
+        check!(mango_group_pk == &state.mango_group, MangoErrorCode::InvalidAccountState)?;
         Ok(state)
     }
 

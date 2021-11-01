@@ -386,6 +386,115 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    /// *** DEPRECATED Initialize perp market including orderbooks and queues
+    fn add_perp_market(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
+        liquidation_fee: I80F48,
+        maker_fee: I80F48,
+        taker_fee: I80F48,
+        base_lot_size: i64,
+        quote_lot_size: i64,
+        rate: I80F48, // starting rate for liquidity mining
+        max_depth_bps: I80F48,
+        target_period_length: u64,
+        mngo_per_period: u64,
+        exp: u8,
+    ) -> MangoResult<()> {
+        // params check
+        check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_leverage > init_leverage, MangoErrorCode::InvalidParam)?;
+        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(base_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(quote_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(!rate.is_negative(), MangoErrorCode::InvalidParam)?;
+        check!(target_period_length > 0, MangoErrorCode::InvalidParam)?;
+        check!(exp <= 8 && exp > 0, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+        mango_group_ai, // write
+        oracle_ai,      // read
+        perp_market_ai, // write
+        event_queue_ai, // write
+        bids_ai,        // write
+        asks_ai,        // write
+        mngo_vault_ai,  // read
+        admin_ai        // read, signer
+        ] = accounts;
+
+        let rent = Rent::get()?; // dynamically load rent sysvar
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+
+        let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
+
+        // This will catch the issue if oracle_ai.key == Pubkey::Default
+        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
+
+        // Make sure perp market at this index not already initialized
+        check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
+
+        let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
+        let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
+
+        mango_group.perp_markets[market_index] = PerpMarketInfo {
+            perp_market: *perp_market_ai.key,
+            maint_asset_weight,
+            init_asset_weight,
+            maint_liab_weight,
+            init_liab_weight,
+            liquidation_fee,
+            maker_fee,
+            taker_fee,
+            base_lot_size,
+            quote_lot_size,
+        };
+
+        // Initialize the Bids
+        let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
+
+        // Initialize the Asks
+        let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent)?;
+
+        // Initialize the EventQueue
+        // TODO: check that the event queue is reasonably large
+        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent)?;
+
+        // Now initialize the PerpMarket itself
+        let _perp_market = PerpMarket::load_and_init(
+            perp_market_ai,
+            program_id,
+            mango_group_ai,
+            bids_ai,
+            asks_ai,
+            event_queue_ai,
+            mngo_vault_ai,
+            &mango_group,
+            &rent,
+            base_lot_size,
+            quote_lot_size,
+            rate,
+            max_depth_bps,
+            target_period_length,
+            mngo_per_period,
+            exp,
+            0,
+            0,
+        )?;
+
+        Ok(())
+    }
+
     /// Create the PerpMarket and associated PDAs and initialize them.
     /// Bids, Asks and EventQueue are not PDAs. They must be created beforehand and owner assigned
     /// to Mango program id
@@ -4653,9 +4762,37 @@ impl Processor {
                 Self::update_root_bank(program_id, accounts)
             }
 
-            MangoInstruction::AddPerpMarket { .. } => {
-                msg!("Mango: AddPerpMarket DEPRECATED - use CreatePerpMarket instead");
-                Ok(())
+            MangoInstruction::AddPerpMarket {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                maker_fee,
+                taker_fee,
+                base_lot_size,
+                quote_lot_size,
+                rate,
+                max_depth_bps,
+                target_period_length,
+                mngo_per_period,
+                exp,
+            } => {
+                msg!("Mango: AddPerpMarket DEPRECATED");
+                Self::add_perp_market(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    maker_fee,
+                    taker_fee,
+                    base_lot_size,
+                    quote_lot_size,
+                    rate,
+                    max_depth_bps,
+                    target_period_length,
+                    mngo_per_period,
+                    exp,
+                )
             }
             MangoInstruction::PlacePerpOrder {
                 side,
