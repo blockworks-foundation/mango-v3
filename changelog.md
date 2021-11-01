@@ -3,7 +3,7 @@
 ## v3.2.1
 Deployed:
 1. If perp market is added before spot market, fix decimals to 6
-2. remove ChangePerpMarketParams and AddPerpMarket
+2. remove ChangePerpMarketParams
 
 ## v3.2.0
 Deployed: Oct 28, 2021 at 23:53:49 UTC | Slot: 104,038,884
