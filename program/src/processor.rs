@@ -447,6 +447,12 @@ impl Processor {
         let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
         let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
 
+        // This means there isn't already a token and spot market in Mango
+        // Default the decimals to 6 and only allow AddSpotMarket if it has 6 decimals
+        if mango_group.tokens[market_index].is_empty() {
+            mango_group.tokens[market_index].decimals = 6;
+        }
+
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
             maint_asset_weight,
