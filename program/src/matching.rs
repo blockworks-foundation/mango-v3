@@ -1388,7 +1388,7 @@ impl<'a> Book<'a> {
                 Side::Ask => asks_keys.push(mango_account.orders[i]),
             }
         }
-        bids_keys.sort();
+        bids_keys.sort_unstable();
         asks_keys.sort_by(|a, b| b.cmp(a));
 
         // First do bids
