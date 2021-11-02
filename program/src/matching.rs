@@ -498,7 +498,9 @@ impl BookSide {
             match self.get(child_h).unwrap().case().unwrap() {
                 NodeRef::Inner(inner) => {
                     parent_h = child_h;
-                    (child_h, crit_bit) = inner.walk_down(search_key);
+                    let (new_child_h, new_crit_bit) = inner.walk_down(search_key);
+                    child_h = new_child_h;
+                    crit_bit = new_crit_bit;
                 }
                 NodeRef::Leaf(leaf) => {
                     if leaf.key != search_key {
