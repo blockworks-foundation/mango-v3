@@ -221,7 +221,8 @@ impl Processor {
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
         // Check deposits and borrows are zero
         for i in 0..MAX_TOKENS {
@@ -1294,6 +1295,7 @@ impl Processor {
         ] = accounts;
 
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
@@ -1303,7 +1305,7 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
         let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -4435,11 +4437,13 @@ impl Processor {
             advanced_orders_ai, // write
         ] = accounts;
 
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
-        check!(
-            &mango_account.advanced_orders_key == advanced_orders_ai.key,
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check_eq!(
+            &mango_account.advanced_orders_key,
+            advanced_orders_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
 
