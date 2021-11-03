@@ -218,8 +218,7 @@ impl Processor {
         ] = accounts;
 
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
+        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
@@ -1052,7 +1051,7 @@ impl Processor {
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
+        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
@@ -4080,8 +4079,7 @@ impl Processor {
         ] = accounts;
 
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        let mut mango_account = MangoAccount::load_mut(mango_account_ai)?;
+        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check_eq!(
             &mango_account.advanced_orders_key,
