@@ -11,3 +11,4 @@ Significant contributions to the source code may be compensated with a grant fro
 Mango is currently unaudited software. Use at your own risk.
 
 You will be compensated by the Mango DAO for privately reporting vulnerabilities to the maintainers of this repo.
+Email hello@blockworks.foundation

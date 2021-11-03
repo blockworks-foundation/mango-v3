@@ -74,7 +74,7 @@ pub fn pow_i80f48(mut base: I80F48, mut exp: u8) -> I80F48 {
     let mut result = ONE_I80F48;
     loop {
         if exp & 1 == 1 {
-            result *= base;
+            result = result.checked_mul(base).unwrap();
         }
         exp >>= 1;
         if exp == 0 {

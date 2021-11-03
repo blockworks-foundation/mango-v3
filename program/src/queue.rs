@@ -3,7 +3,6 @@ use crate::matching::Side;
 use crate::state::{DataType, MetaData, PerpMarket};
 use crate::utils::strip_header_mut;
 
-use bytemuck::Pod;
 use fixed::types::I80F48;
 use mango_logs::FillLog;
 use mango_macro::Pod;
@@ -24,8 +23,8 @@ declare_check_assert_macros!(SourceFileId::Queue);
 // also can't tie it to token withdrawn because during bull market, liqs will be depositing all base tokens and withdrawing quote
 //
 
-pub trait QueueHeader: Pod {
-    type Item: Pod + Copy;
+pub trait QueueHeader: bytemuck::Pod {
+    type Item: bytemuck::Pod + Copy;
 
     fn head(&self) -> usize;
     fn set_head(&mut self, value: usize);
@@ -229,7 +228,8 @@ pub struct FillEvent {
     pub taker_side: Side, // side from the taker's POV
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
-    pub padding: [u8; 4],
+    pub version: u8,
+    pub padding: [u8; 3],
     pub timestamp: u64,
     pub seq_num: usize, // note: usize same as u64
 
@@ -274,13 +274,15 @@ impl FillEvent {
         taker_fee: I80F48,
         price: i64,
         quantity: i64,
+        version: u8,
     ) -> FillEvent {
         Self {
             event_type: EventType::Fill as u8,
             taker_side,
             maker_slot,
             maker_out,
-            padding: [0u8; 4],
+            version,
+            padding: [0u8; 3],
             timestamp,
             seq_num,
             maker,
