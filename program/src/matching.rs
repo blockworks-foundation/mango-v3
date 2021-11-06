@@ -687,6 +687,23 @@ impl<'a> Book<'a> {
         s.min(max_depth)
     }
 
+    /// Walk up the book `quantity` units and return the price at that level. If `quantity` units
+    /// not on book, return None
+    pub fn get_impact_price(&self, side: Side, quantity: i64) -> Option<i64> {
+        let mut s = 0;
+        let book_side = match side {
+            Side::Bid => self.bids.iter(),
+            Side::Ask => self.asks.iter(),
+        };
+        for order in book_side {
+            s += order.quantity;
+            if s >= quantity {
+                return Some(order.price());
+            }
+        }
+        None
+    }
+
     /// Get the quantity of asks below and including the price
     pub fn get_asks_size_below(&self, price: i64, max_depth: i64) -> i64 {
         let mut s = 0;
