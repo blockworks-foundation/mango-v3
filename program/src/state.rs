@@ -1995,7 +1995,7 @@ impl PerpMarket {
         mango_cache: &MangoCache,
         market_index: usize,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // Get the index price from cache, ensure it's not outdated
         let price_cache = &mango_cache.price_cache[market_index];
         price_cache.check_valid(&mango_group, now_ts)?;
@@ -2004,9 +2004,15 @@ impl PerpMarket {
         // Get current book price & compare it to index price
 
         // TODO get impact bid and impact ask if compute allows
-        // TODO consider corner cases of funding being updated
-        let bid = book.get_best_bid_price();
-        let ask = book.get_best_ask_price();
+        // let bid = book.get_best_bid_price();
+        // let ask = book.get_best_ask_price();
+
+        // hard-coded for now because there's no convenient place to put this; also creates breaking
+        // change if we make this a parameter
+        const IMPACT_QUANTITY: i64 = 100;
+        // TODO test the compute impact of worst case scenario
+        let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY);
+        let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY);
 
         const MAX_FUNDING: I80F48 = I80F48!(0.05);
         const MIN_FUNDING: I80F48 = I80F48!(-0.05);
