@@ -328,8 +328,46 @@ impl Processor {
         Ok(())
     }
 
-    /// Like AddSpotMarket but uses PDAs for vaults
-    fn create_spot_market() -> MangoResult {}
+    /// Like AddSpotMarket but uses PDAs for vaults and
+    #[inline(never)]
+    fn create_spot_market(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: I80F48,
+        init_leverage: I80F48,
+        liquidation_fee: I80F48,
+        util0: I80F48,
+        rate0: I80F48,
+        util1: I80F48,
+        rate1: I80F48,
+        max_rate: I80F48,
+    ) -> MangoResult {
+        todo!()
+    }
+
+    #[inline(never)]
+    fn change_spot_market_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+
+        util0: Option<I80F48>,
+        rate0: Option<I80F48>,
+        util1: Option<I80F48>,
+        rate1: Option<I80F48>,
+        max_rate: Option<I80F48>,
+        version: Option<u8>,
+    ) -> MangoResult {
+        /*
+        Make sure leverage satisfies all the same conditions as in AddSpotMarket
+        Follow the example of ChangePerpMarketParams2
+
+         */
+        todo!()
+    }
 
     #[inline(never)]
     /// Add an oracle to the MangoGroup
