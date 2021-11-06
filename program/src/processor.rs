@@ -110,7 +110,7 @@ impl Processor {
         mango_group.insurance_vault = *insurance_vault_ai.key;
 
         let fees_vault = Account::unpack(&fees_vault_ai.try_borrow_data()?)?;
-        check!(fees_vault.is_initialized(), MangoErrorCode::Default)?;
+        check!(fees_vault.is_initialized(), MangoErrorCode::InvalidAccountState)?;
         check!(fees_vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
         check!(fees_vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
         check_eq!(&fees_vault.mint, quote_mint_ai.key, MangoErrorCode::InvalidVault)?;
@@ -129,7 +129,7 @@ impl Processor {
             mango_group.msrm_vault = *msrm_vault_ai.key;
         }
 
-        let _root_bank = init_root_bank(
+        init_root_bank(
             program_id,
             &mango_group,
             quote_mint_ai,
@@ -139,7 +139,10 @@ impl Processor {
             &rent,
             quote_optimal_util,
             quote_optimal_rate,
+            quote_optimal_util,
+            quote_optimal_rate,
             quote_max_rate,
+            1,
         )?;
         let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
         mango_group.tokens[QUOTE_INDEX] = TokenInfo {
@@ -207,6 +210,7 @@ impl Processor {
     }
 
     #[inline(never)]
+    /// DEPRECATED - use CreateSpotMarket instead
     /// Add asset and spot market to mango group
     /// Initialize a root bank and add it to the mango group
     /// Requires a price oracle for this asset priced in quote currency
@@ -259,7 +263,7 @@ impl Processor {
         // Make sure token at this index not already initialized
         check!(mango_group.tokens[market_index].is_empty(), MangoErrorCode::InvalidAccountState)?;
 
-        let _root_bank = init_root_bank(
+        init_root_bank(
             program_id,
             &mango_group,
             mint_ai,
@@ -269,7 +273,10 @@ impl Processor {
             &Rent::get()?,
             optimal_util,
             optimal_rate,
+            optimal_util,
+            optimal_rate,
             max_rate,
+            1,
         )?;
 
         let mint = Mint::unpack(&mint_ai.try_borrow_data()?)?;
@@ -320,6 +327,9 @@ impl Processor {
         }
         Ok(())
     }
+
+    /// Like AddSpotMarket but uses PDAs for vaults
+    fn create_spot_market() -> MangoResult {}
 
     #[inline(never)]
     /// Add an oracle to the MangoGroup
@@ -4676,7 +4686,7 @@ impl Processor {
         Ok(())
     }
 
-    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
+    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         match instruction {
@@ -5085,10 +5095,13 @@ fn init_root_bank(
     node_bank_ai: &AccountInfo,
     rent: &Rent,
 
-    optimal_util: I80F48,
-    optimal_rate: I80F48,
+    util0: I80F48,
+    rate0: I80F48,
+    util1: I80F48,
+    rate1: I80F48,
     max_rate: I80F48,
-) -> MangoResult<RootBank> {
+    version: u8,
+) -> MangoResult {
     let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
     check!(vault.is_initialized(), MangoErrorCode::InvalidVault)?;
     check!(vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
@@ -5098,17 +5111,20 @@ fn init_root_bank(
     check_eq!(vault_ai.owner, &spl_token::id(), MangoErrorCode::InvalidVault)?;
 
     let _node_bank = NodeBank::load_and_init(&node_bank_ai, &program_id, &vault_ai, rent)?;
-    let root_bank = RootBank::load_and_init(
+    let _root_bank = RootBank::load_and_init(
         &root_bank_ai,
         &program_id,
         node_bank_ai,
         rent,
-        optimal_util,
-        optimal_rate,
+        util0,
+        rate0,
+        util1,
+        rate1,
         max_rate,
+        version,
     )?;
 
-    Ok(*root_bank)
+    Ok(())
 }
 
 fn invoke_settle_funds<'a>(
