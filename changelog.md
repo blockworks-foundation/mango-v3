@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.2
-Deployed:
+Deployed: Deployed: Nov 7, 2021 at 14:20:04 UTC | Slot: 105,693,864
 1. Get rid of destructuring assignment feature
 2. Use impact bid/ask for calculating funding (100 contracts)
 
