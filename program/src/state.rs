@@ -2001,16 +2001,11 @@ impl PerpMarket {
         price_cache.check_valid(&mango_group, now_ts)?;
 
         let index_price = price_cache.price;
-        // Get current book price & compare it to index price
-
-        // TODO get impact bid and impact ask if compute allows
-        // let bid = book.get_best_bid_price();
-        // let ask = book.get_best_ask_price();
-
         // hard-coded for now because there's no convenient place to put this; also creates breaking
         // change if we make this a parameter
         const IMPACT_QUANTITY: i64 = 100;
-        // TODO test the compute impact of worst case scenario
+
+        // Get current book price & compare it to index price
         let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY);
         let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY);
 
