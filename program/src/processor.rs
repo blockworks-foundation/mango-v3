@@ -797,40 +797,8 @@ impl Processor {
 
         Ok(())
     }
-    // TODO create client functions and instruction.rs
-    #[inline(never)]
-    #[allow(unused)]
-    /// Change the shape of the interest rate function
-    fn change_rate_params(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        optimal_util: I80F48,
-        optimal_rate: I80F48,
-        max_rate: I80F48,
-    ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 3;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [
-            mango_group_ai, // read
-            root_bank_ai,   // read
-            admin_ai        // read, signer
-        ] = accounts;
-
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
-        check!(
-            mango_group.find_root_bank_index(root_bank_ai.key).is_some(),
-            MangoErrorCode::InvalidRootBank
-        )?;
-        let mut root_bank = RootBank::load_mut_checked(root_bank_ai, program_id)?;
-        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
-
-        Ok(())
-    }
 
     #[inline(never)]
-    #[allow(dead_code)]
     /// Change leverage, fees and liquidity mining params
     fn change_perp_market_params2(
         program_id: &Pubkey,

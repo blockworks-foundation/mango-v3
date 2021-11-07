@@ -327,8 +327,8 @@ impl RootBank {
         rate1: I80F48,
         max_rate: I80F48,
     ) -> MangoResult {
-        check!(util0 > ZERO_I80F48 && util0 < ONE_I80F48, MangoErrorCode::InvalidParam)?;
-        check!(util1 >= util0, MangoErrorCode::InvalidParam)?;
+        check!(util0 > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(util1 >= util0 && util1 < ONE_I80F48, MangoErrorCode::InvalidParam)?;
         check!(rate0 >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
         check!(rate1 >= rate0, MangoErrorCode::InvalidParam)?;
         check!(max_rate >= rate1, MangoErrorCode::InvalidParam)?;
@@ -426,7 +426,6 @@ impl RootBank {
                 self.rate0 + slope * extra_util
             } else {
                 let extra_util = utilization - self.util1;
-                // TODO - check util1 != 1 at initial stage
                 let slope = (self.max_rate - self.rate1) / (ONE_I80F48 - self.util1);
                 self.rate1 + slope * extra_util
             }
