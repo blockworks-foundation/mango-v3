@@ -498,7 +498,9 @@ impl BookSide {
             match self.get(child_h).unwrap().case().unwrap() {
                 NodeRef::Inner(inner) => {
                     parent_h = child_h;
-                    (child_h, crit_bit) = inner.walk_down(search_key);
+                    let (new_child_h, new_crit_bit) = inner.walk_down(search_key);
+                    child_h = new_child_h;
+                    crit_bit = new_crit_bit;
                 }
                 NodeRef::Leaf(leaf) => {
                     if leaf.key != search_key {
@@ -683,6 +685,23 @@ impl<'a> Book<'a> {
             s += bid.quantity;
         }
         s.min(max_depth)
+    }
+
+    /// Walk up the book `quantity` units and return the price at that level. If `quantity` units
+    /// not on book, return None
+    pub fn get_impact_price(&self, side: Side, quantity: i64) -> Option<i64> {
+        let mut s = 0;
+        let book_side = match side {
+            Side::Bid => self.bids.iter(),
+            Side::Ask => self.asks.iter(),
+        };
+        for order in book_side {
+            s += order.quantity;
+            if s >= quantity {
+                return Some(order.price());
+            }
+        }
+        None
     }
 
     /// Get the quantity of asks below and including the price
