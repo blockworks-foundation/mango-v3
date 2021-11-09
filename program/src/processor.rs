@@ -224,7 +224,6 @@ impl Processor {
 
         // Check deposits and borrows are zero
         for i in 0..MAX_TOKENS {
-            // TODO this should use get_native functions
             check_eq!(mango_account.deposits[i], ZERO_I80F48, MangoErrorCode::InvalidAccountState)?;
             check_eq!(mango_account.borrows[i], ZERO_I80F48, MangoErrorCode::InvalidAccountState)?;
         }
@@ -308,13 +307,9 @@ impl Processor {
 
         let borrow_amount = mango_account.get_native_borrow(&mango_cache.root_bank_cache[token_index], token_index)?;
         let deposit_amount = mango_account.get_native_deposit(&mango_cache.root_bank_cache[token_index], token_index)?;
-        msg!("borrow amount {}", borrow_amount.to_num::<f64>());
-        msg!("deposit amount {}", deposit_amount.to_num::<f64>());
+
         // Amount must be dust aka < 1 native spl token
-        if borrow_amount > ZERO_I80F48 {
-            msg!("borrow amount gt zero");
-            check!(borrow_amount < ONE_I80F48, MangoErrorCode::Default)?;
-            msg!("borrow amount lt one");
+        if borrow_amount > ZERO_I80F48 && borrow_amount < ONE_I80F48 {
             checked_change_net(
                 root_bank_cache,
                 &mut node_bank,
@@ -331,10 +326,7 @@ impl Processor {
                 token_index,
                 -borrow_amount,
             )?;
-        } else if deposit_amount > ZERO_I80F48 {
-            msg!("deposit amount gt zero");
-            check!(deposit_amount < ONE_I80F48, MangoErrorCode::Default)?;
-            msg!("deposit amount lt one");
+        } else if deposit_amount > ZERO_I80F48 && deposit_amount < ONE_I80F48{
             checked_change_net(
                 root_bank_cache,
                 &mut node_bank,
@@ -351,8 +343,6 @@ impl Processor {
                 token_index,
                 deposit_amount,
             )?;
-        } else {
-            throw_err!(MangoErrorCode::Default);
         }
 
         Ok(())
