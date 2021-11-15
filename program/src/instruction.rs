@@ -749,6 +749,16 @@ pub enum MangoInstruction {
         #[serde(serialize_with = "serialize_option_fixed_width")]
         lm_size_shift: Option<u8>,
     },
+
+    /// Change the params for perp market.
+    ///
+    /// Accounts expected by this instruction (2 + MAX_PAIRS):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2+ `[]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
+    ///         index needs to be writable. Only OpenOrders in_margin_basket needs to be correct;
+    ///         remaining open orders can just be Pubkey::default() (the zero key)
+    UpdateMarginBasket,
 }
 
 impl MangoInstruction {
@@ -1143,6 +1153,7 @@ impl MangoInstruction {
                     lm_size_shift: unpack_u8_opt(lm_size_shift),
                 }
             }
+            48 => MangoInstruction::UpdateMarginBasket,
             _ => {
                 return None;
             }

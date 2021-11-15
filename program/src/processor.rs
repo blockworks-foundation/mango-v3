@@ -5103,6 +5103,10 @@ impl Processor {
                     lm_size_shift,
                 )
             }
+            MangoInstruction::UpdateMarginBasket => {
+                msg!("Mango: ChangePerpMarketParams2");
+                Self::update_margin_basket(program_id, accounts)
+            }
         }
     }
 }
