@@ -1265,10 +1265,11 @@ impl MangoAccount {
         &mut self,
         market_index: usize,
         open_orders: &serum_dex::state::OpenOrders,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let is_empty = open_orders.native_pc_total == 0
             && open_orders.native_coin_total == 0
-            && open_orders.referrer_rebates_accrued == 0;
+            && open_orders.referrer_rebates_accrued == 0
+            && open_orders.free_slot_bits == u128::MAX;
 
         if self.in_margin_basket[market_index] && is_empty {
             self.in_margin_basket[market_index] = false;

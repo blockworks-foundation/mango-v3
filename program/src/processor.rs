@@ -32,13 +32,13 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
-    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrderType,
-    AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
-    MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpTriggerOrder,
-    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
-    UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
-    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX,
-    ZERO_I80F48,
+    check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
+    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
+    MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
+    PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
+    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
+    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48,
+    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
@@ -4676,6 +4676,37 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn update_margin_basket(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+        ] = fixed_ais;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
+        for i in 0..mango_group.num_oracles {
+            check_eq!(
+                open_orders_ais[i].key,
+                &mango_account.spot_open_orders[i],
+                MangoErrorCode::InvalidOpenOrdersAccount
+            )?;
+
+            if mango_account.spot_open_orders[i] != Pubkey::default() {
+                check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                mango_account.update_basket(i, &open_orders)?;
+            }
+        }
+
+        Ok(())
+    }
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5071,6 +5102,10 @@ impl Processor {
                     version,
                     lm_size_shift,
                 )
+            }
+            MangoInstruction::UpdateMarginBasket => {
+                msg!("Mango: UpdateMarginBasket");
+                Self::update_margin_basket(program_id, accounts)
             }
         }
     }
