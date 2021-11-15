@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.4
-Deployed: Deployed: | Slot:
+Deployed: Nov 15, 2021 at 19:38:22 UTC | Slot: 107,052,828
 1. Updated the update_margin_basket function to include Serum dex OpenOrders accounts with any open orders.
 2. Add instruction UpdateMarginBasket to bring MangoAccount into compliance with new standard
 
