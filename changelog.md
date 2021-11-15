@@ -2,6 +2,7 @@
 
 ## v3.3.0
 Deployed:
+1. Allow canceling all perp orders on one side
 
 ## v3.2.2
 Deployed: Deployed: Nov 7, 2021 at 14:20:04 UTC | Slot: 105,693,864

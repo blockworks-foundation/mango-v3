@@ -4692,6 +4692,122 @@ impl Processor {
         Ok(())
     }
 
+    /// ***rp Cancel all orders for one side of a perp market
+    #[inline(never)]
+    #[allow(dead_code)]
+    fn cancel_perp_orders_side(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        limit: u8,
+        side: Side,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
+
+        check!(perp_market.meta_data.version != 0, MangoErrorCode::InvalidAccountState)?;
+
+        book.cancel_all_side_with_size_incentives(
+            &mut mango_account,
+            &mut perp_market,
+            market_index,
+            limit,
+            side,
+        )?;
+
+        mango_emit!(MngoAccrualLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
+            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+        });
+        Ok(())
+    }
+
+    #[inline(never)]
+    #[allow(dead_code)]
+    pub fn flash_loan_msrm() -> MangoResult {
+        /*
+        Start with just msrm for now because that's safer
+        1. Move msrm into the requested token account
+        2. invoke the requested CPI
+        3. Move msrm back into msrm_vault
+
+        Usage
+        1. Call this instruction and pass in your CPI program id and accounts and instruction data
+         */
+
+        todo!()
+    }
+
+    /// Create open orders account for a spot market for the user
+    /// This allows the user to use the Mango MSRM or SRM vaults for fee discounts
+    #[inline(never)]
+    #[allow(dead_code)]
+    pub fn serum_create_open_orders() -> MangoResult {
+        /*
+           1. Check validity of account PDA of owner wallet, market, bump
+           2. check validity of account PDA.
+        */
+
+        todo!()
+    }
+
+    #[inline(never)]
+    #[allow(dead_code)]
+    pub fn serum_close_open_orders() -> MangoResult {
+        // Close the open orders and refund to the user
+        todo!()
+    }
+
+    /// Proxy for non-leveraged order
+    #[inline(never)]
+    #[allow(dead_code)]
+    pub fn serum_place_order() -> MangoResult {
+        // First need to determine if this is signed or not signed
+        // Then need to do some checks on serum place order
+        // Send the mango spot open orders account and your personal SPL token accounts for base and quote
+        todo!()
+    }
+
+    #[inline(never)]
+    #[allow(dead_code)]
+    pub fn serum_cancel_order() -> MangoResult {
+        // cancel the order
+        todo!()
+    }
+    pub fn serum_cancel_order_by_client_id() -> MangoResult {
+        todo!()
+    }
+    pub fn serum_settle_funds() -> MangoResult {
+        // Check open orders PDA is accurate
+        // check signer is correct
+        todo!()
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
