@@ -2484,7 +2484,7 @@ impl Processor {
         liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
 
         let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
-        check!(liqee_ma.in_margin_basket[market_index], MangoErrorCode::Default)?;
+        // check!(liqee_ma.in_margin_basket[market_index], MangoErrorCode::Default)?;
 
         check_eq!(
             &mango_group.tokens[market_index].root_bank,

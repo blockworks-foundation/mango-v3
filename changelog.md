@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.2.3
+Deployed: Deployed: Nov 15, 2021 at 15:25:19 UTC | Slot: 107,024,833
+1. Comment out in_margin_basket check in ForceCancelSpot due to to it being wrong for an account 
+
 ## v3.2.2
 Deployed: Deployed: Nov 7, 2021 at 14:20:04 UTC | Slot: 105,693,864
 1. Get rid of destructuring assignment feature
