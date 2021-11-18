@@ -361,12 +361,72 @@ impl Processor {
         max_rate: Option<I80F48>,
         version: Option<u8>,
     ) -> MangoResult {
-        /*
-        Make sure leverage satisfies all the same conditions as in AddSpotMarket
-        Follow the example of ChangePerpMarketParams2
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-         */
-        todo!()
+        let [
+            mango_group_ai, // write
+            spot_market_ai, // write
+            root_bank_ai,   // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        // checks rootbank is part of the group
+        let _root_bank_index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+        let mut info = &mut mango_group.spot_markets[market_index];
+
+        // Unwrap params. Default to current state if Option is None
+        let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
+            get_leverage_weights(x)
+        } else {
+            (info.maint_asset_weight, info.maint_liab_weight)
+        };
+        let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
+            get_leverage_weights(x)
+        } else {
+            (info.init_asset_weight, info.init_liab_weight)
+        };
+
+        let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
+        let util0 = util0.unwrap_or(root_bank.util0);
+        let rate0 = rate0.unwrap_or(root_bank.rate0);
+        let util1 = util1.unwrap_or(root_bank.util0);
+        let rate1 = rate1.unwrap_or(root_bank.rate0);
+        let max_rate = max_rate.unwrap_or(root_bank.max_rate);
+        let version = version.unwrap_or(root_bank.meta_data.version);
+
+        // params check
+        check!(init_asset_weight > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_asset_weight > init_asset_weight, MangoErrorCode::InvalidParam)?;
+        // maint leverage may only increase to prevent unforeseen liquidations
+        check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
+
+        // Set the params on the RootBank
+        root_bank.set_rate_params(util0, rate0, util1, rate1, max_rate)?;
+
+        // Set the params on MangoGroup SpotMarketInfo
+        info.liquidation_fee = liquidation_fee;
+        info.maint_asset_weight = maint_asset_weight;
+        info.init_asset_weight = init_asset_weight;
+        info.maint_liab_weight = maint_liab_weight;
+        info.init_liab_weight = init_liab_weight;
+
+        check!(version == 0, MangoErrorCode::InvalidParam)?;
+
+        root_bank.meta_data.version = version;
+        Ok(())
     }
 
     #[inline(never)]
@@ -5086,6 +5146,32 @@ impl Processor {
                     exp,
                     version,
                     lm_size_shift,
+                )
+            }
+            MangoInstruction::ChangeSpotMarketParams {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                util0,
+                rate0,
+                util1,
+                rate1,
+                max_rate,
+                version,
+            } => {
+                msg!("Mango: ChangeSpotMarketParams");
+                Self::change_spot_market_params(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    util0,
+                    rate0,
+                    util1,
+                    rate1,
+                    max_rate,
+                    version,
                 )
             }
         }
