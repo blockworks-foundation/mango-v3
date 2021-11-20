@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.2.6
+Deployed: Nov 20, 2021 at 20:53:42 UTC | Slot: 107,876,588
+1. Checking the owner of OpenOrders accounts now
+
 ## v3.2.5
 Deployed: Nov 20, 2021 at 14:35:26 UTC | Slot: 107,833,583
 1. Fixed init_spot_open_orders bug not checking signer_key

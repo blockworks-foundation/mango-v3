@@ -1747,7 +1747,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 18;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1821,6 +1821,8 @@ impl Processor {
         if *open_orders_ai.key == Pubkey::default() {
             return Ok(());
         }
+
+        check_open_orders(open_orders_ai, &mango_group.signer_key, &mango_group.dex_program_id)?;
 
         let (pre_base, pre_quote) = {
             let open_orders = load_open_orders(open_orders_ai)?;
@@ -4714,7 +4716,11 @@ impl Processor {
             )?;
 
             if mango_account.spot_open_orders[i] != Pubkey::default() {
-                check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+                check_open_orders(
+                    &open_orders_ais[i],
+                    &mango_group.signer_key,
+                    &mango_group.dex_program_id,
+                )?;
                 let open_orders = load_open_orders(&open_orders_ais[i])?;
                 mango_account.update_basket(i, &open_orders)?;
             }
