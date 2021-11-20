@@ -1,5 +1,10 @@
 # Mango Program Change Log
 
+## v3.2.5
+Deployed:
+1. Fixed init_spot_open_orders bug not checking signer_key
+2. checking signer_key wherever it's passed it
+
 ## v3.2.4
 Deployed: Nov 15, 2021 at 19:38:22 UTC | Slot: 107,052,828
 1. Updated the update_margin_basket function to include Serum dex OpenOrders accounts with any open orders.

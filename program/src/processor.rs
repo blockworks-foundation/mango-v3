@@ -1078,12 +1078,13 @@ impl Processor {
         check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -1177,6 +1178,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
 
         let market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
@@ -1264,6 +1266,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1486,6 +1489,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1699,6 +1703,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1769,6 +1774,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::id(), MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -2363,6 +2369,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(fees_vault_ai.key == &mango_group.fees_vault, MangoErrorCode::InvalidVault)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2476,6 +2483,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
@@ -3437,6 +3445,8 @@ impl Processor {
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
@@ -3595,6 +3605,8 @@ impl Processor {
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
 
@@ -4033,6 +4045,8 @@ impl Processor {
         check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let market_index = mango_group
             .find_perp_market_index(perp_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
@@ -4178,6 +4192,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(msrm_vault_ai.key == &mango_group.msrm_vault, MangoErrorCode::InvalidVault)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
