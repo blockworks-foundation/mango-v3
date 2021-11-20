@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.5
-Deployed:
+Deployed: Nov 20, 2021 at 14:35:26 UTC | Slot: 107,833,583
 1. Fixed init_spot_open_orders bug not checking signer_key
 2. checking signer_key wherever it's passed it
 
