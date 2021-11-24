@@ -642,8 +642,8 @@ impl BookSide {
 }
 
 pub struct Order {
-    quantity: i64,
-    price: i64,
+    pub quantity: i64,
+    pub price: i64,
 }
 
 pub struct Book<'a> {
