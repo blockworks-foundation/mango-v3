@@ -641,6 +641,11 @@ impl BookSide {
     }
 }
 
+pub struct Order {
+    quantity: i64,
+    price: i64,
+}
+
 pub struct Book<'a> {
     bids: RefMut<'a, BookSide>,
     asks: RefMut<'a, BookSide>,
@@ -699,6 +704,48 @@ impl<'a> Book<'a> {
             s += order.quantity;
             if s >= quantity {
                 return Some(order.price());
+            }
+        }
+        None
+    }
+
+    /// Walk up the book and progresively find the best quantity and price to spend a given amount of quote.
+    pub fn get_best_order_for_amount(
+        &self,
+        side: Side,
+        amount_to_spend: i64,
+        max_depth: i64,
+    ) -> Option<Order> {
+        let book_side = match side {
+            Side::Bid => self.bids.iter(),
+            Side::Ask => self.asks.iter(),
+        };
+        let mut depth = 0;
+        let mut cmlv_quantity: i64 = 0;
+        let mut best_price = 0; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
+        let mut amount_left_to_spend = amount_to_spend;
+
+        for order in book_side {
+            // Current best execution price
+            best_price = order.price();
+            // How much can we fill with it :
+            let order_quote_amount = order.quantity.checked_mul(order.price()).unwrap();
+            if amount_left_to_spend < order_quote_amount {
+                let spent = amount_left_to_spend.checked_div(order.price()).unwrap();
+                cmlv_quantity = cmlv_quantity.checked_add(spent).unwrap();
+                amount_left_to_spend.checked_sub(spent).unwrap();
+            } else {
+                let spent = order_quote_amount;
+                cmlv_quantity = cmlv_quantity.checked_add(order.quantity).unwrap();
+                amount_left_to_spend = amount_left_to_spend.checked_sub(spent).unwrap();
+            }
+            if !(amount_left_to_spend > 0) {
+                // success
+                return Some(Order { quantity: cmlv_quantity, price: best_price });
+            }
+            depth += 1;
+            if depth >= max_depth {
+                return None;
             }
         }
         None
