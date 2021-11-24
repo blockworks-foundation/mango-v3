@@ -710,34 +710,38 @@ impl<'a> Book<'a> {
     }
 
     /// Walk up the book and progresively find the best quantity and price to spend a given amount of quote.
-    pub fn get_best_order_for_amount(&self, side: Side, amount_to_spend: i64) -> Option<Order> {
+    pub fn get_best_order_for_amount(&self, side: Side, quote_lot_amount_to_spend: i64) -> Option<Order> {
         let book_side = match side {
             Side::Bid => self.bids.iter(),
             Side::Ask => self.asks.iter(),
         };
         let mut cmlv_quantity: i64 = 0;
         let mut best_price; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
-        let mut amount_left_to_spend = amount_to_spend;
+        let mut quote_lot_amount_left_to_spend = quote_lot_amount_to_spend;
 
         for order in book_side {
             // Current best execution price
             best_price = order.price();
             // How much can we fill with it :
             let order_quote_amount = order.quantity.checked_mul(order.price()).unwrap();
-            if amount_left_to_spend < order_quote_amount {
-                let spent = amount_left_to_spend.checked_div(order.price()).unwrap();
+            if quote_lot_amount_left_to_spend < order_quote_amount {
+                let spent = quote_lot_amount_left_to_spend.checked_div(order.price()).unwrap();
                 cmlv_quantity = cmlv_quantity.checked_add(spent).unwrap();
-                amount_left_to_spend.checked_sub(spent).unwrap();
+                quote_lot_amount_left_to_spend.checked_sub(spent).unwrap();
+                msg!("spent {}", spent);
             } else {
                 let spent = order_quote_amount;
                 cmlv_quantity = cmlv_quantity.checked_add(order.quantity).unwrap();
-                amount_left_to_spend = amount_left_to_spend.checked_sub(spent).unwrap();
+                quote_lot_amount_left_to_spend = quote_lot_amount_left_to_spend.checked_sub(spent).unwrap();
+                msg!("spent {}, {} left", spent, quote_lot_amount_left_to_spend);
             }
-            if !(amount_left_to_spend > 0) {
+            if !(quote_lot_amount_left_to_spend > 0) {
                 // success
+                msg!("success");
                 return Some(Order { quantity: cmlv_quantity, price: best_price });
             }
         }
+        msg!("failed (amount_to_spend {}, left {})", quote_lot_amount_to_spend, quote_lot_amount_left_to_spend);
         None
     }
 
