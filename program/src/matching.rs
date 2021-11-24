@@ -710,19 +710,13 @@ impl<'a> Book<'a> {
     }
 
     /// Walk up the book and progresively find the best quantity and price to spend a given amount of quote.
-    pub fn get_best_order_for_amount(
-        &self,
-        side: Side,
-        amount_to_spend: i64,
-        max_depth: i64,
-    ) -> Option<Order> {
+    pub fn get_best_order_for_amount(&self, side: Side, amount_to_spend: i64) -> Option<Order> {
         let book_side = match side {
             Side::Bid => self.bids.iter(),
             Side::Ask => self.asks.iter(),
         };
-        let mut depth = 0;
         let mut cmlv_quantity: i64 = 0;
-        let mut best_price = 0; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
+        let mut best_price; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
         let mut amount_left_to_spend = amount_to_spend;
 
         for order in book_side {
@@ -742,10 +736,6 @@ impl<'a> Book<'a> {
             if !(amount_left_to_spend > 0) {
                 // success
                 return Some(Order { quantity: cmlv_quantity, price: best_price });
-            }
-            depth += 1;
-            if depth >= max_depth {
-                return None;
             }
         }
         None
