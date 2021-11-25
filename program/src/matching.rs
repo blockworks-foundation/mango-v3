@@ -710,7 +710,7 @@ impl<'a> Book<'a> {
     }
 
     /// Walk up the book and progresively find the best quantity and price to spend a given amount of quote.
-    pub fn get_best_order_for_amount(
+    pub fn get_best_order_for_quote_lot_amount(
         &self,
         side: Side,
         quote_lot_amount_to_spend: i64,
@@ -720,7 +720,7 @@ impl<'a> Book<'a> {
             Side::Ask => self.asks.iter(),
         };
         let mut cmlv_quantity: i64 = 0;
-        let mut best_price = 0; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
+        let mut execution_price = 0; // Will update at each step
         let mut quote_lot_left_to_spend = quote_lot_amount_to_spend;
 
         for order in book_side {
@@ -741,30 +741,18 @@ impl<'a> Book<'a> {
             let spent = quantity_matched.checked_mul(order.price()).unwrap();
             if spent > 0 {
                 // Current best execution price in quote_lot
-                best_price = order.price();
+                execution_price = order.price();
             }
             //
             cmlv_quantity = cmlv_quantity.checked_add(quantity_matched).unwrap();
             quote_lot_left_to_spend = quote_lot_left_to_spend.checked_sub(spent).unwrap();
-            msg!(
-                "cmlv_quantity {}, spent {},  quote_lot_left_to_spend {}",
-                cmlv_quantity,
-                spent,
-                quote_lot_left_to_spend
-            );
 
             // when the amount left to spend is inferior to the price of a base lot
             if quote_lot_left_to_spend == 0 || spent == 0 {
                 // success
-                msg!("success");
-                return Some(Order { quantity: cmlv_quantity, price: best_price });
+                return Some(Order { quantity: cmlv_quantity, price: execution_price });
             }
         }
-        msg!(
-            "failed (amount_to_spend {}, left {})",
-            quote_lot_amount_to_spend,
-            quote_lot_left_to_spend
-        );
         None
     }
 
