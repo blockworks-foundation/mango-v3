@@ -720,31 +720,41 @@ impl<'a> Book<'a> {
             Side::Ask => self.asks.iter(),
         };
         let mut cmlv_quantity: i64 = 0;
-        let mut best_price; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
-        let mut quote_lot_amount_left_to_spend = quote_lot_amount_to_spend;
+        let mut best_price = 0; // Will update at each step, to settle on the the best price possible to spend the whole "quote_amount"
+        let mut quote_lot_left_to_spend = quote_lot_amount_to_spend;
 
         for order in book_side {
-            // Current best execution price
-            best_price = order.price();
-            // How much can we fill with it :
-            let order_quote_amount = order.quantity.checked_mul(order.price()).unwrap();
-            let (quantity, spent) = {
-                if quote_lot_amount_left_to_spend < order_quote_amount {
-                    let quantity =
-                        quote_lot_amount_left_to_spend.checked_div(order.price()).unwrap();
-                    let spent = quantity.checked_mul(order.price()).unwrap();
-                    (quantity, spent)
+            // This order total value in quote lots
+            let order_size = order.quantity.checked_mul(order.price()).unwrap();
+            // How much base_lot we can fill for this order size
+            let quantity_matched = {
+                if quote_lot_left_to_spend < order_size {
+                    // we can finish the operation by purchasing this order partially
+                    // find out how much quantity that is in base lots
+                    quote_lot_left_to_spend.checked_div(order.price()).unwrap()
                 } else {
-                    let quantity = order_quote_amount;
-                    let spent = order_quote_amount.checked_mul(order.price()).unwrap();
-                    (quantity, spent)
+                    // we eat this order
+                    order.quantity
                 }
             };
-            cmlv_quantity = cmlv_quantity.checked_add(quantity).unwrap();
-            quote_lot_amount_left_to_spend =
-                quote_lot_amount_left_to_spend.checked_sub(spent).unwrap();
-            msg!("spent {}, {} left", spent, quote_lot_amount_left_to_spend);
-            if !(quote_lot_amount_left_to_spend > 0) {
+            // How much quote_lot were spent
+            let spent = quantity_matched.checked_mul(order.price()).unwrap();
+            if spent > 0 {
+                // Current best execution price in quote_lot
+                best_price = order.price();
+            }
+            //
+            cmlv_quantity = cmlv_quantity.checked_add(quantity_matched).unwrap();
+            quote_lot_left_to_spend = quote_lot_left_to_spend.checked_sub(spent).unwrap();
+            msg!(
+                "cmlv_quantity {}, spent {},  quote_lot_left_to_spend {}",
+                cmlv_quantity,
+                spent,
+                quote_lot_left_to_spend
+            );
+
+            // when the amount left to spend is inferior to the price of a base lot
+            if quote_lot_left_to_spend == 0 || spent == 0 {
                 // success
                 msg!("success");
                 return Some(Order { quantity: cmlv_quantity, price: best_price });
@@ -753,7 +763,7 @@ impl<'a> Book<'a> {
         msg!(
             "failed (amount_to_spend {}, left {})",
             quote_lot_amount_to_spend,
-            quote_lot_amount_left_to_spend
+            quote_lot_left_to_spend
         );
         None
     }
