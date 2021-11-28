@@ -522,6 +522,7 @@ impl Processor {
         exp: u8,
         version: u8,
         lm_size_shift: u8,
+        base_decimals: u8,
     ) -> MangoResult {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
@@ -580,7 +581,7 @@ impl Processor {
         // This means there isn't already a token and spot market in Mango
         // Default the decimals to 6 and only allow AddSpotMarket if it has 6 decimals
         if mango_group.tokens[market_index].is_empty() {
-            mango_group.tokens[market_index].decimals = 6;
+            mango_group.tokens[market_index].decimals = base_decimals;
         }
         // Initialize the Bids
         let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
