@@ -581,7 +581,7 @@ impl Processor {
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
         // This means there isn't already a token and spot market in Mango
-        // Default the decimals to 6 and only allow AddSpotMarket if it has 6 decimals
+        // Set the base decimals; if token not empty, ignore user input base_decimals
         if mango_group.tokens[market_index].is_empty() {
             mango_group.tokens[market_index].decimals = base_decimals;
         }
