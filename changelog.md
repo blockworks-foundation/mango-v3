@@ -4,6 +4,7 @@
 Deployed:
 1. Update margin basket check in ForceCancelSpot
 2. Update margin baskets in PlaceSpotOrder and PlaceSpotOrder2; intended to free up unused margin basket elements
+3. Allow passing in base_decimals when CreatePerpMarket before AddSpotMarket
 
 ## v3.2.6
 Deployed: Nov 20, 2021 at 20:53:42 UTC | Slot: 107,876,588

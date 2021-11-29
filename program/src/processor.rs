@@ -277,11 +277,8 @@ impl Processor {
         // If PerpMarket was added first, then decimals was set by the create_perp_market instruction.
         // Make sure the decimals is not changed
         if !mango_group.perp_markets[market_index].is_empty() {
-            let current_market_info = mango_group.tokens[market_index];
-            check!(
-                !current_market_info.is_empty() && mint.decimals == current_market_info.decimals,
-                MangoErrorCode::InvalidParam
-            )?;
+            let token_info = &mango_group.tokens[market_index];
+            check!(mint.decimals == token_info.decimals, MangoErrorCode::InvalidParam)?;
         }
 
         mango_group.tokens[market_index] = TokenInfo {
