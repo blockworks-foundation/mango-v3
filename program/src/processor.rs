@@ -1308,6 +1308,14 @@ impl Processor {
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
+        // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
+        for i in 0..mango_group.num_oracles {
+            if mango_account.in_margin_basket[i] {
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                mango_account.update_basket(i, &open_orders)?;
+            }
+        }
+
         // Adjust margin basket; this also makes this market an active asset
         mango_account.add_to_basket(market_index)?;
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
@@ -1453,7 +1461,7 @@ impl Processor {
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 22;
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
 
         let [
             mango_group_ai,         // read
@@ -1531,11 +1539,26 @@ impl Processor {
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
+        let mut open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+
+        // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
+        for i in 0..mango_group.num_oracles {
+            if mango_account.in_margin_basket[i] {
+                let open_orders = load_open_orders(open_orders_ais[i].unwrap())?;
+                mango_account.update_basket(i, &open_orders)?;
+            }
+        }
+
         // Adjust margin basket; this also makes this market an active asset
         mango_account.add_to_basket(market_index)?;
-
-        let open_orders_ais =
-            mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+        if open_orders_ais[market_index].is_none() {
+            open_orders_ais[market_index] = Some(mango_account.checked_unpack_open_orders_single(
+                &mango_group,
+                packed_open_orders_ais,
+                market_index,
+            )?);
+        }
 
         let active_assets = UserActiveAssets::new(&mango_group, &mango_account, vec![]);
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -2494,7 +2517,7 @@ impl Processor {
         liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
 
         let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
-        // check!(liqee_ma.in_margin_basket[market_index], MangoErrorCode::Default)?;
+        check!(liqee_ma.in_margin_basket[market_index], MangoErrorCode::Default)?;
 
         check_eq!(
             &mango_group.tokens[market_index].root_bank,
@@ -2572,6 +2595,9 @@ impl Processor {
         };
 
         if pre_base == 0 && pre_quote == 0 {
+            // margin basket may be in an invalid state; correct it before returning
+            let open_orders = load_open_orders(open_orders_ai)?;
+            liqee_ma.update_basket(market_index, &open_orders)?;
             return Ok(());
         }
 

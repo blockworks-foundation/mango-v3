@@ -1,5 +1,10 @@
 # Mango Program Change Log
 
+## v3.2.7
+Deployed:
+1. Update margin basket check in ForceCancelSpot
+2. Update margin baskets in PlaceSpotOrder and PlaceSpotOrder2; intended to free up unused margin basket elements
+
 ## v3.2.6
 Deployed: Nov 20, 2021 at 20:53:42 UTC | Slot: 107,876,588
 1. Checking the owner of OpenOrders accounts now

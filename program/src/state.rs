@@ -1340,25 +1340,33 @@ impl MangoAccount {
         true
     }
 
+    pub fn checked_unpack_open_orders_single<'a, 'b>(
+        &self,
+        mango_group: &MangoGroup,
+        packed_open_orders_ais: &'a [AccountInfo<'b>],
+        market_index: usize,
+    ) -> MangoResult<&'a AccountInfo<'b>> {
+        let open_orders_ai = packed_open_orders_ais
+            .iter()
+            .find(|ai| ai.key == &self.spot_open_orders[market_index])
+            .ok_or(throw_err!(MangoErrorCode::InvalidOpenOrdersAccount))?;
+
+        check_open_orders(open_orders_ai, &mango_group.signer_key, &mango_group.dex_program_id)?;
+        Ok(open_orders_ai)
+    }
     pub fn checked_unpack_open_orders<'a, 'b>(
         &self,
         mango_group: &MangoGroup,
-        open_orders_ais: &'a [AccountInfo<'b>],
+        packed_open_orders_ais: &'a [AccountInfo<'b>],
     ) -> MangoResult<Vec<Option<&'a AccountInfo<'b>>>> {
         let mut unpacked = vec![None; MAX_PAIRS];
         for i in 0..mango_group.num_oracles {
             if self.in_margin_basket[i] {
-                let open_orders_ai = open_orders_ais
-                    .iter()
-                    .find(|ai| ai.key == &self.spot_open_orders[i])
-                    .ok_or(throw_err!(MangoErrorCode::InvalidOpenOrdersAccount))?;
-
-                check_open_orders(
-                    open_orders_ai,
-                    &mango_group.signer_key,
-                    &mango_group.dex_program_id,
-                )?;
-                unpacked[i] = Some(open_orders_ai);
+                unpacked[i] = Some(self.checked_unpack_open_orders_single(
+                    mango_group,
+                    packed_open_orders_ais,
+                    i,
+                )?);
             }
         }
         Ok(unpacked)
