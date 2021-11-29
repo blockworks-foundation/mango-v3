@@ -274,11 +274,16 @@ impl Processor {
 
         let mint = Mint::unpack(&mint_ai.try_borrow_data()?)?;
 
-        // If PerpMarket was added first, then decimals is defaulted to 6.
-        // Make sure the decimals is maintained
+        // If PerpMarket was added first, then decimals was set by the create_perp_market instruction.
+        // Make sure the decimals is not changed
         if !mango_group.perp_markets[market_index].is_empty() {
-            check!(mint.decimals == 6, MangoErrorCode::InvalidParam)?;
+            let current_market_info = mango_group.tokens[market_index];
+            check!(
+                !current_market_info.is_empty() && mint.decimals == current_market_info.decimals,
+                MangoErrorCode::InvalidParam
+            )?;
         }
+
         mango_group.tokens[market_index] = TokenInfo {
             mint: *mint_ai.key,
             root_bank: *root_bank_ai.key,
@@ -5072,6 +5077,7 @@ impl Processor {
                 exp,
                 version,
                 lm_size_shift,
+                base_decimals,
             } => {
                 msg!("Mango: CreatePerpMarket");
                 Self::create_perp_market(
@@ -5091,6 +5097,7 @@ impl Processor {
                     exp,
                     version,
                     lm_size_shift,
+                    base_decimals,
                 )
             }
             MangoInstruction::ChangePerpMarketParams2 {
