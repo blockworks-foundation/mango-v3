@@ -642,8 +642,8 @@ impl BookSide {
 }
 
 pub struct Book<'a> {
-    bids: RefMut<'a, BookSide>,
-    asks: RefMut<'a, BookSide>,
+    pub bids: RefMut<'a, BookSide>,
+    pub asks: RefMut<'a, BookSide>,
 }
 
 impl<'a> Book<'a> {
