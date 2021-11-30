@@ -50,7 +50,7 @@ pub enum MangoInstruction {
 
     /// Deposit funds into mango account
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (9):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account for this user
@@ -702,6 +702,8 @@ pub enum MangoInstruction {
         version: u8,
         /// Helps with integer overflow
         lm_size_shift: u8,
+        /// define base decimals in case spot market has not yet been listed
+        base_decimals: u8,
     },
 
     /// Change the params for perp market.
@@ -1087,7 +1089,7 @@ impl MangoInstruction {
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }
             46 => {
-                let data_arr = array_ref![data, 0, 147];
+                let data_arr = array_ref![data, 0, 148];
                 let (
                     maint_leverage,
                     init_leverage,
@@ -1103,7 +1105,8 @@ impl MangoInstruction {
                     exp,
                     version,
                     lm_size_shift,
-                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8, 1, 1, 1];
+                    base_decimals,
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8, 1, 1, 1, 1];
                 MangoInstruction::CreatePerpMarket {
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
@@ -1119,6 +1122,7 @@ impl MangoInstruction {
                     exp: exp[0],
                     version: version[0],
                     lm_size_shift: lm_size_shift[0],
+                    base_decimals: base_decimals[0],
                 }
             }
             47 => {
