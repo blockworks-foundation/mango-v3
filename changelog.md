@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.7
-Deployed:
+Deployed: Nov 30, 2021 at 03:23:08 UTC | Slot: 109,359,973
 1. Update margin basket check in ForceCancelSpot
 2. Update margin baskets in PlaceSpotOrder and PlaceSpotOrder2; intended to free up unused margin basket elements
 3. Allow passing in base_decimals when CreatePerpMarket before AddSpotMarket
