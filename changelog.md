@@ -4,6 +4,31 @@
 Deployed:
 1. Allow canceling all perp orders on one side
 
+## v3.2.7
+Deployed: Nov 30, 2021 at 03:23:08 UTC | Slot: 109,359,973
+1. Update margin basket check in ForceCancelSpot
+2. Update margin baskets in PlaceSpotOrder and PlaceSpotOrder2; intended to free up unused margin basket elements
+3. Allow passing in base_decimals when CreatePerpMarket before AddSpotMarket
+4. Make bids and asks pub in Book
+
+## v3.2.6
+Deployed: Nov 20, 2021 at 20:53:42 UTC | Slot: 107,876,588
+1. Checking the owner of OpenOrders accounts now
+
+## v3.2.5
+Deployed: Nov 20, 2021 at 14:35:26 UTC | Slot: 107,833,583
+1. Fixed init_spot_open_orders bug not checking signer_key
+2. checking signer_key wherever it's passed it
+
+## v3.2.4
+Deployed: Nov 15, 2021 at 19:38:22 UTC | Slot: 107,052,828
+1. Updated the update_margin_basket function to include Serum dex OpenOrders accounts with any open orders.
+2. Add instruction UpdateMarginBasket to bring MangoAccount into compliance with new standard
+
+## v3.2.3
+Deployed: Deployed: Nov 15, 2021 at 15:25:19 UTC | Slot: 107,024,833
+1. Comment out in_margin_basket check in ForceCancelSpot due to to it being wrong for an account 
+
 ## v3.2.2
 Deployed: Deployed: Nov 7, 2021 at 14:20:04 UTC | Slot: 105,693,864
 1. Get rid of destructuring assignment feature

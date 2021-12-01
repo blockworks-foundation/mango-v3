@@ -32,13 +32,13 @@ use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
-    load_asks_mut, load_bids_mut, load_market_state, load_open_orders, AdvancedOrderType,
-    AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount, MangoCache,
-    MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpTriggerOrder,
-    PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
-    UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
-    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX,
-    ZERO_I80F48,
+    check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
+    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
+    MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
+    PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
+    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
+    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48,
+    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
@@ -281,11 +281,13 @@ impl Processor {
 
         let mint = Mint::unpack(&mint_ai.try_borrow_data()?)?;
 
-        // If PerpMarket was added first, then decimals is defaulted to 6.
-        // Make sure the decimals is maintained
+        // If PerpMarket was added first, then decimals was set by the create_perp_market instruction.
+        // Make sure the decimals is not changed
         if !mango_group.perp_markets[market_index].is_empty() {
-            check!(mint.decimals == 6, MangoErrorCode::InvalidParam)?;
+            let token_info = &mango_group.tokens[market_index];
+            check!(mint.decimals == token_info.decimals, MangoErrorCode::InvalidParam)?;
         }
+
         mango_group.tokens[market_index] = TokenInfo {
             mint: *mint_ai.key,
             root_bank: *root_bank_ai.key,
@@ -630,6 +632,7 @@ impl Processor {
         exp: u8,
         version: u8,
         lm_size_shift: u8,
+        base_decimals: u8,
     ) -> MangoResult {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
@@ -686,9 +689,9 @@ impl Processor {
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
 
         // This means there isn't already a token and spot market in Mango
-        // Default the decimals to 6 and only allow AddSpotMarket if it has 6 decimals
+        // Set the base decimals; if token not empty, ignore user input base_decimals
         if mango_group.tokens[market_index].is_empty() {
-            mango_group.tokens[market_index].decimals = 6;
+            mango_group.tokens[market_index].decimals = base_decimals;
         }
         // Initialize the Bids
         let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent)?;
@@ -1154,12 +1157,13 @@ impl Processor {
         check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -1253,6 +1257,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
 
         let market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
@@ -1340,6 +1345,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1380,6 +1386,14 @@ impl Processor {
         )?;
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
+        for i in 0..mango_group.num_oracles {
+            if mango_account.in_margin_basket[i] {
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                mango_account.update_basket(i, &open_orders)?;
+            }
+        }
 
         // Adjust margin basket; this also makes this market an active asset
         mango_account.add_to_basket(market_index)?;
@@ -1526,7 +1540,7 @@ impl Processor {
         order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 22;
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
 
         let [
             mango_group_ai,         // read
@@ -1562,6 +1576,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1603,11 +1618,26 @@ impl Processor {
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
+        let mut open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+
+        // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
+        for i in 0..mango_group.num_oracles {
+            if mango_account.in_margin_basket[i] {
+                let open_orders = load_open_orders(open_orders_ais[i].unwrap())?;
+                mango_account.update_basket(i, &open_orders)?;
+            }
+        }
+
         // Adjust margin basket; this also makes this market an active asset
         mango_account.add_to_basket(market_index)?;
-
-        let open_orders_ais =
-            mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+        if open_orders_ais[market_index].is_none() {
+            open_orders_ais[market_index] = Some(mango_account.checked_unpack_open_orders_single(
+                &mango_group,
+                packed_open_orders_ais,
+                market_index,
+            )?);
+        }
 
         let active_assets = UserActiveAssets::new(&mango_group, &mango_account, vec![]);
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -1775,6 +1805,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1818,7 +1849,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 18;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1845,6 +1876,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::id(), MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -1891,6 +1923,8 @@ impl Processor {
         if *open_orders_ai.key == Pubkey::default() {
             return Ok(());
         }
+
+        check_open_orders(open_orders_ai, &mango_group.signer_key, &mango_group.dex_program_id)?;
 
         let (pre_base, pre_quote) = {
             let open_orders = load_open_orders(open_orders_ai)?;
@@ -2439,6 +2473,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(fees_vault_ai.key == &mango_group.fees_vault, MangoErrorCode::InvalidVault)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2552,6 +2587,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
@@ -2638,6 +2674,9 @@ impl Processor {
         };
 
         if pre_base == 0 && pre_quote == 0 {
+            // margin basket may be in an invalid state; correct it before returning
+            let open_orders = load_open_orders(open_orders_ai)?;
+            liqee_ma.update_basket(market_index, &open_orders)?;
             return Ok(());
         }
 
@@ -3513,6 +3552,8 @@ impl Processor {
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let mut liqee_ma =
@@ -3671,6 +3712,8 @@ impl Processor {
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
 
@@ -4109,6 +4152,8 @@ impl Processor {
         check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
         let market_index = mango_group
             .find_perp_market_index(perp_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
@@ -4254,6 +4299,7 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(msrm_vault_ai.key == &mango_group.msrm_vault, MangoErrorCode::InvalidVault)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -4752,6 +4798,42 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn update_margin_basket(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+        ] = fixed_ais;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
+        for i in 0..mango_group.num_oracles {
+            check_eq!(
+                open_orders_ais[i].key,
+                &mango_account.spot_open_orders[i],
+                MangoErrorCode::InvalidOpenOrdersAccount
+            )?;
+
+            if mango_account.spot_open_orders[i] != Pubkey::default() {
+                check_open_orders(
+                    &open_orders_ais[i],
+                    &mango_group.signer_key,
+                    &mango_group.dex_program_id,
+                )?;
+                let open_orders = load_open_orders(&open_orders_ais[i])?;
+                mango_account.update_basket(i, &open_orders)?;
+            }
+        }
+
+        Ok(())
+    }
+    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult<()> {
     /// ***rp Cancel all orders for one side of a perp market
     #[inline(never)]
     #[allow(dead_code)]
@@ -5211,6 +5293,7 @@ impl Processor {
                 exp,
                 version,
                 lm_size_shift,
+                base_decimals,
             } => {
                 msg!("Mango: CreatePerpMarket");
                 Self::create_perp_market(
@@ -5230,6 +5313,7 @@ impl Processor {
                     exp,
                     version,
                     lm_size_shift,
+                    base_decimals,
                 )
             }
             MangoInstruction::ChangePerpMarketParams2 {
@@ -5263,6 +5347,10 @@ impl Processor {
                     version,
                     lm_size_shift,
                 )
+            }
+            MangoInstruction::UpdateMarginBasket => {
+                msg!("Mango: UpdateMarginBasket");
+                Self::update_margin_basket(program_id, accounts)
             }
             MangoInstruction::ChangeSpotMarketParams {
                 maint_leverage,
