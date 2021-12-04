@@ -29,7 +29,7 @@ use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
+use crate::oracle::{determine_oracle_type, OracleType, Price, PriceStatus, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
@@ -38,7 +38,7 @@ use crate::state::{
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
     TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48,
-    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
@@ -946,19 +946,20 @@ impl Processor {
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
+        let last_update = clock.unix_timestamp as u64;
 
         let mut oracle_indexes = Vec::new();
         let mut oracle_prices = Vec::new();
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-            let oracle_price = read_oracle(&mango_group, oracle_index, oracle_ai)?;
 
-            mango_cache.price_cache[oracle_index] =
-                PriceCache { price: oracle_price, last_update: now_ts };
+            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
+                mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
-            oracle_indexes.push(oracle_index as u64);
-            oracle_prices.push(oracle_price.to_bits());
+                oracle_indexes.push(oracle_index as u64);
+                oracle_prices.push(price.to_bits());
+            }
+            // TODO: log errors
         }
 
         mango_emit!(CachePricesLog {
@@ -5320,8 +5321,24 @@ fn read_oracle(
 
     let price = match oracle_type {
         OracleType::Pyth => {
-            let price_account = Price::get_price(oracle_ai).unwrap();
+            let price_account = Price::get_price(oracle_ai)?;
             let value = I80F48::from_num(price_account.agg.price);
+            let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
+
+            // Filter out bad prices
+            if price_account.agg.status != PriceStatus::Trading {
+                msg!("Pyth status invalid: {}", price_account.agg.status as u8);
+                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            } else if conf > PYTH_CONF_FILTER {
+                msg!(
+                    "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
+                    token_index,
+                    value.to_num::<f64>(),
+                    conf.to_num::<f64>()
+                );
+                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            }
+
             let decimals = quote_decimals
                 .checked_add(price_account.expo)
                 .unwrap()
@@ -5340,7 +5357,6 @@ fn read_oracle(
             I80F48::from_num(oracle.price)
         }
         OracleType::Switchboard => {
-            // TODO do decimal fixes for cases where base decimals != quote decimals
             let result =
                 FastRoundResultAccountData::deserialize(&oracle_ai.try_borrow_data()?).unwrap();
             let value = I80F48::from_num(result.result.result);
@@ -5356,9 +5372,7 @@ fn read_oracle(
                 value
             }
         }
-        OracleType::Unknown => {
-            panic!("Unknown oracle");
-        }
+        OracleType::Unknown => return Err(throw_err!(MangoErrorCode::InvalidOracleType)),
     };
     Ok(price)
 }

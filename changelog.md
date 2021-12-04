@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.2.8
+Deployed: Dec 4, 2021 at 21:04:59 | Slot: 110,056,063
+1. Add check to Pyth CachePrice so conf intervals larger than 10% result in no change to cache price
+
 ## v3.2.7
 Deployed: Nov 30, 2021 at 03:23:08 UTC | Slot: 109,359,973
 1. Update margin basket check in ForceCancelSpot
