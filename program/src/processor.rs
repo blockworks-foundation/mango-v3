@@ -29,7 +29,7 @@ use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
+use crate::oracle::{determine_oracle_type, OracleType, Price, PriceStatus, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
@@ -38,7 +38,7 @@ use crate::state::{
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
     TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48,
-    ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 use anchor_lang::prelude::emit;
@@ -952,7 +952,12 @@ impl Processor {
         let mut oracle_prices = Vec::new();
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-            let oracle_price = read_oracle(&mango_group, oracle_index, oracle_ai)?;
+            let oracle_price = read_oracle(
+                &mango_group,
+                oracle_index,
+                oracle_ai,
+                &mango_cache.price_cache[oracle_index],
+            )?;
 
             mango_cache.price_cache[oracle_index] =
                 PriceCache { price: oracle_price, last_update: now_ts };
@@ -5312,6 +5317,7 @@ fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
+    price_cache: &PriceCache,
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -5322,17 +5328,25 @@ fn read_oracle(
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
-            let decimals = quote_decimals
-                .checked_add(price_account.expo)
-                .unwrap()
-                .checked_sub(base_decimals)
-                .unwrap();
+            let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
-            let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
-            if decimals < 0 {
-                value.checked_div(decimal_adj).unwrap()
+            // Filter out bad prices
+            if price_account.agg.status != PriceStatus::Trading || conf > PYTH_CONF_FILTER {
+                // TODO consider erroring in this case
+                price_cache.price
             } else {
-                value.checked_mul(decimal_adj).unwrap()
+                let decimals = quote_decimals
+                    .checked_add(price_account.expo)
+                    .unwrap()
+                    .checked_sub(base_decimals)
+                    .unwrap();
+
+                let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
+                if decimals < 0 {
+                    value.checked_div(decimal_adj).unwrap()
+                } else {
+                    value.checked_mul(decimal_adj).unwrap()
+                }
             }
         }
         OracleType::Stub => {
@@ -5340,7 +5354,6 @@ fn read_oracle(
             I80F48::from_num(oracle.price)
         }
         OracleType::Switchboard => {
-            // TODO do decimal fixes for cases where base decimals != quote decimals
             let result =
                 FastRoundResultAccountData::deserialize(&oracle_ai.try_borrow_data()?).unwrap();
             let value = I80F48::from_num(result.result.result);
