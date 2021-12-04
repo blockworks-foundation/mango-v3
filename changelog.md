@@ -2,7 +2,7 @@
 
 ## v3.2.8
 Deployed:  | Slot: 
-1. Add check to Pyth CachePrice so conf intervals larger than 5% result in no change to cache price
+1. Add check to Pyth CachePrice so conf intervals larger than 10% result in no change to cache price
 
 ## v3.2.7
 Deployed: Nov 30, 2021 at 03:23:08 UTC | Slot: 109,359,973

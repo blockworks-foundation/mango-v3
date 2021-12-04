@@ -946,24 +946,20 @@ impl Processor {
         let mut mango_cache =
             MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
         let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
+        let last_update = clock.unix_timestamp as u64;
 
         let mut oracle_indexes = Vec::new();
         let mut oracle_prices = Vec::new();
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
-            let oracle_price = read_oracle(
-                &mango_group,
-                oracle_index,
-                oracle_ai,
-                &mango_cache.price_cache[oracle_index],
-            )?;
 
-            mango_cache.price_cache[oracle_index] =
-                PriceCache { price: oracle_price, last_update: now_ts };
+            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
+                mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
-            oracle_indexes.push(oracle_index as u64);
-            oracle_prices.push(oracle_price.to_bits());
+                oracle_indexes.push(oracle_index as u64);
+                oracle_prices.push(price.to_bits());
+            }
+            // TODO: log errors
         }
 
         mango_emit!(CachePricesLog {
@@ -5317,7 +5313,6 @@ fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
-    price_cache: &PriceCache,
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -5326,27 +5321,35 @@ fn read_oracle(
 
     let price = match oracle_type {
         OracleType::Pyth => {
-            let price_account = Price::get_price(oracle_ai).unwrap();
+            let price_account = Price::get_price(oracle_ai)?;
             let value = I80F48::from_num(price_account.agg.price);
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
             // Filter out bad prices
-            if price_account.agg.status != PriceStatus::Trading || conf > PYTH_CONF_FILTER {
-                // TODO consider erroring in this case
-                price_cache.price
-            } else {
-                let decimals = quote_decimals
-                    .checked_add(price_account.expo)
-                    .unwrap()
-                    .checked_sub(base_decimals)
-                    .unwrap();
+            if price_account.agg.status != PriceStatus::Trading {
+                msg!("Pyth status invalid: {}", price_account.agg.status as u8);
+                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            } else if conf > PYTH_CONF_FILTER {
+                msg!(
+                    "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
+                    token_index,
+                    value.to_num::<f64>(),
+                    conf.to_num::<f64>()
+                );
+                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            }
 
-                let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
-                if decimals < 0 {
-                    value.checked_div(decimal_adj).unwrap()
-                } else {
-                    value.checked_mul(decimal_adj).unwrap()
-                }
+            let decimals = quote_decimals
+                .checked_add(price_account.expo)
+                .unwrap()
+                .checked_sub(base_decimals)
+                .unwrap();
+
+            let decimal_adj = I80F48::from_num(10u64.pow(decimals.abs() as u32));
+            if decimals < 0 {
+                value.checked_div(decimal_adj).unwrap()
+            } else {
+                value.checked_mul(decimal_adj).unwrap()
             }
         }
         OracleType::Stub => {
@@ -5369,9 +5372,7 @@ fn read_oracle(
                 value
             }
         }
-        OracleType::Unknown => {
-            panic!("Unknown oracle");
-        }
+        OracleType::Unknown => return Err(throw_err!(MangoErrorCode::InvalidOracleType)),
     };
     Ok(price)
 }
