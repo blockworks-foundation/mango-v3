@@ -1296,7 +1296,6 @@ pub fn init_mango_account(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
     ];
 
     let instr = MangoInstruction::InitMangoAccount;
