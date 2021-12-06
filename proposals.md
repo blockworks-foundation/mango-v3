@@ -1,4 +1,6 @@
 # Mango Program Improvement Proposals
+## v3.3
+* flash loans to reduce fees on serum dex
 
 ## v3.2
 * implement change rate params so optimal utilization can be moved to 80%
@@ -10,7 +12,6 @@
   * AddSpotMarket
 * auto migrate to v3 from v2 
 * close MangoAccount and OpenOrders accounts to recoup funds
-* flash loans to reduce fees on serum dex
 
 
 ## v4.0

@@ -271,8 +271,10 @@ impl MangoGroup {
 pub struct RootBank {
     pub meta_data: MetaData,
 
-    pub optimal_util: I80F48,
-    pub optimal_rate: I80F48,
+    // pub optimal_util: I80F48,
+    // pub optimal_rate: I80F48,
+    pub util0: I80F48, // ***
+    pub rate0: I80F48, // ***
     pub max_rate: I80F48,
 
     pub num_node_banks: usize,
@@ -282,7 +284,9 @@ pub struct RootBank {
     pub borrow_index: I80F48,
     pub last_updated: u64,
 
-    padding: [u8; 64], // used for future expansions
+    pub util1: I80F48, // ***
+    pub rate1: I80F48, // ***
+    padding: [u8; 32], // *** used for future expansions
 }
 
 impl RootBank {
@@ -291,9 +295,12 @@ impl RootBank {
         program_id: &Pubkey,
         node_bank_ai: &'a AccountInfo,
         rent: &Rent,
-        optimal_util: I80F48,
-        optimal_rate: I80F48,
+        util0: I80F48,
+        rate0: I80F48,
+        util1: I80F48,
+        rate1: I80F48,
         max_rate: I80F48,
+        version: u8,
     ) -> MangoResult<RefMut<'a, Self>> {
         let mut root_bank: RefMut<'a, Self> = Self::load_mut(account)?;
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
@@ -301,32 +308,35 @@ impl RootBank {
             rent.is_exempt(account.lamports(), size_of::<Self>()),
             MangoErrorCode::AccountNotRentExempt
         )?;
-        check!(!root_bank.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(!root_bank.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
 
-        root_bank.meta_data = MetaData::new(DataType::RootBank, 0, true);
+        root_bank.meta_data = MetaData::new(DataType::RootBank, version, true);
         root_bank.node_banks[0] = *node_bank_ai.key;
         root_bank.num_node_banks = 1;
         root_bank.deposit_index = INDEX_START;
         root_bank.borrow_index = INDEX_START;
 
-        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
+        root_bank.set_rate_params(util0, rate0, util1, rate1, max_rate)?;
         Ok(root_bank)
     }
     pub fn set_rate_params(
         &mut self,
-        optimal_util: I80F48,
-        optimal_rate: I80F48,
+        util0: I80F48,
+        rate0: I80F48,
+        util1: I80F48,
+        rate1: I80F48,
         max_rate: I80F48,
-    ) -> MangoResult<()> {
-        check!(
-            optimal_util > ZERO_I80F48 && optimal_util < ONE_I80F48,
-            MangoErrorCode::InvalidParam
-        )?;
-        check!(optimal_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
-        check!(max_rate >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+    ) -> MangoResult {
+        check!(util0 > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(util1 >= util0 && util1 < ONE_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(rate0 >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(rate1 >= rate0, MangoErrorCode::InvalidParam)?;
+        check!(max_rate >= rate1, MangoErrorCode::InvalidParam)?;
 
-        self.optimal_util = optimal_util;
-        self.optimal_rate = optimal_rate;
+        self.util0 = util0;
+        self.rate0 = rate0;
+        self.util1 = util1;
+        self.rate1 = rate1;
         self.max_rate = max_rate;
 
         Ok(())
@@ -376,7 +386,7 @@ impl RootBank {
         node_bank_ais: &[AccountInfo],
         program_id: &Pubkey,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let mut native_deposits = ZERO_I80F48;
         let mut native_borrows = ZERO_I80F48;
 
@@ -394,13 +404,31 @@ impl RootBank {
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
-        let interest_rate = if utilization > self.optimal_util {
-            let extra_util = utilization - self.optimal_util;
-            let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
-            self.optimal_rate + slope * extra_util
+        let interest_rate = if self.meta_data.version == 0 {
+            // version 0 does not have util1 and rate1 defined
+            if utilization > self.util0 {
+                let extra_util = utilization - self.util0;
+                let slope = (self.max_rate - self.rate0) / (ONE_I80F48 - self.util0);
+                self.rate0 + slope * extra_util
+            } else {
+                let slope = self.rate0 / self.util0;
+                slope * utilization
+            }
         } else {
-            let slope = self.optimal_rate / self.optimal_util;
-            slope * utilization
+            if utilization <= self.util0 {
+                let slope = self.rate0 / self.util0;
+                slope * utilization
+            } else if utilization <= self.util1 {
+                // assume util1 >= util0
+                let extra_util = utilization - self.util0;
+                // no need to check for div by zero because if util1 == util0, then we wouldn't be in this branch
+                let slope = (self.rate1 - self.rate0) / (self.util1 - self.util0);
+                self.rate0 + slope * extra_util
+            } else {
+                let extra_util = utilization - self.util1;
+                let slope = (self.max_rate - self.rate1) / (ONE_I80F48 - self.util1);
+                self.rate1 + slope * extra_util
+            }
         };
 
         let borrow_interest: I80F48 =
@@ -1233,10 +1261,33 @@ impl MangoAccount {
             let (quote_free, quote_locked, base_free, base_locked) =
                 split_open_orders(&open_orders);
 
-            // Simulate the health if all bids are executed at current price
-            let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+            // Two "worst-case" scenarios are considered:
+            // 1. All bids are executed at current price, producing a base amount of bids_base_net
+            //    when all quote_locked are converted to base.
+            // 2. All asks are executed at current price, producing a base amount of asks_base_net
+            //    because base_locked would be converted to quote.
+            let bids_base_net: I80F48 = base_net + base_free + base_locked + quote_locked / price;
             let asks_base_net = base_net + base_free;
 
+            // Report the scenario that would have a worse outcome on health.
+            //
+            // Explanation: This function returns (base, quote) and the values later get used in
+            //     health += (if base > 0 { asset_weight } else { liab_weight }) * base + quote
+            // and here we return the scenario that will increase health the least.
+            //
+            // Correctness proof:
+            // - always bids_base_net >= asks_base_net
+            // - note that scenario 1 returns (a + b, c)
+            //         and scenario 2 returns (a,     c + b), and b >= 0, c >= 0
+            // - if a >= 0: scenario 1 will lead to less health as asset_weight <= 1.
+            // - if a < 0 and b <= -a: scenario 2 will lead to less health as liab_weight >= 1.
+            // - if a < 0 and b > -a:
+            //   The health contributions of both scenarios are identical if
+            //       asset_weight * (a + b) + c = liab_weight * a + c + b
+            //   <=> b = (asset_weight - liab_weight) / (1 - asset_weight) * a
+            //   <=> b = -2 a  since asset_weight + liab_weight = 2 by weight construction
+            //   So the worse scenario switches when a + b = -a.
+            // That means scenario 1 leads to less health whenever |a + b| > |a|.
             if bids_base_net.abs() > asks_base_net.abs() {
                 Ok((bids_base_net * price, quote_free))
             } else {
@@ -1995,7 +2046,7 @@ impl PerpMarket {
         mango_cache: &MangoCache,
         market_index: usize,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // Get the index price from cache, ensure it's not outdated
         let price_cache = &mango_cache.price_cache[market_index];
         price_cache.check_valid(&mango_group, now_ts)?;
@@ -2004,9 +2055,15 @@ impl PerpMarket {
         // Get current book price & compare it to index price
 
         // TODO get impact bid and impact ask if compute allows
-        // TODO consider corner cases of funding being updated
-        let bid = book.get_best_bid_price();
-        let ask = book.get_best_ask_price();
+        // let bid = book.get_best_bid_price();
+        // let ask = book.get_best_ask_price();
+
+        // hard-coded for now because there's no convenient place to put this; also creates breaking
+        // change if we make this a parameter
+        const IMPACT_QUANTITY: i64 = 100;
+        // TODO test the compute impact of worst case scenario
+        let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY);
+        let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY);
 
         const MAX_FUNDING: I80F48 = I80F48!(0.05);
         const MIN_FUNDING: I80F48 = I80F48!(-0.05);

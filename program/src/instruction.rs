@@ -783,6 +783,42 @@ pub enum MangoInstruction {
     CloseAdvancedOrders,
     CreateDustAccount,
     ResolveDust,
+
+    /// Change the params for a spot market.
+    ///
+    /// Accounts expected by this instruction (4):
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[]` spot_market_ai - Market
+    /// 2. `[writable]` root_bank_ai - RootBank
+    /// 3. `[signer]` admin_ai - MangoGroup admin
+    ChangeSpotMarketParams {
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        maint_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        init_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        liquidation_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        util0: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        rate0: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        util1: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        rate1: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        max_rate: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        version: Option<u8>,
+    },
 }
 
 impl MangoInstruction {
@@ -1182,6 +1218,32 @@ impl MangoInstruction {
             50 => MangoInstruction::CloseAdvancedOrders,
             51 => MangoInstruction::CreateDustAccount,
             52 => MangoInstruction::ResolveDust,
+            53 => {
+                let data_arr = array_ref![data, 0, 138];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    util0,
+                    rate0,
+                    util1,
+                    rate1,
+                    max_rate,
+                    version,
+                ) = array_refs![data_arr, 17, 17, 17, 17, 17, 17, 17, 17, 2];
+
+                MangoInstruction::ChangeSpotMarketParams {
+                    maint_leverage: unpack_i80f48_opt(maint_leverage),
+                    init_leverage: unpack_i80f48_opt(init_leverage),
+                    liquidation_fee: unpack_i80f48_opt(liquidation_fee),
+                    util0: unpack_i80f48_opt(util0),
+                    rate0: unpack_i80f48_opt(rate0),
+                    util1: unpack_i80f48_opt(util1),
+                    rate1: unpack_i80f48_opt(rate1),
+                    max_rate: unpack_i80f48_opt(max_rate),
+                    version: unpack_u8_opt(version),
+                }
+            }
             _ => {
                 return None;
             }
