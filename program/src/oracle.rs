@@ -78,7 +78,7 @@ pub enum AccountType {
 
 // aggregate and contributing prices are associated with a status
 // only Trading status is valid
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum PriceStatus {
     Unknown,
