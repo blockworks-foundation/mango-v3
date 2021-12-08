@@ -121,6 +121,8 @@ pub enum MangoErrorCode {
     InvalidOracleType,
     #[error("MangoErrorCode::InvalidOraclePrice")]
     InvalidOraclePrice,
+    #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
+    MaxAccountsReached,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
