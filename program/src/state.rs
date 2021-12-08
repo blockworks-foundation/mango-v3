@@ -200,7 +200,9 @@ pub struct MangoGroup {
     pub msrm_vault: Pubkey,
     pub fees_vault: Pubkey,
 
-    pub padding: [u8; 32], // padding used for future expansions
+    pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
+    pub num_mango_accounts: u32, // number of MangoAccounts.v1
+    pub padding: [u8; 24],       // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -1400,19 +1402,19 @@ impl MangoAccount {
     }
 
     /// Add a perp order for the market_index
-    pub fn add_order(
-        &mut self,
-        market_index: usize,
-        side: Side,
-        order: &LeafNode,
-    ) -> MangoResult<()> {
+    pub fn add_order(&mut self, market_index: usize, side: Side, order: &LeafNode) -> MangoResult {
         match side {
             Side::Bid => {
-                // TODO make checked
-                self.perp_accounts[market_index].bids_quantity += order.quantity;
+                self.perp_accounts[market_index].bids_quantity = self.perp_accounts[market_index]
+                    .bids_quantity
+                    .checked_add(order.quantity)
+                    .unwrap();
             }
             Side::Ask => {
-                self.perp_accounts[market_index].asks_quantity += order.quantity;
+                self.perp_accounts[market_index].asks_quantity = self.perp_accounts[market_index]
+                    .asks_quantity
+                    .checked_add(order.quantity)
+                    .unwrap();
             }
         };
         let slot = order.owner_slot as usize;

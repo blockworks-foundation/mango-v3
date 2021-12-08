@@ -1,5 +1,10 @@
 # Mango Program Change Log
 
+## v3.2.9
+Deployed: Dec 8, 2021 at 22:29:47 UTC | Slot: 110,669,751
+1. Add ChangeMaxMangoAccounts
+2. Add some checked math in MangoAccount and matching
+
 ## v3.2.8
 Deployed: Dec 4, 2021 at 21:04:59 | Slot: 110,056,063
 1. Add check to Pyth CachePrice so conf intervals larger than 10% result in no change to cache price
