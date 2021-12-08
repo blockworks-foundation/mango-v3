@@ -792,7 +792,7 @@ impl<'a> Book<'a> {
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
     ) -> MangoResult<(i64, i64, i64, i64)> {
-        let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0, 0);
+        let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0i64, 0);
 
         let (post_only, post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
@@ -814,7 +814,7 @@ impl<'a> Book<'a> {
         let mut current = match self.asks.root() {
             None => {
                 if rem_quantity > 0 && post_allowed {
-                    bids_quantity += rem_quantity;
+                    bids_quantity = bids_quantity.checked_add(rem_quantity).unwrap();
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
             }
@@ -854,7 +854,7 @@ impl<'a> Book<'a> {
         }
 
         if rem_quantity > 0 && post_allowed {
-            bids_quantity += rem_quantity;
+            bids_quantity = bids_quantity.checked_add(rem_quantity).unwrap();
         }
         Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
     }
@@ -865,7 +865,7 @@ impl<'a> Book<'a> {
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
     ) -> MangoResult<(i64, i64, i64, i64)> {
-        let (mut taker_base, mut taker_quote, bids_quantity, mut asks_quantity) = (0, 0, 0, 0);
+        let (mut taker_base, mut taker_quote, bids_quantity, mut asks_quantity) = (0, 0, 0, 0i64);
 
         let (post_only, post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
@@ -887,7 +887,7 @@ impl<'a> Book<'a> {
         let mut current = match self.bids.root() {
             None => {
                 if rem_quantity > 0 && post_allowed {
-                    asks_quantity += rem_quantity;
+                    asks_quantity = asks_quantity.checked_add(rem_quantity).unwrap();
                 }
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
             }
@@ -927,7 +927,7 @@ impl<'a> Book<'a> {
         }
 
         if rem_quantity > 0 && post_allowed {
-            asks_quantity += rem_quantity;
+            asks_quantity = asks_quantity.checked_add(rem_quantity).unwrap();
         }
         Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
     }

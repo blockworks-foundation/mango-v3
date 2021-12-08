@@ -1402,19 +1402,19 @@ impl MangoAccount {
     }
 
     /// Add a perp order for the market_index
-    pub fn add_order(
-        &mut self,
-        market_index: usize,
-        side: Side,
-        order: &LeafNode,
-    ) -> MangoResult<()> {
+    pub fn add_order(&mut self, market_index: usize, side: Side, order: &LeafNode) -> MangoResult {
         match side {
             Side::Bid => {
-                // TODO make checked
-                self.perp_accounts[market_index].bids_quantity += order.quantity;
+                self.perp_accounts[market_index].bids_quantity = self.perp_accounts[market_index]
+                    .bids_quantity
+                    .checked_add(order.quantity)
+                    .unwrap();
             }
             Side::Ask => {
-                self.perp_accounts[market_index].asks_quantity += order.quantity;
+                self.perp_accounts[market_index].asks_quantity = self.perp_accounts[market_index]
+                    .asks_quantity
+                    .checked_add(order.quantity)
+                    .unwrap();
             }
         };
         let slot = order.owner_slot as usize;

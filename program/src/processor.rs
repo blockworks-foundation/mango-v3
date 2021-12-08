@@ -4758,7 +4758,6 @@ impl Processor {
 
         Ok(())
     }
-    // *** TODO create client functions and instruction.rs
     #[inline(never)]
     /// Change the maximum number of MangoAccounts.v1 allowed
     fn change_max_mango_accounts(
