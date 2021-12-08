@@ -834,8 +834,8 @@ pub enum MangoInstruction {
     /// 3. `[]` system_prog_ai - System program
     CreateMangoAccount {
         account_num: u64,
-    }
-    
+    },
+
     /// Accounts expected by this instruction (2 + MAX_PAIRS):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - MangoAccount
@@ -1253,7 +1253,7 @@ impl MangoInstruction {
                 MangoInstruction::ChangeMaxMangoAccounts {
                     max_mango_accounts: u32::from_le_bytes(*data_arr),
                 }
-            }            
+            }
             50 => MangoInstruction::CloseMangoAccount,
             51 => MangoInstruction::CloseSpotOpenOrders,
             52 => MangoInstruction::CloseAdvancedOrders,
