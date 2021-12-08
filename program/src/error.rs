@@ -117,6 +117,10 @@ pub enum MangoErrorCode {
     TriggerConditionFalse,
     #[error("MangoErrorCode::InvalidSeeds Invalid seeds. Unable to create PDA")]
     InvalidSeeds,
+    #[error("MangoErrorCode::InvalidOracleType The oracle account was not recognized")]
+    InvalidOracleType,
+    #[error("MangoErrorCode::InvalidOraclePrice")]
+    InvalidOraclePrice,
     #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
     MaxAccountsReached,
 

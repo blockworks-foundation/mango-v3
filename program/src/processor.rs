@@ -2247,7 +2247,24 @@ impl Processor {
 
         // If reduce_only, position must only go down
         let quantity = if reduce_only {
-            let base_pos = mango_account.perp_accounts[market_index].base_position;
+            let mut base_pos = mango_account.perp_accounts[market_index].base_position
+                + mango_account.perp_accounts[market_index].taker_base;
+
+            // Iterate through event queue and find out maker fills
+            // *** TODO - test full event queue
+            // add in taker base
+            for event in event_queue.iter() {
+                if EventType::try_from(event.event_type).map_err(|_| throw!())? == EventType::Fill {
+                    let fill: &FillEvent = cast_ref(event);
+                    if &fill.maker == mango_account_ai.key {
+                        base_pos = match fill.taker_side {
+                            Side::Bid => base_pos - fill.quantity,
+                            Side::Ask => base_pos + fill.quantity,
+                        };
+                    }
+                }
+            }
+
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
             } else {
@@ -5492,6 +5509,9 @@ impl Processor {
                     max_rate,
                     version,
                 )
+            }
+            MangoInstruction::ChangeSpotMarketParams { .. } => {
+                todo!()
             }
         }
     }

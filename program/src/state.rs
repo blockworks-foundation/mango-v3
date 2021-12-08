@@ -45,6 +45,7 @@ pub const MAX_PERP_OPEN_ORDERS: usize = 64;
 pub const FREE_ORDER_SLOT: u8 = u8::MAX;
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
+pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -1318,10 +1319,11 @@ impl MangoAccount {
         &mut self,
         market_index: usize,
         open_orders: &serum_dex::state::OpenOrders,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let is_empty = open_orders.native_pc_total == 0
             && open_orders.native_coin_total == 0
-            && open_orders.referrer_rebates_accrued == 0;
+            && open_orders.referrer_rebates_accrued == 0
+            && open_orders.free_slot_bits == u128::MAX;
 
         if self.in_margin_basket[market_index] && is_empty {
             self.in_margin_basket[market_index] = false;
@@ -1392,21 +1394,33 @@ impl MangoAccount {
         true
     }
 
+    pub fn checked_unpack_open_orders_single<'a, 'b>(
+        &self,
+        mango_group: &MangoGroup,
+        packed_open_orders_ais: &'a [AccountInfo<'b>],
+        market_index: usize,
+    ) -> MangoResult<&'a AccountInfo<'b>> {
+        let open_orders_ai = packed_open_orders_ais
+            .iter()
+            .find(|ai| ai.key == &self.spot_open_orders[market_index])
+            .ok_or(throw_err!(MangoErrorCode::InvalidOpenOrdersAccount))?;
+
+        check_open_orders(open_orders_ai, &mango_group.signer_key, &mango_group.dex_program_id)?;
+        Ok(open_orders_ai)
+    }
     pub fn checked_unpack_open_orders<'a, 'b>(
         &self,
         mango_group: &MangoGroup,
-        open_orders_ais: &'a [AccountInfo<'b>],
+        packed_open_orders_ais: &'a [AccountInfo<'b>],
     ) -> MangoResult<Vec<Option<&'a AccountInfo<'b>>>> {
         let mut unpacked = vec![None; MAX_PAIRS];
         for i in 0..mango_group.num_oracles {
             if self.in_margin_basket[i] {
-                let open_orders_ai = open_orders_ais
-                    .iter()
-                    .find(|ai| ai.key == &self.spot_open_orders[i])
-                    .ok_or(throw_err!(MangoErrorCode::InvalidOpenOrdersAccount))?;
-
-                check_open_orders(open_orders_ai, &mango_group.signer_key)?;
-                unpacked[i] = Some(open_orders_ai);
+                unpacked[i] = Some(self.checked_unpack_open_orders_single(
+                    mango_group,
+                    packed_open_orders_ais,
+                    i,
+                )?);
             }
         }
         Ok(unpacked)
@@ -1415,7 +1429,7 @@ impl MangoAccount {
         &self,
         mango_group: &MangoGroup,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         for i in 0..mango_group.num_oracles {
             if self.in_margin_basket[i] {
                 check_eq!(
@@ -1423,7 +1437,11 @@ impl MangoAccount {
                     &self.spot_open_orders[i],
                     MangoErrorCode::InvalidOpenOrdersAccount
                 )?;
-                check_open_orders(&open_orders_ais[i], &mango_group.signer_key)?;
+                check_open_orders(
+                    &open_orders_ais[i],
+                    &mango_group.signer_key,
+                    &mango_group.dex_program_id,
+                )?;
             }
         }
         Ok(())
@@ -2054,16 +2072,11 @@ impl PerpMarket {
         price_cache.check_valid(&mango_group, now_ts)?;
 
         let index_price = price_cache.price;
-        // Get current book price & compare it to index price
-
-        // TODO get impact bid and impact ask if compute allows
-        // let bid = book.get_best_bid_price();
-        // let ask = book.get_best_ask_price();
-
         // hard-coded for now because there's no convenient place to put this; also creates breaking
         // change if we make this a parameter
         const IMPACT_QUANTITY: i64 = 100;
-        // TODO test the compute impact of worst case scenario
+
+        // Get current book price & compare it to index price
         let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY);
         let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY);
 
@@ -2172,7 +2185,11 @@ pub fn load_open_orders<'a>(
     Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
 }
 
-pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MangoResult<()> {
+pub fn check_open_orders(
+    acc: &AccountInfo,
+    owner: &Pubkey,
+    dex_program_id: &Pubkey,
+) -> MangoResult {
     if *acc.key == Pubkey::default() {
         return Ok(());
     }
@@ -2183,8 +2200,7 @@ pub fn check_open_orders(acc: &AccountInfo, owner: &Pubkey) -> MangoResult<()> {
         .bits();
     check_eq!(open_orders.account_flags, valid_flags, MangoErrorCode::Default)?;
     check_eq!(identity(open_orders.owner), owner.to_aligned_bytes(), MangoErrorCode::Default)?;
-
-    Ok(())
+    check!(acc.owner == dex_program_id, MangoErrorCode::InvalidOwner)
 }
 
 fn strip_dex_padding_mut<'a>(acc: &'a AccountInfo) -> MangoResult<RefMut<'a, [u8]>> {
