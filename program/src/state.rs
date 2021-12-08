@@ -200,7 +200,9 @@ pub struct MangoGroup {
     pub msrm_vault: Pubkey,
     pub fees_vault: Pubkey,
 
-    pub padding: [u8; 32], // padding used for future expansions
+    pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
+    pub num_mango_accounts: u32, // number of MangoAccounts.v1
+    pub padding: [u8; 24],       // padding used for future expansions
 }
 
 impl MangoGroup {

@@ -761,6 +761,16 @@ pub enum MangoInstruction {
     ///         index needs to be writable. Only OpenOrders in_margin_basket needs to be correct;
     ///         remaining open orders can just be Pubkey::default() (the zero key)
     UpdateMarginBasket,
+
+    /// Change the maximum number of closeable MangoAccounts.v1 allowed
+    ///
+    /// Accounts expected by this instruction (2):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[signer]` admin_ai - Admin
+    ChangeMaxMangoAccounts {
+        max_mango_accounts: u32,
+    },
 }
 
 impl MangoInstruction {
@@ -1158,6 +1168,14 @@ impl MangoInstruction {
                 }
             }
             48 => MangoInstruction::UpdateMarginBasket,
+
+            49 => {
+                let data_arr = array_ref![data, 0, 4];
+                MangoInstruction::ChangeMaxMangoAccounts {
+                    max_mango_accounts: u32::from_le_bytes(*data_arr),
+                }
+            }
+
             _ => {
                 return None;
             }
