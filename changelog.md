@@ -6,6 +6,10 @@ Deployed:
 1. Allow canceling all perp orders on one side
 
 ## v3.2.8
+Deployed: | Slot: 
+1. Add Change
+
+## v3.2.8
 Deployed: Dec 4, 2021 at 21:04:59 | Slot: 110,056,063
 1. Add check to Pyth CachePrice so conf intervals larger than 10% result in no change to cache price
 

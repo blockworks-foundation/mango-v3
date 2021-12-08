@@ -834,6 +834,24 @@ pub enum MangoInstruction {
     /// 3. `[]` system_prog_ai - System program
     CreateMangoAccount {
         account_num: u64,
+    }
+    
+    /// Accounts expected by this instruction (2 + MAX_PAIRS):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2+ `[]` open_orders_ais - An array of MAX_PAIRS. Only OpenOrders of current market
+    ///         index needs to be writable. Only OpenOrders in_margin_basket needs to be correct;
+    ///         remaining open orders can just be Pubkey::default() (the zero key)
+    UpdateMarginBasket,
+
+    /// Change the maximum number of closeable MangoAccounts.v1 allowed
+    ///
+    /// Accounts expected by this instruction (2):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[signer]` admin_ai - Admin
+    ChangeMaxMangoAccounts {
+        max_mango_accounts: u32,
     },
 }
 
@@ -1229,12 +1247,19 @@ impl MangoInstruction {
                     lm_size_shift: unpack_u8_opt(lm_size_shift),
                 }
             }
-            48 => MangoInstruction::CloseMangoAccount,
-            49 => MangoInstruction::CloseSpotOpenOrders,
-            50 => MangoInstruction::CloseAdvancedOrders,
-            51 => MangoInstruction::CreateDustAccount,
-            52 => MangoInstruction::ResolveDust,
-            53 => {
+            48 => MangoInstruction::UpdateMarginBasket,
+            49 => {
+                let data_arr = array_ref![data, 0, 4];
+                MangoInstruction::ChangeMaxMangoAccounts {
+                    max_mango_accounts: u32::from_le_bytes(*data_arr),
+                }
+            }            
+            50 => MangoInstruction::CloseMangoAccount,
+            51 => MangoInstruction::CloseSpotOpenOrders,
+            52 => MangoInstruction::CloseAdvancedOrders,
+            53 => MangoInstruction::CreateDustAccount,
+            54 => MangoInstruction::ResolveDust,
+            55 => {
                 let data_arr = array_ref![data, 0, 138];
                 let (
                     maint_leverage,
@@ -1260,7 +1285,7 @@ impl MangoInstruction {
                     version: unpack_u8_opt(version),
                 }
             }
-            54 => {
+            56 => {
                 let account_num = array_ref![data, 0, 8];
                 MangoInstruction::CreateMangoAccount {
                     account_num: u64::from_le_bytes(*account_num),

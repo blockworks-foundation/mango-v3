@@ -5064,6 +5064,29 @@ impl Processor {
         Ok(())
     }
 
+    // *** TODO create client functions and instruction.rs
+    #[inline(never)]
+    /// Change the maximum number of MangoAccounts.v1 allowed
+    fn change_max_mango_accounts(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        max_mango_accounts: u32,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+
+        mango_group.max_mango_accounts = max_mango_accounts;
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5512,6 +5535,10 @@ impl Processor {
             }
             MangoInstruction::ChangeSpotMarketParams { .. } => {
                 todo!()
+            }
+            MangoInstruction::ChangeMaxMangoAccounts { max_mango_accounts } => {
+                msg!("Mango: ChangeMaxMangoAccounts");
+                Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
             }
         }
     }
