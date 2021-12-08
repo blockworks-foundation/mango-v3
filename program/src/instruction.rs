@@ -749,7 +749,7 @@ pub enum MangoInstruction {
         #[serde(serialize_with = "serialize_option_fixed_width")]
         lm_size_shift: Option<u8>,
     },
-    
+
     /// Delete a mango account and return lamports
     ///
     /// Accounts expected by this instruction (3):
