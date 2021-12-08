@@ -166,6 +166,7 @@ impl Processor {
         check!(!mango_cache.meta_data.is_initialized, MangoErrorCode::Default)?;
         mango_cache.meta_data = MetaData::new(DataType::MangoCache, 0, true);
         mango_group.mango_cache = *mango_cache_ai.key;
+        mango_group.max_mango_accounts = 100_000;
 
         // check size
         Ok(())
@@ -177,7 +178,6 @@ impl Processor {
     }
     #[inline(never)]
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
-    /// TODO make the mango account a derived address
     fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -195,7 +195,11 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(
+            mango_group.num_mango_accounts <= mango_group.max_mango_accounts,
+            MangoErrorCode::MaxAccountsReached
+        )?;
 
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
@@ -215,15 +219,17 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
-            mango_group_ai,     // read
+            mango_group_ai,     // write
             mango_account_ai,   // write
             owner_ai,           // write, signer
         ] = accounts;
 
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
-        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(mango_account.meta_data.version > 0, MangoErrorCode::InvalidAccountState)?;
 
         // Check deposits and borrows are zero
         for i in 0..MAX_TOKENS {
@@ -257,6 +263,9 @@ impl Processor {
         // Transfer lamports to owner
         program_transfer_lamports(mango_account_ai, owner_ai, mango_account_ai.lamports())?;
 
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        mango_group.num_mango_accounts -= 1;
+
         // Prevent account being loaded by program
         mango_account.meta_data.is_initialized = false;
 
@@ -280,15 +289,19 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
-        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
-        let mut dust_account = MangoAccount::load_mut_checked(dust_account_ai, program_id, &mango_group_ai.key)?;
+        let mut dust_account =
+            MangoAccount::load_mut_checked(dust_account_ai, program_id, &mango_group_ai.key)?;
 
         // Check dust account
-        let (pda_address, _bump_seed) =
-            Pubkey::find_program_address(&[&mango_group_ai.key.as_ref(), b"DustAccount"], program_id);
+        let (pda_address, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_ai.key.as_ref(), b"DustAccount"],
+            program_id,
+        );
         check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
         check!(&dust_account.owner == mango_group_ai.key, MangoErrorCode::InvalidOwner)?;
 
@@ -308,8 +321,10 @@ impl Processor {
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
         root_bank_cache.check_valid(&mango_group, now_ts)?;
 
-        let borrow_amount = mango_account.get_native_borrow(&mango_cache.root_bank_cache[token_index], token_index)?;
-        let deposit_amount = mango_account.get_native_deposit(&mango_cache.root_bank_cache[token_index], token_index)?;
+        let borrow_amount = mango_account
+            .get_native_borrow(&mango_cache.root_bank_cache[token_index], token_index)?;
+        let deposit_amount = mango_account
+            .get_native_deposit(&mango_cache.root_bank_cache[token_index], token_index)?;
 
         // Amount must be dust aka < 1 native spl token
         if borrow_amount > ZERO_I80F48 && borrow_amount < ONE_I80F48 {
@@ -329,7 +344,7 @@ impl Processor {
                 token_index,
                 -borrow_amount,
             )?;
-        } else if deposit_amount > ZERO_I80F48 && deposit_amount < ONE_I80F48{
+        } else if deposit_amount > ZERO_I80F48 && deposit_amount < ONE_I80F48 {
             checked_change_net(
                 root_bank_cache,
                 &mut node_bank,
@@ -1461,7 +1476,8 @@ impl Processor {
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
@@ -4553,7 +4569,8 @@ impl Processor {
         ] = accounts;
 
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check_eq!(
             &mango_account.advanced_orders_key,
@@ -4935,7 +4952,6 @@ impl Processor {
 
     /// *** Create a MangoAccount PDA and initialize it
     #[inline(never)]
-    #[allow(dead_code)]
     fn create_mango_account(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -4944,7 +4960,7 @@ impl Processor {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-            mango_group_ai,         // read
+            mango_group_ai,         // write
             mango_account_ai,       // write
             owner_ai,               // write & signer
             system_prog_ai,         // read
@@ -4955,7 +4971,11 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check!(
+            mango_group.num_mango_accounts <= mango_group.max_mango_accounts,
+            MangoErrorCode::MaxAccountsReached
+        )?;
         let rent = Rent::get()?;
 
         let mango_account_seeds: &[&[u8]] =
@@ -4977,17 +4997,16 @@ impl Processor {
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
-        mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
+        mango_account.meta_data = MetaData::new(DataType::MangoAccount, 1, true);
+
+        mango_group.num_mango_accounts += 1;
 
         Ok(())
     }
 
-    /// *** Create a MangoAccount PDA with the group as owner and initialize it
+    /// *** Create a DustAccount PDA and initialize it
     #[inline(never)]
-    fn create_dust_account(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> MangoResult {
+    fn create_dust_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -5005,8 +5024,7 @@ impl Processor {
         let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let rent = Rent::get()?;
 
-        let mango_account_seeds: &[&[u8]] =
-            &[&mango_group_ai.key.as_ref(), b"DustAccount"];
+        let mango_account_seeds: &[&[u8]] = &[&mango_group_ai.key.as_ref(), b"DustAccount"];
         // TODO - test passing in MangoAccount that already has some data in it
         seed_and_create_pda(
             program_id,
@@ -5052,8 +5070,12 @@ impl Processor {
                 )
             }
             MangoInstruction::InitMangoAccount => {
-                msg!("Mango: InitMangoAccount");
+                msg!("Mango: InitMangoAccount DEPRECATED");
                 Self::init_mango_account(program_id, accounts)
+            }
+            MangoInstruction::CreateMangoAccount { account_num } => {
+                msg!("Mango: CreateMangoAccount");
+                Self::create_mango_account(program_id, accounts, account_num)
             }
             MangoInstruction::CloseMangoAccount => {
                 msg!("Mango: CloseMangoAccount");
@@ -5444,6 +5466,7 @@ impl Processor {
             MangoInstruction::ResolveDust => {
                 msg!("Mango: ResolveDust");
                 Self::resolve_dust(program_id, accounts)
+            }
             MangoInstruction::ChangeSpotMarketParams {
                 maint_leverage,
                 init_leverage,

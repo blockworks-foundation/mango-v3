@@ -117,6 +117,8 @@ pub enum MangoErrorCode {
     TriggerConditionFalse,
     #[error("MangoErrorCode::InvalidSeeds Invalid seeds. Unable to create PDA")]
     InvalidSeeds,
+    #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
+    MaxAccountsReached,
 
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,

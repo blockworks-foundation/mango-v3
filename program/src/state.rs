@@ -198,8 +198,10 @@ pub struct MangoGroup {
     pub srm_vault: Pubkey,
     pub msrm_vault: Pubkey,
     pub fees_vault: Pubkey,
+    pub max_mango_accounts: u32,
+    pub num_mango_accounts: u32,
 
-    pub padding: [u8; 32], // padding used for future expansions
+    pub padding: [u8; 24], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -1136,7 +1138,7 @@ pub struct MangoAccount {
     pub advanced_orders_key: Pubkey,
 
     /// padding for expansions
-    pub padding: [u8; 38],
+    pub padding: [u8; 37],
 }
 
 impl MangoAccount {

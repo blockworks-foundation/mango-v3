@@ -749,12 +749,12 @@ pub enum MangoInstruction {
         #[serde(serialize_with = "serialize_option_fixed_width")]
         lm_size_shift: Option<u8>,
     },
-    
+
     /// Delete a mango account and return lamports
     ///
     /// Accounts expected by this instruction (3):
     ///
-    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account data
     /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
     CloseMangoAccount,
@@ -781,7 +781,11 @@ pub enum MangoInstruction {
     /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
     /// 3. `[writable]` advanced_orders_ai - the advanced orders account
     CloseAdvancedOrders,
+
+    // TODO documentation
     CreateDustAccount,
+
+    // TODO documentation
     ResolveDust,
 
     /// Change the params for a spot market.
@@ -818,6 +822,18 @@ pub enum MangoInstruction {
 
         #[serde(serialize_with = "serialize_option_fixed_width")]
         version: Option<u8>,
+    },
+
+    /// Create a PDA mango account for a user
+    ///
+    /// Accounts expected by this instruction (4):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
+    /// 3. `[]` system_prog_ai - System program
+    CreateMangoAccount {
+        account_num: u64,
     },
 }
 
@@ -1244,6 +1260,12 @@ impl MangoInstruction {
                     version: unpack_u8_opt(version),
                 }
             }
+            54 => {
+                let account_num = array_ref![data, 0, 8];
+                MangoInstruction::CreateMangoAccount {
+                    account_num: u64::from_le_bytes(*account_num),
+                }
+            }
             _ => {
                 return None;
             }
@@ -1397,12 +1419,32 @@ pub fn close_mango_account(
     owner_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
-        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new(*owner_pk, true),
     ];
 
     let instr = MangoInstruction::CloseMangoAccount;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn create_mango_account(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    system_prog_pk: &Pubkey,
+    account_num: u64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*system_prog_pk, false),
+    ];
+
+    let instr = MangoInstruction::CreateMangoAccount { account_num };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
