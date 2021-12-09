@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.11
-Deployed:  | Slot: 
+Deployed: Dec 9, 2021 at 18:59:28 UTC | Slot: 110,796,491
 1. Fixed bug where perp limit orders past price limit would fail due to simulation
 2. Remove unnecessary Rent account in InitMangoAccount
 
