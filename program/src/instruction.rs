@@ -853,6 +853,15 @@ pub enum MangoInstruction {
     ChangeMaxMangoAccounts {
         max_mango_accounts: u32,
     },
+
+    /// Upgrade a V0 Mango Account to V1
+    ///
+    /// Accounts expected by this instruction (3):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` signer_ai - Solana account of owner of the mango account
+    UpgradeMangoAccountV0V1,
 }
 
 impl MangoInstruction {
@@ -1291,6 +1300,7 @@ impl MangoInstruction {
                     account_num: u64::from_le_bytes(*account_num),
                 }
             }
+            57 => MangoInstruction::UpgradeMangoAccountV0V1,
             _ => {
                 return None;
             }
@@ -1470,6 +1480,23 @@ pub fn create_mango_account(
     ];
 
     let instr = MangoInstruction::CreateMangoAccount { account_num };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn upgrade_mango_account_v0_v1(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+    ];
+
+    let instr = MangoInstruction::UpgradeMangoAccountV0V1;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
