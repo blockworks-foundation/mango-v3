@@ -4605,8 +4605,22 @@ impl Processor {
 
         if quantity != 0 {
             let (taker_base, taker_quote, bids_quantity, asks_quantity) = match order.side {
-                Side::Bid => book.sim_new_bid(order.price, quantity, order.order_type)?,
-                Side::Ask => book.sim_new_ask(order.price, quantity, order.order_type)?,
+                Side::Bid => book.sim_new_bid(
+                    &perp_market,
+                    &mango_group.perp_markets[market_index],
+                    mango_cache.get_price(market_index),
+                    order.price,
+                    quantity,
+                    order.order_type,
+                )?,
+                Side::Ask => book.sim_new_ask(
+                    &perp_market,
+                    &mango_group.perp_markets[market_index],
+                    mango_cache.get_price(market_index),
+                    order.price,
+                    quantity,
+                    order.order_type,
+                )?,
             };
 
             // simulate the effect on health
