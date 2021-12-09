@@ -302,8 +302,8 @@ impl FillEvent {
 
     pub fn base_quote_change(&self, side: Side) -> (i64, i64) {
         match side {
-            Side::Bid => (self.quantity, -self.price * self.quantity),
-            Side::Ask => (-self.quantity, self.price * self.quantity),
+            Side::Bid => (self.quantity, -self.price.checked_mul(self.quantity).unwrap()),
+            Side::Ask => (-self.quantity, self.price.checked_mul(self.quantity).unwrap()),
         }
     }
 
