@@ -5092,6 +5092,33 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn upgrade_mango_account_v0_v1(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,   // write
+            mango_account_ai, // write, signer
+            owner_ai          // signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check_eq!(mango_account.meta_data.version, 0, MangoErrorCode::InvalidAccountState)?;
+        check!(mango_group.num_mango_accounts < mango_group.max_mango_accounts, MangoErrorCode::MaxAccountsReached)?;
+
+        mango_group.num_mango_accounts += 1;
+        mango_account.meta_data.version = 1;
+
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5125,6 +5152,10 @@ impl Processor {
             MangoInstruction::CloseMangoAccount => {
                 msg!("Mango: CloseMangoAccount");
                 Self::close_mango_account(program_id, accounts)
+            }
+            MangoInstruction::UpgradeMangoAccountV0V1 => {
+                msg!("Mango: UpgradeMangoAccountV0V1");
+                Self::upgrade_mango_account_v0_v1(program_id, accounts)
             }
             MangoInstruction::Deposit { quantity } => {
                 msg!("Mango: Deposit");
