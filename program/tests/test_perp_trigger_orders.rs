@@ -87,7 +87,7 @@ async fn test_perp_trigger_orders_basic() {
             OrderType::Limit,
             Side::Bid,
             TriggerCondition::Below,
-            base_price,
+            base_price * 0.91,
             base_size,
             I80F48::from_num(base_price * 0.9),
         )
@@ -134,7 +134,7 @@ async fn test_perp_trigger_orders_basic() {
         )
         .await
         .expect_err("order trigger condition should not be met");
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price * 0.8).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price * 0.89).await;
     mango_group_cookie.run_keeper(&mut test).await;
     perp_market
         .execute_trigger_order(

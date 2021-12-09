@@ -1453,19 +1453,19 @@ impl MangoAccount {
     }
 
     /// Add a perp order for the market_index
-    pub fn add_order(
-        &mut self,
-        market_index: usize,
-        side: Side,
-        order: &LeafNode,
-    ) -> MangoResult<()> {
+    pub fn add_order(&mut self, market_index: usize, side: Side, order: &LeafNode) -> MangoResult {
         match side {
             Side::Bid => {
-                // TODO make checked
-                self.perp_accounts[market_index].bids_quantity += order.quantity;
+                self.perp_accounts[market_index].bids_quantity = self.perp_accounts[market_index]
+                    .bids_quantity
+                    .checked_add(order.quantity)
+                    .unwrap();
             }
             Side::Ask => {
-                self.perp_accounts[market_index].asks_quantity += order.quantity;
+                self.perp_accounts[market_index].asks_quantity = self.perp_accounts[market_index]
+                    .asks_quantity
+                    .checked_add(order.quantity)
+                    .unwrap();
             }
         };
         let slot = order.owner_slot as usize;
@@ -1535,10 +1535,10 @@ impl MangoAccount {
         let side = invert_side(fill.taker_side);
         let (base_change, quote_change) = fill.base_quote_change(side);
         pa.change_base_position(perp_market, base_change);
-        let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
+        let quote = I80F48::from_num(perp_market.quote_lot_size.checked_mul(quote_change).unwrap());
         let fees = quote.abs() * info.maker_fee;
         perp_market.fees_accrued += fees;
-        pa.quote_position += quote - fees;
+        pa.quote_position = pa.quote_position.checked_add(quote - fees).unwrap();
 
         // if versions don't match, no LM
         if perp_market.meta_data.version == fill.version {
