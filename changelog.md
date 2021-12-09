@@ -1,5 +1,10 @@
 # Mango Program Change Log
 
+## v3.2.10
+Deployed: Dec 9, 2021 at 01:49:38 UTC | Slot: 110,691,491
+1. Limit placing bids to oracle + maint margin req and asks to oracle - maint margin req
+2. Add more checked math in FillEvent struct method and execute_maker()
+
 ## v3.2.9
 Deployed: Dec 8, 2021 at 22:29:47 UTC | Slot: 110,669,751
 1. Add ChangeMaxMangoAccounts

@@ -4,6 +4,7 @@ use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 use std::vec;
 
+use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
@@ -23,6 +24,12 @@ use spl_token::state::{Account, Mint};
 use switchboard_program::FastRoundResultAccountData;
 
 use mango_common::Loadable;
+use mango_logs::{
+    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, DepositLog,
+    LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog,
+    OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
+    TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
+};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::msrm_token;
@@ -41,13 +48,6 @@ use crate::state::{
     ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
-use anchor_lang::prelude::emit;
-use mango_logs::{
-    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, DepositLog,
-    LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog,
-    OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
-    TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
-};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -2020,6 +2020,7 @@ impl Processor {
             &mut event_queue,
             &mut perp_market,
             &mango_group.perp_markets[market_index],
+            mango_cache.get_price(market_index),
             &mut mango_account,
             mango_account_ai.key,
             market_index,
@@ -4636,6 +4637,7 @@ impl Processor {
                     &mut event_queue,
                     &mut perp_market,
                     &mango_group.perp_markets[market_index],
+                    mango_cache.get_price(market_index),
                     &mut mango_account,
                     mango_account_ai.key,
                     market_index,

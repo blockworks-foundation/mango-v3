@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use std::mem::size_of;
 
 use bytemuck::{cast, cast_mut, cast_ref};
+use fixed::types::I80F48;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_program::account_info::AccountInfo;
@@ -744,6 +745,7 @@ impl<'a> Book<'a> {
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
         info: &PerpMarketInfo,
+        oracle_price: I80F48,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
@@ -753,12 +755,13 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         match side {
             Side::Bid => self.new_bid(
                 event_queue,
                 market,
                 info,
+                oracle_price,
                 mango_account,
                 mango_account_pk,
                 market_index,
@@ -772,6 +775,7 @@ impl<'a> Book<'a> {
                 event_queue,
                 market,
                 info,
+                oracle_price,
                 mango_account,
                 mango_account_pk,
                 market_index,
@@ -938,6 +942,7 @@ impl<'a> Book<'a> {
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
         info: &PerpMarketInfo,
+        oracle_price: I80F48,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
@@ -946,7 +951,7 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
         let (post_only, post_allowed, price) = match order_type {
@@ -1025,6 +1030,11 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
+            let native_price = market.lot_to_native_price(price);
+            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+                msg!("Failed to place bid on book due to price limits.");
+                return Ok(());
+            }
             if self.bids.is_full() {
                 // If this bid is higher than lowest bid, boot that bid and insert this one
                 let min_bid = self.bids.remove_min().unwrap();
@@ -1074,7 +1084,6 @@ impl<'a> Book<'a> {
                 rem_quantity,
                 price
             );
-
             mango_account.add_order(market_index, Side::Bid, &new_bid)?;
         }
 
@@ -1087,6 +1096,7 @@ impl<'a> Book<'a> {
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
         info: &PerpMarketInfo,
+        oracle_price: I80F48,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
@@ -1172,6 +1182,12 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
+            let native_price = market.lot_to_native_price(price);
+            if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
+                msg!("Failed to place bid on book due to price limits.");
+                return Ok(());
+            }
+
             if self.asks.is_full() {
                 // If this asks is lower than highest ask, boot that ask and insert this one
                 let max_ask = self.asks.remove_max().unwrap();
