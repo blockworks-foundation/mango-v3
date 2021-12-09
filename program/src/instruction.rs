@@ -40,12 +40,11 @@ pub enum MangoInstruction {
 
     /// Initialize a mango account for a user
     ///
-    /// Accounts expected by this instruction (4):
+    /// Accounts expected by this instruction (3):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account data
     /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
-    /// 3. `[]` rent_ai - Rent sysvar account
     InitMangoAccount,
 
     /// Deposit funds into mango account
@@ -1314,7 +1313,6 @@ pub fn init_mango_account(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
     ];
 
     let instr = MangoInstruction::InitMangoAccount;

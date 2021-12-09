@@ -792,13 +792,16 @@ impl<'a> Book<'a> {
     /// return changes to (taker_base, taker_quote, bids_quantity, asks_quantity)
     pub fn sim_new_bid(
         &self,
+        market: &PerpMarket,
+        info: &PerpMarketInfo,
+        oracle_price: I80F48,
         price: i64,
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
     ) -> MangoResult<(i64, i64, i64, i64)> {
         let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0i64, 0);
 
-        let (post_only, post_allowed, price) = match order_type {
+        let (post_only, mut post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
             OrderType::PostOnly => (true, true, price),
@@ -812,6 +815,11 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
+        let native_price = market.lot_to_native_price(price);
+        if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+            msg!("Posting on book disallowed due to price limits");
+            post_allowed = false;
+        }
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
         let mut stack = vec![];
@@ -865,13 +873,16 @@ impl<'a> Book<'a> {
 
     pub fn sim_new_ask(
         &self,
+        market: &PerpMarket,
+        info: &PerpMarketInfo,
+        oracle_price: I80F48,
         price: i64,
         quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
     ) -> MangoResult<(i64, i64, i64, i64)> {
         let (mut taker_base, mut taker_quote, bids_quantity, mut asks_quantity) = (0, 0, 0, 0i64);
 
-        let (post_only, post_allowed, price) = match order_type {
+        let (post_only, mut post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
             OrderType::PostOnly => (true, true, price),
@@ -885,6 +896,11 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
+        let native_price = market.lot_to_native_price(price);
+        if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
+            msg!("Posting on book disallowed due to price limits");
+            post_allowed = false;
+        }
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
         let mut stack = vec![];
@@ -954,7 +970,7 @@ impl<'a> Book<'a> {
     ) -> MangoResult {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
-        let (post_only, post_allowed, price) = match order_type {
+        let (post_only, mut post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
             OrderType::PostOnly => (true, true, price),
@@ -968,6 +984,11 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
+        let native_price = market.lot_to_native_price(price);
+        if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+            msg!("Posting on book disallowed due to price limits");
+            post_allowed = false;
+        }
 
         let order_id = market.gen_order_id(Side::Bid, price);
 
@@ -1030,11 +1051,6 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
-            let native_price = market.lot_to_native_price(price);
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
-                msg!("Failed to place bid on book due to price limits.");
-                return Ok(());
-            }
             if self.bids.is_full() {
                 // If this bid is higher than lowest bid, boot that bid and insert this one
                 let min_bid = self.bids.remove_min().unwrap();
@@ -1105,9 +1121,9 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // TODO proper error handling
-        let (post_only, post_allowed, price) = match order_type {
+        let (post_only, mut post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
             OrderType::PostOnly => (true, true, price),
@@ -1121,6 +1137,12 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
+        let native_price = market.lot_to_native_price(price);
+        if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
+            msg!("Posting on book disallowed due to price limits");
+            post_allowed = false;
+        }
+
         let order_id = market.gen_order_id(Side::Ask, price);
 
         // if post only and price >= best_ask, return
@@ -1182,12 +1204,6 @@ impl<'a> Book<'a> {
 
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
-            let native_price = market.lot_to_native_price(price);
-            if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
-                msg!("Failed to place bid on book due to price limits.");
-                return Ok(());
-            }
-
             if self.asks.is_full() {
                 // If this asks is lower than highest ask, boot that ask and insert this one
                 let max_ask = self.asks.remove_max().unwrap();
