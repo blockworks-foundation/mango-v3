@@ -5,6 +5,11 @@
 Deployed:
 1. Allow canceling all perp orders on one side
 
+## v3.2.11
+Deployed:  | Slot: 
+1. Fixed bug where perp limit orders past price limit would fail due to simulation
+2. Remove unnecessary Rent account in InitMangoAccount
+
 ## v3.2.10
 Deployed: Dec 9, 2021 at 01:49:38 UTC | Slot: 110,691,491
 1. Limit placing bids to oracle + maint margin req and asks to oracle - maint margin req
