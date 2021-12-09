@@ -2266,7 +2266,11 @@ impl Processor {
 
         // If reduce_only, position must only go down
         let quantity = if reduce_only {
-            let base_pos = mango_account.get_complete_base_pos(market_index, &event_queue)?;
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
@@ -2385,11 +2389,13 @@ impl Processor {
             )?;
         }
 
+        let mngo_accrual =
+            mango_account.perp_accounts[market_index].mngo_accrued.checked_sub(mngo_start).unwrap();
         mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
-            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+            mngo_accrual
         });
 
         Ok(())
@@ -2477,11 +2483,13 @@ impl Processor {
             )?;
         }
 
+        let mngo_accrual =
+            mango_account.perp_accounts[market_index].mngo_accrued.checked_sub(mngo_start).unwrap();
         mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
-            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+            mngo_accrual
         });
 
         Ok(())
@@ -2536,11 +2544,13 @@ impl Processor {
             )?;
         }
 
+        let mngo_accrual =
+            mango_account.perp_accounts[market_index].mngo_accrued.checked_sub(mngo_start).unwrap();
         mango_emit!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
-            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+            mngo_accrual
         });
         Ok(())
     }
@@ -2607,18 +2617,27 @@ impl Processor {
         b.settle_funding(perp_market_cache);
 
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
-        let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
-        let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
+
+        let new_quote_pos_a = I80F48::from_num(
+            a.base_position.checked_mul(contract_size).unwrap().checked_neg().unwrap(),
+        )
+        .checked_mul(price)
+        .unwrap();
+        let new_quote_pos_b = I80F48::from_num(
+            b.base_position.checked_mul(contract_size).unwrap().checked_neg().unwrap(),
+        )
+        .checked_mul(price)
+        .unwrap();
         let a_pnl: I80F48 = a.quote_position.checked_sub(new_quote_pos_a).unwrap();
         let b_pnl: I80F48 = b.quote_position.checked_sub(new_quote_pos_b).unwrap();
 
         // pnl must be opposite signs for there to be a settlement
-        if a_pnl * b_pnl > 0 {
+        if a_pnl.checked_mul(b_pnl).unwrap() > 0 {
             return Ok(());
         }
 
-        let settlement = a_pnl.abs().min(b_pnl.abs());
-        let a_settle = if a_pnl > 0 { settlement } else { -settlement };
+        let settlement = a_pnl.checked_abs().unwrap().min(b_pnl.checked_abs().unwrap());
+        let a_settle = if a_pnl > 0 { settlement } else { settlement.checked_neg().unwrap() };
         a.transfer_quote_position(b, a_settle);
 
         transfer_token_internal(
@@ -4205,11 +4224,15 @@ impl Processor {
                             perp_market_cache,
                             fill,
                         )?;
+                        let mngo_accrual = ma.perp_accounts[market_index]
+                            .mngo_accrued
+                            .checked_sub(pre_mngo)
+                            .unwrap();
                         mango_emit!(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
                             market_index: market_index as u64,
-                            mngo_accrual: ma.perp_accounts[market_index].mngo_accrued - pre_mngo
+                            mngo_accrual
                         });
                     } else {
                         let mut maker =
@@ -4252,11 +4275,15 @@ impl Processor {
                             perp_market_cache,
                             fill,
                         )?;
+                        let mngo_accrual = maker.perp_accounts[market_index]
+                            .mngo_accrued
+                            .checked_sub(pre_mngo)
+                            .unwrap();
                         mango_emit!(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
                             market_index: market_index as u64,
-                            mngo_accrual: maker.perp_accounts[market_index].mngo_accrued - pre_mngo
+                            mngo_accrual
                         });
                     }
                     mango_emit!(fill.to_fill_log(*mango_group_ai.key, market_index));
@@ -5605,11 +5632,10 @@ impl Processor {
                 msg!("Mango: ChangeMaxMangoAccounts");
                 Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
             }
-            MangoInstruction::ChangeMaxMangoAccounts { max_mango_accounts } => {
-                msg!("Mango: ChangeMaxMangoAccounts");
-                Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
+            MangoInstruction::UpdateMarginBasket => {
+                msg!("Mango: UpdateMarginBasket");
+                todo!()
             }
-            MangoInstruction::UpdateMarginBasket => {}
         }
     }
 }

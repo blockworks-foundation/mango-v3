@@ -1629,6 +1629,7 @@ impl MangoAccount {
         &self,
         market_index: usize,
         event_queue: &EventQueue,
+        mango_account_pk: &Pubkey,
     ) -> MangoResult<i64> {
         let mut base_pos = self.perp_accounts[market_index]
             .base_position
@@ -1640,7 +1641,7 @@ impl MangoAccount {
         for event in event_queue.iter() {
             if EventType::try_from(event.event_type).map_err(|_| throw!())? == EventType::Fill {
                 let fill: &FillEvent = cast_ref(event);
-                if &fill.maker == mango_account_ai.key {
+                if &fill.maker == mango_account_pk {
                     base_pos = match fill.taker_side {
                         Side::Bid => base_pos.checked_sub(fill.quantity).unwrap(),
                         Side::Ask => base_pos.checked_add(fill.quantity).unwrap(),

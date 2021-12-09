@@ -1315,21 +1315,21 @@ impl<'a> Book<'a> {
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
         for ask in self.asks.iter() {
-            match asks_keys.last() {
+            match keys.last() {
                 None => break,
                 Some(&last) => {
                     if ask.key < last {
                         cuml_asks += ask.quantity;
                     } else if ask.key == last {
                         asks_and_sizes.push((ask.key, cuml_asks));
-                        asks_keys.pop();
+                        keys.pop();
                     } else {
                         cuml_asks += ask.quantity;
-                        asks_keys.pop();
+                        keys.pop();
                     }
                     if cuml_asks >= max_depth {
-                        for ask_key in asks_keys {
-                            asks_and_sizes.push((ask_key, max_depth))
+                        for key in keys {
+                            asks_and_sizes.push((key, max_depth))
                         }
                         break;
                     }
@@ -1338,7 +1338,7 @@ impl<'a> Book<'a> {
         }
 
         for (key, cuml_size) in asks_and_sizes {
-            if limit == 0 {
+            if *limit == 0 {
                 return Ok(());
             }
             match self.cancel_order(key, Side::Ask) {
@@ -1360,7 +1360,7 @@ impl<'a> Book<'a> {
                     // Invalid state because we know it's on the book
                 }
             }
-            limit -= 1;
+            *limit -= 1;
         }
 
         Ok(())
@@ -1405,7 +1405,7 @@ impl<'a> Book<'a> {
         }
 
         for (key, cuml_size) in bids_and_sizes {
-            if limit == 0 {
+            if *limit == 0 {
                 return Ok(());
             }
             match self.cancel_order(key, Side::Bid) {
@@ -1427,7 +1427,7 @@ impl<'a> Book<'a> {
                     // Invalid state because we know it's on the book
                 }
             }
-            limit -= 1;
+            *limit -= 1;
         }
         Ok(())
     }
