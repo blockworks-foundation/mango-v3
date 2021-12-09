@@ -51,7 +51,6 @@ declare_check_assert_macros!(SourceFileId::State);
 
 // NOTE: I80F48 multiplication ops are very expensive. Avoid when possible
 // TODO: add prop tests for nums
-// TODO add GUI hoster fee discount
 
 // units
 // long_funding: I80F48 - native quote currency per contract
@@ -581,16 +580,16 @@ impl NodeBank {
     }
 
     // TODO - Add checks to these math methods to prevent result from being < 0
-    pub fn checked_add_borrow(&mut self, v: I80F48) -> MangoResult<()> {
+    pub fn checked_add_borrow(&mut self, v: I80F48) -> MangoResult {
         Ok(self.borrows = self.borrows.checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_borrow(&mut self, v: I80F48) -> MangoResult<()> {
+    pub fn checked_sub_borrow(&mut self, v: I80F48) -> MangoResult {
         Ok(self.borrows = self.borrows.checked_sub(v).ok_or(throw!())?)
     }
-    pub fn checked_add_deposit(&mut self, v: I80F48) -> MangoResult<()> {
+    pub fn checked_add_deposit(&mut self, v: I80F48) -> MangoResult {
         Ok(self.deposits = self.deposits.checked_add(v).ok_or(throw!())?)
     }
-    pub fn checked_sub_deposit(&mut self, v: I80F48) -> MangoResult<()> {
+    pub fn checked_sub_deposit(&mut self, v: I80F48) -> MangoResult {
         Ok(self.deposits = self.deposits.checked_sub(v).ok_or(throw!())?)
     }
     pub fn has_valid_deposits_borrows(&self, root_bank_cache: &RootBankCache) -> bool {
@@ -615,7 +614,7 @@ pub struct PriceCache {
 }
 
 impl PriceCache {
-    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult {
         check!(
             self.last_update >= now_ts - mango_group.valid_interval,
             MangoErrorCode::InvalidPriceCache
@@ -632,7 +631,7 @@ pub struct RootBankCache {
 }
 
 impl RootBankCache {
-    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult {
         check!(
             self.last_update >= now_ts - (mango_group.valid_interval * 2),
             MangoErrorCode::InvalidRootBankCache
@@ -649,7 +648,7 @@ pub struct PerpMarketCache {
 }
 
 impl PerpMarketCache {
-    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+    pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult {
         check!(
             self.last_update >= now_ts - mango_group.valid_interval,
             MangoErrorCode::InvalidPerpMarketCache
@@ -714,7 +713,7 @@ impl MangoCache {
         mango_group: &MangoGroup,
         active_assets: &UserActiveAssets,
         now_ts: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         for i in 0..mango_group.num_oracles {
             if active_assets.spot[i] || active_assets.perps[i] {
                 self.price_cache[i].check_valid(&mango_group, now_ts)?;
@@ -815,7 +814,7 @@ impl HealthCache {
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
             if self.active_assets.spot[i] {
@@ -847,7 +846,7 @@ impl HealthCache {
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
         open_orders_ais: &Vec<Option<&AccountInfo>>,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
             if self.active_assets.spot[i] {
@@ -940,7 +939,7 @@ impl HealthCache {
         mango_account: &MangoAccount,
         open_orders_ai: &AccountInfo,
         market_index: usize,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let (base, quote) = mango_account.get_spot_val(
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
@@ -990,7 +989,7 @@ impl HealthCache {
         mango_account: &MangoAccount,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
         token_index: usize,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         if token_index == QUOTE_INDEX {
             Ok(self.update_quote(mango_cache, mango_account))
         } else {
@@ -1060,7 +1059,7 @@ impl HealthCache {
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
         market_index: usize,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let (base, quote) = mango_account.perp_accounts[market_index].get_val(
             &mango_group.perp_markets[market_index],
             &mango_cache.perp_market_cache[market_index],
@@ -1200,7 +1199,7 @@ impl MangoAccount {
 
     // TODO - Add unchecked versions to be used when we're confident
     // TODO OPT - remove negative and zero checks if we're confident
-    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+    pub fn checked_add_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult {
         self.borrows[token_i] = self.borrows[token_i].checked_add(v).ok_or(math_err!())?;
 
         // TODO - actually try to hit this error
@@ -1209,7 +1208,7 @@ impl MangoAccount {
             MangoErrorCode::MathError
         )
     }
-    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+    pub fn checked_sub_borrow(&mut self, token_i: usize, v: I80F48) -> MangoResult {
         self.borrows[token_i] = self.borrows[token_i].checked_sub(v).ok_or(math_err!())?;
 
         check!(!self.borrows[token_i].is_negative(), MangoErrorCode::MathError)?;
@@ -1218,7 +1217,7 @@ impl MangoAccount {
             MangoErrorCode::MathError
         )
     }
-    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+    pub fn checked_add_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult {
         self.deposits[token_i] = self.deposits[token_i].checked_add(v).ok_or(math_err!())?;
 
         check!(
@@ -1226,7 +1225,7 @@ impl MangoAccount {
             MangoErrorCode::MathError
         )
     }
-    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult<()> {
+    pub fn checked_sub_deposit(&mut self, token_i: usize, v: I80F48) -> MangoResult {
         self.deposits[token_i] = self.deposits[token_i].checked_sub(v).ok_or(math_err!())?;
 
         check!(!self.deposits[token_i].is_negative(), MangoErrorCode::MathError)?;
@@ -1301,7 +1300,7 @@ impl MangoAccount {
 
     /// Add a market to margin basket
     /// This function should be called any time you place a spot order
-    pub fn add_to_basket(&mut self, market_index: usize) -> MangoResult<()> {
+    pub fn add_to_basket(&mut self, market_index: usize) -> MangoResult {
         if self.num_in_margin_basket == MAX_NUM_IN_MARGIN_BASKET {
             check!(self.in_margin_basket[market_index], MangoErrorCode::MarginBasketFull)
         } else {
@@ -1477,7 +1476,7 @@ impl MangoAccount {
     }
 
     ///
-    pub fn remove_order(&mut self, slot: usize, quantity: i64) -> MangoResult<()> {
+    pub fn remove_order(&mut self, slot: usize, quantity: i64) -> MangoResult {
         check!(self.order_market[slot] != FREE_ORDER_SLOT, MangoErrorCode::Default)?;
         let market_index = self.order_market[slot] as usize;
 
@@ -1508,7 +1507,7 @@ impl MangoAccount {
         info: &PerpMarketInfo,
         cache: &PerpMarketCache,
         fill: &FillEvent,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let pa = &mut self.perp_accounts[market_index];
         pa.settle_funding(cache);
         let (base_change, quote_change) = fill.base_quote_change(fill.taker_side);
@@ -1528,7 +1527,7 @@ impl MangoAccount {
         info: &PerpMarketInfo,
         cache: &PerpMarketCache,
         fill: &FillEvent,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let pa = &mut self.perp_accounts[market_index];
         pa.settle_funding(cache);
 
@@ -2362,7 +2361,7 @@ pub struct AdvancedOrders {
 }
 
 impl AdvancedOrders {
-    pub fn init(account: &AccountInfo, program_id: &Pubkey, rent: &Rent) -> MangoResult<()> {
+    pub fn init(account: &AccountInfo, program_id: &Pubkey, rent: &Rent) -> MangoResult {
         let mut state: RefMut<Self> = Self::load_mut(account)?;
         check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
         check!(

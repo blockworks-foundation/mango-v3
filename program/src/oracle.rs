@@ -16,7 +16,6 @@ pub struct StubOracle {
     pub last_update: u64,
 }
 
-// TODO move to separate program
 impl StubOracle {
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,

@@ -105,7 +105,7 @@ impl<'a, H: QueueHeader> Queue<'a, H> {
         Ok(value)
     }
 
-    pub fn revert_pushes(&mut self, desired_len: usize) -> MangoResult<()> {
+    pub fn revert_pushes(&mut self, desired_len: usize) -> MangoResult {
         check!(desired_len <= self.header.count(), MangoErrorCode::Default)?;
         let len_diff = self.header.count() - desired_len;
         self.header.set_count(desired_len);

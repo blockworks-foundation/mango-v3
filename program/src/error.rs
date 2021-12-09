@@ -152,7 +152,7 @@ pub fn check_assert(
     mango_error_code: MangoErrorCode,
     line: u32,
     source_file_id: SourceFileId,
-) -> MangoResult<()> {
+) -> MangoResult {
     if cond {
         Ok(())
     } else {

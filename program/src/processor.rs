@@ -63,7 +63,7 @@ impl Processor {
         quote_optimal_util: I80F48,
         quote_optimal_rate: I80F48,
         quote_max_rate: I80F48,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 12;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -173,12 +173,12 @@ impl Processor {
     }
 
     #[allow(unused)]
-    fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         todo!()
     }
     #[inline(never)]
     /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
-    fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -214,7 +214,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn close_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn close_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -273,7 +273,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn resolve_dust(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn resolve_dust(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -591,7 +591,7 @@ impl Processor {
     /// Add an oracle to the MangoGroup
     /// This must be called first before `add_spot_market` or `add_perp_market`
     /// There will never be a gap in the mango_group.oracles array
-    fn add_oracle(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn add_oracle(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -628,7 +628,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MangoResult<()> {
+    fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -669,7 +669,7 @@ impl Processor {
         target_period_length: u64,
         mngo_per_period: u64,
         exp: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
         check!(maint_leverage > init_leverage, MangoErrorCode::InvalidParam)?;
@@ -952,7 +952,7 @@ impl Processor {
 
     #[inline(never)]
     /// Deposit instruction
-    fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
+    fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult {
         // TODO - consider putting update crank here
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -1033,7 +1033,7 @@ impl Processor {
         exp: Option<u8>,
         version: Option<u8>,
         lm_size_shift: Option<u8>,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -1166,7 +1166,7 @@ impl Processor {
 
     #[inline(never)]
     /// Write oracle prices onto MangoAccount before calling a value-dep instruction (e.g. Withdraw)
-    fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn cache_prices(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, oracle_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -1202,7 +1202,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn cache_root_banks(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, root_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -1244,7 +1244,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn cache_perp_markets(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn cache_perp_markets(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 2;
         let (fixed_ais, perp_market_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -1293,7 +1293,7 @@ impl Processor {
         accounts: &[AccountInfo],
         quantity: u64,
         allow_borrow: bool,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -1395,7 +1395,7 @@ impl Processor {
 
     #[inline(never)]
     /// Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
-    fn init_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn init_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 8;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -1452,7 +1452,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn close_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn close_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -1503,7 +1503,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 23;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -1728,7 +1728,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order: serum_dex::instruction::NewOrderInstructionV3,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 22;
         let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
 
@@ -1958,7 +1958,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         data: Vec<u8>,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // TODO add param `ok_invalid_id` to return Ok() instead of Err if order id or client id invalid
 
         const NUM_FIXED: usize = 10;
@@ -2022,7 +2022,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 18;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -2181,7 +2181,7 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
 
@@ -2307,7 +2307,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         client_order_id: u64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -2397,7 +2397,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order_id: i128,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -2548,7 +2548,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // TODO - what if someone has no collateral except other perps contracts
         //  maybe you don't allow people to withdraw if they don't have enough
         //  when liquidating, make sure you settle their pnl first?
@@ -2642,7 +2642,7 @@ impl Processor {
 
     #[inline(never)]
     /// Take an account that has losses in the selected perp market to account for fees_accrued
-    fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn settle_fees(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -2741,7 +2741,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         limit: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 19;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -2929,7 +2929,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         limit: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
@@ -2996,7 +2996,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // parameter checks
         check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
 
@@ -3224,7 +3224,7 @@ impl Processor {
         liab_type: AssetType,
         liab_index: usize,
         max_liab_transfer: I80F48,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         check!(max_liab_transfer.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(asset_type != liab_type, MangoErrorCode::InvalidParam)?;
 
@@ -3515,7 +3515,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         base_transfer_request: i64,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // TODO OPT find a way to send in open orders accounts without zero keys
         // liqor passes in his own account and the liqee mango account
         // position is transfered to the liqor at favorable rate
@@ -3701,7 +3701,7 @@ impl Processor {
         accounts: &[AccountInfo],
         liab_index: usize,
         max_liab_transfer: I80F48,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
@@ -3860,7 +3860,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         max_liab_transfer: I80F48, // in native token terms
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         // First check the account is bankrupt
         // Determine the value of the liab transfer
         // Check if insurance fund has enough (given the fees)
@@ -4060,7 +4060,7 @@ impl Processor {
     #[inline(never)]
     /// *** Keeper Related Instructions ***
     /// Update the deposit and borrow index on a passed in RootBank
-    fn update_root_bank(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn update_root_bank(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let (fixed_accounts, node_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
@@ -4108,11 +4108,7 @@ impl Processor {
 
     #[inline(never)]
     /// similar to serum dex, but also need to do some extra magic with funding
-    fn consume_events(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        limit: usize,
-    ) -> MangoResult<()> {
+    fn consume_events(program_id: &Pubkey, accounts: &[AccountInfo], limit: usize) -> MangoResult {
         // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
         let limit = min(limit, 10);
 
@@ -4266,7 +4262,7 @@ impl Processor {
     #[inline(never)]
     /// Update the `funding_earned` of a `PerpMarket` using the current book price, spot index price
     /// and time since last update
-    fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn update_funding(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 5;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4312,7 +4308,7 @@ impl Processor {
 
     #[inline(never)]
     /// Settle the mngo_accrued in a PerpAccount for MNGO tokens
-    fn redeem_mngo(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn redeem_mngo(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4404,7 +4400,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         info: [u8; INFO_LEN],
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4423,11 +4419,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn deposit_msrm(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        quantity: u64,
-    ) -> MangoResult<()> {
+    fn deposit_msrm(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4456,11 +4448,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn withdraw_msrm(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        quantity: u64,
-    ) -> MangoResult<()> {
+    fn withdraw_msrm(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult {
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4500,7 +4488,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn set_group_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn set_group_admin(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4520,7 +4508,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn init_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn init_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 5;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -4575,7 +4563,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn close_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn close_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -4632,7 +4620,7 @@ impl Processor {
         price: i64,
         quantity: i64,
         trigger_price: I80F48,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         check!(price.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(quantity.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(trigger_price.is_positive(), MangoErrorCode::InvalidParam)?; // Is this necessary?
@@ -4739,7 +4727,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order_index: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let order_index = order_index as usize;
         check!(order_index < MAX_ADVANCED_ORDERS, MangoErrorCode::InvalidParam)?;
 
@@ -4781,7 +4769,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         order_index: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let order_index = order_index as usize;
         check!(order_index < MAX_ADVANCED_ORDERS, MangoErrorCode::InvalidParam)?;
         const NUM_FIXED: usize = 9;
@@ -5813,7 +5801,7 @@ fn transfer_token_internal(
     dst_pk: &Pubkey,
     token_index: usize,
     native_quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     if native_quantity.is_positive() {
         // increase dst first before decreasing from src
         checked_change_net(root_bank_cache, node_bank, dst, dst_pk, token_index, native_quantity)?;
@@ -5833,7 +5821,7 @@ fn checked_change_net(
     mango_account_pk: &Pubkey,
     token_index: usize,
     native_quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     if native_quantity.is_negative() {
         checked_sub_net(root_bank_cache, node_bank, mango_account, token_index, -native_quantity)?;
     } else if native_quantity.is_positive() {
@@ -5858,7 +5846,7 @@ fn checked_add_net(
     mango_account: &mut MangoAccount,
     token_index: usize,
     mut native_quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     if mango_account.borrows[token_index].is_positive() {
         let native_borrows = mango_account.get_native_borrow(root_bank_cache, token_index)?;
 
@@ -5892,7 +5880,7 @@ fn checked_sub_net(
     mango_account: &mut MangoAccount,
     token_index: usize,
     mut native_quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     if mango_account.deposits[token_index].is_positive() {
         let native_deposits = mango_account.get_native_deposit(root_bank_cache, token_index)?;
 
@@ -5929,7 +5917,7 @@ fn checked_add_deposit(
     mango_account: &mut MangoAccount,
     token_index: usize,
     quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     mango_account.checked_add_deposit(token_index, quantity)?;
     node_bank.checked_add_deposit(quantity)
 }
@@ -5939,7 +5927,7 @@ fn checked_sub_deposit(
     mango_account: &mut MangoAccount,
     token_index: usize,
     quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     mango_account.checked_sub_deposit(token_index, quantity)?;
     node_bank.checked_sub_deposit(quantity)
 }
@@ -5949,7 +5937,7 @@ fn checked_add_borrow(
     mango_account: &mut MangoAccount,
     token_index: usize,
     quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     mango_account.checked_add_borrow(token_index, quantity)?;
     node_bank.checked_add_borrow(quantity)
 }
@@ -5959,7 +5947,7 @@ fn checked_sub_borrow(
     mango_account: &mut MangoAccount,
     token_index: usize,
     quantity: I80F48,
-) -> MangoResult<()> {
+) -> MangoResult {
     mango_account.checked_sub_borrow(token_index, quantity)?;
     node_bank.checked_sub_borrow(quantity)
 }
@@ -5975,7 +5963,7 @@ fn invoke_cancel_orders<'a>(
     signers_seeds: &[&[&[u8]]],
 
     mut limit: u8,
-) -> MangoResult<()> {
+) -> MangoResult {
     let mut cancels = vec![];
     {
         let open_orders = load_open_orders(open_orders_ai)?;
@@ -6301,7 +6289,7 @@ fn program_transfer_lamports(
     src_ai: &AccountInfo,
     dst_ai: &AccountInfo,
     quantity: u64,
-) -> MangoResult<()> {
+) -> MangoResult {
     let src_lamports = src_ai.lamports().checked_sub(quantity).ok_or(math_err!())?;
     **src_ai.lamports.borrow_mut() = src_lamports;
 
@@ -6314,7 +6302,7 @@ fn cancel_all_advanced_orders<'a>(
     advanced_orders_ai: &AccountInfo<'a>,
     advanced_orders: &mut AdvancedOrders,
     agent_ai: &AccountInfo<'a>,
-) -> MangoResult<()> {
+) -> MangoResult {
     let mut total_fee = 0u64;
     for i in 0..MAX_ADVANCED_ORDERS {
         if advanced_orders.orders[i].is_active {

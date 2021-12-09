@@ -248,7 +248,7 @@ pub struct BookSide {
     pub free_list_head: u32,
     pub root_node: u32,
     pub leaf_count: usize,
-    pub nodes: [AnyNode; MAX_BOOK_NODES], // TODO make this variable length
+    pub nodes: [AnyNode; MAX_BOOK_NODES],
 }
 
 pub struct BookSideIter<'a> {
@@ -1276,7 +1276,7 @@ impl<'a> Book<'a> {
         mango_account: &mut MangoAccount,
         market_index: usize,
         mut limit: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let market_index = market_index as u8;
         for i in 0..MAX_PERP_OPEN_ORDERS {
             if mango_account.order_market[i] != market_index {
