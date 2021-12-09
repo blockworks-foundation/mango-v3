@@ -673,7 +673,10 @@ impl Processor {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
         check!(maint_leverage > init_leverage, MangoErrorCode::InvalidParam)?;
-        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(
+            maker_fee.checked_add(taker_fee).unwrap() >= ZERO_I80F48,
+            MangoErrorCode::InvalidParam
+        )?;
         check!(base_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(quote_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
@@ -792,7 +795,10 @@ impl Processor {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
         check!(maint_leverage > init_leverage, MangoErrorCode::InvalidParam)?;
-        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(
+            maker_fee.checked_add(taker_fee).unwrap() >= ZERO_I80F48,
+            MangoErrorCode::InvalidParam
+        )?;
         check!(base_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(quote_lot_size.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(!max_depth_bps.is_negative(), MangoErrorCode::InvalidParam)?;
@@ -1077,7 +1083,10 @@ impl Processor {
         // maint leverage may only increase to prevent unforeseen liquidations
         check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
 
-        check!(maker_fee + taker_fee >= ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(
+            maker_fee.checked_add(taker_fee).unwrap() >= ZERO_I80F48,
+            MangoErrorCode::InvalidParam
+        )?;
 
         // Set the params on MangoGroup PerpMarketInfo
         info.maker_fee = maker_fee;
@@ -1671,8 +1680,10 @@ impl Processor {
             )
         };
 
-        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
-        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
+        let quote_change =
+            I80F48::from_num(post_quote).checked_sub(I80F48::from_num(pre_quote)).unwrap();
+        let base_change =
+            I80F48::from_num(post_base).checked_sub(I80F48::from_num(pre_base)).unwrap();
 
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
@@ -1901,8 +1912,10 @@ impl Processor {
             )
         };
 
-        let quote_change = I80F48::from_num(post_quote) - I80F48::from_num(pre_quote);
-        let base_change = I80F48::from_num(post_base) - I80F48::from_num(pre_base);
+        let quote_change =
+            I80F48::from_num(post_quote).checked_sub(I80F48::from_num(pre_quote)).unwrap();
+        let base_change =
+            I80F48::from_num(post_base).checked_sub(I80F48::from_num(pre_base)).unwrap();
 
         checked_change_net(
             &mango_cache.root_bank_cache[QUOTE_INDEX],
@@ -2100,7 +2113,10 @@ impl Processor {
             let open_orders = load_open_orders(open_orders_ai)?;
             (
                 open_orders.native_coin_free,
-                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+                open_orders
+                    .native_pc_free
+                    .checked_add(open_orders.referrer_rebates_accrued)
+                    .unwrap(),
             )
         };
 
@@ -2136,7 +2152,10 @@ impl Processor {
 
             (
                 open_orders.native_coin_free,
-                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+                open_orders
+                    .native_pc_free
+                    .checked_add(open_orders.referrer_rebates_accrued)
+                    .unwrap(),
             )
         };
 
@@ -2159,7 +2178,7 @@ impl Processor {
             &mut mango_account,
             mango_account_ai.key,
             market_index,
-            I80F48::from_num(pre_base - post_base),
+            I80F48::from_num(pre_base - post_base), // already checked
         )?;
         checked_change_net(
             quote_root_bank_cache,
@@ -2167,7 +2186,7 @@ impl Processor {
             &mut mango_account,
             mango_account_ai.key,
             QUOTE_INDEX,
-            I80F48::from_num(pre_quote - post_quote),
+            I80F48::from_num(pre_quote - post_quote), // already checked
         )
     }
 
@@ -2247,23 +2266,7 @@ impl Processor {
 
         // If reduce_only, position must only go down
         let quantity = if reduce_only {
-            let mut base_pos = mango_account.perp_accounts[market_index].base_position
-                + mango_account.perp_accounts[market_index].taker_base;
-
-            // Iterate through event queue and find out maker fills
-            // *** TODO - test full event queue
-            // add in taker base
-            for event in event_queue.iter() {
-                if EventType::try_from(event.event_type).map_err(|_| throw!())? == EventType::Fill {
-                    let fill: &FillEvent = cast_ref(event);
-                    if &fill.maker == mango_account_ai.key {
-                        base_pos = match fill.taker_side {
-                            Side::Bid => base_pos - fill.quantity,
-                            Side::Ask => base_pos + fill.quantity,
-                        };
-                    }
-                }
-            }
+            let base_pos = mango_account.get_complete_base_pos(market_index, &event_queue)?;
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
@@ -2606,8 +2609,8 @@ impl Processor {
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos_a = I80F48::from_num(-a.base_position * contract_size) * price;
         let new_quote_pos_b = I80F48::from_num(-b.base_position * contract_size) * price;
-        let a_pnl: I80F48 = a.quote_position - new_quote_pos_a;
-        let b_pnl: I80F48 = b.quote_position - new_quote_pos_b;
+        let a_pnl: I80F48 = a.quote_position.checked_sub(new_quote_pos_a).unwrap();
+        let b_pnl: I80F48 = b.quote_position.checked_sub(new_quote_pos_b).unwrap();
 
         // pnl must be opposite signs for there to be a settlement
         if a_pnl * b_pnl > 0 {
@@ -2696,7 +2699,7 @@ impl Processor {
         pa.settle_funding(&perp_market_cache);
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos = I80F48::from_num(-pa.base_position * contract_size) * price;
-        let pnl: I80F48 = pa.quote_position - new_quote_pos;
+        let pnl: I80F48 = pa.quote_position.checked_sub(new_quote_pos).unwrap();
         check!(pnl.is_negative(), MangoErrorCode::Default)?;
         check!(perp_market.fees_accrued.is_positive(), MangoErrorCode::Default)?;
 
@@ -2855,7 +2858,10 @@ impl Processor {
             let open_orders = load_open_orders(open_orders_ai)?;
             (
                 open_orders.native_coin_free,
-                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+                open_orders
+                    .native_pc_free
+                    .checked_add(open_orders.referrer_rebates_accrued)
+                    .unwrap(),
             )
         };
 
@@ -2895,7 +2901,10 @@ impl Processor {
 
             (
                 open_orders.native_coin_free,
-                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+                open_orders
+                    .native_pc_free
+                    .checked_add(open_orders.referrer_rebates_accrued)
+                    .unwrap(),
             )
         };
 
@@ -3109,8 +3118,16 @@ impl Processor {
         };
 
         // Max liab transferred to reach init_health == 0
+        //
+        // This is the math without all the checked math
+        // let deficit_max_liab: I80F48 = -init_health
+        //     / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+
         let deficit_max_liab: I80F48 = -init_health
-            / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee));
+            / (liab_price
+                * (init_liab_weight
+                    .checked_sub(init_asset_weight * asset_fee / liab_fee)
+                    .unwrap()));
 
         let native_deposits = liqee_ma.get_native_deposit(asset_bank, asset_index)?;
         let native_borrows = liqee_ma.get_native_borrow(liab_bank, liab_index)?;
@@ -3336,8 +3353,15 @@ impl Processor {
             let deficit_max_liab = if asset_index == QUOTE_INDEX {
                 native_deposits
             } else {
+                // math without checked
+                // -init_health
+                //     / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee))
+
                 -init_health
-                    / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee))
+                    / (liab_price
+                        * (init_liab_weight
+                            .checked_sub(init_asset_weight * asset_fee / liab_fee)
+                            .unwrap()))
             };
 
             // Max liab transferred to reach asset_i == 0
@@ -3410,8 +3434,14 @@ impl Processor {
             let deficit_max_liab = if liab_index == QUOTE_INDEX {
                 native_borrows
             } else {
+                // math without checking
+                // -init_health
+                //     / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee))
                 -init_health
-                    / (liab_price * (init_liab_weight - init_asset_weight * asset_fee / liab_fee))
+                    / (liab_price
+                        * (init_liab_weight
+                            .checked_sub(init_asset_weight * asset_fee / liab_fee)
+                            .unwrap()))
             };
 
             // Max liab transferred to reach asset_i == 0
@@ -4921,10 +4951,10 @@ impl Processor {
                 let (taker_base, taker_quote, bids_quantity, asks_quantity) = {
                     let pa = &mango_account.perp_accounts[market_index];
                     (
-                        pa.taker_base + taker_base,
-                        pa.taker_quote + taker_quote,
-                        pa.bids_quantity + bids_quantity,
-                        pa.asks_quantity + asks_quantity,
+                        pa.taker_base.checked_add(taker_base).unwrap(),
+                        pa.taker_quote.checked_add(taker_quote).unwrap(),
+                        pa.bids_quantity.checked_add(bids_quantity).unwrap(),
+                        pa.asks_quantity.checked_add(asks_quantity).unwrap(),
                     )
                 };
 
@@ -5579,6 +5609,7 @@ impl Processor {
                 msg!("Mango: ChangeMaxMangoAccounts");
                 Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
             }
+            MangoInstruction::UpdateMarginBasket => {}
         }
     }
 }
