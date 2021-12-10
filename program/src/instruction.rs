@@ -1241,7 +1241,7 @@ impl MangoInstruction {
                     account_num: u64::from_le_bytes(*account_num),
                 }
             }
-            57 => MangoInstruction::UpgradeMangoAccountV0V1,
+            55 => MangoInstruction::UpgradeMangoAccountV0V1,
             _ => {
                 return None;
             }
@@ -1396,7 +1396,7 @@ pub fn close_mango_account(
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
-        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*owner_pk, true),
     ];
 
     let instr = MangoInstruction::CloseMangoAccount;

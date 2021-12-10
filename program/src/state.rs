@@ -1112,7 +1112,7 @@ pub struct MangoAccount {
     pub advanced_orders_key: Pubkey,
 
     /// padding for expansions
-    pub padding: [u8; 37],
+    pub padding: [u8; 38],
 }
 
 impl MangoAccount {
