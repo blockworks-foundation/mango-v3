@@ -5093,10 +5093,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn upgrade_mango_account_v0_v1(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> MangoResult {
+    fn upgrade_mango_account_v0_v1(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
@@ -5106,12 +5103,16 @@ impl Processor {
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check_eq!(mango_account.meta_data.version, 0, MangoErrorCode::InvalidAccountState)?;
-        check!(mango_group.num_mango_accounts < mango_group.max_mango_accounts, MangoErrorCode::MaxAccountsReached)?;
+        check!(
+            mango_group.num_mango_accounts < mango_group.max_mango_accounts,
+            MangoErrorCode::MaxAccountsReached
+        )?;
 
         mango_group.num_mango_accounts += 1;
         mango_account.meta_data.version = 1;

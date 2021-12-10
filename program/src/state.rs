@@ -203,7 +203,7 @@ pub struct MangoGroup {
     pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
     pub num_mango_accounts: u32, // number of MangoAccounts.v1
 
-    pub padding: [u8; 24],       // padding used for future expansions
+    pub padding: [u8; 24], // padding used for future expansions
 }
 
 impl MangoGroup {
