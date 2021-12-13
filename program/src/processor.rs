@@ -5120,6 +5120,61 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn cancel_perp_orders_side(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,
+        limit: u8,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
+
+        if perp_market.meta_data.version == 0 {
+            return Err(throw_err!(MangoErrorCode::InvalidParam));
+        } else {
+            book.cancel_all_side_with_size_incentives(
+                &mut mango_account,
+                &mut perp_market,
+                market_index,
+                side,
+                limit,
+            )?;
+        }
+
+        mango_emit!(MngoAccrualLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
+            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+        });
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5553,6 +5608,10 @@ impl Processor {
             MangoInstruction::ResolveDust => {
                 msg!("Mango: ResolveDust");
                 Self::resolve_dust(program_id, accounts)
+            }
+            MangoInstruction::CancelPerpOrdersSide { side, limit } => {
+                msg!("Mango: CancelSidePerpOrders");
+                Self::cancel_perp_orders_side(program_id, accounts, side, limit)
             }
         }
     }

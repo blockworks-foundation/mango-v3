@@ -615,7 +615,7 @@ pub enum MangoInstruction {
     /// 5. `[]` root_bank_ai - RootBank
     /// 6. `[writable]` node_bank_ai - NodeBank
     /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
-    ForceSettleQuotePositions,
+    ForceSettleQuotePositions, // instruction 40
 
     /// Place an order on the Serum Dex using Mango account. Improved over PlaceSpotOrder
     /// by reducing the tx size
@@ -777,7 +777,7 @@ pub enum MangoInstruction {
     /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account data
     /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
-    CloseMangoAccount,
+    CloseMangoAccount, // instruction 50
 
     /// Delete a spot open orders account and return lamports
     ///
@@ -828,6 +828,20 @@ pub enum MangoInstruction {
     /// 1. `[writable]` mango_account_ai - MangoAccount
     /// 2. `[signer]` signer_ai - Solana account of owner of the mango account
     UpgradeMangoAccountV0V1,
+
+    /// Cancel all perp open orders for one side of the book
+    ///
+    /// Accounts expected: 6
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - Owner of Mango Account
+    /// 3. `[writable]` perp_market_ai - PerpMarket
+    /// 4. `[writable]` bids_ai - Bids acc
+    /// 5. `[writable]` asks_ai - Asks acc
+    CancelPerpOrdersSide {
+        side: Side,
+        limit: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -1242,6 +1256,16 @@ impl MangoInstruction {
                 }
             }
             55 => MangoInstruction::UpgradeMangoAccountV0V1,
+            56 => {
+                let data_arr = array_ref![data, 0, 2];
+                let (side, limit) = array_refs![data_arr, 1, 1];
+
+                MangoInstruction::CancelPerpOrdersSide {
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    limit: u8::from_le_bytes(*limit),
+                }
+            }
+
             _ => {
                 return None;
             }
@@ -1676,6 +1700,30 @@ pub fn cancel_all_perp_orders(
         AccountMeta::new(*asks_pk, false),
     ];
     let instr = MangoInstruction::CancelAllPerpOrders { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cancel_perp_orders_side(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,   // read
+    mango_account_pk: &Pubkey, // write
+    owner_pk: &Pubkey,         // read, signer
+    perp_market_pk: &Pubkey,   // write
+    bids_pk: &Pubkey,          // write
+    asks_pk: &Pubkey,          // write
+    side: Side,
+    limit: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+    ];
+    let instr = MangoInstruction::CancelPerpOrdersSide { side, limit };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

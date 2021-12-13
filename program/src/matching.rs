@@ -1306,16 +1306,17 @@ impl<'a> Book<'a> {
         mango_account: &mut MangoAccount,
         perp_market: &mut PerpMarket,
         market_index: usize,
-        mut limit: u8,
         side: Side,
+        mut limit: u8,
     ) -> MangoResult {
         // TODO - test different limits
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
 
         let mut keys = vec![];
+        let market_index_u8 = market_index as u8;
         for i in 0..MAX_PERP_OPEN_ORDERS {
-            if mango_account.order_market[i] == market_index as u8
+            if mango_account.order_market[i] == market_index_u8
                 && mango_account.order_side[i] == side
             {
                 keys.push(mango_account.orders[i])
@@ -1353,10 +1354,11 @@ impl<'a> Book<'a> {
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
 
+        let market_index_u8 = market_index as u8;
         let mut bids_keys = vec![];
         let mut asks_keys = vec![];
         for i in 0..MAX_PERP_OPEN_ORDERS {
-            if mango_account.order_market[i] != market_index as u8 {
+            if mango_account.order_market[i] != market_index_u8 {
                 continue;
             }
             match mango_account.order_side[i] {
@@ -1392,7 +1394,7 @@ impl<'a> Book<'a> {
         market_index: usize,
         max_depth: i64,
         now_ts: u64,
-        mut limit: &mut u8,
+        limit: &mut u8,
         mut keys: Vec<i128>,
     ) -> MangoResult {
         keys.sort_unstable();
@@ -1459,7 +1461,7 @@ impl<'a> Book<'a> {
         market_index: usize,
         max_depth: i64,
         now_ts: u64,
-        mut limit: &mut u8,
+        limit: &mut u8,
         mut keys: Vec<i128>,
     ) -> MangoResult {
         keys.sort_unstable_by(|a, b| b.cmp(a));
