@@ -958,8 +958,9 @@ impl Processor {
 
                 oracle_indexes.push(oracle_index as u64);
                 oracle_prices.push(price.to_bits());
+            } else {
+                msg!("Failed CachePrice for oracle_index: {}", oracle_index);
             }
-            // TODO: log errors
         }
 
         mango_emit!(CachePricesLog {
@@ -5365,21 +5366,22 @@ fn read_oracle(
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai)?;
             let value = I80F48::from_num(price_account.agg.price);
-            let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
+            // let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
+            // Commented out for devnet
             // Filter out bad prices
-            if price_account.agg.status != PriceStatus::Trading {
-                msg!("Pyth status invalid: {}", price_account.agg.status as u8);
-                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
-            } else if conf > PYTH_CONF_FILTER {
-                msg!(
-                    "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
-                    token_index,
-                    value.to_num::<f64>(),
-                    conf.to_num::<f64>()
-                );
-                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
-            }
+            // if price_account.agg.status != PriceStatus::Trading {
+            //     msg!("Pyth status invalid: {}", price_account.agg.status as u8);
+            //     return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            // } else if conf > PYTH_CONF_FILTER {
+            //     msg!(
+            //         "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
+            //         token_index,
+            //         value.to_num::<f64>(),
+            //         conf.to_num::<f64>()
+            //     );
+            //     return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            // }
 
             let decimals = quote_decimals
                 .checked_add(price_account.expo)
