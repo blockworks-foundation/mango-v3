@@ -175,7 +175,7 @@ impl Processor {
         todo!()
     }
     #[inline(never)]
-    /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
+    /// DEPRECATED - if you use this instruction after v3.3.0 you will not be able to close your MangoAccount
     fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -189,7 +189,7 @@ impl Processor {
         let rent = Rent::get()?;
         check!(
             rent.is_exempt(mango_account_ai.lamports(), size_of::<MangoAccount>()),
-            MangoErrorCode::Default
+            MangoErrorCode::AccountNotRentExempt
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
@@ -201,13 +201,13 @@ impl Processor {
 
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
-        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
 
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
         mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
-
+        mango_account.not_upgradable = true;
         Ok(())
     }
 
@@ -5098,7 +5098,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,   // write
-            mango_account_ai, // write, signer
+            mango_account_ai, // write
             owner_ai          // signer
         ] = accounts;
 
@@ -5109,6 +5109,7 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check_eq!(mango_account.meta_data.version, 0, MangoErrorCode::InvalidAccountState)?;
+        check!(!mango_account.not_upgradable, MangoErrorCode::InvalidAccountState)?;
         check!(
             mango_group.num_mango_accounts < mango_group.max_mango_accounts,
             MangoErrorCode::MaxAccountsReached

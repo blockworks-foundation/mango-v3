@@ -1111,8 +1111,10 @@ pub struct MangoAccount {
     /// Starts off as zero pubkey and points to the AdvancedOrders account
     pub advanced_orders_key: Pubkey,
 
+    /// Can this account be upgraded to v1 so it can be closed
+    pub not_upgradable: bool,
     /// padding for expansions
-    pub padding: [u8; 38],
+    pub padding: [u8; 37],
 }
 
 impl MangoAccount {
