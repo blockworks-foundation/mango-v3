@@ -1307,10 +1307,13 @@ impl<'a> Book<'a> {
         perp_market: &mut PerpMarket,
         market_index: usize,
         mut limit: u8,
-    ) -> MangoResult {
+    ) -> MangoResult<(Vec<i128>, Vec<i128>)> {
         // TODO - test different limits
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
+        // For logging
+        let mut all_order_ids = vec![];
+        let mut canceled_order_ids = vec![];
 
         let mut my_bids = vec![];
         let mut my_asks = vec![];
@@ -1318,6 +1321,7 @@ impl<'a> Book<'a> {
             if mango_account.order_market[i] != market_index as u8 {
                 continue;
             }
+            all_order_ids.push(mango_account.orders[i]);
             match mango_account.order_side[i] {
                 Side::Bid => my_bids.push(mango_account.orders[i]),
                 Side::Ask => my_asks.push(mango_account.orders[i]),
@@ -1325,10 +1329,6 @@ impl<'a> Book<'a> {
         }
         my_bids.sort_unstable();
         my_asks.sort_by(|a, b| b.cmp(a));
-
-        // For logging
-        let mut attempted_cancels = vec![];
-        let mut canceled = vec![];
 
         // First do bids
         let mut bids_and_sizes = vec![];
@@ -1363,9 +1363,13 @@ impl<'a> Book<'a> {
 
         for (key, cuml_size) in bids_and_sizes {
             if limit == 0 {
-                return Ok(());
+                msg!(
+                    "all_order_ids: {:?} | canceled_order_ids: {:?}",
+                    all_order_ids,
+                    canceled_order_ids
+                );
+                return Ok((all_order_ids, canceled_order_ids));
             }
-            attempted_cancels.push(key);
             match self.cancel_order(key, Side::Bid) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
@@ -1380,7 +1384,7 @@ impl<'a> Book<'a> {
                         now_ts,
                         order.quantity,
                     )?;
-                    canceled.push(key);
+                    canceled_order_ids.push(key);
                 }
                 Err(_) => {
                     // Invalid state because we know it's on the book
@@ -1411,7 +1415,7 @@ impl<'a> Book<'a> {
                     }
                     if cuml_asks >= max_depth {
                         for ask_key in my_asks {
-                            asks_and_sizes.push((ask_key, max_depth))
+                            asks_and_sizes.push((ask_key, max_depth));
                         }
                         break;
                     }
@@ -1421,9 +1425,13 @@ impl<'a> Book<'a> {
 
         for (key, cuml_size) in asks_and_sizes {
             if limit == 0 {
-                return Ok(());
+                msg!(
+                    "all_order_ids: {:?} | canceled_order_ids: {:?}",
+                    all_order_ids,
+                    canceled_order_ids
+                );
+                return Ok((all_order_ids, canceled_order_ids));
             }
-            attempted_cancels.push(key);
             match self.cancel_order(key, Side::Ask) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
@@ -1438,7 +1446,7 @@ impl<'a> Book<'a> {
                         now_ts,
                         order.quantity,
                     )?;
-                    canceled.push(key);
+                    canceled_order_ids.push(key);
                 }
                 Err(_) => {
                     // Invalid state because we know it's on the book
@@ -1447,10 +1455,8 @@ impl<'a> Book<'a> {
             }
             limit -= 1;
         }
-
-        msg!("attempted_cancels: {:?} | canceled: {:?}", attempted_cancels, canceled);
-
-        Ok(())
+        msg!("all_order_ids: {:?} | canceled_order_ids: {:?}", all_order_ids, canceled_order_ids);
+        Ok((all_order_ids, canceled_order_ids))
     }
 
     /// Cancel all the orders for MangoAccount for this PerpMarket up to `limit`
