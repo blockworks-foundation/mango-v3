@@ -2271,6 +2271,8 @@ impl Processor {
                 market_index,
                 limit,
             )?;
+            check!(all_order_ids.len() == canceled_order_ids.len(), MangoErrorCode::MathError)?;
+
             mango_emit!(CancelAllPerpOrdersLog {
                 mango_group: *mango_group_ai.key,
                 mango_account: *mango_account_ai.key,
