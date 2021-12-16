@@ -1,9 +1,9 @@
 use std::cell::{Ref, RefMut};
 use std::cmp::{max, min};
-use std::convert::identity;
+use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 
-use bytemuck::{from_bytes, from_bytes_mut, try_from_bytes_mut};
+use bytemuck::{cast_ref, from_bytes, from_bytes_mut, try_from_bytes_mut};
 use enumflags2::BitFlags;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
@@ -24,7 +24,7 @@ use static_assertions::const_assert_eq;
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, OrderType, Side};
-use crate::queue::FillEvent;
+use crate::queue::{EventQueue, EventType, FillEvent};
 use crate::utils::{invert_side, pow_i80f48, remove_slop_mut, split_open_orders};
 
 pub const MAX_TOKENS: usize = 16; // Just changed
@@ -1335,6 +1335,10 @@ impl MangoAccount {
         }
 
         for i in 0..mango_group.num_oracles {
+            if self.borrows[i] > DUST_THRESHOLD {
+                return false;
+            }
+
             let pa = &self.perp_accounts[i];
             if pa.quote_position.is_negative() || pa.base_position != 0 {
                 return false;
@@ -1572,6 +1576,34 @@ impl MangoAccount {
         } else {
             Ok(0)
         }
+    }
+
+    /// Return base position on a perp market accounting for unprocessed fill events
+    pub fn get_complete_base_pos(
+        &self,
+        market_index: usize,
+        event_queue: &EventQueue,
+        mango_account_pk: &Pubkey,
+    ) -> MangoResult<i64> {
+        let mut base_pos = self.perp_accounts[market_index]
+            .base_position
+            .checked_add(self.perp_accounts[market_index].taker_base)
+            .unwrap();
+
+        // Iterate through event queue and find out maker fills
+        // *** TODO - test full event queue
+        for event in event_queue.iter() {
+            if EventType::try_from(event.event_type).map_err(|_| throw!())? == EventType::Fill {
+                let fill: &FillEvent = cast_ref(event);
+                if &fill.maker == mango_account_pk {
+                    base_pos = match fill.taker_side {
+                        Side::Bid => base_pos.checked_sub(fill.quantity).unwrap(),
+                        Side::Ask => base_pos.checked_add(fill.quantity).unwrap(),
+                    };
+                }
+            }
+        }
+        Ok(base_pos)
     }
 }
 
