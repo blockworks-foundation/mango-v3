@@ -1335,6 +1335,10 @@ impl MangoAccount {
         }
 
         for i in 0..mango_group.num_oracles {
+            if self.borrows[i] > DUST_THRESHOLD {
+                return false;
+            }
+
             let pa = &self.perp_accounts[i];
             if pa.quote_position.is_negative() || pa.base_position != 0 {
                 return false;
