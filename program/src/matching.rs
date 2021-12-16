@@ -1094,12 +1094,7 @@ impl<'a> Book<'a> {
             let _result = self.bids.insert_leaf(&new_bid)?;
 
             // TODO OPT remove if PlacePerpOrder needs more compute
-            msg!(
-                "bid on book client_id={} quantity={} price={}",
-                client_order_id,
-                rem_quantity,
-                price
-            );
+            msg!("bid on book order_id={} quantity={} price={}", order_id, rem_quantity, price);
             mango_account.add_order(market_index, Side::Bid, &new_bid)?;
         }
 
@@ -1245,12 +1240,7 @@ impl<'a> Book<'a> {
             );
 
             // TODO OPT remove if PlacePerpOrder needs more compute
-            msg!(
-                "ask on book client_id={} quantity={} price={}",
-                client_order_id,
-                rem_quantity,
-                price
-            );
+            msg!("ask on book order_id={} quantity={} price={}", order_id, rem_quantity, price);
 
             let _result = self.asks.insert_leaf(&new_ask)?;
             mango_account.add_order(market_index, Side::Ask, &new_ask)?;
