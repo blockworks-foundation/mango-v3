@@ -204,7 +204,7 @@ impl<'a> EventQueue<'a> {
     }
 }
 
-#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
+#[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive, Eq, PartialEq)]
 #[repr(u8)]
 pub enum EventType {
     Fill,
