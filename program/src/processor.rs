@@ -4605,7 +4605,12 @@ impl Processor {
 
         // If reduce_only, position must only go down
         let quantity = if order.reduce_only {
-            let base_pos = mango_account.perp_accounts[market_index].base_position;
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
+
             if (order.side == Side::Bid && base_pos > 0)
                 || (order.side == Side::Ask && base_pos < 0)
             {
