@@ -5177,13 +5177,20 @@ impl Processor {
         if perp_market.meta_data.version == 0 {
             return Err(throw_err!(MangoErrorCode::InvalidParam));
         } else {
-            book.cancel_all_side_with_size_incentives(
+            let (all_order_ids, canceled_order_ids) = book.cancel_all_side_with_size_incentives(
                 &mut mango_account,
                 &mut perp_market,
                 market_index,
                 side,
                 limit,
             )?;
+            mango_emit!(CancelAllPerpOrdersLog {
+                mango_group: *mango_group_ai.key,
+                mango_account: *mango_account_ai.key,
+                market_index: market_index as u64,
+                all_order_ids,
+                canceled_order_ids
+            });
         }
 
         mango_emit!(MngoAccrualLog {
