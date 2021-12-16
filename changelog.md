@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.13
-Deployed:  | Slot: 
+Deployed: Dec 16, 2021 at 21:16:50 UTC | Slot: 111,865,268
 1. Fixed FillLog maker_fee and taker_fee
 2. Now logging order id in new_bid and new_ask
 
