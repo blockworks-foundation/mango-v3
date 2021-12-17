@@ -7,7 +7,7 @@ edition = "2018"
 proc-macro = true
 
 [dependencies]
-syn = "=1.0.74"
+syn = "=1.0.82"
 solana-program = "^1.8.1"
 bytemuck = "^1.7.2"
 quote = "^1.0.9"
