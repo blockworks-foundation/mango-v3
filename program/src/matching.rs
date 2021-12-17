@@ -1323,11 +1323,25 @@ impl<'a> Book<'a> {
         // First do bids
         let mut bids_and_sizes = vec![];
         let mut cuml_bids = 0;
-
+        let mut last_bid = i128::MAX;
+        let mut bid_leaf_count = 0;
+        let mut my_prev = i128::MAX;
         for bid in self.bids.iter() {
+            if bid.key >= last_bid {
+                msg!("Invalid iter");
+                panic!()
+            } else {
+                last_bid = bid.key;
+                bid_leaf_count += 1;
+            }
             match my_bids.last() {
-                None => break,
+                None => continue,
                 Some(&my_highest_bid) => {
+                    if my_highest_bid > my_prev {
+                        panic!("bad sorting")
+                    } else {
+                        my_prev = my_highest_bid;
+                    }
                     if bid.key > my_highest_bid {
                         // If book bid is greater than my highest bid continue
                         cuml_bids += bid.quantity;
@@ -1341,16 +1355,20 @@ impl<'a> Book<'a> {
                         my_bids.pop();
                     }
 
-                    if cuml_bids >= max_depth {
-                        for bid_key in my_bids {
-                            bids_and_sizes.push((bid_key, max_depth));
-                        }
-                        break;
-                    }
+                    // if cuml_bids >= max_depth {
+                    //     for bid_key in my_bids {
+                    //         bids_and_sizes.push((bid_key, max_depth));
+                    //     }
+                    //     break;
+                    // }
                 }
             }
         }
-
+        msg!("bids leaf count: {} {}", self.bids.leaf_count, bid_leaf_count);
+        if self.bids.leaf_count != bid_leaf_count {
+            msg!("invalid leaf count: {} {}", self.bids.leaf_count, bid_leaf_count);
+            panic!()
+        }
         for (key, cuml_size) in bids_and_sizes {
             if limit == 0 {
                 return Ok((all_order_ids, canceled_order_ids));
@@ -1382,10 +1400,26 @@ impl<'a> Book<'a> {
         // Asks
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
+        let mut last_ask = i128::MIN;
+        let mut ask_leaf_count = 0;
+        my_prev = i128::MIN;
         for ask in self.asks.iter() {
+            if ask.key <= last_ask {
+                msg!("Invalid iter");
+                panic!()
+            } else {
+                last_ask = ask.key;
+                ask_leaf_count += 1;
+            }
+
             match my_asks.last() {
-                None => break,
+                None => continue,
                 Some(&my_lowest_ask) => {
+                    if my_lowest_ask < my_prev {
+                        panic!("bad sorting asks")
+                    } else {
+                        my_prev = my_lowest_ask;
+                    }
                     if ask.key < my_lowest_ask {
                         // If book ask is less than my lowest ask, continue
                         cuml_asks += ask.quantity;
@@ -1398,14 +1432,20 @@ impl<'a> Book<'a> {
                         cuml_asks += ask.quantity;
                         my_asks.pop();
                     }
-                    if cuml_asks >= max_depth {
-                        for ask_key in my_asks {
-                            asks_and_sizes.push((ask_key, max_depth));
-                        }
-                        break;
-                    }
+                    // if cuml_asks >= max_depth {
+                    //     for ask_key in my_asks {
+                    //         asks_and_sizes.push((ask_key, max_depth));
+                    //     }
+                    //     break;
+                    // }
                 }
             }
+        }
+        msg!("asks leaf count: {} {}", self.asks.leaf_count, ask_leaf_count);
+
+        if self.asks.leaf_count != ask_leaf_count {
+            msg!("invalid leaf count: {} {}", self.asks.leaf_count, ask_leaf_count);
+            panic!()
         }
 
         for (key, cuml_size) in asks_and_sizes {
