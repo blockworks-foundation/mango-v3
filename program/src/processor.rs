@@ -25,10 +25,11 @@ use switchboard_program::FastRoundResultAccountData;
 
 use mango_common::Loadable;
 use mango_logs::{
-    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, DepositLog,
-    LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog,
-    OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog,
-    TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
+    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, CancelAllPerpOrdersLog,
+    DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog,
+    MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog,
+    SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog,
+    WithdrawLog,
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
@@ -958,8 +959,9 @@ impl Processor {
 
                 oracle_indexes.push(oracle_index as u64);
                 oracle_prices.push(price.to_bits());
+            } else {
+                msg!("Failed CachePrice for oracle_index: {}", oracle_index);
             }
-            // TODO: log errors
         }
 
         mango_emit!(CachePricesLog {
@@ -2002,7 +2004,12 @@ impl Processor {
 
         // If reduce_only, position must only go down
         let quantity = if reduce_only {
-            let base_pos = mango_account.perp_accounts[market_index].base_position;
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
+
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
             } else {
@@ -2263,12 +2270,19 @@ impl Processor {
                 limit,
             )?;
         } else {
-            book.cancel_all_with_size_incentives(
+            let (all_order_ids, canceled_order_ids) = book.cancel_all_with_size_incentives(
                 &mut mango_account,
                 &mut perp_market,
                 market_index,
                 limit,
             )?;
+            mango_emit!(CancelAllPerpOrdersLog {
+                mango_group: *mango_group_ai.key,
+                mango_account: *mango_account_ai.key,
+                market_index: market_index as u64,
+                all_order_ids,
+                canceled_order_ids
+            });
         }
 
         mango_emit!(MngoAccrualLog {
@@ -4591,7 +4605,12 @@ impl Processor {
 
         // If reduce_only, position must only go down
         let quantity = if order.reduce_only {
-            let base_pos = mango_account.perp_accounts[market_index].base_position;
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
+
             if (order.side == Side::Bid && base_pos > 0)
                 || (order.side == Side::Ask && base_pos < 0)
             {
@@ -5068,7 +5087,7 @@ impl Processor {
                 Self::set_group_admin(program_id, accounts)
             }
             MangoInstruction::CancelAllPerpOrders { limit } => {
-                msg!("Mango: CancelAllPerpOrders");
+                msg!("Mango: CancelAllPerpOrders | limit={}", limit);
                 Self::cancel_all_perp_orders(program_id, accounts, limit)
             }
             MangoInstruction::ForceSettleQuotePositions => {

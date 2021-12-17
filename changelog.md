@@ -1,5 +1,16 @@
 # Mango Program Change Log
 
+## v3.2.13
+Deployed: Dec 16, 2021 at 21:16:50 UTC | Slot: 111,865,268
+1. Fixed FillLog maker_fee and taker_fee
+2. Now logging order id in new_bid and new_ask
+
+## v3.2.12
+Deployed: Dec 16, 2021 at 16:15:19 UTC | Slot: 111,832,202
+1. Add CancelAllPerpOrdersLog to mango_logs and start logging cancel_all_with_size_incentives
+2. For reduce_only on perp orders, now checking base position that's sitting on EventQueue unprocessed
+2. Fix bug in check_exit_bankruptcy; now checking all borrows
+
 ## v3.2.11
 Deployed: Dec 9, 2021 at 18:59:28 UTC | Slot: 110,796,491
 1. Fixed bug where perp limit orders past price limit would fail due to simulation

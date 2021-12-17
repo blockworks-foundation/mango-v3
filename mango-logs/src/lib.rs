@@ -222,3 +222,12 @@ pub struct RedeemMngoLog {
     pub market_index: u64,
     pub redeemed_mngo: u64,
 }
+
+#[event]
+pub struct CancelAllPerpOrdersLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub market_index: u64,
+    pub all_order_ids: Vec<i128>,
+    pub canceled_order_ids: Vec<i128>,
+}
