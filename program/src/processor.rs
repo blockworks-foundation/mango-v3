@@ -1430,9 +1430,9 @@ impl Processor {
             MangoErrorCode::InvalidOpenOrdersAccount
         )?;
 
-        if mango_account.in_margin_basket[i] {
+        if mango_account.in_margin_basket[market_index] {
             let open_orders = load_open_orders(open_orders_ai)?;
-            mango_account.update_basket(i, &open_orders)?;
+            mango_account.update_basket(market_index, &open_orders)?;
             check!(
                 !mango_account.in_margin_basket[market_index],
                 MangoErrorCode::InvalidAccountState
