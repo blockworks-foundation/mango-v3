@@ -305,7 +305,7 @@ impl Processor {
             program_id,
         );
         check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
-        check!(&dust_account.owner == mango_group_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(&dust_account.owner == &mango_group.admin, MangoErrorCode::InvalidOwner)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
 
@@ -328,10 +328,8 @@ impl Processor {
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
         root_bank_cache.check_valid(&mango_group, now_ts)?;
 
-        let borrow_amount = mango_account
-            .get_native_borrow(&mango_cache.root_bank_cache[token_index], token_index)?;
-        let deposit_amount = mango_account
-            .get_native_deposit(&mango_cache.root_bank_cache[token_index], token_index)?;
+        let borrow_amount = mango_account.get_native_borrow(root_bank_cache, token_index)?;
+        let deposit_amount = mango_account.get_native_deposit(root_bank_cache, token_index)?;
 
         // Amount must be dust aka < 1 native spl token
         if borrow_amount > ZERO_I80F48 && borrow_amount < ONE_I80F48 {
@@ -5088,7 +5086,7 @@ impl Processor {
         )?;
         check!(payer_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let rent = Rent::get()?;
 
         let mango_account_seeds: &[&[u8]] = &[&mango_group_ai.key.as_ref(), b"DustAccount"];
@@ -5107,7 +5105,7 @@ impl Processor {
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
 
         mango_account.mango_group = *mango_group_ai.key;
-        mango_account.owner = *mango_group_ai.key;
+        mango_account.owner = mango_group.admin;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
         mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
 
