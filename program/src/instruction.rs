@@ -208,6 +208,16 @@ pub enum MangoInstruction {
     },
 
     /// Place an order on a perp market
+    ///
+    /// In case this order is matched, the corresponding order structs on both
+    /// PerpAccounts (taker & maker) will be adjusted, and the position size
+    /// will be adjusted w/o accounting for fees.
+    /// In addition a FillEvent will be placed on the event queue.
+    /// Through a subsequent invocation of ConsumeEvents the FillEvent can be
+    /// executed and the perp account balances (base/quote) and fees will be
+    /// paid from the quote position. Only at this point the position balance
+    /// is 100% refelecting the trade.
+    ///
     /// Accounts expected by this instruction (8):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
