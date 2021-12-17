@@ -1877,7 +1877,7 @@ impl PerpAccount {
     }
 
     /// All orders must be canceled and there must be no unprocessed FillEvents for this PerpAccount
-    pub fn is_liquidatable(&self) -> bool {
+    pub fn has_no_open_orders(&self) -> bool {
         self.bids_quantity == 0
             && self.asks_quantity == 0
             && self.taker_quote == 0

@@ -38,7 +38,8 @@ pub enum MangoInstruction {
         quote_max_rate: I80F48,
     },
 
-    /// Initialize a mango account for a user
+    /// DEPRECATED Initialize a mango account for a user
+    /// Accounts created with this function cannot be closed without upgrading with UpgradeMangoAccountV0V1
     ///
     /// Accounts expected by this instruction (3):
     ///
@@ -802,10 +803,26 @@ pub enum MangoInstruction {
     /// 3. `[writable]` advanced_orders_ai - the advanced orders account
     CloseAdvancedOrders,
 
-    // TODO documentation
+    /// Create a PDA Mango Account for collecting dust owned by a group
+    /// 
+    /// Accounts expected by this instruction (4)
+    /// 0. `[]` mango_group_ai - MangoGroup to create the dust account for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer, writable]` signer_ai - Signer and fee payer account
+    /// 3. `[writable]` system_prog_ai - System program
     CreateDustAccount,
 
-    // TODO documentation
+    /// Transfer dust (< 1 native SPL token) assets and liabilities for a single token to the group's dust account
+    /// 
+    /// Accounts expected by this instruction (7)
+    /// 
+    /// 0. `[]` mango_group_ai - MangoGroup of the mango account
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
+    /// 3. `[writable]` dust_account_ai - Dust Account for the group
+    /// 4. `[]` root_bank_ai - The root bank for the token
+    /// 5. `[writable]` node_bank_ai - A node bank for the token
+    /// 6. `[]` mango_cache_ai - The cache for the group
     ResolveDust,
 
     /// Create a PDA mango account for a user
@@ -820,13 +837,13 @@ pub enum MangoInstruction {
         account_num: u64,
     },
 
-    /// Upgrade a V0 Mango Account to V1
+    /// Upgrade a V0 Mango Account to V1 allowing it to be closed
     ///
     /// Accounts expected by this instruction (3):
     ///
     /// 0. `[writable]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - MangoAccount
-    /// 2. `[signer]` signer_ai - Solana account of owner of the mango account
+    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
     UpgradeMangoAccountV0V1,
 
     /// Cancel all perp open orders for one side of the book
@@ -1249,14 +1266,15 @@ impl MangoInstruction {
             51 => MangoInstruction::CloseSpotOpenOrders,
             52 => MangoInstruction::CloseAdvancedOrders,
             53 => MangoInstruction::CreateDustAccount,
-            54 => {
+            54 => MangoInstruction::ResolveDust,
+            55 => {
                 let account_num = array_ref![data, 0, 8];
                 MangoInstruction::CreateMangoAccount {
                     account_num: u64::from_le_bytes(*account_num),
                 }
             }
-            55 => MangoInstruction::UpgradeMangoAccountV0V1,
-            56 => {
+            56 => MangoInstruction::UpgradeMangoAccountV0V1,
+            57 => {
                 let data_arr = array_ref![data, 0, 2];
                 let (side, limit) = array_refs![data_arr, 1, 1];
 
