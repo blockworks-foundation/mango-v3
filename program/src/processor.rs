@@ -275,11 +275,9 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn resolve_dust(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+    fn resolve_dust(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 7;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
-
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write
@@ -288,13 +286,15 @@ impl Processor {
             root_bank_ai,       // read
             node_bank_ai,       // write
             mango_cache_ai      // read
-        ] = fixed_ais;
+        ] = accounts;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let mut dust_account =
             MangoAccount::load_mut_checked(dust_account_ai, program_id, &mango_group_ai.key)?;
@@ -305,28 +305,30 @@ impl Processor {
             program_id,
         );
         check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        // TODO OPT - unnecessary
         check!(&dust_account.owner == &mango_group.admin, MangoErrorCode::InvalidOwner)?;
-
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-
-        let active_assets = UserActiveAssets::new(&mango_group, &dust_account, vec![]);
-        let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
-        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
         let token_index = mango_group
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
-
         // Find the node_bank pubkey in root_bank, if not found error
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-        // Check validity of root bank cache
-        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &dust_account,
+            vec![(AssetType::Token, token_index)],
+        );
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        // No need to check validity here because it's part of active_assets
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
-        root_bank_cache.check_valid(&mango_group, now_ts)?;
 
         let borrow_amount = mango_account.get_native_borrow(root_bank_cache, token_index)?;
         let deposit_amount = mango_account.get_native_deposit(root_bank_cache, token_index)?;
@@ -343,6 +345,21 @@ impl Processor {
                 token_index,
                 borrow_amount,
             )?;
+
+            // We know DustAccount doesn't have any open orders; but check it just in case
+            check!(dust_account.num_in_margin_basket == 0, MangoErrorCode::InvalidAccountState)?;
+
+            // Make sure DustAccount satisfies health check only when it has taken on more borrows
+            let mut health_cache = HealthCache::new(active_assets);
+            let open_orders_ais = vec![None; MAX_PAIRS];
+            health_cache.init_vals_with_orders_vec(
+                &mango_group,
+                &mango_cache,
+                &dust_account,
+                &open_orders_ais,
+            )?;
+            let health = health_cache.get_health(&mango_group, HealthType::Init);
+            check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
         } else if deposit_amount > ZERO_I80F48 && deposit_amount < ONE_I80F48 {
             transfer_token_internal(
                 root_bank_cache,
@@ -355,12 +372,6 @@ impl Processor {
                 deposit_amount,
             )?;
         }
-
-        let mut health_cache = HealthCache::new(active_assets);
-
-        health_cache.init_vals(&mango_group, &mango_cache, &dust_account, open_orders_ais)?;
-        let health = health_cache.get_health(&mango_group, HealthType::Init);
-        check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
 
         Ok(())
     }
