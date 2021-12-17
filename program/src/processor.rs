@@ -246,17 +246,21 @@ impl Processor {
             check!(perp_account.has_no_open_orders(), MangoErrorCode::InvalidAccountState)?;
         }
         // Check no msrm
-        check_eq!(mango_account.msrm_amount, 0, MangoErrorCode::Default)?;
+        check_eq!(mango_account.msrm_amount, 0, MangoErrorCode::InvalidAccountState)?;
         // Check not being liquidated/bankrupt
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         // Check open orders accounts closed
         for open_orders_key in mango_account.spot_open_orders.iter() {
-            check_eq!(open_orders_key, &Pubkey::default(), MangoErrorCode::Default)?;
+            check_eq!(open_orders_key, &Pubkey::default(), MangoErrorCode::InvalidAccountState)?;
         }
         // Check advanced orders account closed
-        check_eq!(&mango_account.advanced_orders_key, &Pubkey::default(), MangoErrorCode::Default)?;
+        check_eq!(
+            &mango_account.advanced_orders_key,
+            &Pubkey::default(),
+            MangoErrorCode::InvalidAccountState
+        )?;
 
         // Transfer lamports to owner
         program_transfer_lamports(mango_account_ai, owner_ai, mango_account_ai.lamports())?;
@@ -4589,17 +4593,14 @@ impl Processor {
 
         let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+        for i in 0..MAX_ADVANCED_ORDERS {
+            advanced_orders.orders[i].is_active = false;
+        }
+        advanced_orders.meta_data.is_initialized = false;
 
         // Transfer lamports to owner
         program_transfer_lamports(advanced_orders_ai, owner_ai, advanced_orders_ai.lamports())?;
 
-        for i in 0..MAX_ADVANCED_ORDERS {
-            if advanced_orders.orders[i].is_active {
-                advanced_orders.orders[i].is_active = false;
-            }
-        }
-
-        advanced_orders.meta_data.is_initialized = false;
         mango_account.advanced_orders_key = Pubkey::default();
 
         Ok(())
