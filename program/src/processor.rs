@@ -1427,8 +1427,17 @@ impl Processor {
         check_eq!(
             &mango_account.spot_open_orders[market_index],
             open_orders_ai.key,
-            MangoErrorCode::InvalidOwner
+            MangoErrorCode::InvalidOpenOrdersAccount
         )?;
+
+        if mango_account.in_margin_basket[i] {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            mango_account.update_basket(i, &open_orders)?;
+            check!(
+                !mango_account.in_margin_basket[market_index],
+                MangoErrorCode::InvalidAccountState
+            )?;
+        }
 
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_close_open_orders(
@@ -1441,7 +1450,6 @@ impl Processor {
         )?;
 
         mango_account.spot_open_orders[market_index] = Pubkey::default();
-        mango_account.in_margin_basket[market_index] = false;
 
         Ok(())
     }
