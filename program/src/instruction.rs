@@ -804,7 +804,7 @@ pub enum MangoInstruction {
     CloseAdvancedOrders,
 
     /// Create a PDA Mango Account for collecting dust owned by a group
-    /// 
+    ///
     /// Accounts expected by this instruction (4)
     /// 0. `[]` mango_group_ai - MangoGroup to create the dust account for
     /// 1. `[writable]` mango_account_ai - the mango account data
@@ -813,9 +813,9 @@ pub enum MangoInstruction {
     CreateDustAccount,
 
     /// Transfer dust (< 1 native SPL token) assets and liabilities for a single token to the group's dust account
-    /// 
+    ///
     /// Accounts expected by this instruction (7)
-    /// 
+    ///
     /// 0. `[]` mango_group_ai - MangoGroup of the mango account
     /// 1. `[writable]` mango_account_ai - the mango account data
     /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
