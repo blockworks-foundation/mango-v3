@@ -46,6 +46,7 @@ pub const FREE_ORDER_SLOT: u8 = u8::MAX;
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
+pub const PYTH_CONF_FILTER_TIMEOUT: u64 = 60; // if filter is filtering out for more than 1 minitue / update the price even if confidence is low
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -709,6 +710,15 @@ impl MangoCache {
         } else {
             self.price_cache[i].price // Just panic if index out of bounds
         }
+    }
+
+    pub fn get_price_updated(&self, i: usize) -> u64 {
+        if i >= self.price_cache.len() {
+            0
+        } else {
+            self.price_cache[i].last_update
+        }
+        
     }
 }
 

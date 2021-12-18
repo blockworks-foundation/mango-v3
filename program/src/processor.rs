@@ -46,7 +46,7 @@ use crate::state::{
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
     TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48,
-    ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
+    ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48, PYTH_CONF_FILTER_TIMEOUT,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -954,7 +954,8 @@ impl Processor {
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
+            let oracle_last_update = mango_cache.get_price_updated(oracle_index);
+            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai, oracle_last_update) {
                 mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
                 oracle_indexes.push(oracle_index as u64);
@@ -5374,6 +5375,7 @@ fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
+    last_updated: u64
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -5397,7 +5399,12 @@ fn read_oracle(
                     value.to_num::<f64>(),
                     conf.to_num::<f64>()
                 );
-                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+                let clock = Clock::get()?;
+                let current_time = clock.unix_timestamp as u64;
+                let time_diff_in_seconds = (current_time - last_updated)/(60*1000);
+                if time_diff_in_seconds < PYTH_CONF_FILTER_TIMEOUT {
+                    return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+                }
             }
 
             let decimals = quote_decimals
