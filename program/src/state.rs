@@ -712,7 +712,7 @@ impl MangoCache {
         }
     }
 
-    pub fn get_price_updated(&self, i: usize) -> u64 {
+    pub fn get_last_updated(&self, i: usize) -> u64 {
         if i >= self.price_cache.len() {
             0
         } else {

@@ -954,7 +954,7 @@ impl Processor {
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            let oracle_last_update = mango_cache.get_price_updated(oracle_index);
+            let oracle_last_update = mango_cache.get_last_updated(oracle_index);
             if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai, oracle_last_update) {
                 mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
