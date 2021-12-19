@@ -888,7 +888,7 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
-        // Note: a check for &mango_account.owner == owner_ai.key does'nt exist on purpose
+        // Note: a check for &mango_account.owner == owner_ai.key doesn't exist on purpose
         // this is how mango currently reimburses users
 
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
