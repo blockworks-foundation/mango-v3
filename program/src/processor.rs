@@ -1,4 +1,3 @@
-use anchor_lang::account;
 use std::cell::RefMut;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
@@ -5311,7 +5310,7 @@ impl Processor {
         accounts: &[AccountInfo],
     ) -> MangoResult {
         const NUM_FIXED: usize = 4;
-        let accounts = array_ref![accounts, 0, 4];
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,                   // read
             mango_account_ai,                 // write
