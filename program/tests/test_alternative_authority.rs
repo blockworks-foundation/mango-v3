@@ -55,7 +55,7 @@ async fn test_alternative_authority() {
     // Step 1: Make deposits
     deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
-    // Step2: Setup alternative
+    // Step2: Setup alternative authority which can place orders on behalf
     alternative_authority_scenario(
         &mut test,
         &mut mango_group_cookie,
