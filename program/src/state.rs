@@ -1118,7 +1118,7 @@ pub struct MangoAccount {
     pub alternative_authority: Pubkey,
 
     /// padding for expansions
-    /// Note: future expansion can also be just done via islated PDAs
+    /// Note: future expansion can also be just done via isolated PDAs
     /// which can be computed independently and dont need to be linked from
     /// this account
     pub padding: [u8; 5],
