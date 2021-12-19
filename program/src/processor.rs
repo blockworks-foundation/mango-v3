@@ -3058,8 +3058,7 @@ impl Processor {
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(
-            &liqor_ma.owner == liqor_ai.key
-                || &liqor_ma.alternative_authority == liqor_ai.key,
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.alternative_authority == liqor_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
@@ -3287,8 +3286,7 @@ impl Processor {
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(
-            &liqor_ma.owner == liqor_ai.key
-                || &liqor_ma.alternative_authority == liqor_ai.key,
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.alternative_authority == liqor_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
@@ -3586,8 +3584,7 @@ impl Processor {
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(
-            &liqor_ma.owner == liqor_ai.key
-                || &liqor_ma.alternative_authority == liqor_ai.key,
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.alternative_authority == liqor_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
@@ -5327,7 +5324,10 @@ impl Processor {
 
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
-        check!(&mango_account.alternative_authority != alternative_authority_ai.key, MangoErrorCode::InvalidAccount)?;
+        check!(
+            &mango_account.alternative_authority != alternative_authority_ai.key,
+            MangoErrorCode::InvalidAccount
+        )?;
 
         mango_account.alternative_authority = *alternative_authority_ai.key;
 
