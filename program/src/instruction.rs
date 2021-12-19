@@ -869,6 +869,16 @@ pub enum MangoInstruction {
         side: Side,
         limit: u8,
     },
+
+    /// https://github.com/blockworks-foundation/mango-v3/pull/97/
+    /// Set alternative authority to mango account
+    ///
+    /// Accounts expected: 4
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - Owner of Mango Account
+    /// 3. `[]` alternative_authority_ai - Alternative authority
+    SetAlternativeMangoAccountAuthority {},
 }
 
 impl MangoInstruction {
@@ -1293,7 +1303,7 @@ impl MangoInstruction {
                     limit: u8::from_le_bytes(*limit),
                 }
             }
-
+            58 => MangoInstruction::SetAlternativeMangoAccountAuthority {},
             _ => {
                 return None;
             }
@@ -1472,6 +1482,25 @@ pub fn create_mango_account(
     ];
 
     let instr = MangoInstruction::CreateMangoAccount { account_num };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn set_alternative_mango_account_authority(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    alternative_authority_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*alternative_authority_pk, false),
+    ];
+
+    let instr = MangoInstruction::SetAlternativeMangoAccountAuthority {};
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

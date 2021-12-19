@@ -1,3 +1,4 @@
+use anchor_lang::Key;
 use std::borrow::Borrow;
 use std::mem::size_of;
 
@@ -1222,6 +1223,95 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn place_spot_order_with_alternative_authority(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        spot_market_cookie: &SpotMarketCookie,
+        user_index: usize,
+        alternative_authority_user_index: usize,
+        order: NewOrderInstructionV3,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let mint_index = spot_market_cookie.mint.index;
+
+        let alternative_user = Keypair::from_base58_string(
+            &self.users[alternative_authority_user_index].to_base58_string(),
+        );
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (mint_root_bank_pk, mint_root_bank) =
+            self.with_root_bank(&mango_group, mint_index).await;
+        let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
+        let (quote_root_bank_pk, quote_root_bank) =
+            self.with_root_bank(&mango_group, self.quote_index).await;
+        let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
+
+        // Only pass in open orders if in margin basket or current market index, and
+        // the only writable account should be OpenOrders for current market index
+        let mut open_orders_pks = Vec::new();
+        for x in 0..mango_account.spot_open_orders.len() {
+            if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
+                open_orders_pks.push(
+                    self.init_spot_open_orders(
+                        &mango_group_pk,
+                        &mango_group,
+                        &mango_account_pk,
+                        &mango_account,
+                        user_index,
+                        x,
+                    )
+                    .await,
+                );
+            } else {
+                open_orders_pks.push(mango_account.spot_open_orders[x]);
+            }
+        }
+
+        let (dex_signer_pk, _dex_signer_nonce) =
+            create_signer_key_and_nonce(&serum_program_id, &spot_market_cookie.market);
+
+        let instructions = [mango::instruction::place_spot_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &alternative_user.pubkey(),
+            &mango_group.mango_cache,
+            &serum_program_id,
+            &spot_market_cookie.market,
+            &spot_market_cookie.bids,
+            &spot_market_cookie.asks,
+            &spot_market_cookie.req_q,
+            &spot_market_cookie.event_q,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &mint_root_bank_pk,
+            &mint_node_bank_pk,
+            &mint_node_bank.vault,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &signer_pk,
+            &dex_signer_pk,
+            &mango_group.msrm_vault,
+            &open_orders_pks, // oo ais
+            mint_index,
+            order,
+        )
+        .unwrap()];
+
+        let signers = vec![&alternative_user];
+
+        self.process_transaction(&instructions, Some(&signers)).await
+    }
+
+    #[allow(dead_code)]
     pub async fn settle_spot_funds(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
@@ -1351,6 +1441,107 @@ impl MangoProgramTest {
             &mango_account.spot_open_orders,
             quantity,
             allow_borrow,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_withdraw_with_alternative_authority(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        alternative_authority_user_index: usize,
+        mint_index: usize,
+        quantity: u64,
+        allow_borrow: bool,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let alternative_user = Keypair::from_base58_string(
+            &self.users[alternative_authority_user_index].to_base58_string(),
+        );
+        let user_token_account = self.with_user_token_account(user_index, mint_index);
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
+        let instructions = [withdraw(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &alternative_user.pubkey(),
+            &mango_group.mango_cache,
+            &root_bank_pk,
+            &node_bank_pk,
+            &node_bank.vault,
+            &user_token_account,
+            &signer_pk,
+            &mango_account.spot_open_orders,
+            quantity,
+            allow_borrow,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&alternative_user])).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_set_alternative_authority(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        alternative_authority_user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let alternative_authority = Keypair::from_base58_string(
+            &self.users[alternative_authority_user_index].to_base58_string(),
+        );
+
+        let instructions = [set_alternative_mango_account_authority(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &alternative_authority.pubkey(),
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_reset_alternative_authority(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        alternative_authority_user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let alternative_authority = Keypair::from_base58_string(
+            &self.users[alternative_authority_user_index].to_base58_string(),
+        );
+
+        let instructions = [set_alternative_mango_account_authority(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &Pubkey::default(),
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();

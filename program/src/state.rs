@@ -1113,8 +1113,16 @@ pub struct MangoAccount {
 
     /// Can this account be upgraded to v1 so it can be closed
     pub not_upgradable: bool,
+
+    // Alternative authority/signer of transactions
+    // out of mango account
+    pub alternative_authority: Pubkey,
+
     /// padding for expansions
-    pub padding: [u8; 37],
+    /// Note: future expansion can also be just done via islated PDAs
+    /// which can be computed independently and dont need to be linked from
+    /// this account
+    pub padding: [u8; 5],
 }
 
 impl MangoAccount {
