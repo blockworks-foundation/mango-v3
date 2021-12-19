@@ -1114,8 +1114,7 @@ pub struct MangoAccount {
     /// Can this account be upgraded to v1 so it can be closed
     pub not_upgradable: bool,
 
-    // Alternative authority/signer of transactions
-    // out of mango account
+    // Alternative authority/signer of transactions for a mango account
     pub alternative_authority: Pubkey,
 
     /// padding for expansions
