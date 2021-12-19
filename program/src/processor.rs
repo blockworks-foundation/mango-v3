@@ -5401,7 +5401,7 @@ fn read_oracle(
                 );
                 let clock = Clock::get()?;
                 let current_time = clock.unix_timestamp as u64;
-                let time_diff_in_seconds = (current_time - last_updated)/(60*1000);
+                let time_diff_in_seconds = (current_time - last_updated)/(60 * solana_program::clock::DEFAULT_TICKS_PER_SECOND);
                 if time_diff_in_seconds < PYTH_CONF_FILTER_TIMEOUT {
                     return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
                 }
