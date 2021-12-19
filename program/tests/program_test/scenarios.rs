@@ -56,20 +56,20 @@ pub async fn withdraw_scenario(
 }
 
 #[allow(dead_code)]
-pub async fn withdraw_scenario_with_alternative_authority(
+pub async fn withdraw_scenario_with_delegate(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
     withdraw: &(usize, usize, usize, f64, bool),
 ) -> Result<(), TransportError> {
     mango_group_cookie.run_keeper(test).await;
 
-    let (user_index, alternative_authority_user_index, mint_index, amount, allow_borrow) = withdraw;
+    let (user_index, delegate_user_index, mint_index, amount, allow_borrow) = withdraw;
     let mint = test.with_mint(*mint_index);
     let withdraw_amount = (*amount * mint.unit) as u64;
-    test.perform_withdraw_with_alternative_authority(
+    test.perform_withdraw_with_delegate(
         &mango_group_cookie,
         *user_index,
-        *alternative_authority_user_index,
+        *delegate_user_index,
         *mint_index,
         withdraw_amount,
         *allow_borrow,
@@ -78,33 +78,23 @@ pub async fn withdraw_scenario_with_alternative_authority(
 }
 
 #[allow(dead_code)]
-pub async fn alternative_authority_scenario(
+pub async fn delegate_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
     user_index: usize,
-    alternative_authority_user_index: usize,
+    delegate_user_index: usize,
 ) {
-    test.perform_set_alternative_authority(
-        &mango_group_cookie,
-        user_index,
-        alternative_authority_user_index,
-    )
-    .await;
+    test.perform_set_delegate(&mango_group_cookie, user_index, delegate_user_index).await;
 }
 
 #[allow(dead_code)]
-pub async fn reset_alternative_authority_scenario(
+pub async fn reset_delegate_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
     user_index: usize,
-    alternative_authority_user_index: usize,
+    delegate_user_index: usize,
 ) {
-    test.perform_reset_alternative_authority(
-        &mango_group_cookie,
-        user_index,
-        alternative_authority_user_index,
-    )
-    .await;
+    test.perform_reset_delegate(&mango_group_cookie, user_index, delegate_user_index).await;
 }
 
 #[allow(dead_code)]
@@ -127,29 +117,23 @@ pub async fn place_spot_order_scenario(
 }
 
 #[allow(dead_code)]
-pub async fn place_spot_order_scenario_with_alternative_authority(
+pub async fn place_spot_order_scenario_with_delegate(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
     spot_order: &(usize, usize, usize, serum_dex::matching::Side, f64, f64),
 ) -> Result<(), TransportError> {
     mango_group_cookie.run_keeper(test).await;
 
-    let (
-        user_index,
-        alternative_authority_user_index,
-        market_index,
-        order_side,
-        order_size,
-        order_price,
-    ) = *spot_order;
+    let (user_index, delegate_user_index, market_index, order_side, order_size, order_price) =
+        *spot_order;
     let mut spot_market_cookie = mango_group_cookie.spot_markets[market_index];
     mango_group_cookie.users_with_spot_event[market_index].push(user_index);
     spot_market_cookie
-        .place_order_with_alternative_authority(
+        .place_order_with_delegate(
             test,
             mango_group_cookie,
             user_index,
-            alternative_authority_user_index,
+            delegate_user_index,
             order_side,
             order_size,
             order_price,

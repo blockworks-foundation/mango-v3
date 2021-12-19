@@ -534,12 +534,12 @@ impl SpotMarketCookie {
     }
 
     #[allow(dead_code)]
-    pub async fn place_order_with_alternative_authority(
+    pub async fn place_order_with_delegate(
         &mut self,
         test: &mut MangoProgramTest,
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
-        alternative_authority_user_index: usize,
+        delegate_user_index: usize,
         side: serum_dex::matching::Side,
         size: f64,
         price: f64,
@@ -565,11 +565,11 @@ impl SpotMarketCookie {
             limit: u16::MAX,
         };
 
-        test.place_spot_order_with_alternative_authority(
+        test.place_spot_order_with_delegate(
             &mango_group_cookie,
             self,
             user_index,
-            alternative_authority_user_index,
+            delegate_user_index,
             order,
         )
         .await

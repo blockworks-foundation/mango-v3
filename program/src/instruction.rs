@@ -871,14 +871,15 @@ pub enum MangoInstruction {
     },
 
     /// https://github.com/blockworks-foundation/mango-v3/pull/97/
-    /// Set alternative authority to mango account
+    /// Set delegate authority to mango account which can do everything regular account can do
+    /// except Withdraw and CloseMangoAccount. Set to Pubkey::default() to revoke delegate
     ///
     /// Accounts expected: 4
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - MangoAccount
     /// 2. `[signer]` owner_ai - Owner of Mango Account
-    /// 3. `[]` alternative_authority_ai - Alternative authority
-    SetAlternativeMangoAccountAuthority {},
+    /// 3. `[]` delegate_ai - delegate
+    SetDelegate,
 }
 
 impl MangoInstruction {
@@ -1303,7 +1304,7 @@ impl MangoInstruction {
                     limit: u8::from_le_bytes(*limit),
                 }
             }
-            58 => MangoInstruction::SetAlternativeMangoAccountAuthority {},
+            58 => MangoInstruction::SetDelegate,
             _ => {
                 return None;
             }
@@ -1486,21 +1487,21 @@ pub fn create_mango_account(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-pub fn set_alternative_mango_account_authority(
+pub fn set_delegate(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
     mango_account_pk: &Pubkey,
     owner_pk: &Pubkey,
-    alternative_authority_pk: &Pubkey,
+    delegate_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(*alternative_authority_pk, false),
+        AccountMeta::new_readonly(*delegate_pk, false),
     ];
 
-    let instr = MangoInstruction::SetAlternativeMangoAccountAuthority {};
+    let instr = MangoInstruction::SetDelegate {};
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

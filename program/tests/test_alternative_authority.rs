@@ -14,7 +14,7 @@ use program_test::*;
 mod program_test;
 
 #[tokio::test]
-async fn test_alternative_authority() {
+async fn test_delegate() {
     // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -25,7 +25,7 @@ async fn test_alternative_authority() {
 
     // General parameters
     let user_index: usize = 0;
-    let alternative_authority_user_index: usize = 1;
+    let delegate_user_index: usize = 1;
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
@@ -38,13 +38,13 @@ async fn test_alternative_authority() {
     let user_deposits = vec![(user_index, test.quote_index, base_price * 3.)];
 
     // Withdraw amounts
-    let user_withdraw_with_alternative_authority =
-        (user_index, alternative_authority_user_index, test.quote_index, base_price, false);
+    let user_withdraw_with_delegate =
+        (user_index, delegate_user_index, test.quote_index, base_price, false);
 
     // Spot Orders
     let user_spot_orders = (
         user_index,
-        alternative_authority_user_index,
+        delegate_user_index,
         mint_index,
         serum_dex::matching::Side::Bid,
         base_size,
@@ -55,23 +55,13 @@ async fn test_alternative_authority() {
     // Step 1: Make deposits
     deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
-    // Step2: Setup alternative authority which can place orders on behalf
-    alternative_authority_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        user_index,
-        alternative_authority_user_index,
-    )
-    .await;
+    // Step2: Setup delegate authority which can place orders on behalf
+    delegate_scenario(&mut test, &mut mango_group_cookie, user_index, delegate_user_index).await;
 
     // Step 3: Place spot orders
-    place_spot_order_scenario_with_alternative_authority(
-        &mut test,
-        &mut mango_group_cookie,
-        &user_spot_orders,
-    )
-    .await
-    .unwrap();
+    place_spot_order_scenario_with_delegate(&mut test, &mut mango_group_cookie, &user_spot_orders)
+        .await
+        .unwrap();
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
@@ -95,29 +85,20 @@ async fn test_alternative_authority() {
     }
 
     // Step 4: Withdraw, should fail
-    withdraw_scenario_with_alternative_authority(
+    withdraw_scenario_with_delegate(
         &mut test,
         &mut mango_group_cookie,
-        &user_withdraw_with_alternative_authority,
+        &user_withdraw_with_delegate,
     )
     .await
     .unwrap_err();
 
-    // Step5: Reset alternative
-    reset_alternative_authority_scenario(
-        &mut test,
-        &mut mango_group_cookie,
-        user_index,
-        alternative_authority_user_index,
-    )
-    .await;
+    // Step5: Reset delegate
+    reset_delegate_scenario(&mut test, &mut mango_group_cookie, user_index, delegate_user_index)
+        .await;
 
     // Step6: Test placing orders again, should fail
-    place_spot_order_scenario_with_alternative_authority(
-        &mut test,
-        &mut mango_group_cookie,
-        &user_spot_orders,
-    )
-    .await
-    .unwrap_err();
+    place_spot_order_scenario_with_delegate(&mut test, &mut mango_group_cookie, &user_spot_orders)
+        .await
+        .unwrap_err();
 }

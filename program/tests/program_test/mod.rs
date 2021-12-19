@@ -1223,12 +1223,12 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn place_spot_order_with_alternative_authority(
+    pub async fn place_spot_order_with_delegate(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         spot_market_cookie: &SpotMarketCookie,
         user_index: usize,
-        alternative_authority_user_index: usize,
+        delegate_user_index: usize,
         order: NewOrderInstructionV3,
     ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
@@ -1239,9 +1239,8 @@ impl MangoProgramTest {
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let mint_index = spot_market_cookie.mint.index;
 
-        let alternative_user = Keypair::from_base58_string(
-            &self.users[alternative_authority_user_index].to_base58_string(),
-        );
+        let delegate_user =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
 
         let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
@@ -1281,7 +1280,7 @@ impl MangoProgramTest {
             &mango_program_id,
             &mango_group_pk,
             &mango_account_pk,
-            &alternative_user.pubkey(),
+            &delegate_user.pubkey(),
             &mango_group.mango_cache,
             &serum_program_id,
             &spot_market_cookie.market,
@@ -1306,7 +1305,7 @@ impl MangoProgramTest {
         )
         .unwrap()];
 
-        let signers = vec![&alternative_user];
+        let signers = vec![&delegate_user];
 
         self.process_transaction(&instructions, Some(&signers)).await
     }
@@ -1447,11 +1446,11 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn perform_withdraw_with_alternative_authority(
+    pub async fn perform_withdraw_with_delegate(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         user_index: usize,
-        alternative_authority_user_index: usize,
+        delegate_user_index: usize,
         mint_index: usize,
         quantity: u64,
         allow_borrow: bool,
@@ -1463,9 +1462,8 @@ impl MangoProgramTest {
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let alternative_user = Keypair::from_base58_string(
-            &self.users[alternative_authority_user_index].to_base58_string(),
-        );
+        let delegate_user =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
         let user_token_account = self.with_user_token_account(user_index, mint_index);
 
         let (signer_pk, _signer_nonce) =
@@ -1478,7 +1476,7 @@ impl MangoProgramTest {
             &mango_program_id,
             &mango_group_pk,
             &mango_account_pk,
-            &alternative_user.pubkey(),
+            &delegate_user.pubkey(),
             &mango_group.mango_cache,
             &root_bank_pk,
             &node_bank_pk,
@@ -1490,53 +1488,51 @@ impl MangoProgramTest {
             allow_borrow,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&alternative_user])).await
+        self.process_transaction(&instructions, Some(&[&delegate_user])).await
     }
 
     #[allow(dead_code)]
-    pub async fn perform_set_alternative_authority(
+    pub async fn perform_set_delegate(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         user_index: usize,
-        alternative_authority_user_index: usize,
+        delegate_user_index: usize,
     ) {
         let mango_program_id = self.mango_program_id;
         let mango_group_pk = mango_group_cookie.address;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let alternative_authority = Keypair::from_base58_string(
-            &self.users[alternative_authority_user_index].to_base58_string(),
-        );
+        let delegate =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
 
-        let instructions = [set_alternative_mango_account_authority(
+        let instructions = [set_delegate(
             &mango_program_id,
             &mango_group_pk,
             &mango_account_pk,
             &user.pubkey(),
-            &alternative_authority.pubkey(),
+            &delegate.pubkey(),
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 
     #[allow(dead_code)]
-    pub async fn perform_reset_alternative_authority(
+    pub async fn perform_reset_delegate(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         user_index: usize,
-        alternative_authority_user_index: usize,
+        delegate_user_index: usize,
     ) {
         let mango_program_id = self.mango_program_id;
         let mango_group_pk = mango_group_cookie.address;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
-        let alternative_authority = Keypair::from_base58_string(
-            &self.users[alternative_authority_user_index].to_base58_string(),
-        );
+        let delegate =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
 
-        let instructions = [set_alternative_mango_account_authority(
+        let instructions = [set_delegate(
             &mango_program_id,
             &mango_group_pk,
             &mango_account_pk,

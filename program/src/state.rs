@@ -1115,7 +1115,7 @@ pub struct MangoAccount {
     pub not_upgradable: bool,
 
     // Alternative authority/signer of transactions for a mango account
-    pub alternative_authority: Pubkey,
+    pub delegate: Pubkey,
 
     /// padding for expansions
     /// Note: future expansion can also be just done via isolated PDAs
