@@ -1,5 +1,14 @@
 # Mango Program Change Log
 
+## v3.3.0
+Deployed:  | Slot: 
+1. CancelAllPerpOrdersSide - cancels all order on one side
+2. CloseMangoAccount - close account and retrieve lamports
+3. ResolveDust - settle anything below 1 native SPL against the dust account
+4. CreateDustAccount - create a PDA tied to the MangoGroup useful for settling dust against
+5. SetDelegate - delegate authority to operate MangoAccount to another account
+6. upgrade packages
+
 ## v3.2.13
 Deployed: Dec 16, 2021 at 21:16:50 UTC | Slot: 111,865,268
 1. Fixed FillLog maker_fee and taker_fee

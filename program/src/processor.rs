@@ -272,6 +272,7 @@ impl Processor {
         mango_account.meta_data.is_initialized = false;
         mango_account.mango_group = Pubkey::default();
         mango_account.owner = Pubkey::default();
+        mango_account.delegate = Pubkey::default();
         mango_account.in_margin_basket = [false; MAX_PAIRS];
         mango_account.info = [0; INFO_LEN];
 
@@ -295,7 +296,10 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
@@ -884,6 +888,9 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
+        // Note: a check for &mango_account.owner == owner_ai.key doesn't exist on purpose
+        // this is how mango currently reimburses users
+
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -1365,7 +1372,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -1509,7 +1519,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -1740,7 +1753,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -1969,7 +1985,10 @@ impl Processor {
 
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -2040,7 +2059,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(owner_ai.key == &mango_account.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -2194,7 +2216,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let clock = Clock::get()?;
@@ -2303,7 +2328,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2396,7 +2424,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2485,7 +2516,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -3016,7 +3050,10 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -3241,7 +3278,10 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -3536,7 +3576,10 @@ impl Processor {
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
 
@@ -3735,7 +3778,7 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?; // todo
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -3898,7 +3941,7 @@ impl Processor {
         // Load the liqor's mango account
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?; // todo
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -4339,7 +4382,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
@@ -4411,7 +4457,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
         mango_account.info = info;
@@ -4476,7 +4525,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
         check!(mango_account.msrm_amount >= quantity, MangoErrorCode::InsufficientFunds)?;
@@ -4536,7 +4588,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -4587,7 +4642,7 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -4647,7 +4702,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
 
@@ -4748,7 +4806,10 @@ impl Processor {
 
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         // No bankruptcy check; removing order is fine
 
@@ -5147,7 +5208,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check_eq!(mango_account.meta_data.version, 0, MangoErrorCode::InvalidAccountState)?;
         check!(!mango_account.not_upgradable, MangoErrorCode::InvalidAccountState)?;
         check!(
@@ -5185,7 +5249,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -5220,6 +5287,29 @@ impl Processor {
             market_index: market_index as u64,
             mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
         });
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn set_delegate(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,                   // read
+            mango_account_ai,                 // write
+            owner_ai,                         // read, signer
+            delegate_ai,                      // read
+        ] = accounts;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(&mango_account.delegate != delegate_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        mango_account.delegate = *delegate_ai.key;
+
         Ok(())
     }
 
@@ -5660,6 +5750,10 @@ impl Processor {
             MangoInstruction::CancelPerpOrdersSide { side, limit } => {
                 msg!("Mango: CancelSidePerpOrders");
                 Self::cancel_perp_orders_side(program_id, accounts, side, limit)
+            }
+            MangoInstruction::SetDelegate => {
+                msg!("Mango: SetDelegate");
+                Self::set_delegate(program_id, accounts)
             }
         }
     }
