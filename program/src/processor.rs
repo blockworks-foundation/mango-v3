@@ -314,9 +314,6 @@ impl Processor {
         );
         check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
 
-        // TODO OPT - unnecessary
-        check!(&dust_account.owner == &mango_group.admin, MangoErrorCode::InvalidOwner)?;
-
         let token_index = mango_group
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
