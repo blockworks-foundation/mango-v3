@@ -1495,7 +1495,7 @@ pub fn set_delegate(
     delegate_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
-        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
         AccountMeta::new_readonly(*delegate_pk, false),

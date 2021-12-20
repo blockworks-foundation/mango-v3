@@ -3778,7 +3778,10 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?; // todo
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -3941,7 +3944,10 @@ impl Processor {
         // Load the liqor's mango account
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?; // todo
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -4525,10 +4531,7 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(
-            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
-            MangoErrorCode::InvalidOwner
-        )?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
         check!(mango_account.msrm_amount >= quantity, MangoErrorCode::InsufficientFunds)?;
