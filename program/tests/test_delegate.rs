@@ -18,7 +18,6 @@ async fn test_delegate() {
     // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
-    solana_logger::setup_with_default("debug");
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;

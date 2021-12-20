@@ -33,6 +33,12 @@ pub mod cookies;
 pub mod scenarios;
 use self::cookies::*;
 
+const RUST_LOG_DEFAULT: &str = "solana_rbpf::vm=info,\
+             solana_program_runtime::stable_log=debug,\
+             solana_runtime::message_processor=debug,\
+             solana_runtime::system_instruction_processor=info,\
+             solana_program_test=info";
+
 trait AddPacked {
     fn add_packable_account<T: Pack>(
         &mut self,
@@ -258,6 +264,9 @@ impl MangoProgramTest {
         // TODO: add more programs (oracles)
         // limit to track compute unit increase
         test.set_bpf_compute_max_units(config.compute_limit);
+
+        // Supress some of the logs
+        solana_logger::setup_with_default(RUST_LOG_DEFAULT);
 
         // Add MNGO mint
         test.add_packable_account(

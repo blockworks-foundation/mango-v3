@@ -13,15 +13,6 @@ async fn test_list_spot_market_on_serum() {
     // === Arrange ===
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // Disable all logs except error
-    // solana_logger::setup_with("error");
 
     let mint_index: usize = 0;
     // === Act ===
@@ -36,15 +27,7 @@ async fn test_init_spot_markets() {
     // === Arrange ===
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // Disable all logs except error
-    // solana_logger::setup_with("error");
+
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
 
     // === Act ===
@@ -60,15 +43,6 @@ async fn test_place_spot_order() {
     // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // Disable all logs except error
-    // solana_logger::setup_with("error");
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
@@ -124,15 +98,6 @@ async fn test_match_spot_order() {
     // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // Disable all logs except error
-    // solana_logger::setup_with("error");
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
@@ -230,15 +195,6 @@ async fn test_match_and_settle_spot_order() {
     // === Arrange ===
     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
     let mut test = MangoProgramTest::start_new(&config).await;
-    // Supress some of the logs
-    solana_logger::setup_with_default(
-        "solana_rbpf::vm=info,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info",
-    );
-    // Disable all logs except error
-    // solana_logger::setup_with("error");
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
