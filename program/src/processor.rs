@@ -5388,10 +5388,9 @@ impl Processor {
             &flash_loan_instruction_account_infos[..],
         )?;
 
-        let source_token = Account::unpack(&source_token_ai.try_borrow_data()?)?;
-        // todo: fees
-        let source_balance_after = source_token.amount;
+        let source_balance_after = Account::unpack(&source_token_ai.try_borrow_data()?)?.amount;
         check!(
+            // todo: fees
             source_balance_after >= source_balance_before,
             MangoErrorCode::InvalidBalanceAfterFlashLoan
         )?;

@@ -892,11 +892,11 @@ pub enum MangoInstruction {
     ///   . `[]` token_prog_ai - Token program id.
     ///   . `[]` flash_loan_prog_ai - Flash loan receiver program id.
     ///             Must implement an instruction that has tag of 0 and a signature of `(amount: u64)`
-    ///             This instruction must return the amount to the source liquidity account.
+    ///             This instruction must return the amount to the source account.
     ///   .. `[any]` Additional accounts expected by the receiving program's `ReceiveFlashLoan` instruction.
     ///
     ///   The flash loan receiver program that is to be invoked should contain an instruction with
-    ///   tag `0` and accept the total amount (including fee) that needs to be returned back after
+    ///   tag `0` and accept the total amount that needs to be returned back after
     ///   its execution has completed.
     ///
     ///   Flash loan receiver should have an instruction with the following signature:
