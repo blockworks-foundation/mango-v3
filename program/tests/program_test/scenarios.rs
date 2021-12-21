@@ -1,4 +1,6 @@
 use crate::*;
+use solana_program::entrypoint::ProgramResult;
+use solana_program::pubkey::Pubkey;
 use solana_sdk::transport::TransportError;
 
 #[allow(dead_code)]
@@ -186,4 +188,14 @@ pub async fn match_perp_order_scenario(
         mango_group_cookie.consume_perp_events(test).await;
         mango_group_cookie.run_keeper(test).await;
     }
+}
+
+#[allow(dead_code)]
+pub async fn flash_loan_scenario(
+    test: &mut MangoProgramTest,
+    mango_group_cookie: &mut MangoGroupCookie,
+    mint_index: usize,
+    amount: u64,
+) -> Result<(), TransportError> {
+    mango_group_cookie.flash_loan(test, mint_index, amount).await
 }

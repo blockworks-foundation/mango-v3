@@ -5313,6 +5313,92 @@ impl Processor {
         Ok(())
     }
 
+    fn flash_loan(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        liquidity_amount: u64,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 6;
+        let (fixed_ais, remaining_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,           // read
+            signer_ai,                // read
+            source_token_ai,          // write
+            destination_token_ai,     // write
+            token_prog_ai,            // read
+            flash_loan_prog_ai,       // read
+        ] = fixed_ais;
+
+        check!(program_id != flash_loan_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let source_token = Account::unpack(&source_token_ai.try_borrow_data()?)?;
+
+        let flash_loan_amount = if liquidity_amount == u64::MAX {
+            source_token.amount
+        } else {
+            min(source_token.amount, liquidity_amount)
+        };
+
+        let source_balance_before = source_token.amount;
+
+        let mut flash_loan_instruction_accounts = vec![
+            AccountMeta::new(*destination_token_ai.key, false),
+            AccountMeta::new(*source_token_ai.key, false),
+            AccountMeta::new_readonly(*token_prog_ai.key, false),
+        ];
+        let mut flash_loan_instruction_account_infos = vec![
+            destination_token_ai.clone(),
+            source_token_ai.clone(),
+            token_prog_ai.clone(),
+            flash_loan_prog_ai.clone(),
+        ];
+        for account_info in remaining_ais.iter() {
+            flash_loan_instruction_accounts.push(AccountMeta {
+                pubkey: *account_info.key,
+                is_signer: account_info.is_signer,
+                is_writable: account_info.is_writable,
+            });
+            flash_loan_instruction_account_infos.push(account_info.clone());
+        }
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            source_token_ai,
+            destination_token_ai,
+            signer_ai,
+            &[&signers_seeds],
+            flash_loan_amount,
+        )?;
+
+        // fixme: make configurable
+        const RECEIVE_FLASH_LOAN_INSTRUCTION_TAG: u8 = 0u8;
+        const RECEIVE_FLASH_LOAN_INSTRUCTION_DATA_SIZE: usize = 9;
+        let mut data = Vec::with_capacity(RECEIVE_FLASH_LOAN_INSTRUCTION_DATA_SIZE);
+        data.push(RECEIVE_FLASH_LOAN_INSTRUCTION_TAG);
+        data.extend_from_slice(&flash_loan_amount.to_le_bytes());
+
+        solana_program::program::invoke(
+            &Instruction {
+                program_id: *flash_loan_prog_ai.key,
+                accounts: flash_loan_instruction_accounts,
+                data,
+            },
+            &flash_loan_instruction_account_infos[..],
+        )?;
+
+        let source_token = Account::unpack(&source_token_ai.try_borrow_data()?)?;
+        // todo: fees
+        let source_balance_after = source_token.amount;
+        check!(
+            source_balance_after >= source_balance_before,
+            MangoErrorCode::InvalidBalanceAfterFlashLoan
+        )?;
+
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5754,6 +5840,10 @@ impl Processor {
             MangoInstruction::SetDelegate => {
                 msg!("Mango: SetDelegate");
                 Self::set_delegate(program_id, accounts)
+            }
+            MangoInstruction::FlashLoan { liquidity_amount } => {
+                msg!("Mango: FlashLoan");
+                Self::flash_loan(program_id, accounts, liquidity_amount)
             }
         }
     }

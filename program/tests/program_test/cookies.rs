@@ -1,4 +1,5 @@
 use fixed::types::I80F48;
+use solana_program::entrypoint::ProgramResult;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
@@ -6,6 +7,7 @@ use solana_program::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transport::TransportError;
 
+use mango::instruction::flash_loan;
 use mango::{ids::*, matching::*, queue::*, state::*, utils::*};
 
 use crate::*;
@@ -308,6 +310,34 @@ impl MangoGroupCookie {
                 }
             }
         }
+    }
+
+    pub async fn flash_loan(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mint_index: usize,
+        amount: u64,
+    ) -> Result<(), TransportError> {
+        let (_, root_bank) = test.with_root_bank(&self.mango_group, mint_index).await;
+        let (_, node_bank) = test.with_node_bank(&root_bank, 0).await;
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&test.mango_program_id, &self.address);
+
+        let (receiver_authority_pubkey, _) =
+            Pubkey::find_program_address(&[b"flashloan"], &test.flash_loan_receiver_program_id);
+        let instructions = [mango::instruction::flash_loan(
+            &test.mango_program_id,
+            &self.address,
+            &signer_pk,
+            &node_bank.vault,
+            &test.flash_loan_receiver_program_owned_token_account.pubkey(),
+            &test.flash_loan_receiver_program_id,
+            &[receiver_authority_pubkey],
+            amount,
+        )
+        .unwrap()];
+
+        test.process_transaction(&instructions, None).await
     }
 }
 

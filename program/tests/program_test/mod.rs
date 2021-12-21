@@ -1,10 +1,11 @@
-use anchor_lang::Key;
 use std::borrow::Borrow;
 use std::mem::size_of;
 
+use anchor_lang::Key;
 use bincode::deserialize;
 use fixed::types::I80F48;
-use mango_common::Loadable;
+use serum_dex::instruction::NewOrderInstructionV3;
+use solana_program::entrypoint::ProgramResult;
 use solana_program::{
     account_info::AccountInfo,
     clock::{Clock, UnixTimestamp},
@@ -24,22 +25,22 @@ use solana_sdk::{
 use spl_token::{state::*, *};
 
 use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*};
+use mango_common::Loadable;
 
-use serum_dex::instruction::NewOrderInstructionV3;
-use solana_program::entrypoint::ProgramResult;
+use self::cookies::*;
 
 pub mod assertions;
 pub mod cookies;
+pub mod helpers;
 pub mod scenarios;
-use self::cookies::*;
 
 const RUST_LOG_DEFAULT: &str = "solana_rbpf::vm=info,\
              solana_program_runtime::stable_log=debug,\
              solana_runtime::message_processor=debug,\
              solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info";
+             solana_program_test=debug";
 
-trait AddPacked {
+pub trait AddPacked {
     fn add_packable_account<T: Pack>(
         &mut self,
         pubkey: Pubkey,
@@ -103,6 +104,9 @@ pub struct MangoProgramTest {
     pub rent: Rent,
     pub mango_program_id: Pubkey,
     pub serum_program_id: Pubkey,
+    pub flash_loan_receiver_program_id: Pubkey,
+    pub flash_loan_receiver_program_account: Keypair,
+    pub flash_loan_receiver_program_owned_token_account: Keypair,
     pub num_mints: usize,
     pub quote_index: usize,
     pub quote_mint: MintCookie,
@@ -352,6 +356,32 @@ impl MangoProgramTest {
             users.push(user_key);
         }
 
+        // Load flash loan program.
+        let flash_loan_receiver_program_account = Keypair::new();
+        let flash_loan_receiver_program_id = flash_loan_receiver_program_account.pubkey();
+        test.prefer_bpf(false);
+        test.add_program(
+            "flash_loan_receiver",
+            flash_loan_receiver_program_id.clone(),
+            processor!(helpers::flash_loan_receiver::process_instruction),
+        );
+        let flash_loan_receiver_program_owned_token_account = Keypair::new();
+        let (receiver_authority_pubkey, _) =
+            Pubkey::find_program_address(&[b"flashloan"], &flash_loan_receiver_program_id);
+        test.add_packable_account(
+            flash_loan_receiver_program_owned_token_account.pubkey(),
+            u32::MAX as u64,
+            &Account {
+                mint: mints[1].pubkey.unwrap(),
+                owner: receiver_authority_pubkey,
+                amount: 10,
+                state: AccountState::Initialized,
+                is_native: COption::None,
+                ..Account::default()
+            },
+            &spl_token::id(),
+        );
+
         let mut context = test.start_with_context().await;
         let rent = context.banks_client.get_rent().await.unwrap();
         mints = mints[..num_mints].to_vec();
@@ -361,6 +391,9 @@ impl MangoProgramTest {
             rent,
             mango_program_id,
             serum_program_id,
+            flash_loan_receiver_program_id,
+            flash_loan_receiver_program_account,
+            flash_loan_receiver_program_owned_token_account,
             num_mints,
             quote_index,
             quote_mint,
