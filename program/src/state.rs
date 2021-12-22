@@ -580,6 +580,14 @@ impl NodeBank {
     }
 }
 
+/// Internal - not an Account
+pub struct BankSet<'a, 'b> {
+    pub token_index: usize,
+    pub root_bank: Ref<'a, RootBank>,
+    pub node_bank: RefMut<'a, NodeBank>,
+    pub vault_ai: &'a AccountInfo<'b>,
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PriceCache {
@@ -911,14 +919,14 @@ impl HealthCache {
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
-        open_orders_ai: &AccountInfo,
+        open_orders_ai: Option<&AccountInfo>,
         market_index: usize,
     ) -> MangoResult<()> {
         let (base, quote) = mango_account.get_spot_val(
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
             market_index,
-            if *open_orders_ai.key == Pubkey::default() { None } else { Some(open_orders_ai) },
+            open_orders_ai,
         )?;
 
         let (prev_base, prev_quote) = self.spot[market_index];
@@ -971,7 +979,33 @@ impl HealthCache {
                 mango_group,
                 mango_cache,
                 mango_account,
-                &open_orders_ais[token_index],
+                if open_orders_ais[token_index].key == &Pubkey::default() {
+                    None
+                } else {
+                    Some(&open_orders_ais[token_index])
+                },
+                token_index,
+            )
+        }
+    }
+    /// Sends to update_quote if QUOTE_INDEX, else sends to update_spot_val
+    /// Use the more efficient Option Vec of open orders
+    pub fn update_token_val_orders_vec(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ais: &Vec<Option<&AccountInfo>>,
+        token_index: usize,
+    ) -> MangoResult {
+        if token_index == QUOTE_INDEX {
+            Ok(self.update_quote(mango_cache, mango_account))
+        } else {
+            self.update_spot_val(
+                mango_group,
+                mango_cache,
+                mango_account,
+                open_orders_ais[token_index],
                 token_index,
             )
         }
