@@ -44,9 +44,10 @@ use crate::state::{
     AdvancedOrderType, AdvancedOrders, AssetType, BankSet, DataType, HealthCache, HealthType,
     MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache,
     PerpMarketInfo, PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
-    TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
-    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
+    TokenAccount, TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE,
+    FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
+    MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 
 use crate::utils::{gen_signer_key, gen_signer_seeds};
@@ -5377,9 +5378,13 @@ impl Processor {
             )?;
             let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
             check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
-            pre_amounts.push(Account::unpack(&vault_ai.try_borrow_data()?)?.amount);
+            // pre_amounts.push(Account::unpack(&vault_ai.try_borrow_data()?)?.amount);
+            let token_account = TokenAccount::load_checked(vault_ai)?;
+            token_account.check_mango_reqs(&mango_group)?;
 
-            bank_sets.push(BankSet { token_index, root_bank, node_bank, vault_ai });
+            pre_amounts.push(token_account.0.amount);
+
+            bank_sets.push(BankSet { token_index, node_bank, vault_ai });
             extra_user_assets.push((AssetType::Token, token_index));
         }
 
@@ -5389,11 +5394,25 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
-        // no calls allowed to mango program id
-        // no calls allowed to serum dex program id (what if it's a CPI to another program which calls serum dex)?
-        // solution no accounts owned by serum dex can be writable (must be true before and after CPI)
+        /**
+        There are two types of `Account`: either owned by Mango program id or not.
+        We are not worried about `Account` owned by Mango program because we disallow CPI into Mango
+            Therefore, Mango owned accounts cannot be modified
 
-        // Security check on all accounts. Must be performed before and after CPI
+        We don't care about accounts owned another program id *except* in the following cases:
+        1. Serum Dex OpenOrders with `owner == mango_group.signer_key`
+        2. SPL Token Account with `owner == mango_group.signer_key`
+
+        We sign the CPI as `mango_group.signer_key` so these types of accounts may be modified in
+        dangerous ways. To handle this we look at only accounts marked `is_writable` because we
+        know only those can change in important ways (TODO: do we?)
+        Then:
+        1. Among writable accounts, we ensure it's not owned by Serum Dex Program id
+        2. For SPL Token Accounts, if it's owned by Mango `signer_key`, we make sure it's one of the
+            specified Mango vaults that were passed in first. We also made sure all fields except
+            `amount` are correct. At the end of the instruction we take the diff in `amount` and
+            assign changes to `MangoAccount`. We ensure all other fields stayed the same during CPI.
+         */
         for ai in cpi_ais {
             // ignore accounts that are not writable
             if !ai.is_writable {
@@ -5406,9 +5425,9 @@ impl Processor {
 
             // If an SPL token Account is owned by mango signer key, make sure it's one of the bank_sets
             if ai.owner == &spl_token::id() && ai.data_len() == Account::LEN {
-                // TODO - make zero copy version of Account unpack for efficiency
-                let token_account = Account::unpack(&ai.try_borrow_data()?)?;
-                if &token_account.owner == &mango_group.signer_key {
+                // let token_account = Account::unpack(&ai.try_borrow_data()?)?;
+                let token_account = TokenAccount::load_checked(ai)?;
+                if &token_account.0.owner == &mango_group.signer_key {
                     bank_sets
                         .iter()
                         .find(|bank_set| bank_set.vault_ai.key == ai.key)
@@ -5417,6 +5436,7 @@ impl Processor {
             }
         }
 
+        // Unpack the open orders accounts and compute MangoAccount health before CPI
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
         let mut health_cache = HealthCache::new(active_assets);
@@ -5466,8 +5486,11 @@ impl Processor {
         // Determine change in vaults and apply to MangoAccount
         for (i, bank_set) in bank_sets.iter_mut().enumerate() {
             let pre_amount = I80F48::from_num(pre_amounts[i]);
-            let post_amount =
-                I80F48::from_num(Account::unpack(&bank_set.vault_ai.try_borrow_data()?)?.amount);
+            let token_account = TokenAccount::load(bank_set.vault_ai)?;
+            token_account.check_mango_reqs(&mango_group)?; // make sure only amount changed
+            let post_amount = I80F48::from_num(token_account.0.amount);
+            // let post_amount =
+            //     I80F48::from_num(Account::unpack(&bank_set.vault_ai.try_borrow_data()?)?.amount);
             let change = post_amount - pre_amount;
             checked_change_net(
                 &mango_cache.root_bank_cache[bank_set.token_index],
@@ -5493,8 +5516,6 @@ impl Processor {
             MangoErrorCode::InsufficientFunds
         )?;
 
-        // TODO need to either verify Accounts haven't changed from first verification pre-CPI
-        //  OR make sure Accounts cannot change on important values checked
         Ok(())
     }
     fn flash_loan(

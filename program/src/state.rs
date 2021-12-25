@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
-use solana_program::program_pack::Pack;
+use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
-use spl_token::state::Account;
+use spl_token::state::{Account, AccountState};
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod, TriviallyTransmutable};
@@ -581,9 +581,8 @@ impl NodeBank {
 }
 
 /// Internal - not an Account
-pub struct BankSet<'a, 'b> {
+pub(crate) struct BankSet<'a, 'b> {
     pub token_index: usize,
-    pub root_bank: Ref<'a, RootBank>,
     pub node_bank: RefMut<'a, NodeBank>,
     pub vault_ai: &'a AccountInfo<'b>,
 }
@@ -2415,5 +2414,25 @@ impl AdvancedOrders {
         )?;
         check!(&mango_account.advanced_orders_key == account.key, MangoErrorCode::InvalidAccount)?;
         Ok(state)
+    }
+}
+
+#[derive(Copy, Clone, Pod, Loadable)]
+pub(crate) struct TokenAccount(pub(crate) Account);
+
+impl TokenAccount {
+    pub fn load_checked<'a>(account: &'a AccountInfo) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, &spl_token::id(), MangoErrorCode::InvalidOwner)?;
+        let state = Self::load(account)?;
+        check!(state.0.is_initialized(), MangoErrorCode::InvalidAccountState)?;
+        Ok(state)
+    }
+
+    /// Check that all fields except `amount` always stay the same
+    pub fn check_mango_reqs(&self, mango_group: &MangoGroup) -> MangoResult {
+        check!(self.0.owner == mango_group.signer_key, MangoErrorCode::InvalidAccountState)?;
+        check!(self.0.delegate.is_none(), MangoErrorCode::InvalidAccountState)?;
+        check!(self.0.state == AccountState::Initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(self.0.close_authority.is_none(), MangoErrorCode::InvalidAccountState)
     }
 }
