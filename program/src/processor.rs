@@ -5325,7 +5325,7 @@ impl Processor {
         accounts: &[AccountInfo],
         num_open_orders: u8,
         num_tokens_used: u8,
-        cpi_data: &[u8],
+        cpi_data: Vec<u8>,
     ) -> MangoResult {
         let num_open_orders = num_open_orders as usize;
         let num_tokens_used = num_tokens_used as usize;
@@ -5476,7 +5476,7 @@ impl Processor {
 
         let cpi_ix = Instruction {
             program_id: *cpi_prog_ai.key,
-            data: cpi_data.to_vec(),
+            data: cpi_data,
             accounts: cpi_account_metas,
         };
 
@@ -6048,6 +6048,10 @@ impl Processor {
             MangoInstruction::FlashLoan { liquidity_amount } => {
                 msg!("Mango: FlashLoan");
                 Self::flash_loan(program_id, accounts, liquidity_amount)
+            }
+            MangoInstruction::MarginTrade { num_open_orders, num_tokens_used, cpi_data } => {
+                msg!("Mango: MarginTrade");
+                Self::margin_trade(program_id, accounts, num_open_orders, num_tokens_used, cpi_data)
             }
         }
     }

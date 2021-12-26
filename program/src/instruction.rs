@@ -912,6 +912,12 @@ pub enum MangoInstruction {
     FlashLoan {
         liquidity_amount: u64,
     },
+
+    MarginTrade {
+        num_open_orders: u8,
+        num_tokens_used: u8,
+        cpi_data: Vec<u8>,
+    },
 }
 
 impl MangoInstruction {
@@ -1340,6 +1346,15 @@ impl MangoInstruction {
             59 => {
                 let data = array_ref![data, 0, 8];
                 MangoInstruction::FlashLoan { liquidity_amount: u64::from_le_bytes(*data) }
+            }
+            60 => {
+                let (num_open_orders, num_tokens_used, cpi_data) = array_refs![data, 1, 1; ..;];
+
+                MangoInstruction::MarginTrade {
+                    num_open_orders: u8::from_le_bytes(*num_open_orders),
+                    num_tokens_used: u8::from_le_bytes(*num_tokens_used),
+                    cpi_data: cpi_data.to_vec(),
+                }
             }
             _ => {
                 return None;
