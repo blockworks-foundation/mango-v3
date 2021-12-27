@@ -1346,6 +1346,7 @@ impl MangoInstruction {
             58 => MangoInstruction::SetDelegate,
             59 => {
                 let (amount, _cpi_data_vec_len, cpi_data_vec_arr) = array_refs![data, 8, 8;..;];
+
                 MangoInstruction::FlashLoan {
                     liquidity_amount: u64::from_le_bytes(*amount),
                     cpi_data: cpi_data_vec_arr.to_vec(),
