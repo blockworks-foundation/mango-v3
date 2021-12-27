@@ -5523,6 +5523,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         liquidity_amount: u64,
+        cpi_data: Vec<u8>,
     ) -> MangoResult {
         const NUM_FIXED: usize = 6;
         let (fixed_ais, remaining_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -5578,18 +5579,11 @@ impl Processor {
             flash_loan_amount,
         )?;
 
-        // fixme: make configurable
-        const RECEIVE_FLASH_LOAN_INSTRUCTION_TAG: u8 = 0u8;
-        const RECEIVE_FLASH_LOAN_INSTRUCTION_DATA_SIZE: usize = 9;
-        let mut data = Vec::with_capacity(RECEIVE_FLASH_LOAN_INSTRUCTION_DATA_SIZE);
-        data.push(RECEIVE_FLASH_LOAN_INSTRUCTION_TAG);
-        data.extend_from_slice(&flash_loan_amount.to_le_bytes());
-
         solana_program::program::invoke(
             &Instruction {
                 program_id: *flash_loan_prog_ai.key,
                 accounts: flash_loan_instruction_accounts,
-                data,
+                data: cpi_data,
             },
             &flash_loan_instruction_account_infos[..],
         )?;
@@ -6046,9 +6040,9 @@ impl Processor {
                 msg!("Mango: SetDelegate");
                 Self::set_delegate(program_id, accounts)
             }
-            MangoInstruction::FlashLoan { liquidity_amount } => {
+            MangoInstruction::FlashLoan { liquidity_amount, cpi_data } => {
                 msg!("Mango: FlashLoan");
-                Self::flash_loan(program_id, accounts, liquidity_amount)
+                Self::flash_loan(program_id, accounts, liquidity_amount, cpi_data)
             }
             MangoInstruction::MarginTrade { num_open_orders, num_tokens_used, cpi_data } => {
                 msg!("Mango: MarginTrade");

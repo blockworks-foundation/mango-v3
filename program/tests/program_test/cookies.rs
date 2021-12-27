@@ -325,6 +325,7 @@ impl MangoGroupCookie {
 
         let (receiver_authority_pubkey, _) =
             Pubkey::find_program_address(&[b"flashloan"], &test.flash_loan_receiver_program_id);
+
         let instructions = [mango::instruction::flash_loan(
             &test.mango_program_id,
             &self.address,
@@ -334,6 +335,12 @@ impl MangoGroupCookie {
             &test.flash_loan_receiver_program_id,
             &[receiver_authority_pubkey],
             amount,
+            {
+                let mut cpi_data = Vec::with_capacity(9);
+                cpi_data.push(0u8);
+                cpi_data.extend_from_slice(&amount.to_le_bytes());
+                cpi_data
+            },
         )
         .unwrap()];
 
