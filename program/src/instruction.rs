@@ -899,6 +899,10 @@ pub enum MangoInstruction {
     ///   tag `0` and accept the total amount that needs to be returned back after
     ///   its execution has completed.
     ///
+    /// Data expected:
+    ///  . loan_amount - size of flash loan
+    ///  . cpi_data - cpi instruction data
+    ///
     ///   Flash loan receiver should have an instruction with the following signature:
     ///
     ///   0. `[writable]` source_token_ai - Source vault (matching the destination from above).
