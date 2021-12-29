@@ -34,8 +34,10 @@ pub mod cookies;
 pub mod helpers;
 pub mod scenarios;
 
-const RUST_LOG_DEFAULT: &str = "solana_bpf_loader_program=debug,\
-                                solana_program_runtime::stable_log=debug";
+const RUST_LOG_DEFAULT: &str = "debug";
+
+// "solana_bpf_loader_program=debug,\
+//                                 solana_program_runtime::stable_log=debug";
 // "solana_rbpf::vm=info,\
 //              solana_program_runtime::stable_log=debug,\
 //              solana_runtime::message_processor=debug,\
@@ -411,7 +413,7 @@ impl MangoProgramTest {
         &mut self,
         instructions: &[Instruction],
         signers: Option<&[&Keypair]>,
-    ) -> Result<(), TransportError> {
+    ) {
         let mut transaction =
             Transaction::new_with_payer(&instructions, Some(&self.context.payer.pubkey()));
 
@@ -426,7 +428,7 @@ impl MangoProgramTest {
 
         transaction.sign(&all_signers, self.context.last_blockhash);
 
-        self.context.banks_client.process_transaction(transaction).await
+        self.context.banks_client.process_transaction(transaction).await.unwrap()
     }
 
     #[allow(dead_code)]
@@ -483,7 +485,7 @@ impl MangoProgramTest {
             owner,
         )];
 
-        self.process_transaction(&instructions, Some(&[&keypair])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&keypair])).await;
 
         return keypair.pubkey();
     }
@@ -511,7 +513,7 @@ impl MangoProgramTest {
             .unwrap(),
         ];
 
-        self.process_transaction(&instructions, Some(&[&keypair])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&keypair])).await;
 
         return keypair.pubkey();
     }
@@ -538,7 +540,7 @@ impl MangoProgramTest {
             .unwrap(),
         ];
 
-        self.process_transaction(&instructions, Some(&[&keypair])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&keypair])).await;
         return keypair.pubkey();
     }
 
@@ -664,7 +666,7 @@ impl MangoProgramTest {
             )
             .unwrap(),
         ];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     #[allow(dead_code)]
@@ -762,7 +764,7 @@ impl MangoProgramTest {
             reduce_only,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await;
     }
 
     #[allow(dead_code)]
@@ -788,7 +790,7 @@ impl MangoProgramTest {
             3,
         )
         .unwrap()];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     #[allow(dead_code)]
@@ -818,7 +820,7 @@ impl MangoProgramTest {
             20,
         )
         .unwrap()];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     // pub fn get_pnl(
@@ -867,7 +869,7 @@ impl MangoProgramTest {
         )
         .unwrap()];
 
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     #[allow(dead_code)]
@@ -968,7 +970,7 @@ impl MangoProgramTest {
             &event_q_key,
         ];
 
-        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        self.process_transaction(&instructions, Some(&signers)).await;
 
         SpotMarketCookie {
             market: market_key.pubkey(),
@@ -1006,7 +1008,7 @@ impl MangoProgramTest {
                 5,
             )
             .unwrap()];
-            self.process_transaction(&instructions, None).await.unwrap();
+            self.process_transaction(&instructions, None).await;
         }
     }
 
@@ -1038,7 +1040,7 @@ impl MangoProgramTest {
         let instructions = vec![create_account_instr, init_spot_open_orders_instruction];
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let signers = vec![&user, &orders_key];
-        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        self.process_transaction(&instructions, Some(&signers)).await;
         open_orders_pk
     }
 
@@ -1052,7 +1054,7 @@ impl MangoProgramTest {
         instructions.push(instruction);
 
         let orders_pk = orders_keypair.pubkey();
-        self.process_transaction(&instructions, Some(&[&orders_keypair])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&orders_keypair])).await;
 
         return orders_pk;
     }
@@ -1070,7 +1072,7 @@ impl MangoProgramTest {
             );
             oracle_pks.push(oracle_pk);
         }
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
         return oracle_pks;
     }
 
@@ -1089,7 +1091,7 @@ impl MangoProgramTest {
             &perp_market_pks,
         )
         .unwrap()];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     pub async fn cache_all_root_banks(
@@ -1112,7 +1114,7 @@ impl MangoProgramTest {
             &root_bank_pks,
         )
         .unwrap()];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     pub async fn cache_all_prices(
@@ -1129,7 +1131,7 @@ impl MangoProgramTest {
             &oracle_pks,
         )
         .unwrap()];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     pub async fn update_all_root_banks(
@@ -1152,7 +1154,7 @@ impl MangoProgramTest {
                     &[node_bank_pk],
                 )
                 .unwrap()];
-                self.process_transaction(&instructions, None).await.unwrap();
+                self.process_transaction(&instructions, None).await;
             }
         }
     }
@@ -1177,7 +1179,7 @@ impl MangoProgramTest {
             &perp_market.asks,
         )
         .unwrap()];
-        self.process_transaction(&instructions, None).await.unwrap();
+        self.process_transaction(&instructions, None).await;
     }
 
     #[allow(dead_code)]
@@ -1263,7 +1265,7 @@ impl MangoProgramTest {
 
         let signers = vec![&user];
 
-        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        self.process_transaction(&instructions, Some(&signers)).await;
     }
 
     #[allow(dead_code)]
@@ -1274,7 +1276,7 @@ impl MangoProgramTest {
         user_index: usize,
         delegate_user_index: usize,
         order: NewOrderInstructionV3,
-    ) -> Result<(), TransportError> {
+    ) {
         let mango_program_id = self.mango_program_id;
         let serum_program_id = self.serum_program_id;
         let mango_group = mango_group_cookie.mango_group;
@@ -1351,7 +1353,7 @@ impl MangoProgramTest {
 
         let signers = vec![&delegate_user];
 
-        self.process_transaction(&instructions, Some(&signers)).await
+        self.process_transaction(&instructions, Some(&signers)).await;
     }
 
     #[allow(dead_code)]
@@ -1408,7 +1410,7 @@ impl MangoProgramTest {
 
         let signers = vec![&user];
 
-        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        self.process_transaction(&instructions, Some(&signers)).await;
     }
 
     #[allow(dead_code)]
@@ -1443,7 +1445,7 @@ impl MangoProgramTest {
             amount,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await;
     }
 
     #[allow(dead_code)]
@@ -1498,7 +1500,7 @@ impl MangoProgramTest {
         mint_index: usize,
         quantity: u64,
         allow_borrow: bool,
-    ) -> Result<(), TransportError> {
+    ) {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -1532,7 +1534,7 @@ impl MangoProgramTest {
             allow_borrow,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&delegate_user])).await
+        self.process_transaction(&instructions, Some(&[&delegate_user])).await;
     }
 
     #[allow(dead_code)]
@@ -1558,7 +1560,7 @@ impl MangoProgramTest {
             &delegate.pubkey(),
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await;
     }
 
     #[allow(dead_code)]
@@ -1584,7 +1586,7 @@ impl MangoProgramTest {
             &Pubkey::default(),
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await;
     }
 
     #[allow(dead_code)]
@@ -1633,7 +1635,7 @@ impl MangoProgramTest {
         )
         .unwrap()];
 
-        self.process_transaction(&instructions, Some(&[&liqor])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&liqor])).await;
 
         mango_group_cookie.mango_accounts[liqee_index].mango_account =
             self.load_account::<MangoAccount>(liqee_mango_account_pk).await;

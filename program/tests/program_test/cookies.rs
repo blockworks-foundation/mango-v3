@@ -99,7 +99,7 @@ impl MangoGroupCookie {
         )
         .unwrap()];
 
-        test.process_transaction(&instructions, None).await.unwrap();
+        test.process_transaction(&instructions, None).await;
 
         let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
         let mango_cache = test.load_account::<MangoCache>(mango_group.mango_cache).await;
@@ -194,7 +194,7 @@ impl MangoGroupCookie {
             oracle_price,
         )
         .unwrap()];
-        test.process_transaction(&instructions, None).await.unwrap();
+        test.process_transaction(&instructions, None).await;
     }
 
     #[allow(dead_code)]
@@ -317,7 +317,7 @@ impl MangoGroupCookie {
         test: &mut MangoProgramTest,
         mint_index: usize,
         amount: u64,
-    ) -> Result<(), TransportError> {
+    ) {
         let (_, root_bank) = test.with_root_bank(&self.mango_group, mint_index).await;
         let (_, node_bank) = test.with_node_bank(&root_bank, 0).await;
         let (signer_pk, _signer_nonce) =
@@ -344,7 +344,7 @@ impl MangoGroupCookie {
         )
         .unwrap()];
 
-        test.process_transaction(&instructions, None).await
+        test.process_transaction(&instructions, None).await;
     }
 }
 
@@ -375,7 +375,7 @@ impl MangoAccountCookie {
             &user_pk,
         )
         .unwrap()];
-        test.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        test.process_transaction(&instructions, Some(&[&user])).await;
         let mango_account = test.load_account::<MangoAccount>(mango_account_pk).await;
         MangoAccountCookie { address: mango_account_pk, user, mango_account }
     }
@@ -413,7 +413,7 @@ impl AdvancedOrdersCookie {
             &solana_sdk::system_program::id(),
         )
         .unwrap()];
-        test.process_transaction(&instructions, Some(&[user])).await.unwrap();
+        test.process_transaction(&instructions, Some(&[user])).await;
         let advanced_orders = test.load_account::<AdvancedOrders>(advanced_orders_pk).await;
         AdvancedOrdersCookie { address: advanced_orders_pk, advanced_orders }
     }
@@ -425,7 +425,7 @@ impl AdvancedOrdersCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         order_index: u8,
-    ) -> Result<(), TransportError> {
+    ) {
         let mango_program_id = test.mango_program_id;
         let mango_account_cookie = &mango_group_cookie.mango_accounts[user_index];
         let mango_account_pk = mango_account_cookie.address;
@@ -446,11 +446,11 @@ impl AdvancedOrdersCookie {
 
         let result = test.process_transaction(&instructions, Some(&[&user])).await;
 
-        if result.is_ok() {
-            self.advanced_orders = test.load_account::<AdvancedOrders>(self.address).await;
-        }
+        // if result.is_ok() {
+        self.advanced_orders = test.load_account::<AdvancedOrders>(self.address).await;
+        // }
 
-        result
+        result;
     }
 }
 
@@ -526,7 +526,7 @@ impl SpotMarketCookie {
         )
         .unwrap()];
 
-        test.process_transaction(&instructions, None).await.unwrap();
+        test.process_transaction(&instructions, None).await;
         spot_market_cookie.mint = test.with_mint(mint_index);
         spot_market_cookie
     }
@@ -580,7 +580,7 @@ impl SpotMarketCookie {
         side: serum_dex::matching::Side,
         size: f64,
         price: f64,
-    ) -> Result<(), TransportError> {
+    ) {
         let limit_price = test.price_number_to_lots(&self.mint, price);
         let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
         let max_native_pc_qty_including_fees = match side {
@@ -609,7 +609,7 @@ impl SpotMarketCookie {
             delegate_user_index,
             order,
         )
-        .await
+        .await;
     }
 }
 
@@ -682,7 +682,7 @@ impl PerpMarketCookie {
         )
         .unwrap()];
 
-        test.process_transaction(&instructions, None).await.unwrap();
+        test.process_transaction(&instructions, None).await;
 
         let perp_market = test.load_account::<PerpMarket>(perp_market_pk).await;
         PerpMarketCookie {
@@ -770,7 +770,7 @@ impl PerpMarketCookie {
         )
         .unwrap()];
 
-        test.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        test.process_transaction(&instructions, Some(&[&user])).await;
 
         mango_group_cookie.mango_accounts[user_index].mango_account =
             test.load_account::<MangoAccount>(mango_account_pk).await;
@@ -789,7 +789,7 @@ impl PerpMarketCookie {
         user_index: usize,
         agent_user_index: usize,
         order_index: u8,
-    ) -> Result<(), TransportError> {
+    ) {
         let mango_program_id = test.mango_program_id;
         let mango_account_cookie = &mango_group_cookie.mango_accounts[user_index];
         let mango_account_pk = mango_account_cookie.address;
@@ -818,13 +818,13 @@ impl PerpMarketCookie {
 
         let result = test.process_transaction(&instructions, Some(&[&agent_user])).await;
 
-        if result.is_ok() {
-            mango_group_cookie.mango_accounts[user_index].mango_account =
-                test.load_account::<MangoAccount>(mango_account_pk).await;
-            advanced_orders_cookie.advanced_orders =
-                test.load_account::<AdvancedOrders>(advanced_orders_cookie.address).await;
-        }
+        // if result.is_ok() {
+        mango_group_cookie.mango_accounts[user_index].mango_account =
+            test.load_account::<MangoAccount>(mango_account_pk).await;
+        advanced_orders_cookie.advanced_orders =
+            test.load_account::<AdvancedOrders>(advanced_orders_cookie.address).await;
+        // }
 
-        result
+        result;
     }
 }

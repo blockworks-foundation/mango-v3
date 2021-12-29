@@ -46,7 +46,7 @@ async fn test_flash_loan() {
     let balance_before = test.get_token_balance(node_bank.vault).await;
 
     // Step 2: Make flash loan
-    flash_loan_scenario(&mut test, &mut mango_group_cookie, mint_index, 100_000_000).await.unwrap();
+    flash_loan_scenario(&mut test, &mut mango_group_cookie, mint_index, 100_000_000).await;
     let balance_after = test.get_token_balance(node_bank.vault).await;
 
     assert!(balance_before >= balance_after)
