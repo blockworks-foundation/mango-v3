@@ -187,7 +187,7 @@ dependencies = [
  "bincode",
  "borsh",
  "bytemuck",
- "solana-program 1.9.1",
+ "solana-program",
  "thiserror",
 ]
 
@@ -343,7 +343,6 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4"
 dependencies = [
- "block-padding",
  "generic-array",
 ]
 
@@ -355,12 +354,6 @@ checksum = "f1d36a02058e76b040de25a4464ba1c80935655595b661505c8b39b664828b95"
 dependencies = [
  "generic-array",
 ]
-
-[[package]]
-name = "block-padding"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 
 [[package]]
 name = "borsh"
@@ -1519,8 +1512,8 @@ dependencies = [
  "safe-transmute",
  "serde",
  "serum_dex",
- "solana-logger 1.10.0",
- "solana-program 1.10.0",
+ "solana-logger",
+ "solana-program",
  "solana-program-test",
  "solana-sdk",
  "spl-token",
@@ -1535,7 +1528,7 @@ name = "mango-common"
 version = "3.0.0"
 dependencies = [
  "bytemuck",
- "solana-program 1.10.0",
+ "solana-program",
 ]
 
 [[package]]
@@ -1553,7 +1546,7 @@ dependencies = [
  "mango-common",
  "quote",
  "safe-transmute",
- "solana-program 1.9.1",
+ "solana-program",
  "syn",
 ]
 
@@ -2418,7 +2411,7 @@ dependencies = [
  "num_enum",
  "safe-transmute",
  "serde",
- "solana-program 1.9.1",
+ "solana-program",
  "spl-token",
  "static_assertions",
  "thiserror",
@@ -2447,18 +2440,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.1",
-]
-
-[[package]]
-name = "sha3"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f81199417d4e5de3f04b1e871023acea7389672c4135918f05aa9cbf2f2fa809"
-dependencies = [
- "block-buffer 0.9.0",
- "digest 0.9.0",
- "keccak",
- "opaque-debug",
 ]
 
 [[package]]
@@ -2520,6 +2501,7 @@ dependencies = [
 [[package]]
 name = "solana-address-lookup-table-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -2528,8 +2510,8 @@ dependencies = [
  "num-traits",
  "rustc_version 0.4.0",
  "serde",
- "solana-frozen-abi 1.10.0",
- "solana-frozen-abi-macro 1.10.0",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-program-runtime",
  "solana-sdk",
  "thiserror",
@@ -2538,11 +2520,12 @@ dependencies = [
 [[package]]
 name = "solana-banks-client"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "borsh",
  "futures",
  "solana-banks-interface",
- "solana-program 1.10.0",
+ "solana-program",
  "solana-sdk",
  "tarpc 0.27.2",
  "thiserror",
@@ -2553,6 +2536,7 @@ dependencies = [
 [[package]]
 name = "solana-banks-interface"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "serde",
  "solana-sdk",
@@ -2562,6 +2546,7 @@ dependencies = [
 [[package]]
 name = "solana-banks-server"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bincode",
  "futures",
@@ -2578,6 +2563,7 @@ dependencies = [
 [[package]]
 name = "solana-bpf-loader-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bincode",
  "byteorder",
@@ -2593,6 +2579,7 @@ dependencies = [
 [[package]]
 name = "solana-bucket-map"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "log",
  "memmap2",
@@ -2605,6 +2592,7 @@ dependencies = [
 [[package]]
 name = "solana-compute-budget-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "solana-program-runtime",
  "solana-sdk",
@@ -2613,6 +2601,7 @@ dependencies = [
 [[package]]
 name = "solana-config-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bincode",
  "chrono",
@@ -2624,27 +2613,8 @@ dependencies = [
 
 [[package]]
 name = "solana-frozen-abi"
-version = "1.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd0c18abe9d7b525215f3de16db3fca6057affdd73464ca027786b42455257b9"
-dependencies = [
- "bs58 0.4.0",
- "bv",
- "generic-array",
- "log",
- "memmap2",
- "rustc_version 0.4.0",
- "serde",
- "serde_derive",
- "sha2 0.9.8",
- "solana-frozen-abi-macro 1.9.1",
- "solana-logger 1.9.1",
- "thiserror",
-]
-
-[[package]]
-name = "solana-frozen-abi"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bs58 0.4.0",
  "bv",
@@ -2655,25 +2625,14 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha2 0.10.0",
- "solana-frozen-abi-macro 1.10.0",
+ "solana-frozen-abi-macro",
  "thiserror",
 ]
 
 [[package]]
 name = "solana-frozen-abi-macro"
-version = "1.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4221e1b9cfad821fa097a61c1827f8214c2ef97057c270d5f68a52d90929ae2a"
-dependencies = [
- "proc-macro2",
- "quote",
- "rustc_version 0.4.0",
- "syn",
-]
-
-[[package]]
-name = "solana-frozen-abi-macro"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2683,18 +2642,8 @@ dependencies = [
 
 [[package]]
 name = "solana-logger"
-version = "1.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a5b4d8fe05eab74ca3c7afd79e6143bed4028997bf36de06b7f503b55b125c"
-dependencies = [
- "env_logger",
- "lazy_static",
- "log",
-]
-
-[[package]]
-name = "solana-logger"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "env_logger",
  "lazy_static",
@@ -2704,6 +2653,7 @@ dependencies = [
 [[package]]
 name = "solana-measure"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "log",
  "solana-sdk",
@@ -2712,6 +2662,7 @@ dependencies = [
 [[package]]
 name = "solana-metrics"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "gethostname",
  "lazy_static",
@@ -2722,50 +2673,8 @@ dependencies = [
 
 [[package]]
 name = "solana-program"
-version = "1.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32d577959f537ba4435db97588fe2ea5520c98483ef5fcf6a0fb8ca096f82213"
-dependencies = [
- "base64 0.13.0",
- "bincode",
- "bitflags",
- "blake3",
- "borsh",
- "borsh-derive",
- "bs58 0.4.0",
- "bv",
- "bytemuck",
- "console_error_panic_hook",
- "console_log",
- "curve25519-dalek",
- "getrandom 0.1.16",
- "itertools 0.10.3",
- "js-sys",
- "lazy_static",
- "libsecp256k1",
- "log",
- "num-derive",
- "num-traits",
- "parking_lot",
- "rand 0.7.3",
- "rustc_version 0.4.0",
- "rustversion",
- "serde",
- "serde_bytes",
- "serde_derive",
- "sha2 0.9.8",
- "sha3 0.9.1",
- "solana-frozen-abi 1.9.1",
- "solana-frozen-abi-macro 1.9.1",
- "solana-logger 1.9.1",
- "solana-sdk-macro 1.9.1",
- "thiserror",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "solana-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "base64 0.13.0",
  "bincode",
@@ -2795,10 +2704,10 @@ dependencies = [
  "serde_bytes",
  "serde_derive",
  "sha2 0.10.0",
- "sha3 0.10.0",
- "solana-frozen-abi 1.10.0",
- "solana-frozen-abi-macro 1.10.0",
- "solana-sdk-macro 1.10.0",
+ "sha3",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
+ "solana-sdk-macro",
  "thiserror",
  "wasm-bindgen",
 ]
@@ -2806,6 +2715,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "base64 0.13.0",
  "bincode",
@@ -2824,6 +2734,7 @@ dependencies = [
 [[package]]
 name = "solana-program-test"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "async-trait",
  "base64 0.12.3",
@@ -2834,7 +2745,7 @@ dependencies = [
  "solana-banks-client",
  "solana-banks-server",
  "solana-bpf-loader-program",
- "solana-logger 1.10.0",
+ "solana-logger",
  "solana-program-runtime",
  "solana-runtime",
  "solana-sdk",
@@ -2846,6 +2757,7 @@ dependencies = [
 [[package]]
 name = "solana-rayon-threadlimit"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "lazy_static",
  "num_cpus",
@@ -2854,6 +2766,7 @@ dependencies = [
 [[package]]
 name = "solana-runtime"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "arrayref",
  "bincode",
@@ -2884,8 +2797,8 @@ dependencies = [
  "solana-bucket-map",
  "solana-compute-budget-program",
  "solana-config-program",
- "solana-frozen-abi 1.10.0",
- "solana-frozen-abi-macro 1.10.0",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-measure",
  "solana-metrics",
  "solana-program-runtime",
@@ -2903,6 +2816,7 @@ dependencies = [
 [[package]]
 name = "solana-sdk"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "assert_matches",
  "base64 0.13.0",
@@ -2937,12 +2851,12 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sha2 0.10.0",
- "sha3 0.10.0",
- "solana-frozen-abi 1.10.0",
- "solana-frozen-abi-macro 1.10.0",
- "solana-logger 1.10.0",
- "solana-program 1.10.0",
- "solana-sdk-macro 1.10.0",
+ "sha3",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
+ "solana-logger",
+ "solana-program",
+ "solana-sdk-macro",
  "thiserror",
  "uriparse",
  "wasm-bindgen",
@@ -2950,20 +2864,8 @@ dependencies = [
 
 [[package]]
 name = "solana-sdk-macro"
-version = "1.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0664789b09d768bfab1fc34c532d8cd1abfc63b2ec8174c7b65e6b17f08e7841"
-dependencies = [
- "bs58 0.4.0",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn",
-]
-
-[[package]]
-name = "solana-sdk-macro"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bs58 0.4.0",
  "proc-macro2",
@@ -2975,6 +2877,7 @@ dependencies = [
 [[package]]
 name = "solana-send-transaction-service"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "log",
  "solana-metrics",
@@ -2985,6 +2888,7 @@ dependencies = [
 [[package]]
 name = "solana-stake-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bincode",
  "log",
@@ -2994,8 +2898,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "solana-config-program",
- "solana-frozen-abi 1.10.0",
- "solana-frozen-abi-macro 1.10.0",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-metrics",
  "solana-program-runtime",
  "solana-sdk",
@@ -3006,6 +2910,7 @@ dependencies = [
 [[package]]
 name = "solana-vote-program"
 version = "1.10.0"
+source = "git+https://github.com/dmakarov/solana.git?branch=syscall-base-costs#f5678c0cd614d1296d54aca83632004de115993e"
 dependencies = [
  "bincode",
  "log",
@@ -3014,8 +2919,8 @@ dependencies = [
  "rustc_version 0.4.0",
  "serde",
  "serde_derive",
- "solana-frozen-abi 1.10.0",
- "solana-frozen-abi-macro 1.10.0",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
  "solana-metrics",
  "solana-program-runtime",
  "solana-sdk",
@@ -3057,7 +2962,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "num_enum",
- "solana-program 1.9.1",
+ "solana-program",
  "thiserror",
 ]
 
@@ -3089,7 +2994,7 @@ dependencies = [
  "borsh",
  "byteorder",
  "quick-protobuf",
- "solana-program 1.9.1",
+ "solana-program",
  "switchboard-protos",
  "switchboard-utils",
  "zerocopy",
@@ -3119,7 +3024,7 @@ dependencies = [
  "quick-protobuf",
  "rust_decimal",
  "rust_decimal_macros",
- "solana-program 1.9.1",
+ "solana-program",
  "switchboard-protos",
  "zerocopy",
 ]

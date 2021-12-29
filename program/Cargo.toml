@@ -10,7 +10,7 @@ test-bpf = []
 devnet = []
 
 [dependencies]
-solana-program = { path="../../../repos/dmakarov-solana/sdk/program" }
+solana-program = "^1.8.1"
 arrayref = "^0.3.6"
 serde = "^1.0.118"
 bs58 = "0.4.0"
@@ -32,9 +32,9 @@ switchboard-program = "^0.1.52"
 anchor-lang = "0.19.0"
 
 [dev-dependencies]
-solana-sdk = { path="../../../repos/dmakarov-solana/sdk" }
-solana-program-test = { path="../../../repos/dmakarov-solana/program-test" }
-solana-logger = { path="../../../repos/dmakarov-solana/logger" }
+solana-sdk = "^1.8.1"
+solana-program-test = "^1.8.1"
+solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
 
 
