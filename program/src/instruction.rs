@@ -910,7 +910,7 @@ pub enum MangoInstruction {
     ///       amount: u64
     ///   }
     FlashLoan {
-        liquidity_amount: u64,
+        loan_amount: u64,
         cpi_data: Vec<u8>,
     },
 
@@ -1348,7 +1348,7 @@ impl MangoInstruction {
                 let (amount, _cpi_data_vec_len, cpi_data_vec_arr) = array_refs![data, 8, 8;..;];
 
                 MangoInstruction::FlashLoan {
-                    liquidity_amount: u64::from_le_bytes(*amount),
+                    loan_amount: u64::from_le_bytes(*amount),
                     cpi_data: cpi_data_vec_arr.to_vec(),
                 }
             }
@@ -2440,7 +2440,7 @@ pub fn flash_loan(
     token_pk: &Pubkey,
     flash_loan_prog_pk: &Pubkey,
     remaining_pks: &[Pubkey],
-    liquidity_amount: u64,
+    loan_amount: u64,
     cpi_data: Vec<u8>,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
@@ -2454,7 +2454,7 @@ pub fn flash_loan(
 
     accounts.extend(remaining_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
-    let instr = MangoInstruction::FlashLoan { liquidity_amount, cpi_data };
+    let instr = MangoInstruction::FlashLoan { loan_amount, cpi_data };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

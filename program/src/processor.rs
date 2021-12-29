@@ -5522,7 +5522,7 @@ impl Processor {
     fn flash_loan(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        liquidity_amount: u64,
+        loan_amount: u64,
         cpi_data: Vec<u8>,
     ) -> MangoResult {
         const NUM_FIXED: usize = 6;
@@ -5541,10 +5541,10 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let source_token = Account::unpack(&source_token_ai.try_borrow_data()?)?;
 
-        let flash_loan_amount = if liquidity_amount == u64::MAX {
+        let flash_loan_amount = if loan_amount == u64::MAX {
             source_token.amount
         } else {
-            min(source_token.amount, liquidity_amount)
+            min(source_token.amount, loan_amount)
         };
 
         let source_balance_before = source_token.amount;
@@ -6040,9 +6040,9 @@ impl Processor {
                 msg!("Mango: SetDelegate");
                 Self::set_delegate(program_id, accounts)
             }
-            MangoInstruction::FlashLoan { liquidity_amount, cpi_data } => {
+            MangoInstruction::FlashLoan { loan_amount, cpi_data } => {
                 msg!("Mango: FlashLoan");
-                Self::flash_loan(program_id, accounts, liquidity_amount, cpi_data)
+                Self::flash_loan(program_id, accounts, loan_amount, cpi_data)
             }
             MangoInstruction::MarginTrade { num_open_orders, num_tokens_used, cpi_data } => {
                 msg!("Mango: MarginTrade");
