@@ -5541,11 +5541,7 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let source_token = Account::unpack(&source_token_ai.try_borrow_data()?)?;
 
-        let flash_loan_amount = if loan_amount == u64::MAX {
-            source_token.amount
-        } else {
-            min(source_token.amount, loan_amount)
-        };
+        let flash_loan_amount = min(source_token.amount, loan_amount);
 
         let source_balance_before = source_token.amount;
 
