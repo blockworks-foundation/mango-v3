@@ -1350,6 +1350,7 @@ impl MangoInstruction {
             58 => MangoInstruction::SetDelegate,
             59 => {
                 let (amount, _cpi_data_vec_len, cpi_data_vec_arr) = array_refs![data, 8, 8;..;];
+                assert!(usize::from_le_bytes(*_cpi_data_vec_len) == cpi_data_vec_arr.len());
 
                 MangoInstruction::FlashLoan {
                     loan_amount: u64::from_le_bytes(*amount),
