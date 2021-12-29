@@ -34,11 +34,13 @@ pub mod cookies;
 pub mod helpers;
 pub mod scenarios;
 
-const RUST_LOG_DEFAULT: &str = "solana_rbpf::vm=info,\
-             solana_program_runtime::stable_log=debug,\
-             solana_runtime::message_processor=debug,\
-             solana_runtime::system_instruction_processor=info,\
-             solana_program_test=debug";
+const RUST_LOG_DEFAULT: &str = "solana_bpf_loader_program=debug,\
+                                solana_program_runtime::stable_log=debug";
+// "solana_rbpf::vm=info,\
+//              solana_program_runtime::stable_log=debug,\
+//              solana_runtime::message_processor=debug,\
+//              solana_runtime::system_instruction_processor=info,\
+//              solana_program_test=debug";
 
 pub trait AddPacked {
     fn add_packable_account<T: Pack>(
