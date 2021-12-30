@@ -1,0 +1,14 @@
+AddOracle,2052
+AddPerpMarket,20469
+AddSpotMarket,79637
+CachePerpMarkets,23125
+CachePrices,18193
+CacheRootBanks,24094
+ConsumeEvents,13399
+InitMangoAccount,1869
+InitMangoGroup,9706
+PlacePerpOrder,80362
+SetOracle,2151
+SettlePnl,19753
+UpdateFunding,78615
+UpdateRootBank,84756
