@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.2.14
-Deployed:  | Slot: 
+Deployed: Jan 2, 2022 at 20:48:01 UTC | Slot: 114,518,931
 1. Check bids and asks when loading perp market book
 
 ## v3.2.13
