@@ -112,6 +112,8 @@ async fn test_perp_trigger_orders_basic() {
             - advanced_orders_initial_lamports
             == ADVANCED_ORDER_FEE
     );
+    // advance slots, since we want to send the same tx a second time
+    test.advance_clock_by_slots(2).await;
     advanced_orders_cookie
         .remove_advanced_order(&mut test, &mut mango_group_cookie, user_index, 0)
         .await
