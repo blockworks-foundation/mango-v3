@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.2.14
+Deployed:  | Slot: 
+1. Check bids and asks when loading perp market book
+
 ## v3.2.13
 Deployed: Dec 16, 2021 at 21:16:50 UTC | Slot: 111,865,268
 1. Fixed FillLog maker_fee and taker_fee
