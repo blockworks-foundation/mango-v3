@@ -5486,9 +5486,17 @@ impl Processor {
         // Determine change in vaults and apply to MangoAccount
         for (i, bank_set) in bank_sets.iter_mut().enumerate() {
             let pre_amount = I80F48::from_num(pre_amounts[i]);
-            let token_account = TokenAccount::load(bank_set.vault_ai)?;
+            let token_account = TokenAccount::load_checked(bank_set.vault_ai)?;
             token_account.check_mango_reqs(&mango_group)?; // make sure only amount changed
+
+            // Make sure mint has not changed
+            check!(
+                token_account.0.mint == mango_group.tokens[bank_set.token_index].mint,
+                MangoErrorCode::InvalidAccountState
+            )?;
+
             let post_amount = I80F48::from_num(token_account.0.amount);
+
             // let post_amount =
             //     I80F48::from_num(Account::unpack(&bank_set.vault_ai.try_borrow_data()?)?.amount);
             let change = post_amount - pre_amount;

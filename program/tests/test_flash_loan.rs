@@ -51,3 +51,21 @@ async fn test_flash_loan() {
 
     assert!(balance_before >= balance_after)
 }
+//
+// #[tokio::test]
+// async fn test_margin_trade() {
+//     // === Arrange ===
+//     let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+//     let mut test = MangoProgramTest::start_new(&config).await;
+//
+//     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+//     mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+//
+//     // General parameters
+//     let user_index: usize = 0;
+//     let mint_index: usize = 1;
+//     let base_price: f64 = 10_000.0;
+//
+//     // Deposit amounts
+//     let user_deposits = vec![(user_index, test.quote_index, base_price * 3.)];
+// }
