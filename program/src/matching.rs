@@ -654,6 +654,8 @@ impl<'a> Book<'a> {
         asks_ai: &'a AccountInfo,
         perp_market: &PerpMarket,
     ) -> MangoResult<Self> {
+        check!(bids_ai.key == &perp_market.bids, MangoErrorCode::InvalidAccount)?;
+        check!(asks_ai.key == &perp_market.asks, MangoErrorCode::InvalidAccount)?;
         Ok(Self {
             bids: BookSide::load_mut_checked(bids_ai, program_id, perp_market)?,
             asks: BookSide::load_mut_checked(asks_ai, program_id, perp_market)?,
