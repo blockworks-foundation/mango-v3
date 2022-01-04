@@ -78,8 +78,7 @@ pub enum MangoInstruction {
     /// 7. `[write]` token_account_ai, -
     /// 8. `[read]` signer_ai,        -
     /// 9. `[read]` token_prog_ai,    -
-    /// 10. `[read]` clock_ai,         -
-    /// 11..+ `[]` open_orders_accs - open orders for each of the spot market
+    /// 10..+ `[]` open_orders_accs - open orders for each of the spot market
     Withdraw {
         quantity: u64,
         allow_borrow: bool,
