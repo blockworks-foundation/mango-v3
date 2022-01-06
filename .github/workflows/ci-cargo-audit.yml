@@ -1,16 +1,13 @@
 # CI job for scanning Cargo dependencies for vulnerabilities and report/fail job based on criticality.
 # Critically vulnerable dependencies with fix available will mark the run as failed (X)
 
-name: Rust Cargo Audit
+name: Cargo Audit
 
 on:
   push:
     branches: main
   pull_request:
     branches: main
-
-  # Allowing manual runs with ability to choose branch
-  workflow_dispatch:
 
 # Optimisation option by targeting direct paths to only scan when there are changes to dependencies in the push/PR
 # Can also be used to limit testing to specific programs
