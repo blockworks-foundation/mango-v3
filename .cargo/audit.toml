@@ -1,10 +1,10 @@
 # All of the options which can be passed via CLI arguments can also be
 # permanently specified in this file.
 
-# RUSTSEC-2020-0071 and RUSTSEC-2020-0159 are low severity vulnerable upstream Solana crates. Ignored for now.
+# RUSTSEC-2020-0071, RUSTSEC-2020-0159 and RUSTSEC-2021-0124 are low severity vulnerable upstream Solana crates. Ignored for now.
 
 [advisories]
-ignore = ["RUSTSEC-2020-0071","RUSTSEC-2020-0159"] # advisory IDs to ignore e.g. ["RUSTSEC-2019-0001", ...]
+ignore = ["RUSTSEC-2020-0071","RUSTSEC-2020-0159", "RUSTSEC-2021-0124"] # advisory IDs to ignore e.g. ["RUSTSEC-2019-0001", ...]
 informational_warnings = ["unmaintained"] # warn for categories of informational advisories
 severity_threshold = "medium" # CVSS severity ("none", "low", "medium", "high", "critical")
 
