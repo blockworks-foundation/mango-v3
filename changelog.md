@@ -8,6 +8,7 @@ Deployed:  | Slot:
 4. CreateDustAccount - create a PDA tied to the MangoGroup useful for settling dust against
 5. SetDelegate - delegate authority to operate MangoAccount to another account
 6. upgrade packages
+7. impose price limits for placing limit orders
 
 ## v3.2.14
 Deployed: Jan 2, 2022 at 20:48:01 UTC | Slot: 114,518,931

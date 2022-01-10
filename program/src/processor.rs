@@ -48,7 +48,6 @@ use crate::state::{
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
     NEG_ONE_I80F48, ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
 };
-
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -1593,6 +1592,7 @@ impl Processor {
         // TODO maybe check oracle was updated recently
 
         // TODO OPT - write a zero copy way to deserialize Account to reduce compute
+
         // this is to keep track of the amount of funds transferred
         let (pre_base, pre_quote) = {
             (
@@ -1600,9 +1600,40 @@ impl Processor {
                 Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
             )
         };
-        let vault_ai = match order.side {
+
+        let order_side = order.side;
+        let vault_ai = match order_side {
             serum_dex::matching::Side::Bid => quote_vault_ai,
             serum_dex::matching::Side::Ask => base_vault_ai,
+        };
+
+        // Enforce order price limits if the order is a limit order that goes on the book
+        let native_price = {
+            let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
+
+            I80F48::from_num(order.limit_price.get())
+                .checked_mul(I80F48::from_num(market.pc_lot_size))
+                .unwrap()
+                .checked_div(I80F48::from_num(market.coin_lot_size))
+                .unwrap()
+        };
+        let oracle_price = mango_cache.get_price(market_index);
+        msg!("native price: {:?} oracle_price: {:?}", native_price, oracle_price);
+        let info = &mango_group.spot_markets[market_index];
+
+        // If not post_allowed, then pre_locked may not increase
+        let (post_allowed, pre_locked) = {
+            let open_orders = load_open_orders(&open_orders_ais[market_index])?;
+            match order_side {
+                serum_dex::matching::Side::Bid => (
+                    native_price.checked_div(oracle_price).unwrap() <= info.maint_liab_weight,
+                    open_orders.native_pc_total - open_orders.native_pc_free,
+                ),
+                serum_dex::matching::Side::Ask => (
+                    native_price.checked_div(oracle_price).unwrap() >= info.maint_asset_weight,
+                    open_orders.native_coin_total - open_orders.native_coin_free,
+                ),
+            }
         };
 
         // Send order to serum dex
@@ -1644,6 +1675,15 @@ impl Processor {
         let open_orders = load_open_orders(&open_orders_ais[market_index])?;
         mango_account.update_basket(market_index, &open_orders)?;
 
+        let post_locked = match order_side {
+            serum_dex::matching::Side::Bid => {
+                open_orders.native_pc_total - open_orders.native_pc_free
+            }
+            serum_dex::matching::Side::Ask => {
+                open_orders.native_coin_total - open_orders.native_coin_free
+            }
+        };
+        check!(post_allowed || post_locked <= pre_locked, MangoErrorCode::InvalidParam)?;
         let (post_base, post_quote) = {
             (
                 Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
@@ -1848,13 +1888,43 @@ impl Processor {
                 Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
             )
         };
-        let vault_ai = match order.side {
+        let order_side = order.side;
+        let vault_ai = match order_side {
             serum_dex::matching::Side::Bid => quote_vault_ai,
             serum_dex::matching::Side::Ask => base_vault_ai,
         };
 
-        // Send order to serum dex
+        // Enforce order price limits if the order is a limit order that goes on the book
+        let native_price = {
+            // Conver the price in
+            let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
+            I80F48::from_num(order.limit_price.get())
+                .checked_mul(I80F48::from_num(market.pc_lot_size))
+                .unwrap()
+                .checked_div(I80F48::from_num(market.coin_lot_size))
+                .unwrap()
+        };
+        let oracle_price = mango_cache.get_price(market_index);
+        msg!("native price: {:?} oracle_price: {:?}", native_price, oracle_price);
+        let info = &mango_group.spot_markets[market_index];
         let market_open_orders_ai = open_orders_ais[market_index].unwrap();
+
+        // If not post_allowed, then pre_locked may not increase
+        let (post_allowed, pre_locked) = {
+            let open_orders = load_open_orders(market_open_orders_ai)?;
+            match order_side {
+                serum_dex::matching::Side::Bid => (
+                    native_price.checked_div(oracle_price).unwrap() <= info.maint_liab_weight,
+                    open_orders.native_pc_total - open_orders.native_pc_free,
+                ),
+                serum_dex::matching::Side::Ask => (
+                    native_price.checked_div(oracle_price).unwrap() >= info.maint_asset_weight,
+                    open_orders.native_coin_total - open_orders.native_coin_free,
+                ),
+            }
+        };
+
+        // Send order to serum dex
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_new_order(
             dex_prog_ai,
@@ -1890,8 +1960,18 @@ impl Processor {
         )?;
 
         // See if we can remove this market from margin
-        let open_orders = load_open_orders(open_orders_ais[market_index].unwrap())?;
+        let open_orders = load_open_orders(market_open_orders_ai)?;
         mango_account.update_basket(market_index, &open_orders)?;
+
+        let post_locked = match order_side {
+            serum_dex::matching::Side::Bid => {
+                open_orders.native_pc_total - open_orders.native_pc_free
+            }
+            serum_dex::matching::Side::Ask => {
+                open_orders.native_coin_total - open_orders.native_coin_free
+            }
+        };
+        check!(post_allowed || post_locked <= pre_locked, MangoErrorCode::InvalidParam)?;
 
         let (post_base, post_quote) = {
             (
