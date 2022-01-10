@@ -1618,7 +1618,6 @@ impl Processor {
                 .unwrap()
         };
         let oracle_price = mango_cache.get_price(market_index);
-        msg!("native price: {:?} oracle_price: {:?}", native_price, oracle_price);
         let info = &mango_group.spot_markets[market_index];
 
         // If not post_allowed, then pre_locked may not increase
@@ -1905,7 +1904,6 @@ impl Processor {
                 .unwrap()
         };
         let oracle_price = mango_cache.get_price(market_index);
-        msg!("native price: {:?} oracle_price: {:?}", native_price, oracle_price);
         let info = &mango_group.spot_markets[market_index];
         let market_open_orders_ai = open_orders_ais[market_index].unwrap();
 
@@ -1971,6 +1969,8 @@ impl Processor {
                 open_orders.native_coin_total - open_orders.native_coin_free
             }
         };
+
+        // If not post allowed, locked amount (i.e. amount on the order book) should not increase)
         check!(post_allowed || post_locked <= pre_locked, MangoErrorCode::InvalidParam)?;
 
         let (post_base, post_quote) = {
