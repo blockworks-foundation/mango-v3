@@ -1,5 +1,5 @@
 use std::cell::RefMut;
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 use std::vec;
@@ -5313,6 +5313,84 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn change_spot_market_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        optimal_util: Option<I80F48>,
+        optimal_rate: Option<I80F48>,
+        max_rate: Option<I80F48>,
+        version: Option<u8>,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+        mango_group_ai, // write
+        spot_market_ai, // write
+        root_bank_ai,   // write
+        admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        // checks rootbank is part of the group
+        let _root_bank_index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+        let mut info = &mut mango_group.spot_markets[market_index];
+
+        // Unwrap params. Default to current state if Option is None
+        let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
+            get_leverage_weights(x)
+        } else {
+            (info.init_asset_weight, info.init_liab_weight)
+        };
+        let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
+            get_leverage_weights(x)
+        } else {
+            (info.maint_asset_weight, info.maint_liab_weight)
+        };
+
+        let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
+        let optimal_util = optimal_util.unwrap_or(root_bank.optimal_util);
+        let optimal_rate = optimal_rate.unwrap_or(root_bank.optimal_rate);
+        let max_rate = max_rate.unwrap_or(root_bank.max_rate);
+        let version = version.unwrap_or(root_bank.meta_data.version);
+
+        // params check
+        check!(init_asset_weight > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_asset_weight > init_asset_weight, MangoErrorCode::InvalidParam)?;
+        // maint leverage may only increase to prevent unforeseen liquidations
+        check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
+
+        // set the params on the RootBank
+        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
+
+        // set the params on MangoGroup SpotMarketInfo
+        info.liquidation_fee = liquidation_fee;
+        info.maint_asset_weight = maint_asset_weight;
+        info.init_asset_weight = init_asset_weight;
+        info.maint_liab_weight = maint_liab_weight;
+        info.init_liab_weight = init_liab_weight;
+
+        check!(root_bank.meta_data.version != version, MangoErrorCode::InvalidParam)?;
+
+        root_bank.meta_data.version = version;
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5754,6 +5832,28 @@ impl Processor {
             MangoInstruction::SetDelegate => {
                 msg!("Mango: SetDelegate");
                 Self::set_delegate(program_id, accounts)
+            }
+            MangoInstruction::ChangeSpotMarketParams {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                optimal_util,
+                optimal_rate,
+                max_rate,
+                version,
+            } => {
+                msg!("Mango: ChangeSpotMarketParams");
+                Self::change_spot_market_params(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                    version,
+                )
             }
         }
     }
@@ -6497,7 +6597,7 @@ fn cancel_all_advanced_orders<'a>(
 }
 
 // Returns asset_weight and liab_weight
-fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
+pub fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
     (
         (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
         (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
