@@ -1,0 +1,158 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the workflow will run
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  
+permissions:
+  contents: read
+  pull-requests: write
+  
+env:
+  solana_version: 1.8.11
+  anchor_version: 0.20.0
+  cluster: "devnet"
+  runner_wallet_path: "/home/runner/.config/solana/id.json"
+  mango_account_mm: "8fbL4156uoVYYyY9cvA6hVBBTdui9356tdKmFbkC6t6w"
+  NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps: 
+      - uses: actions/checkout@v2
+
+      # Node 14
+      - uses: actions/setup-node@v2.5.1
+        with:
+          node-version: "14"
+          cache: "yarn"
+          registry-url: 'https://npm.pkg.github.com'
+          scope: "@UXDProtocol"
+          always-auth: true
+          
+      # Cache Cargo registry + index 
+      - uses: actions/cache@v2
+        name: Cache Cargo registry + index
+        id: cache-anchor
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-${{ runner.os }}-v0000-${{ hashFiles('**/Cargo.lock') }}
+          
+      # Add Solana to PATH
+      - name: Add Solana to PATH
+        run: echo "/home/runner/.local/share/solana/install/active_release/bin:$PATH" >> $GITHUB_PATH
+        
+      # Cache Solana Tool Suite
+      - uses: actions/cache@v2
+        name: Cache Solana Tool Suite
+        id: cache-solana
+        with:
+          path: |
+            ~/.cache/solana/
+            ~/.local/share/solana/
+          key: solana-${{ runner.os }}-v0000-${{ env.solana_version }}
+
+      # Cache Target Folder
+      - uses: actions/cache@v2
+        name: Cache target folder
+        id: cache-programs
+        with:
+          path: |
+            ./target/debug
+            ./target/release
+            ./target/bpfel-unknown-unknown
+          key: solana-${{ runner.os }}-v0000-${{ hashFiles('**/programs/**/*.rs') }}-${{ hashFiles('**/programs/**/*.toml') }}
+
+      # Rust toolchain
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      # Install Solana
+      - name: install solana
+        if: steps.cache-solana.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config build-essential libudev-dev
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.solana_version }}/install)"
+
+      # Setup Solana
+      - name: setup solana
+        run: |
+          solana --version
+          solana config set -u d
+          solana config get
+          solana-keygen new -o ${{ env.runner_wallet_path }}
+          
+      # Checkout MangoClient-v3, install dependencies, and run MM bot devnet SOL perp + Keeper
+      - name: Checkout
+        uses: actions/checkout@v2.4.0
+        with:
+          repository: blockworks-foundation/mango-client-v3
+          path: /home/runner/work/uxd-program/uxd-program/third-party-dependencies/mango-client-v3
+      - name: Install MangoClient-v3 dependencies then runs Mango Keeper and MM bot on devnet for SOL perp
+        run: |
+          cd /home/runner/work/uxd-program/uxd-program/third-party-dependencies/mango-client-v3
+          yarn install
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          solana airdrop 1 -u d
+          GROUP=devnet.2 CLUSTER=${{ env.cluster }} KEYPAIR=${{ env.runner_wallet_path }} yarn keeper &
+          GROUP=devnet.2 CLUSTER=${{ env.cluster }} KEYPAIR=${{ env.runner_wallet_path }} MANGO_ACCOUNT_PUBKEY=${{ env.mango_account_mm }} MARKET=SOL yarn mm &
+          cd -
+
+      # Checkout @UXDProtocol/UXD-Program, install dependencies
+      - name: Checkout
+        uses: actions/checkout@v2.4.0
+        with:
+          repository: uxdprotocol/uxd-program
+          path: ./uxd-program
+
+      - name: Create NPMRC
+        run: |
+          echo "@uxdprotocol:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ env.NODE_AUTH_TOKEN }}" >> ~/.npmrc
+      - name: Yarn install + use local version of Mango-v3 +  run tests
+        run: |
+          cd ./uxd-program
+          sed -i.bak 's/^mango.*/mango={path="hello_utils"}/' ./program/Cargo.toml
+          hello_utils = { path = "hello_utils" }
+          yarn install
+          chmod +x ./scripts/reset_program_id.sh
+          ./scripts/reset_program_id.sh
+          npx @project-serum/anchor-cli@${{ env.anchor_version }} test --skip-local-validator
+
+#       # Runs a single command using the runners shell
+#       - name: Run a one-line script
+#         run: echo Hello, world!
+
+#       # Runs a set of commands using the runners shell
+#       - name: Run a multi-line script
+#         run: |
+#           echo Add other actions to build,
+#           echo test, and deploy your project.
