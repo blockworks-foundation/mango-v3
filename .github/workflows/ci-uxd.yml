@@ -136,7 +136,6 @@ jobs:
       - name: Yarn install + use local version of Mango-v3 +  run tests
         run: |
           cd ./uxd-program
-          pwd
           sed -i.bak 's/^mango.*/mango={path="..\/..\/..\/program\/",features=["no-entrypoint"]}/' ./programs/uxd/Cargo.toml
           yarn install
           chmod +x ./scripts/reset_program_id.sh
