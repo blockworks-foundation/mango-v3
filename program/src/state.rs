@@ -1805,19 +1805,29 @@ impl PerpAccount {
         pmc: &PerpMarketCache,
         price: I80F48,
     ) -> MangoResult<(I80F48, I80F48)> {
-        let bids_base_net = self.base_position + self.taker_base + self.bids_quantity;
-        let asks_base_net = self.base_position + self.taker_base - self.asks_quantity;
+        let curr_pos = self.base_position + self.taker_base;
+        let bids_base_net = curr_pos.checked_add(self.bids_quantity).unwrap();
+        let asks_base_net = curr_pos.checked_sub(self.asks_quantity).unwrap();
+
         if bids_base_net.abs() > asks_base_net.abs() {
-            let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
+            let base = I80F48::from_num(bids_base_net.checked_mul(pmi.base_lot_size).unwrap())
+                .checked_mul(price)
+                .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
-                - I80F48::from_num(self.bids_quantity * pmi.base_lot_size) * price;
+                - I80F48::from_num(self.bids_quantity.checked_mul(pmi.base_lot_size).unwrap())
+                    .checked_mul(price)
+                    .unwrap();
             Ok((base, quote))
         } else {
-            let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
+            let base = I80F48::from_num(asks_base_net.checked_mul(pmi.base_lot_size).unwrap())
+                .checked_mul(price)
+                .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
-                + I80F48::from_num(self.asks_quantity * pmi.base_lot_size) * price;
+                + I80F48::from_num(self.asks_quantity.checked_mul(pmi.base_lot_size).unwrap())
+                    .checked_mul(price)
+                    .unwrap();
             Ok((base, quote))
         }
     }
