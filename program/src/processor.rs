@@ -1,5 +1,5 @@
 use std::cell::RefMut;
-use std::cmp::{max, min};
+use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 use std::vec;

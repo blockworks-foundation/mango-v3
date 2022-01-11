@@ -2442,7 +2442,7 @@ pub fn change_spot_market_params(
     max_rate: Option<I80F48>,
     version: Option<u8>,
 ) -> Result<Instruction, ProgramError> {
-    let mut accounts = vec![
+    let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*spot_market_pk, false),
         AccountMeta::new(*root_bank_pk, false),
