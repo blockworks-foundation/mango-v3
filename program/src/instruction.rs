@@ -1478,7 +1478,7 @@ pub fn create_mango_account(
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
-        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*owner_pk, true),
         AccountMeta::new_readonly(*system_prog_pk, false),
     ];
 
