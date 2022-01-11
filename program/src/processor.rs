@@ -5352,16 +5352,10 @@ impl Processor {
         let mut info = &mut mango_group.spot_markets[market_index];
 
         // Unwrap params. Default to current state if Option is None
-        let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
-            get_leverage_weights(x)
-        } else {
-            (info.init_asset_weight, info.init_liab_weight)
-        };
-        let (maint_asset_weight, maint_liab_weight) = if let Some(x) = maint_leverage {
-            get_leverage_weights(x)
-        } else {
-            (info.maint_asset_weight, info.maint_liab_weight)
-        };
+        let (init_asset_weight, init_liab_weight) = init_leverage
+            .map_or((info.init_asset_weight, info.init_liab_weight), |x| get_leverage_weights(x));
+        let (maint_asset_weight, maint_liab_weight) = maint_leverage
+            .map_or((info.maint_asset_weight, info.maint_liab_weight), |x| get_leverage_weights(x));
 
         let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
         let optimal_util = optimal_util.unwrap_or(root_bank.optimal_util);
@@ -5385,7 +5379,7 @@ impl Processor {
         info.maint_liab_weight = maint_liab_weight;
         info.init_liab_weight = init_liab_weight;
 
-        check!(root_bank.meta_data.version != version, MangoErrorCode::InvalidParam)?;
+        check!(version == 0, MangoErrorCode::InvalidParam)?;
 
         root_bank.meta_data.version = version;
         Ok(())

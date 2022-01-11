@@ -59,7 +59,7 @@ async fn test_change_spot_market_params() {
     let optimal_util = Option::from(I80F48::from_num(0.8));
     let optimal_rate = Option::from(I80F48::from_num(0.09));
     let max_rate = Option::from(I80F48::from_num(1.4));
-    let version = Option::from(1);
+    let version = Option::from(0);
 
     // load anew, after adding spot market
     let mango_group = test.load_account::<MangoGroup>(mango_group_cookie.address).await;
