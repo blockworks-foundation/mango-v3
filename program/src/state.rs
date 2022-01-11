@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
-use solana_program::program_pack::Pack;
+use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
-use spl_token::state::Account;
+use spl_token::state::{Account, AccountState};
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod, TriviallyTransmutable};
@@ -580,6 +580,13 @@ impl NodeBank {
     }
 }
 
+/// Internal - not an Account
+pub(crate) struct BankSet<'a, 'b> {
+    pub token_index: usize,
+    pub node_bank: RefMut<'a, NodeBank>,
+    pub vault_ai: &'a AccountInfo<'b>,
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PriceCache {
@@ -911,14 +918,14 @@ impl HealthCache {
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
-        open_orders_ai: &AccountInfo,
+        open_orders_ai: Option<&AccountInfo>,
         market_index: usize,
     ) -> MangoResult<()> {
         let (base, quote) = mango_account.get_spot_val(
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
             market_index,
-            if *open_orders_ai.key == Pubkey::default() { None } else { Some(open_orders_ai) },
+            open_orders_ai,
         )?;
 
         let (prev_base, prev_quote) = self.spot[market_index];
@@ -971,7 +978,33 @@ impl HealthCache {
                 mango_group,
                 mango_cache,
                 mango_account,
-                &open_orders_ais[token_index],
+                if open_orders_ais[token_index].key == &Pubkey::default() {
+                    None
+                } else {
+                    Some(&open_orders_ais[token_index])
+                },
+                token_index,
+            )
+        }
+    }
+    /// Sends to update_quote if QUOTE_INDEX, else sends to update_spot_val
+    /// Use the more efficient Option Vec of open orders
+    pub fn update_token_val_orders_vec(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        mango_account: &MangoAccount,
+        open_orders_ais: &Vec<Option<&AccountInfo>>,
+        token_index: usize,
+    ) -> MangoResult {
+        if token_index == QUOTE_INDEX {
+            Ok(self.update_quote(mango_cache, mango_account))
+        } else {
+            self.update_spot_val(
+                mango_group,
+                mango_cache,
+                mango_account,
+                open_orders_ais[token_index],
                 token_index,
             )
         }
@@ -2405,5 +2438,25 @@ impl AdvancedOrders {
         )?;
         check!(&mango_account.advanced_orders_key == account.key, MangoErrorCode::InvalidAccount)?;
         Ok(state)
+    }
+}
+
+#[derive(Copy, Clone, Pod, Loadable)]
+pub(crate) struct TokenAccount(pub(crate) Account);
+
+impl TokenAccount {
+    pub fn load_checked<'a>(account: &'a AccountInfo) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, &spl_token::id(), MangoErrorCode::InvalidOwner)?;
+        let state = Self::load(account)?;
+        check!(state.0.is_initialized(), MangoErrorCode::InvalidAccountState)?;
+        Ok(state)
+    }
+
+    /// Check that all fields except `amount` always stay the same
+    pub fn check_mango_reqs(&self, mango_group: &MangoGroup) -> MangoResult {
+        check!(self.0.owner == mango_group.signer_key, MangoErrorCode::InvalidAccountState)?;
+        check!(self.0.delegate.is_none(), MangoErrorCode::InvalidAccountState)?;
+        check!(self.0.state == AccountState::Initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(self.0.close_authority.is_none(), MangoErrorCode::InvalidAccountState)
     }
 }

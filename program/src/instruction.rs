@@ -879,6 +879,49 @@ pub enum MangoInstruction {
     /// 2. `[signer]` owner_ai - Owner of Mango Account
     /// 3. `[]` delegate_ai - delegate
     SetDelegate,
+
+    /// Make a flash loan.
+    ///
+    /// Accounts expected: 4 + any optional
+    ///
+    ///   . `[]` mango_group_ai - MangoGroup
+    ///   . `[]` signer_ai - Source token account authority
+    ///   . `[writable]` source_token_ai - Source token account from which loan would be acquired
+    ///   . `[writable]` destination_token_ai - Destination token account
+    ///   . `[]` token_prog_ai - Token program id.
+    ///   . `[]` flash_loan_prog_ai - Flash loan receiver program id.
+    ///             Must implement an instruction that has tag of 0 and a signature of `(amount: u64)`
+    ///             This instruction must return the amount to the source account.
+    ///   .. `[any]` Additional accounts expected by the receiving program's `ReceiveFlashLoan` instruction.
+    ///
+    ///   The flash loan receiver program that is to be invoked should contain an instruction with
+    ///   tag `0` and accept the total amount that needs to be returned back after
+    ///   its execution has completed.
+    ///
+    /// Data expected:
+    ///  . loan_amount - size of flash loan
+    ///  . cpi_data - cpi instruction data
+    ///
+    ///   Flash loan receiver should have an instruction with the following signature:
+    ///
+    ///   0. `[writable]` source_token_ai - Source vault (matching the destination from above).
+    ///   1. `[writable]` destination_token_ai - Destination vault (matching the source from above).
+    ///   2. `[]` token_prog_ai - Token program id
+    ///   .. `[any]` Additional accounts provided to the lending program's `FlashLoan` instruction above.
+    ///   ReceiveFlashLoan {
+    ///       // Amount that must be repaid by the receiver program
+    ///       amount: u64
+    ///   }
+    FlashLoan {
+        loan_amount: u64,
+        cpi_data: Vec<u8>,
+    },
+
+    MarginTrade {
+        num_open_orders: u8,
+        num_tokens_used: u8,
+        cpi_data: Vec<u8>,
+    },
 }
 
 impl MangoInstruction {
@@ -1304,6 +1347,24 @@ impl MangoInstruction {
                 }
             }
             58 => MangoInstruction::SetDelegate,
+            59 => {
+                let (amount, _cpi_data_vec_len, cpi_data_vec_arr) = array_refs![data, 8, 8;..;];
+                assert!(usize::from_le_bytes(*_cpi_data_vec_len) == cpi_data_vec_arr.len());
+
+                MangoInstruction::FlashLoan {
+                    loan_amount: u64::from_le_bytes(*amount),
+                    cpi_data: cpi_data_vec_arr.to_vec(),
+                }
+            }
+            60 => {
+                let (num_open_orders, num_tokens_used, cpi_data) = array_refs![data, 1, 1; ..;];
+
+                MangoInstruction::MarginTrade {
+                    num_open_orders: u8::from_le_bytes(*num_open_orders),
+                    num_tokens_used: u8::from_le_bytes(*num_tokens_used),
+                    cpi_data: cpi_data.to_vec(),
+                }
+            }
             _ => {
                 return None;
             }
@@ -2371,6 +2432,33 @@ pub fn liquidate_token_and_token(
     accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn flash_loan(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    vault_pk: &Pubkey,
+    token_pk: &Pubkey,
+    flash_loan_prog_pk: &Pubkey,
+    remaining_pks: &[Pubkey],
+    loan_amount: u64,
+    cpi_data: Vec<u8>,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new(*vault_pk, false),
+        AccountMeta::new(*token_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(*flash_loan_prog_pk, false),
+    ];
+
+    accounts.extend(remaining_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::FlashLoan { loan_amount, cpi_data };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

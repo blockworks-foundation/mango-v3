@@ -41,12 +41,13 @@ use crate::oracle::{determine_oracle_type, OracleType, Price, PriceStatus, StubO
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
-    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
-    MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
-    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
+    AdvancedOrderType, AdvancedOrders, AssetType, BankSet, DataType, HealthCache, HealthType,
+    MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache,
+    PerpMarketInfo, PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
+    TokenAccount, TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE,
+    FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
+    MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -1717,7 +1718,11 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais[market_index],
+            if open_orders_ais[market_index].key == &Pubkey::default() {
+                None
+            } else {
+                Some(&open_orders_ais[market_index])
+            },
             market_index,
         )?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -2007,7 +2012,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            market_open_orders_ai,
+            Some(market_open_orders_ai),
             market_index,
         )?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -5393,6 +5398,290 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    #[allow(unused)]
+    fn margin_trade(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        num_open_orders: u8,
+        num_tokens_used: u8,
+        cpi_data: Vec<u8>,
+    ) -> MangoResult {
+        let num_open_orders = num_open_orders as usize;
+        let num_tokens_used = num_tokens_used as usize;
+        check!(num_tokens_used > 0 && num_tokens_used <= MAX_TOKENS, MangoErrorCode::InvalidParam)?;
+        const NUM_FIXED: usize = 5;
+        let (fixed_ais, var_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let (packed_open_orders_ais, var_ais) = var_ais.split_at(num_open_orders);
+        let (bank_ais, cpi_ais) = var_ais.split_at(num_tokens_used * 3);
+        let (cpi_prog_ai, cpi_ais) = cpi_ais.split_first().unwrap();
+
+        // First cpi account must be the program and it must not be mango program
+        check!(cpi_prog_ai.key != program_id, MangoErrorCode::InvalidParam)?;
+
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read & signer
+            mango_cache_ai,         // read
+            signer_ai,              // read
+        ] = fixed_ais;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        // Take out the root bank, node bank and vault accounts and validate
+        let mut bank_sets = vec![];
+        let mut extra_user_assets = vec![];
+        let mut pre_amounts = vec![];
+        for bank_set_ais in bank_ais.chunks_exact(3) {
+            let bank_set_ais = array_ref![bank_set_ais, 0, 3];
+            let [root_bank_ai, node_bank_ai, vault_ai] = bank_set_ais;
+            let token_index = mango_group
+                .find_root_bank_index(root_bank_ai.key)
+                .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+            let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+
+            check!(
+                root_bank.node_banks.contains(node_bank_ai.key),
+                MangoErrorCode::InvalidNodeBank
+            )?;
+            let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+            check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
+            // pre_amounts.push(Account::unpack(&vault_ai.try_borrow_data()?)?.amount);
+            let token_account = TokenAccount::load_checked(vault_ai)?;
+            token_account.check_mango_reqs(&mango_group)?;
+
+            pre_amounts.push(token_account.0.amount);
+
+            bank_sets.push(BankSet { token_index, node_bank, vault_ai });
+            extra_user_assets.push((AssetType::Token, token_index));
+        }
+
+        // Validate MangoCache
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let active_assets = UserActiveAssets::new(&mango_group, &mango_account, extra_user_assets);
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        /**
+        There are two types of `Account`: either owned by Mango program id or not.
+        We are not worried about `Account` owned by Mango program because we disallow CPI into Mango
+            Therefore, Mango owned accounts cannot be modified
+
+        We don't care about accounts owned another program id *except* in the following cases:
+        1. Serum Dex OpenOrders with `owner == mango_group.signer_key`
+        2. SPL Token Account with `owner == mango_group.signer_key`
+
+        We sign the CPI as `mango_group.signer_key` so these types of accounts may be modified in
+        dangerous ways. To handle this we look at only accounts marked `is_writable` because we
+        know only those can change in important ways (TODO: do we?)
+        Then:
+        1. Among writable accounts, we ensure it's not owned by Serum Dex Program id
+        2. For SPL Token Accounts, if it's owned by Mango `signer_key`, we make sure it's one of the
+            specified Mango vaults that were passed in first. We also made sure all fields except
+            `amount` are correct. At the end of the instruction we take the diff in `amount` and
+            assign changes to `MangoAccount`. We ensure all other fields stayed the same during CPI.
+         */
+        for ai in cpi_ais {
+            // ignore accounts that are not writable
+            if !ai.is_writable {
+                // TODO - verify that this field cannot change over course of a tx
+                continue;
+            }
+
+            // Serum dex accounts cannot be sent writable for safety reasons
+            check!(ai.owner != &mango_group.dex_program_id, MangoErrorCode::InvalidAccount)?;
+
+            // If an SPL token Account is owned by mango signer key, make sure it's one of the bank_sets
+            if ai.owner == &spl_token::id() && ai.data_len() == Account::LEN {
+                // let token_account = Account::unpack(&ai.try_borrow_data()?)?;
+                let token_account = TokenAccount::load_checked(ai)?;
+                if &token_account.0.owner == &mango_group.signer_key {
+                    bank_sets
+                        .iter()
+                        .find(|bank_set| bank_set.vault_ai.key == ai.key)
+                        .ok_or(throw_err!(MangoErrorCode::InvalidVault))?;
+                }
+            }
+        }
+
+        // Unpack the open orders accounts and compute MangoAccount health before CPI
+        let open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            &open_orders_ais,
+        )?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
+
+        // Prepare and invoke CPI
+        let cpi_account_metas: Vec<AccountMeta> = cpi_ais
+            .iter()
+            .map(|cpi_ai| {
+                if cpi_ai.is_writable {
+                    AccountMeta::new(*cpi_ai.key, cpi_ai.is_signer)
+                } else {
+                    AccountMeta::new_readonly(*cpi_ai.key, cpi_ai.is_signer)
+                }
+            })
+            .collect();
+        let mut cpi_account_infos: Vec<AccountInfo> = cpi_ais.iter().map(|ai| ai.clone()).collect();
+        cpi_account_infos.push(cpi_prog_ai.clone());
+
+        let cpi_ix = Instruction {
+            program_id: *cpi_prog_ai.key,
+            data: cpi_data,
+            accounts: cpi_account_metas,
+        };
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        solana_program::program::invoke_signed(&cpi_ix, &cpi_account_infos, &[&signers_seeds])?;
+
+        // Determine change in vaults and apply to MangoAccount
+        for (i, bank_set) in bank_sets.iter_mut().enumerate() {
+            let pre_amount = I80F48::from_num(pre_amounts[i]);
+            let token_account = TokenAccount::load_checked(bank_set.vault_ai)?;
+            token_account.check_mango_reqs(&mango_group)?; // make sure only amount changed
+
+            // Make sure mint has not changed
+            check!(
+                token_account.0.mint == mango_group.tokens[bank_set.token_index].mint,
+                MangoErrorCode::InvalidAccountState
+            )?;
+
+            let post_amount = I80F48::from_num(token_account.0.amount);
+
+            // let post_amount =
+            //     I80F48::from_num(Account::unpack(&bank_set.vault_ai.try_borrow_data()?)?.amount);
+            let change = post_amount - pre_amount;
+            checked_change_net(
+                &mango_cache.root_bank_cache[bank_set.token_index],
+                &mut bank_set.node_bank,
+                &mut mango_account,
+                mango_account_ai.key,
+                bank_set.token_index,
+                change,
+            )?;
+            health_cache.update_token_val_orders_vec(
+                &mango_group,
+                &mango_cache,
+                &mango_account,
+                &open_orders_ais,
+                bank_set.token_index,
+            )?;
+            // TODO log
+        }
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+        // If an account is in reduce_only mode, health must only go up
+        check!(
+            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )?;
+
+        Ok(())
+    }
+
+    fn flash_loan(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        loan_amount: u64,
+        cpi_data: Vec<u8>,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 6;
+        let (fixed_ais, remaining_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,           // read
+            signer_ai,                // read
+            source_token_ai,          // write
+            destination_token_ai,     // write
+            token_prog_ai,            // read
+            flash_loan_prog_ai,       // read
+        ] = fixed_ais;
+
+        check!(program_id != flash_loan_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let source_token = Account::unpack(&source_token_ai.try_borrow_data()?)?;
+
+        let flash_loan_amount = min(source_token.amount, loan_amount);
+
+        let source_balance_before = source_token.amount;
+
+        let mut flash_loan_instruction_accounts = vec![
+            AccountMeta::new(*destination_token_ai.key, false),
+            AccountMeta::new(*source_token_ai.key, false),
+            AccountMeta::new_readonly(*token_prog_ai.key, false),
+        ];
+        let mut flash_loan_instruction_account_infos = vec![
+            destination_token_ai.clone(),
+            source_token_ai.clone(),
+            token_prog_ai.clone(),
+            flash_loan_prog_ai.clone(),
+        ];
+        for account_info in remaining_ais.iter() {
+            flash_loan_instruction_accounts.push(AccountMeta {
+                pubkey: *account_info.key,
+                is_signer: account_info.is_signer,
+                is_writable: account_info.is_writable,
+            });
+            flash_loan_instruction_account_infos.push(account_info.clone());
+        }
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            source_token_ai,
+            destination_token_ai,
+            signer_ai,
+            &[&signers_seeds],
+            flash_loan_amount,
+        )?;
+
+        solana_program::program::invoke(
+            &Instruction {
+                program_id: *flash_loan_prog_ai.key,
+                accounts: flash_loan_instruction_accounts,
+                data: cpi_data,
+            },
+            &flash_loan_instruction_account_infos[..],
+        )?;
+
+        let source_balance_after = Account::unpack(&source_token_ai.try_borrow_data()?)?.amount;
+        check!(
+            // todo: fees
+            source_balance_after >= source_balance_before,
+            MangoErrorCode::InvalidBalanceAfterFlashLoan
+        )?;
+
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -5834,6 +6123,14 @@ impl Processor {
             MangoInstruction::SetDelegate => {
                 msg!("Mango: SetDelegate");
                 Self::set_delegate(program_id, accounts)
+            }
+            MangoInstruction::FlashLoan { loan_amount, cpi_data } => {
+                msg!("Mango: FlashLoan");
+                Self::flash_loan(program_id, accounts, loan_amount, cpi_data)
+            }
+            MangoInstruction::MarginTrade { num_open_orders, num_tokens_used, cpi_data } => {
+                msg!("Mango: MarginTrade");
+                Self::margin_trade(program_id, accounts, num_open_orders, num_tokens_used, cpi_data)
             }
         }
     }
