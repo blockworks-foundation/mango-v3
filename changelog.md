@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.2.16
+Deployed: Jan 11, 2022 at 01:59:05 UTC | Slot: 115,691,635
+1. Checked math in all areas touched by place_perp_order
+
 ## v3.2.15
 Deployed: Jan 10, 2022 at 22:00:54 UTC | Slot: 115,666,186
 1. Impose price limits on spot orders
