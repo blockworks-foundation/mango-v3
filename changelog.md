@@ -8,6 +8,15 @@ Deployed:  | Slot:
 4. CreateDustAccount - create a PDA tied to the MangoGroup useful for settling dust against
 5. SetDelegate - delegate authority to operate MangoAccount to another account
 6. upgrade packages
+7. impose price limits for placing limit orders
+
+## v3.2.16
+Deployed: Jan 11, 2022 at 01:59:05 UTC | Slot: 115,691,635
+1. Checked math in all areas touched by place_perp_order
+
+## v3.2.15
+Deployed: Jan 10, 2022 at 22:00:54 UTC | Slot: 115,666,186
+1. Impose price limits on spot orders
 
 ## v3.2.14
 Deployed: Jan 2, 2022 at 20:48:01 UTC | Slot: 114,518,931

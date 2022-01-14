@@ -1246,9 +1246,33 @@ impl MangoAccount {
             let (quote_free, quote_locked, base_free, base_locked) =
                 split_open_orders(&open_orders);
 
-            // Simulate the health if all bids are executed at current price
-            let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+            // Two "worst-case" scenarios are considered:
+            // 1. All bids are executed at current price, producing a base amount of bids_base_net
+            //    when all quote_locked are converted to base.
+            // 2. All asks are executed at current price, producing a base amount of asks_base_net
+            //    because base_locked would be converted to quote.
+            let bids_base_net: I80F48 = base_net + base_free + base_locked + quote_locked / price;
             let asks_base_net = base_net + base_free;
+
+            // Report the scenario that would have a worse outcome on health.
+            //
+            // Explanation: This function returns (base, quote) and the values later get used in
+            //     health += (if base > 0 { asset_weight } else { liab_weight }) * base + quote
+            // and here we return the scenario that will increase health the least.
+            //
+            // Correctness proof:
+            // - always bids_base_net >= asks_base_net
+            // - note that scenario 1 returns (a + b, c)
+            //         and scenario 2 returns (a,     c + b), and b >= 0, c >= 0
+            // - if a >= 0: scenario 1 will lead to less health as asset_weight <= 1.
+            // - if a < 0 and b <= -a: scenario 2 will lead to less health as liab_weight >= 1.
+            // - if a < 0 and b > -a:
+            //   The health contributions of both scenarios are identical if
+            //       asset_weight * (a + b) + c = liab_weight * a + c + b
+            //   <=> b = (asset_weight - liab_weight) / (1 - asset_weight) * a
+            //   <=> b = -2 a  since asset_weight + liab_weight = 2 by weight construction
+            //   So the worse scenario switches when a + b = -a.
+            // That means scenario 1 leads to less health whenever |a + b| > |a|.
 
             if bids_base_net.abs() > asks_base_net.abs() {
                 Ok((bids_base_net * price, quote_free))
@@ -1815,19 +1839,29 @@ impl PerpAccount {
         pmc: &PerpMarketCache,
         price: I80F48,
     ) -> MangoResult<(I80F48, I80F48)> {
-        let bids_base_net = self.base_position + self.taker_base + self.bids_quantity;
-        let asks_base_net = self.base_position + self.taker_base - self.asks_quantity;
+        let curr_pos = self.base_position + self.taker_base;
+        let bids_base_net = curr_pos.checked_add(self.bids_quantity).unwrap();
+        let asks_base_net = curr_pos.checked_sub(self.asks_quantity).unwrap();
+
         if bids_base_net.abs() > asks_base_net.abs() {
-            let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
+            let base = I80F48::from_num(bids_base_net.checked_mul(pmi.base_lot_size).unwrap())
+                .checked_mul(price)
+                .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
-                - I80F48::from_num(self.bids_quantity * pmi.base_lot_size) * price;
+                - I80F48::from_num(self.bids_quantity.checked_mul(pmi.base_lot_size).unwrap())
+                    .checked_mul(price)
+                    .unwrap();
             Ok((base, quote))
         } else {
-            let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
+            let base = I80F48::from_num(asks_base_net.checked_mul(pmi.base_lot_size).unwrap())
+                .checked_mul(price)
+                .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(self.taker_quote * pmi.quote_lot_size)
-                + I80F48::from_num(self.asks_quantity * pmi.base_lot_size) * price;
+                + I80F48::from_num(self.asks_quantity.checked_mul(pmi.base_lot_size).unwrap())
+                    .checked_mul(price)
+                    .unwrap();
             Ok((base, quote))
         }
     }
