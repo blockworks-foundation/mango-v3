@@ -572,11 +572,11 @@ impl NodeBank {
     }
     pub fn get_total_native_borrow(&self, root_bank_cache: &RootBankCache) -> u64 {
         let native: I80F48 = self.borrows * root_bank_cache.borrow_index;
-        native.checked_ceil().unwrap().to_num() // rounds toward +inf
+        native.checked_ceil().unwrap().checked_to_num().unwrap() // rounds toward +inf
     }
     pub fn get_total_native_deposit(&self, root_bank_cache: &RootBankCache) -> u64 {
         let native: I80F48 = self.deposits * root_bank_cache.deposit_index;
-        native.checked_floor().unwrap().to_num() // rounds toward -inf
+        native.checked_floor().unwrap().checked_to_num().unwrap() // rounds toward -inf
     }
 }
 
