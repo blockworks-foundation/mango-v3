@@ -879,6 +879,36 @@ pub enum MangoInstruction {
     /// 2. `[signer]` owner_ai - Owner of Mango Account
     /// 3. `[]` delegate_ai - delegate
     SetDelegate,
+
+    /// Change the params for a spot market.
+    ///
+    /// Accounts expected by this instruction (4):
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` spot_market_ai - Market
+    /// 2. `[writable]` root_bank_ai - RootBank
+    /// 3. `[signer]` admin_ai - MangoGroup admin
+    ChangeSpotMarketParams {
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        maint_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        init_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        liquidation_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        optimal_util: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        optimal_rate: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        max_rate: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        version: Option<u8>,
+    },
 }
 
 impl MangoInstruction {
@@ -1304,6 +1334,28 @@ impl MangoInstruction {
                 }
             }
             58 => MangoInstruction::SetDelegate,
+            59 => {
+                let data_arr = array_ref![data, 0, 104];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                    version,
+                ) = array_refs![data_arr, 17, 17, 17, 17, 17, 17, 2];
+
+                MangoInstruction::ChangeSpotMarketParams {
+                    maint_leverage: unpack_i80f48_opt(maint_leverage),
+                    init_leverage: unpack_i80f48_opt(init_leverage),
+                    liquidation_fee: unpack_i80f48_opt(liquidation_fee),
+                    optimal_util: unpack_i80f48_opt(optimal_util),
+                    optimal_rate: unpack_i80f48_opt(optimal_rate),
+                    max_rate: unpack_i80f48_opt(max_rate),
+                    version: unpack_u8_opt(version),
+                }
+            }
             _ => {
                 return None;
             }
@@ -2371,6 +2423,40 @@ pub fn liquidate_token_and_token(
     accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn change_spot_market_params(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    maint_leverage: Option<I80F48>,
+    init_leverage: Option<I80F48>,
+    liquidation_fee: Option<I80F48>,
+    optimal_util: Option<I80F48>,
+    optimal_rate: Option<I80F48>,
+    max_rate: Option<I80F48>,
+    version: Option<u8>,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MangoInstruction::ChangeSpotMarketParams {
+        maint_leverage,
+        init_leverage,
+        liquidation_fee,
+        optimal_util,
+        optimal_rate,
+        max_rate,
+        version,
+    };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
