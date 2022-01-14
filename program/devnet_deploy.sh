@@ -6,8 +6,7 @@ if [ $# -eq 0 ]
     KEYPAIR=$1
 fi
 
-# deploy mango program and new mango group
-source ~/mango/cli/devnet.env $KEYPAIR
+CLUSTER_URL="https://mango.devnet.rpcpool.com"
 solana config set --url $CLUSTER_URL
 
 cd ~/blockworks-foundation/mango-v3/

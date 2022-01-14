@@ -1,6 +1,7 @@
 mod program_test;
 use fixed::types::I80F48;
-use mango::state::{QUOTE_INDEX, ZERO_I80F48};
+use mango::processor::get_leverage_weights;
+use mango::state::{MangoGroup, RootBank, SpotMarketInfo, QUOTE_INDEX, ZERO_I80F48};
 use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
@@ -36,6 +37,65 @@ async fn test_init_spot_markets() {
 
     // === Assert ===
     // TODO: Figure out how to assert
+}
+
+#[tokio::test]
+async fn test_change_spot_market_params() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig::default();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+
+    // === Act ===
+    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
+    let mut spot_markets =
+        mango_group_cookie.add_spot_markets(&mut test, config.num_mints - 1, &oracle_pks).await;
+
+    // == Change spot market params, and verify them ==
+    let init_leverage = Option::from(I80F48::from_num(20));
+    let maint_leverage = Option::from(init_leverage.unwrap() * 2);
+    let liquidation_fee = Option::from(I80F48::from_num(0.015));
+    let optimal_util = Option::from(I80F48::from_num(0.8));
+    let optimal_rate = Option::from(I80F48::from_num(0.09));
+    let max_rate = Option::from(I80F48::from_num(1.4));
+    let version = Option::from(0);
+
+    // load anew, after adding spot market
+    let mango_group = test.load_account::<MangoGroup>(mango_group_cookie.address).await;
+    let root_bank_pk = mango_group.tokens[0].root_bank;
+
+    spot_markets[0]
+        .change_params(
+            &mut test,
+            &mango_group_cookie.address,
+            &root_bank_pk,
+            0,
+            init_leverage,
+            maint_leverage,
+            liquidation_fee,
+            optimal_util,
+            optimal_rate,
+            max_rate,
+            version,
+        )
+        .await;
+
+    // load anew, after changing spot market params
+    let mango_group = test.load_account::<MangoGroup>(mango_group_cookie.address).await;
+    let spot_market_info = mango_group.spot_markets[0];
+    let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage.unwrap());
+    assert!(spot_market_info.init_asset_weight == init_asset_weight);
+    assert!(spot_market_info.init_liab_weight == init_liab_weight);
+    let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage.unwrap());
+    assert!(spot_market_info.maint_asset_weight == maint_asset_weight);
+    assert!(spot_market_info.maint_liab_weight == maint_liab_weight);
+
+    let root_bank = test.load_account::<RootBank>(root_bank_pk).await;
+    assert!(root_bank.optimal_util == optimal_util.unwrap());
+    assert!(root_bank.optimal_rate == optimal_rate.unwrap());
+    assert!(root_bank.max_rate == max_rate.unwrap());
+    assert_eq!(root_bank.meta_data.version, version.unwrap());
 }
 
 #[tokio::test]
