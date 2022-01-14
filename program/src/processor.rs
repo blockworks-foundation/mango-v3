@@ -5251,7 +5251,6 @@ impl Processor {
         let rent = Rent::get()?;
 
         let mango_account_seeds: &[&[u8]] = &[&mango_group_ai.key.as_ref(), b"DustAccount"];
-        // TODO - test passing in MangoAccount that already has some data in it
         seed_and_create_pda(
             program_id,
             payer_ai,
