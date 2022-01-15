@@ -1376,7 +1376,6 @@ impl Processor {
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         {
-            // TODO OPT - Unnecessary check because serum dex also checks account flags 0
             let open_orders = load_open_orders(open_orders_ai)?;
 
             // Make sure this open orders account has not been initialized already
