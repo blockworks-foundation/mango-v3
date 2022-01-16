@@ -29,7 +29,7 @@ mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
 mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
 switchboard-program = "^0.1.52"
-anchor-lang = "0.19.0"
+anchor-lang = "0.20.1"
 
 [dev-dependencies]
 solana-sdk = "^1.8.1"
