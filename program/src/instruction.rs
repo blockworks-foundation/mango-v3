@@ -2212,6 +2212,33 @@ pub fn init_spot_open_orders(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn create_spot_open_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    open_orders_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    signer_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*open_orders_pk, false),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(solana_program::system_program::ID, false),
+    ];
+
+    let instr = MangoInstruction::CreateSpotOpenOrders;
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn close_spot_open_orders(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,

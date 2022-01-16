@@ -1008,6 +1008,40 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn create_spot_open_orders(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        mango_group: &MangoGroup,
+        mango_account_pk: &Pubkey,
+        mango_account: &MangoAccount,
+        user_index: usize,
+        market_index: usize,
+    ) -> Pubkey {
+        let open_orders_seeds: &[&[u8]] =
+            &[&mango_account_pk.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
+        let (open_orders_pk, _) =
+            Pubkey::find_program_address(open_orders_seeds, &self.mango_program_id);
+
+        let create_spot_open_orders_instruction = create_spot_open_orders(
+            &self.mango_program_id,
+            mango_group_pk,
+            mango_account_pk,
+            &mango_account.owner,
+            &self.serum_program_id,
+            &open_orders_pk,
+            &mango_group.spot_markets[market_index].spot_market,
+            &mango_group.signer_key,
+        )
+        .unwrap();
+
+        let instructions = vec![create_spot_open_orders_instruction];
+        let user = Keypair::from_bytes(&self.users[user_index].to_bytes()).unwrap();
+        let signers = vec![&user];
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        open_orders_pk
+    }
+
+    #[allow(dead_code)]
     pub async fn init_open_orders(&mut self) -> Pubkey {
         let (orders_key, instruction) =
             self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
@@ -1179,7 +1213,7 @@ impl MangoProgramTest {
         for x in 0..mango_account.spot_open_orders.len() {
             if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
                 open_orders_pks.push(
-                    self.init_spot_open_orders(
+                    self.create_spot_open_orders(
                         &mango_group_pk,
                         &mango_group,
                         &mango_account_pk,
@@ -1267,7 +1301,7 @@ impl MangoProgramTest {
         for x in 0..mango_account.spot_open_orders.len() {
             if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
                 open_orders_pks.push(
-                    self.init_spot_open_orders(
+                    self.create_spot_open_orders(
                         &mango_group_pk,
                         &mango_group,
                         &mango_account_pk,
