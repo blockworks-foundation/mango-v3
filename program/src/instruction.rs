@@ -909,6 +909,20 @@ pub enum MangoInstruction {
         #[serde(serialize_with = "serialize_option_fixed_width")]
         version: Option<u8>,
     },
+
+    /// Create an OpenOrders PDA and initialize it with InitOpenOrders call to serum dex
+    ///
+    /// Accounts expected by this instruction (8):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[]` dex_prog_ai - program id of serum dex
+    /// 4. `[writable]` open_orders_ai - open orders PDA
+    /// 5. `[]` spot_market_ai - dex MarketState account
+    /// 6. `[]` signer_ai - Group Signer Account
+    /// 7. `[]` system_prog_ai - System program
+    CreateSpotOpenOrders, // instruction 60
 }
 
 impl MangoInstruction {
@@ -1356,6 +1370,7 @@ impl MangoInstruction {
                     version: unpack_u8_opt(version),
                 }
             }
+            60 => MangoInstruction::CreateSpotOpenOrders,
             _ => {
                 return None;
             }

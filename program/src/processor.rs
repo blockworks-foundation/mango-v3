@@ -1416,6 +1416,86 @@ impl Processor {
     }
 
     #[inline(never)]
+    /// Create a new OpenOrders PDA then
+    /// Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
+    fn create_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read
+            dex_prog_ai,            // read
+            open_orders_ai,         // write
+            spot_market_ai,         // read
+            signer_ai,              // read
+            system_prog_ai,         // read
+        ] = accounts;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        let open_orders_seeds: &[&[u8]] =
+            &[&mango_account_ai.key.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
+        seed_and_create_pda(
+            program_id,
+            owner_ai,
+            &Rent::get()?,
+            size_of::<serum_dex::state::OpenOrders>() + 12,
+            dex_prog_ai.key,
+            system_prog_ai,
+            open_orders_ai,
+            open_orders_seeds,
+            &[],
+        )?;
+
+        {
+            let open_orders = load_open_orders(open_orders_ai)?;
+
+            // Make sure this open orders account has not been initialized already
+            check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
+        }
+
+        // Make sure there isn't already an open orders account for this market
+        check!(
+            mango_account.spot_open_orders[market_index] == Pubkey::default(),
+            MangoErrorCode::Default
+        )?;
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_init_open_orders(
+            dex_prog_ai,
+            open_orders_ai,
+            signer_ai,
+            spot_market_ai,
+            system_prog_ai, // no need to send in rent ai
+            &[&signers_seeds],
+        )?;
+
+        mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
+
+        Ok(())
+    }
+
+    #[inline(never)]
     fn close_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -5941,6 +6021,10 @@ impl Processor {
                     max_rate,
                     version,
                 )
+            }
+            MangoInstruction::CreateSpotOpenOrders => {
+                msg!("Mango: CreateSpotOpenOrders");
+                Self::create_spot_open_orders(program_id, accounts)
             }
         }
     }

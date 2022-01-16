@@ -10,6 +10,7 @@ Deployed:  | Slot:
 6. upgrade packages
 7. impose price limits for placing limit orders
 8. ChangeSpotMarketParams
+9. CreateSpotOpenOrders using PDA for better UX
 
 ## v3.2.16
 Deployed: Jan 11, 2022 at 01:59:05 UTC | Slot: 115,691,635
