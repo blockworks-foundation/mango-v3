@@ -37,8 +37,12 @@ use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::{determine_oracle_type, OracleType, Price, PriceStatus, StubOracle};
+#[cfg(not(feature = "devnet"))]
+use crate::oracle::PriceStatus;
+use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
+#[cfg(not(feature = "devnet"))]
+use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
@@ -46,7 +50,7 @@ use crate::state::{
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
     TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
+    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -6101,9 +6105,12 @@ fn read_oracle(
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai)?;
             let value = I80F48::from_num(price_account.agg.price);
+
+            // Filter out bad prices on mainnet
+            #[cfg(not(feature = "devnet"))]
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
-            // Filter out bad prices
+            #[cfg(not(feature = "devnet"))]
             if price_account.agg.status != PriceStatus::Trading {
                 msg!("Pyth status invalid: {}", price_account.agg.status as u8);
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
