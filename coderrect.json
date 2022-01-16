@@ -1,0 +1,11 @@
+// Use this file to configure ignores for Soteria.
+// Ignores can be configured based on line number and functions (variable support to be added by tool)
+{
+  "ignoreRacesAtLocations": [
+//        "filename.rs:123",
+//        "filename.rs:321"
+    ],
+  "ignoreRacesInFunctions": [
+//        "fnName"
+    ]
+}
