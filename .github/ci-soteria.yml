@@ -1,0 +1,22 @@
+# CI job for running Soteria against Solana smart contracts
+# Maintain false positives/exclusions using coderrect.json in the root folder
+
+name: Soteria Scan
+
+on:
+  push:
+    branches: [main, v*.*]
+  pull_request:
+    branches: [main, v*.*]
+
+jobs:
+  build:
+    name: Soteria Vulnerability Scanner
+    runs-on: ubuntu-latest
+    steps:
+      # Check out GitHub repo
+      - uses: actions/checkout@v2
+      
+      # Run Soteria Action
+      - name: Soteria Scan
+        uses: silas-x/soteria-action@v1
