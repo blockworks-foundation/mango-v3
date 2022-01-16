@@ -241,7 +241,7 @@ impl Processor {
                 ZERO_I80F48,
                 MangoErrorCode::InvalidAccountState
             )?;
-
+            check!(perp_account.mngo_accrued == 0, MangoErrorCode::InvalidAccountState)?;
             check!(perp_account.has_no_open_orders(), MangoErrorCode::InvalidAccountState)?;
         }
         // Check no msrm
@@ -303,6 +303,17 @@ impl Processor {
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
+        let token_index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        if mango_account.deposits[token_index].is_zero()
+            && mango_account.borrows[token_index].is_zero()
+        {
+            // Nothing to settle. Just return
+            return Ok(());
+        }
+
         let mut dust_account =
             MangoAccount::load_mut_checked(dust_account_ai, program_id, &mango_group_ai.key)?;
 
@@ -313,9 +324,6 @@ impl Processor {
         );
         check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
 
-        let token_index = mango_group
-            .find_root_bank_index(root_bank_ai.key)
-            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
         // Find the node_bank pubkey in root_bank, if not found error
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
@@ -5160,6 +5168,7 @@ impl Processor {
             &[],
         )?;
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
+        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
 
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
@@ -5262,11 +5271,13 @@ impl Processor {
             &[],
         )?;
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
+        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
 
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = mango_group.admin;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
         mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
+        mango_account.not_upgradable = true;
 
         Ok(())
     }

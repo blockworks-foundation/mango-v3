@@ -16,10 +16,10 @@ use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use spl_token::state::Account;
+use static_assertions::const_assert_eq;
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod, TriviallyTransmutable};
-use static_assertions::const_assert_eq;
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
