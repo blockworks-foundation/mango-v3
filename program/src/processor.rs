@@ -5077,8 +5077,8 @@ impl Processor {
                     (
                         pa.taker_base + taker_base,
                         pa.taker_quote + taker_quote,
-                        pa.bids_quantity + bids_quantity,
-                        pa.asks_quantity + asks_quantity,
+                        pa.bids_quantity.checked_add(bids_quantity).unwrap(),
+                        pa.asks_quantity.checked_add(asks_quantity).unwrap(),
                     )
                 };
 
