@@ -37,16 +37,20 @@ use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::{determine_oracle_type, OracleType, Price, PriceStatus, StubOracle};
+#[cfg(not(feature = "devnet"))]
+use crate::oracle::PriceStatus;
+use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
+#[cfg(not(feature = "devnet"))]
+use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
     MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
     TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
-    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, NEG_ONE_I80F48,
-    ONE_I80F48, PYTH_CONF_FILTER, QUOTE_INDEX, ZERO_I80F48,
+    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
+    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -164,6 +168,7 @@ impl Processor {
         check!(!mango_cache.meta_data.is_initialized, MangoErrorCode::Default)?;
         mango_cache.meta_data = MetaData::new(DataType::MangoCache, 0, true);
         mango_group.mango_cache = *mango_cache_ai.key;
+        mango_group.max_mango_accounts = 100_000;
 
         // check size
         Ok(())
@@ -174,8 +179,7 @@ impl Processor {
         todo!()
     }
     #[inline(never)]
-    /// TODO figure out how to do docs for functions with link to instruction.rs instruction documentation
-    /// TODO make the mango account a derived address
+    /// DEPRECATED - if you use this instruction after v3.3.0 you will not be able to close your MangoAccount
     fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -189,20 +193,201 @@ impl Processor {
         let rent = Rent::get()?;
         check!(
             rent.is_exempt(mango_account_ai.lamports(), size_of::<MangoAccount>()),
-            MangoErrorCode::Default
+            MangoErrorCode::AccountNotRentExempt
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check!(
+            mango_group.num_mango_accounts < mango_group.max_mango_accounts,
+            MangoErrorCode::MaxAccountsReached
+        )?;
 
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
         check_eq!(&mango_account_ai.owner, &program_id, MangoErrorCode::InvalidOwner)?;
-        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::Default)?;
+        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
 
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
         mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
+        mango_account.not_upgradable = true;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn close_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai,     // write
+            mango_account_ai,   // write
+            owner_ai,           // write, signer
+        ] = accounts;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(mango_account.meta_data.version > 0, MangoErrorCode::InvalidAccountState)?;
+
+        // Check deposits and borrows are zero
+        for i in 0..MAX_TOKENS {
+            check_eq!(mango_account.deposits[i], ZERO_I80F48, MangoErrorCode::InvalidAccountState)?;
+            check_eq!(mango_account.borrows[i], ZERO_I80F48, MangoErrorCode::InvalidAccountState)?;
+        }
+        // Check no perp positions or orders
+        for perp_account in mango_account.perp_accounts.iter() {
+            check_eq!(perp_account.base_position, 0, MangoErrorCode::InvalidAccountState)?;
+            check_eq!(
+                perp_account.quote_position,
+                ZERO_I80F48,
+                MangoErrorCode::InvalidAccountState
+            )?;
+            check!(perp_account.mngo_accrued == 0, MangoErrorCode::InvalidAccountState)?;
+            check!(perp_account.has_no_open_orders(), MangoErrorCode::InvalidAccountState)?;
+        }
+        // Check no msrm
+        check_eq!(mango_account.msrm_amount, 0, MangoErrorCode::InvalidAccountState)?;
+        // Check not being liquidated/bankrupt
+        check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        // Check open orders accounts closed
+        for open_orders_key in mango_account.spot_open_orders.iter() {
+            check_eq!(open_orders_key, &Pubkey::default(), MangoErrorCode::InvalidAccountState)?;
+        }
+        // Check advanced orders account closed
+        check_eq!(
+            &mango_account.advanced_orders_key,
+            &Pubkey::default(),
+            MangoErrorCode::InvalidAccountState
+        )?;
+
+        // Transfer lamports to owner
+        program_transfer_lamports(mango_account_ai, owner_ai, mango_account_ai.lamports())?;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        mango_group.num_mango_accounts = mango_group.num_mango_accounts.checked_sub(1).unwrap();
+
+        // Prevent account being loaded by program and zero all unchecked data
+        mango_account.meta_data.is_initialized = false;
+        mango_account.mango_group = Pubkey::default();
+        mango_account.owner = Pubkey::default();
+        mango_account.delegate = Pubkey::default();
+        mango_account.in_margin_basket = [false; MAX_PAIRS];
+        mango_account.info = [0; INFO_LEN];
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn resolve_dust(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            dust_account_ai,    // write
+            root_bank_ai,       // read
+            node_bank_ai,       // write
+            mango_cache_ai      // read
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        let token_index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        if mango_account.deposits[token_index].is_zero()
+            && mango_account.borrows[token_index].is_zero()
+        {
+            // Nothing to settle. Just return
+            return Ok(());
+        }
+
+        let mut dust_account =
+            MangoAccount::load_mut_checked(dust_account_ai, program_id, &mango_group_ai.key)?;
+
+        // Check dust account
+        let (pda_address, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_ai.key.as_ref(), b"DustAccount"],
+            program_id,
+        );
+        check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        // Find the node_bank pubkey in root_bank, if not found error
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &dust_account,
+            vec![(AssetType::Token, token_index)],
+        );
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        // No need to check validity here because it's part of active_assets
+        let root_bank_cache = &mango_cache.root_bank_cache[token_index];
+
+        let borrow_amount = mango_account.get_native_borrow(root_bank_cache, token_index)?;
+        let deposit_amount = mango_account.get_native_deposit(root_bank_cache, token_index)?;
+
+        // Amount must be dust aka < 1 native spl token
+        if borrow_amount > ZERO_I80F48 && borrow_amount < ONE_I80F48 {
+            transfer_token_internal(
+                root_bank_cache,
+                &mut node_bank,
+                &mut dust_account,
+                &mut mango_account,
+                dust_account_ai.key,
+                mango_account_ai.key,
+                token_index,
+                borrow_amount,
+            )?;
+
+            // We know DustAccount doesn't have any open orders; but check it just in case
+            check!(dust_account.num_in_margin_basket == 0, MangoErrorCode::InvalidAccountState)?;
+
+            // Make sure DustAccount satisfies health check only when it has taken on more borrows
+            let mut health_cache = HealthCache::new(active_assets);
+            let open_orders_ais = vec![None; MAX_PAIRS];
+            health_cache.init_vals_with_orders_vec(
+                &mango_group,
+                &mango_cache,
+                &dust_account,
+                &open_orders_ais,
+            )?;
+            let health = health_cache.get_health(&mango_group, HealthType::Init);
+            check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        } else if deposit_amount > ZERO_I80F48 && deposit_amount < ONE_I80F48 {
+            transfer_token_internal(
+                root_bank_cache,
+                &mut node_bank,
+                &mut mango_account,
+                &mut dust_account,
+                mango_account_ai.key,
+                dust_account_ai.key,
+                token_index,
+                deposit_amount,
+            )?;
+        }
 
         Ok(())
     }
@@ -711,6 +896,9 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
+        // Note: a check for &mango_account.owner == owner_ai.key doesn't exist on purpose
+        // this is how mango currently reimburses users
+
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
@@ -1192,12 +1380,14 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         {
-            // TODO OPT - Unnecessary check because serum dex also checks account flags 0
             let open_orders = load_open_orders(open_orders_ai)?;
 
             // Make sure this open orders account has not been initialized already
@@ -1221,6 +1411,146 @@ impl Processor {
         )?;
 
         mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    /// Create a new OpenOrders PDA then
+    /// Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
+    fn create_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read
+            dex_prog_ai,            // read
+            open_orders_ai,         // write
+            spot_market_ai,         // read
+            signer_ai,              // read
+            system_prog_ai,         // read
+        ] = accounts;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        let open_orders_seeds: &[&[u8]] =
+            &[&mango_account_ai.key.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
+        seed_and_create_pda(
+            program_id,
+            owner_ai,
+            &Rent::get()?,
+            size_of::<serum_dex::state::OpenOrders>() + 12,
+            dex_prog_ai.key,
+            system_prog_ai,
+            open_orders_ai,
+            open_orders_seeds,
+            &[],
+        )?;
+
+        {
+            let open_orders = load_open_orders(open_orders_ai)?;
+
+            // Make sure this open orders account has not been initialized already
+            check_eq!(open_orders.account_flags, 0, MangoErrorCode::Default)?;
+        }
+
+        // Make sure there isn't already an open orders account for this market
+        check!(
+            mango_account.spot_open_orders[market_index] == Pubkey::default(),
+            MangoErrorCode::Default
+        )?;
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_init_open_orders(
+            dex_prog_ai,
+            open_orders_ai,
+            signer_ai,
+            spot_market_ai,
+            system_prog_ai, // no need to send in rent ai
+            &[&signers_seeds],
+        )?;
+
+        mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn close_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // write, signer
+            dex_prog_ai,        // read
+            open_orders_ai,     // write
+            spot_market_ai,     // read
+            signer_ai,          // read
+        ] = accounts;
+
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check_eq!(signer_ai.key, &mango_group.signer_key, MangoErrorCode::InvalidParam)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check_eq!(
+            &mango_account.spot_open_orders[market_index],
+            open_orders_ai.key,
+            MangoErrorCode::InvalidOpenOrdersAccount
+        )?;
+
+        if mango_account.in_margin_basket[market_index] {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            mango_account.update_basket(market_index, &open_orders)?;
+            check!(
+                !mango_account.in_margin_basket[market_index],
+                MangoErrorCode::InvalidAccountState
+            )?;
+        }
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_close_open_orders(
+            dex_prog_ai,
+            open_orders_ai,
+            signer_ai,
+            owner_ai,
+            spot_market_ai,
+            &[&signers_seeds],
+        )?;
+
+        mango_account.spot_open_orders[market_index] = Pubkey::default();
 
         Ok(())
     }
@@ -1276,7 +1606,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -1547,7 +1880,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -1817,7 +2153,10 @@ impl Processor {
 
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -1888,7 +2227,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(owner_ai.key == &mango_account.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -2042,7 +2384,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let clock = Clock::get()?;
@@ -2151,7 +2496,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2244,7 +2592,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2332,8 +2683,11 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::Default)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -2864,7 +3218,10 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -2900,7 +3257,7 @@ impl Processor {
         // Make sure orders are cancelled for perps and check orders
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
-                check!(liqee_ma.perp_accounts[i].is_liquidatable(), MangoErrorCode::Default)?;
+                check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
         }
 
@@ -3089,7 +3446,10 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -3115,7 +3475,7 @@ impl Processor {
         // Make sure orders are cancelled for perps and check orders
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
-                check!(liqee_ma.perp_accounts[i].is_liquidatable(), MangoErrorCode::Default)?;
+                check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
         }
 
@@ -3384,7 +3744,10 @@ impl Processor {
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
 
@@ -3415,7 +3778,7 @@ impl Processor {
         // Make sure orders are cancelled for perps before liquidation
         for i in 0..mango_group.num_oracles {
             if liqee_active_assets.perps[i] {
-                check!(liqee_ma.perp_accounts[i].is_liquidatable(), MangoErrorCode::Default)?;
+                check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
         }
 
@@ -3583,7 +3946,10 @@ impl Processor {
 
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -3746,7 +4112,10 @@ impl Processor {
         // Load the liqor's mango account
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
-        check_eq!(liqor_ai.key, &liqor_ma.owner, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
@@ -4187,7 +4556,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
@@ -4259,7 +4631,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
         mango_account.info = info;
@@ -4384,7 +4759,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
@@ -4416,6 +4794,41 @@ impl Processor {
 
         // set the mango_account.advanced_orders field
         mango_account.advanced_orders_key = *advanced_orders_ai.key;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn close_advanced_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // write, signer
+            advanced_orders_ai, // write
+        ] = accounts;
+
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        let mut advanced_orders =
+            AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
+        for i in 0..MAX_ADVANCED_ORDERS {
+            advanced_orders.orders[i].is_active = false;
+        }
+        advanced_orders.meta_data.is_initialized = false;
+
+        // Transfer lamports to owner
+        program_transfer_lamports(advanced_orders_ai, owner_ai, advanced_orders_ai.lamports())?;
+
+        mango_account.advanced_orders_key = Pubkey::default();
+
         Ok(())
     }
 
@@ -4460,7 +4873,10 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
 
@@ -4561,7 +4977,10 @@ impl Processor {
 
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         // No bankruptcy check; removing order is fine
 
@@ -4742,8 +5161,8 @@ impl Processor {
                     (
                         pa.taker_base + taker_base,
                         pa.taker_quote + taker_quote,
-                        pa.bids_quantity + bids_quantity,
-                        pa.asks_quantity + asks_quantity,
+                        pa.bids_quantity.checked_add(bids_quantity).unwrap(),
+                        pa.asks_quantity.checked_add(asks_quantity).unwrap(),
                     )
                 };
 
@@ -4792,7 +5211,6 @@ impl Processor {
 
     /// *** Create a MangoAccount PDA and initialize it
     #[inline(never)]
-    #[allow(dead_code)]
     fn create_mango_account(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -4801,7 +5219,7 @@ impl Processor {
         const NUM_FIXED: usize = 4;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
-            mango_group_ai,         // read
+            mango_group_ai,         // write
             mango_account_ai,       // write
             owner_ai,               // write & signer
             system_prog_ai,         // read
@@ -4812,7 +5230,11 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        let _mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check!(
+            mango_group.num_mango_accounts < mango_group.max_mango_accounts,
+            MangoErrorCode::MaxAccountsReached
+        )?;
         let rent = Rent::get()?;
 
         let mango_account_seeds: &[&[u8]] =
@@ -4830,11 +5252,14 @@ impl Processor {
             &[],
         )?;
         let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
+        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
 
         mango_account.mango_group = *mango_group_ai.key;
         mango_account.owner = *owner_ai.key;
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
-        mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
+        mango_account.meta_data = MetaData::new(DataType::MangoAccount, 1, true);
+
+        mango_group.num_mango_accounts += 1;
 
         Ok(())
     }
@@ -4874,6 +5299,7 @@ impl Processor {
 
         Ok(())
     }
+
     #[inline(never)]
     /// Change the maximum number of MangoAccounts.v1 allowed
     fn change_max_mango_accounts(
@@ -4893,6 +5319,242 @@ impl Processor {
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
 
         mango_group.max_mango_accounts = max_mango_accounts;
+        Ok(())
+    }
+
+    /// *** Create a DustAccount PDA and initialize it
+    #[inline(never)]
+    fn create_dust_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            payer_ai,               // write & signer
+            system_prog_ai,         // read
+        ] = accounts;
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+        check!(payer_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let rent = Rent::get()?;
+
+        let mango_account_seeds: &[&[u8]] = &[&mango_group_ai.key.as_ref(), b"DustAccount"];
+        seed_and_create_pda(
+            program_id,
+            payer_ai,
+            &rent,
+            size_of::<MangoAccount>(),
+            program_id,
+            system_prog_ai,
+            mango_account_ai,
+            mango_account_seeds,
+            &[],
+        )?;
+        let mut mango_account: RefMut<MangoAccount> = MangoAccount::load_mut(mango_account_ai)?;
+        check!(!mango_account.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        mango_account.mango_group = *mango_group_ai.key;
+        mango_account.owner = mango_group.admin;
+        mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
+        mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
+        mango_account.not_upgradable = true;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn upgrade_mango_account_v0_v1(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,   // write
+            mango_account_ai, // write
+            owner_ai          // signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check_eq!(mango_account.meta_data.version, 0, MangoErrorCode::InvalidAccountState)?;
+        check!(!mango_account.not_upgradable, MangoErrorCode::InvalidAccountState)?;
+        check!(
+            mango_group.num_mango_accounts < mango_group.max_mango_accounts,
+            MangoErrorCode::MaxAccountsReached
+        )?;
+
+        mango_group.num_mango_accounts += 1;
+        mango_account.meta_data.version = 1;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn cancel_perp_orders_side(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,
+        limit: u8,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+        ] = accounts;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+        let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mngo_start = mango_account.perp_accounts[market_index].mngo_accrued;
+
+        if perp_market.meta_data.version == 0 {
+            return Err(throw_err!(MangoErrorCode::InvalidParam));
+        } else {
+            let (all_order_ids, canceled_order_ids) = book.cancel_all_side_with_size_incentives(
+                &mut mango_account,
+                &mut perp_market,
+                market_index,
+                side,
+                limit,
+            )?;
+            mango_emit!(CancelAllPerpOrdersLog {
+                mango_group: *mango_group_ai.key,
+                mango_account: *mango_account_ai.key,
+                market_index: market_index as u64,
+                all_order_ids,
+                canceled_order_ids
+            });
+        }
+
+        mango_emit!(MngoAccrualLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            market_index: market_index as u64,
+            mngo_accrual: mango_account.perp_accounts[market_index].mngo_accrued - mngo_start
+        });
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn set_delegate(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,                   // read
+            mango_account_ai,                 // write
+            owner_ai,                         // read, signer
+            delegate_ai,                      // read
+        ] = accounts;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(&mango_account.delegate != delegate_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        mango_account.delegate = *delegate_ai.key;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn change_spot_market_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        maint_leverage: Option<I80F48>,
+        init_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        optimal_util: Option<I80F48>,
+        optimal_rate: Option<I80F48>,
+        max_rate: Option<I80F48>,
+        version: Option<u8>,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 4;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+        mango_group_ai, // write
+        spot_market_ai, // write
+        root_bank_ai,   // write
+        admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        // checks rootbank is part of the group
+        let _root_bank_index = mango_group
+            .find_root_bank_index(root_bank_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
+
+        let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+        let mut info = &mut mango_group.spot_markets[market_index];
+
+        // Unwrap params. Default to current state if Option is None
+        let (init_asset_weight, init_liab_weight) = init_leverage
+            .map_or((info.init_asset_weight, info.init_liab_weight), |x| get_leverage_weights(x));
+        let (maint_asset_weight, maint_liab_weight) = maint_leverage
+            .map_or((info.maint_asset_weight, info.maint_liab_weight), |x| get_leverage_weights(x));
+
+        let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
+        let optimal_util = optimal_util.unwrap_or(root_bank.optimal_util);
+        let optimal_rate = optimal_rate.unwrap_or(root_bank.optimal_rate);
+        let max_rate = max_rate.unwrap_or(root_bank.max_rate);
+        let version = version.unwrap_or(root_bank.meta_data.version);
+
+        // params check
+        check!(init_asset_weight > ZERO_I80F48, MangoErrorCode::InvalidParam)?;
+        check!(maint_asset_weight > init_asset_weight, MangoErrorCode::InvalidParam)?;
+        // maint leverage may only increase to prevent unforeseen liquidations
+        check!(maint_asset_weight >= info.maint_asset_weight, MangoErrorCode::InvalidParam)?;
+
+        // set the params on the RootBank
+        root_bank.set_rate_params(optimal_util, optimal_rate, max_rate)?;
+
+        // set the params on MangoGroup SpotMarketInfo
+        info.liquidation_fee = liquidation_fee;
+        info.maint_asset_weight = maint_asset_weight;
+        info.init_asset_weight = init_asset_weight;
+        info.maint_liab_weight = maint_liab_weight;
+        info.init_liab_weight = init_liab_weight;
+
+        check!(version == 0, MangoErrorCode::InvalidParam)?;
+
+        root_bank.meta_data.version = version;
         Ok(())
     }
 
@@ -4919,8 +5581,20 @@ impl Processor {
                 )
             }
             MangoInstruction::InitMangoAccount => {
-                msg!("Mango: InitMangoAccount");
+                msg!("Mango: InitMangoAccount DEPRECATED");
                 Self::init_mango_account(program_id, accounts)
+            }
+            MangoInstruction::CreateMangoAccount { account_num } => {
+                msg!("Mango: CreateMangoAccount");
+                Self::create_mango_account(program_id, accounts, account_num)
+            }
+            MangoInstruction::CloseMangoAccount => {
+                msg!("Mango: CloseMangoAccount");
+                Self::close_mango_account(program_id, accounts)
+            }
+            MangoInstruction::UpgradeMangoAccountV0V1 => {
+                msg!("Mango: UpgradeMangoAccountV0V1");
+                Self::upgrade_mango_account_v0_v1(program_id, accounts)
             }
             MangoInstruction::Deposit { quantity } => {
                 msg!("Mango: Deposit");
@@ -5143,6 +5817,10 @@ impl Processor {
                 msg!("Mango: InitSpotOpenOrders");
                 Self::init_spot_open_orders(program_id, accounts)
             }
+            MangoInstruction::CloseSpotOpenOrders => {
+                msg!("Mango: CloseSpotOpenOrders");
+                Self::close_spot_open_orders(program_id, accounts)
+            }
             MangoInstruction::RedeemMngo => {
                 msg!("Mango: RedeemMngo");
                 Self::redeem_mngo(program_id, accounts)
@@ -5182,6 +5860,10 @@ impl Processor {
             MangoInstruction::InitAdvancedOrders => {
                 msg!("Mango: InitAdvancedOrders");
                 Self::init_advanced_orders(program_id, accounts)
+            }
+            MangoInstruction::CloseAdvancedOrders => {
+                msg!("Mango: CloseAdvancedOrders");
+                Self::close_advanced_orders(program_id, accounts)
             }
             MangoInstruction::AddPerpTriggerOrder {
                 order_type,
@@ -5301,6 +5983,48 @@ impl Processor {
             MangoInstruction::ChangeMaxMangoAccounts { max_mango_accounts } => {
                 msg!("Mango: ChangeMaxMangoAccounts");
                 Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
+            }
+            MangoInstruction::CreateDustAccount => {
+                msg!("Mango: CreateDustAccount");
+                Self::create_dust_account(program_id, accounts)
+            }
+            MangoInstruction::ResolveDust => {
+                msg!("Mango: ResolveDust");
+                Self::resolve_dust(program_id, accounts)
+            }
+            MangoInstruction::CancelPerpOrdersSide { side, limit } => {
+                msg!("Mango: CancelSidePerpOrders");
+                Self::cancel_perp_orders_side(program_id, accounts, side, limit)
+            }
+            MangoInstruction::SetDelegate => {
+                msg!("Mango: SetDelegate");
+                Self::set_delegate(program_id, accounts)
+            }
+            MangoInstruction::ChangeSpotMarketParams {
+                maint_leverage,
+                init_leverage,
+                liquidation_fee,
+                optimal_util,
+                optimal_rate,
+                max_rate,
+                version,
+            } => {
+                msg!("Mango: ChangeSpotMarketParams");
+                Self::change_spot_market_params(
+                    program_id,
+                    accounts,
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                    version,
+                )
+            }
+            MangoInstruction::CreateSpotOpenOrders => {
+                msg!("Mango: CreateSpotOpenOrders");
+                Self::create_spot_open_orders(program_id, accounts)
             }
         }
     }
@@ -5465,9 +6189,12 @@ fn read_oracle(
         OracleType::Pyth => {
             let price_account = Price::get_price(oracle_ai)?;
             let value = I80F48::from_num(price_account.agg.price);
+
+            // Filter out bad prices on mainnet
+            #[cfg(not(feature = "devnet"))]
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
-            // Filter out bad prices
+            #[cfg(not(feature = "devnet"))]
             if price_account.agg.status != PriceStatus::Trading {
                 msg!("Pyth status invalid: {}", price_account.agg.status as u8);
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
@@ -5886,6 +6613,37 @@ fn invoke_init_open_orders<'a>(
     solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
 }
 
+fn invoke_close_open_orders<'a>(
+    dex_prog_ai: &AccountInfo<'a>, // Have to add account of the program id
+    open_orders_ai: &AccountInfo<'a>,
+    signer_ai: &AccountInfo<'a>,
+    destination_ai: &AccountInfo<'a>,
+    spot_market_ai: &AccountInfo<'a>,
+    signers_seeds: &[&[&[u8]]],
+) -> ProgramResult {
+    let data = serum_dex::instruction::MarketInstruction::CloseOpenOrders.pack();
+
+    let instruction = Instruction {
+        program_id: *dex_prog_ai.key,
+        data,
+        accounts: vec![
+            AccountMeta::new(*open_orders_ai.key, false),
+            AccountMeta::new_readonly(*signer_ai.key, true),
+            AccountMeta::new(*destination_ai.key, false),
+            AccountMeta::new_readonly(*spot_market_ai.key, false),
+        ],
+    };
+
+    let account_infos = [
+        dex_prog_ai.clone(),
+        open_orders_ai.clone(),
+        signer_ai.clone(),
+        destination_ai.clone(),
+        spot_market_ai.clone(),
+    ];
+    solana_program::program::invoke_signed(&instruction, &account_infos, signers_seeds)
+}
+
 /*
 TODO test order types
  */
@@ -6013,7 +6771,7 @@ fn cancel_all_advanced_orders<'a>(
 }
 
 // Returns asset_weight and liab_weight
-fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
+pub fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
     (
         (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
         (leverage + ONE_I80F48).checked_div(leverage).unwrap(),

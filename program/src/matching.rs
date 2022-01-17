@@ -248,7 +248,7 @@ pub struct BookSide {
     pub free_list_head: u32,
     pub root_node: u32,
     pub leaf_count: usize,
-    pub nodes: [AnyNode; MAX_BOOK_NODES], // TODO make this variable length
+    pub nodes: [AnyNode; MAX_BOOK_NODES],
 }
 
 pub struct BookSideIter<'a> {
@@ -1268,7 +1268,7 @@ impl<'a> Book<'a> {
         mango_account: &mut MangoAccount,
         market_index: usize,
         mut limit: u8,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         let market_index = market_index as u8;
         for i in 0..MAX_PERP_OPEN_ORDERS {
             if mango_account.order_market[i] != market_index {
@@ -1293,6 +1293,54 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
+    pub fn cancel_all_side_with_size_incentives(
+        &mut self,
+        mango_account: &mut MangoAccount,
+        perp_market: &mut PerpMarket,
+        market_index: usize,
+        side: Side,
+        mut limit: u8,
+    ) -> MangoResult<(Vec<i128>, Vec<i128>)> {
+        // TODO - test different limits
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
+
+        let mut all_order_ids = vec![];
+        let mut canceled_order_ids = vec![];
+        let mut keys = vec![];
+        let market_index_u8 = market_index as u8;
+        for i in 0..MAX_PERP_OPEN_ORDERS {
+            if mango_account.order_market[i] == market_index_u8
+                && mango_account.order_side[i] == side
+            {
+                all_order_ids.push(mango_account.orders[i]);
+                keys.push(mango_account.orders[i])
+            }
+        }
+        match side {
+            Side::Bid => self.cancel_all_bids_with_size_incentives(
+                mango_account,
+                perp_market,
+                market_index,
+                max_depth,
+                now_ts,
+                &mut limit,
+                keys,
+                &mut canceled_order_ids,
+            )?,
+            Side::Ask => self.cancel_all_asks_with_size_incentives(
+                mango_account,
+                perp_market,
+                market_index,
+                max_depth,
+                now_ts,
+                &mut limit,
+                keys,
+                &mut canceled_order_ids,
+            )?,
+        };
+        Ok((all_order_ids, canceled_order_ids))
+    }
     pub fn cancel_all_with_size_incentives(
         &mut self,
         mango_account: &mut MangoAccount,
@@ -1303,26 +1351,59 @@ impl<'a> Book<'a> {
         // TODO - test different limits
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
-        // For logging
+
         let mut all_order_ids = vec![];
         let mut canceled_order_ids = vec![];
 
-        let mut my_bids = vec![];
-        let mut my_asks = vec![];
+        let market_index_u8 = market_index as u8;
+        let mut bids_keys = vec![];
+        let mut asks_keys = vec![];
         for i in 0..MAX_PERP_OPEN_ORDERS {
-            if mango_account.order_market[i] != market_index as u8 {
+            if mango_account.order_market[i] != market_index_u8 {
                 continue;
             }
             all_order_ids.push(mango_account.orders[i]);
             match mango_account.order_side[i] {
-                Side::Bid => my_bids.push(mango_account.orders[i]),
-                Side::Ask => my_asks.push(mango_account.orders[i]),
+                Side::Bid => bids_keys.push(mango_account.orders[i]),
+                Side::Ask => asks_keys.push(mango_account.orders[i]),
             }
         }
-        my_bids.sort_unstable();
-        my_asks.sort_by(|a, b| b.cmp(a));
+        self.cancel_all_bids_with_size_incentives(
+            mango_account,
+            perp_market,
+            market_index,
+            max_depth,
+            now_ts,
+            &mut limit,
+            bids_keys,
+            &mut canceled_order_ids,
+        )?;
+        self.cancel_all_asks_with_size_incentives(
+            mango_account,
+            perp_market,
+            market_index,
+            max_depth,
+            now_ts,
+            &mut limit,
+            asks_keys,
+            &mut canceled_order_ids,
+        )?;
+        Ok((all_order_ids, canceled_order_ids))
+    }
 
-        // First do bids
+    /// Internal
+    fn cancel_all_bids_with_size_incentives(
+        &mut self,
+        mango_account: &mut MangoAccount,
+        perp_market: &mut PerpMarket,
+        market_index: usize,
+        max_depth: i64,
+        now_ts: u64,
+        limit: &mut u8,
+        mut my_bids: Vec<i128>,
+        canceled_order_ids: &mut Vec<i128>,
+    ) -> MangoResult {
+        my_bids.sort_unstable();
         let mut bids_and_sizes = vec![];
         let mut cuml_bids = 0;
 
@@ -1331,14 +1412,11 @@ impl<'a> Book<'a> {
                 None => break,
                 Some(&my_highest_bid) => {
                     if bid.key > my_highest_bid {
-                        // If book bid is greater than my highest bid continue
                         cuml_bids += bid.quantity;
                     } else if bid.key == my_highest_bid {
-                        // If order id matches, push my bid key and total cuml bids above it
                         bids_and_sizes.push((bid.key, cuml_bids));
                         my_bids.pop();
                     } else {
-                        // This means my bid is not on the book; Possibly on event queue waiting to be processed
                         cuml_bids += bid.quantity;
                         my_bids.pop();
                     }
@@ -1354,9 +1432,12 @@ impl<'a> Book<'a> {
         }
 
         for (key, cuml_size) in bids_and_sizes {
-            if limit == 0 {
-                return Ok((all_order_ids, canceled_order_ids));
+            if *limit == 0 {
+                return Ok(());
+            } else {
+                *limit -= 1;
             }
+
             match self.cancel_order(key, Side::Bid) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
@@ -1378,10 +1459,23 @@ impl<'a> Book<'a> {
                     msg!("Failed to cancel bid oid: {}; Either error state or bid is on EventQueue unprocessed", key)
                 }
             }
-            limit -= 1;
         }
+        Ok(())
+    }
 
-        // Asks
+    /// Internal
+    fn cancel_all_asks_with_size_incentives(
+        &mut self,
+        mango_account: &mut MangoAccount,
+        perp_market: &mut PerpMarket,
+        market_index: usize,
+        max_depth: i64,
+        now_ts: u64,
+        limit: &mut u8,
+        mut my_asks: Vec<i128>,
+        canceled_order_ids: &mut Vec<i128>,
+    ) -> MangoResult {
+        my_asks.sort_unstable_by(|a, b| b.cmp(a));
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
         for ask in self.asks.iter() {
@@ -1389,20 +1483,17 @@ impl<'a> Book<'a> {
                 None => break,
                 Some(&my_lowest_ask) => {
                     if ask.key < my_lowest_ask {
-                        // If book ask is less than my lowest ask, continue
                         cuml_asks += ask.quantity;
                     } else if ask.key == my_lowest_ask {
-                        // If order id matches, push my ask key and total cuml asks ahead of it
                         asks_and_sizes.push((ask.key, cuml_asks));
                         my_asks.pop();
                     } else {
-                        // This means my ask is not on the book; Possibly on event queue waiting to be processed
                         cuml_asks += ask.quantity;
                         my_asks.pop();
                     }
                     if cuml_asks >= max_depth {
-                        for ask_key in my_asks {
-                            asks_and_sizes.push((ask_key, max_depth));
+                        for key in my_asks {
+                            asks_and_sizes.push((key, max_depth))
                         }
                         break;
                     }
@@ -1411,8 +1502,10 @@ impl<'a> Book<'a> {
         }
 
         for (key, cuml_size) in asks_and_sizes {
-            if limit == 0 {
-                return Ok((all_order_ids, canceled_order_ids));
+            if *limit == 0 {
+                return Ok(());
+            } else {
+                *limit -= 1;
             }
             match self.cancel_order(key, Side::Ask) {
                 Ok(order) => {
@@ -1432,14 +1525,13 @@ impl<'a> Book<'a> {
                 }
                 Err(_) => {
                     // Invalid state because we know it's on the book
-                    msg!("Failed to cancel ask oid: {}; Either error state or ask is on EventQueue unprocessed", key)
+                    msg!("Failed to cancel ask oid: {}; Either error state or ask is on EventQueue unprocessed", key);
                 }
             }
-            limit -= 1;
         }
-        Ok((all_order_ids, canceled_order_ids))
-    }
 
+        Ok(())
+    }
     /// Cancel all the orders for MangoAccount for this PerpMarket up to `limit`
     /// Only used when PerpMarket version == 0
     pub fn cancel_all_with_price_incentives(

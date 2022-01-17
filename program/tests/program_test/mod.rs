@@ -1,3 +1,4 @@
+use anchor_lang::Key;
 use std::borrow::Borrow;
 use std::mem::size_of;
 
@@ -31,6 +32,12 @@ pub mod assertions;
 pub mod cookies;
 pub mod scenarios;
 use self::cookies::*;
+
+const RUST_LOG_DEFAULT: &str = "solana_rbpf::vm=info,\
+             solana_program_runtime::stable_log=debug,\
+             solana_runtime::message_processor=debug,\
+             solana_runtime::system_instruction_processor=info,\
+             solana_program_test=info";
 
 trait AddPacked {
     fn add_packable_account<T: Pack>(
@@ -257,6 +264,9 @@ impl MangoProgramTest {
         // TODO: add more programs (oracles)
         // limit to track compute unit increase
         test.set_bpf_compute_max_units(config.compute_limit);
+
+        // Supress some of the logs
+        solana_logger::setup_with_default(RUST_LOG_DEFAULT);
 
         // Add MNGO mint
         test.add_packable_account(
@@ -998,6 +1008,40 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn create_spot_open_orders(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        mango_group: &MangoGroup,
+        mango_account_pk: &Pubkey,
+        mango_account: &MangoAccount,
+        user_index: usize,
+        market_index: usize,
+    ) -> Pubkey {
+        let open_orders_seeds: &[&[u8]] =
+            &[&mango_account_pk.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
+        let (open_orders_pk, _) =
+            Pubkey::find_program_address(open_orders_seeds, &self.mango_program_id);
+
+        let create_spot_open_orders_instruction = create_spot_open_orders(
+            &self.mango_program_id,
+            mango_group_pk,
+            mango_account_pk,
+            &mango_account.owner,
+            &self.serum_program_id,
+            &open_orders_pk,
+            &mango_group.spot_markets[market_index].spot_market,
+            &mango_group.signer_key,
+        )
+        .unwrap();
+
+        let instructions = vec![create_spot_open_orders_instruction];
+        let user = Keypair::from_bytes(&self.users[user_index].to_bytes()).unwrap();
+        let signers = vec![&user];
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        open_orders_pk
+    }
+
+    #[allow(dead_code)]
     pub async fn init_open_orders(&mut self) -> Pubkey {
         let (orders_key, instruction) =
             self.create_dex_account(size_of::<serum_dex::state::OpenOrders>());
@@ -1169,7 +1213,7 @@ impl MangoProgramTest {
         for x in 0..mango_account.spot_open_orders.len() {
             if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
                 open_orders_pks.push(
-                    self.init_spot_open_orders(
+                    self.create_spot_open_orders(
                         &mango_group_pk,
                         &mango_group,
                         &mango_account_pk,
@@ -1219,6 +1263,94 @@ impl MangoProgramTest {
         let signers = vec![&user];
 
         self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn place_spot_order_with_delegate(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        spot_market_cookie: &SpotMarketCookie,
+        user_index: usize,
+        delegate_user_index: usize,
+        order: NewOrderInstructionV3,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let mint_index = spot_market_cookie.mint.index;
+
+        let delegate_user =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (mint_root_bank_pk, mint_root_bank) =
+            self.with_root_bank(&mango_group, mint_index).await;
+        let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
+        let (quote_root_bank_pk, quote_root_bank) =
+            self.with_root_bank(&mango_group, self.quote_index).await;
+        let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
+
+        // Only pass in open orders if in margin basket or current market index, and
+        // the only writable account should be OpenOrders for current market index
+        let mut open_orders_pks = Vec::new();
+        for x in 0..mango_account.spot_open_orders.len() {
+            if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
+                open_orders_pks.push(
+                    self.create_spot_open_orders(
+                        &mango_group_pk,
+                        &mango_group,
+                        &mango_account_pk,
+                        &mango_account,
+                        user_index,
+                        x,
+                    )
+                    .await,
+                );
+            } else {
+                open_orders_pks.push(mango_account.spot_open_orders[x]);
+            }
+        }
+
+        let (dex_signer_pk, _dex_signer_nonce) =
+            create_signer_key_and_nonce(&serum_program_id, &spot_market_cookie.market);
+
+        let instructions = [mango::instruction::place_spot_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &delegate_user.pubkey(),
+            &mango_group.mango_cache,
+            &serum_program_id,
+            &spot_market_cookie.market,
+            &spot_market_cookie.bids,
+            &spot_market_cookie.asks,
+            &spot_market_cookie.req_q,
+            &spot_market_cookie.event_q,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &mint_root_bank_pk,
+            &mint_node_bank_pk,
+            &mint_node_bank.vault,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &signer_pk,
+            &dex_signer_pk,
+            &mango_group.msrm_vault,
+            &open_orders_pks, // oo ais
+            mint_index,
+            order,
+        )
+        .unwrap()];
+
+        let signers = vec![&delegate_user];
+
+        self.process_transaction(&instructions, Some(&signers)).await
     }
 
     #[allow(dead_code)]
@@ -1351,6 +1483,104 @@ impl MangoProgramTest {
             &mango_account.spot_open_orders,
             quantity,
             allow_borrow,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_withdraw_with_delegate(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        delegate_user_index: usize,
+        mint_index: usize,
+        quantity: u64,
+        allow_borrow: bool,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let delegate_user =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
+        let user_token_account = self.with_user_token_account(user_index, mint_index);
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
+        let instructions = [withdraw(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &delegate_user.pubkey(),
+            &mango_group.mango_cache,
+            &root_bank_pk,
+            &node_bank_pk,
+            &node_bank.vault,
+            &user_token_account,
+            &signer_pk,
+            &mango_account.spot_open_orders,
+            quantity,
+            allow_borrow,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&delegate_user])).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_set_delegate(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        delegate_user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let delegate =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
+
+        let instructions = [set_delegate(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &delegate.pubkey(),
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_reset_delegate(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        delegate_user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let delegate =
+            Keypair::from_base58_string(&self.users[delegate_user_index].to_base58_string());
+
+        let instructions = [set_delegate(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &Pubkey::default(),
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();

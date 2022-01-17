@@ -16,10 +16,10 @@ use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
 use spl_token::state::Account;
+use static_assertions::const_assert_eq;
 
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod, TriviallyTransmutable};
-use static_assertions::const_assert_eq;
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
@@ -202,7 +202,8 @@ pub struct MangoGroup {
 
     pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
     pub num_mango_accounts: u32, // number of MangoAccounts.v1
-    pub padding: [u8; 24],       // padding used for future expansions
+
+    pub padding: [u8; 24], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -571,11 +572,11 @@ impl NodeBank {
     }
     pub fn get_total_native_borrow(&self, root_bank_cache: &RootBankCache) -> u64 {
         let native: I80F48 = self.borrows * root_bank_cache.borrow_index;
-        native.checked_ceil().unwrap().to_num() // rounds toward +inf
+        native.checked_ceil().unwrap().checked_to_num().unwrap() // rounds toward +inf
     }
     pub fn get_total_native_deposit(&self, root_bank_cache: &RootBankCache) -> u64 {
         let native: I80F48 = self.deposits * root_bank_cache.deposit_index;
-        native.checked_floor().unwrap().to_num() // rounds toward -inf
+        native.checked_floor().unwrap().checked_to_num().unwrap() // rounds toward -inf
     }
 }
 
@@ -1110,8 +1111,17 @@ pub struct MangoAccount {
     /// Starts off as zero pubkey and points to the AdvancedOrders account
     pub advanced_orders_key: Pubkey,
 
+    /// Can this account be upgraded to v1 so it can be closed
+    pub not_upgradable: bool,
+
+    // Alternative authority/signer of transactions for a mango account
+    pub delegate: Pubkey,
+
     /// padding for expansions
-    pub padding: [u8; 38],
+    /// Note: future expansion can also be just done via isolated PDAs
+    /// which can be computed independently and dont need to be linked from
+    /// this account
+    pub padding: [u8; 5],
 }
 
 impl MangoAccount {
@@ -1236,9 +1246,33 @@ impl MangoAccount {
             let (quote_free, quote_locked, base_free, base_locked) =
                 split_open_orders(&open_orders);
 
-            // Simulate the health if all bids are executed at current price
-            let bids_base_net: I80F48 = base_net + quote_locked / price + base_free + base_locked;
+            // Two "worst-case" scenarios are considered:
+            // 1. All bids are executed at current price, producing a base amount of bids_base_net
+            //    when all quote_locked are converted to base.
+            // 2. All asks are executed at current price, producing a base amount of asks_base_net
+            //    because base_locked would be converted to quote.
+            let bids_base_net: I80F48 = base_net + base_free + base_locked + quote_locked / price;
             let asks_base_net = base_net + base_free;
+
+            // Report the scenario that would have a worse outcome on health.
+            //
+            // Explanation: This function returns (base, quote) and the values later get used in
+            //     health += (if base > 0 { asset_weight } else { liab_weight }) * base + quote
+            // and here we return the scenario that will increase health the least.
+            //
+            // Correctness proof:
+            // - always bids_base_net >= asks_base_net
+            // - note that scenario 1 returns (a + b, c)
+            //         and scenario 2 returns (a,     c + b), and b >= 0, c >= 0
+            // - if a >= 0: scenario 1 will lead to less health as asset_weight <= 1.
+            // - if a < 0 and b <= -a: scenario 2 will lead to less health as liab_weight >= 1.
+            // - if a < 0 and b > -a:
+            //   The health contributions of both scenarios are identical if
+            //       asset_weight * (a + b) + c = liab_weight * a + c + b
+            //   <=> b = (asset_weight - liab_weight) / (1 - asset_weight) * a
+            //   <=> b = -2 a  since asset_weight + liab_weight = 2 by weight construction
+            //   So the worse scenario switches when a + b = -a.
+            // That means scenario 1 leads to less health whenever |a + b| > |a|.
 
             if bids_base_net.abs() > asks_base_net.abs() {
                 Ok((bids_base_net * price, quote_free))
@@ -1884,7 +1918,7 @@ impl PerpAccount {
     }
 
     /// All orders must be canceled and there must be no unprocessed FillEvents for this PerpAccount
-    pub fn is_liquidatable(&self) -> bool {
+    pub fn has_no_open_orders(&self) -> bool {
         self.bids_quantity == 0
             && self.asks_quantity == 0
             && self.taker_quote == 0

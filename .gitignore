@@ -2,3 +2,5 @@ program/target
 common/target
 mango-macro/target
 target
+
+.idea

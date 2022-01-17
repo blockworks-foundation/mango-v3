@@ -1,5 +1,17 @@
 # Mango Program Change Log
 
+## v3.3.0
+Deployed: Jan 17, 2022 at 00:45:05 UTC | Slot: 116,585,405
+1. CancelAllPerpOrdersSide - cancels all order on one side
+2. CloseMangoAccount - close account and retrieve lamports
+3. ResolveDust - settle anything below 1 native SPL against the dust account
+4. CreateDustAccount - create a PDA tied to the MangoGroup useful for settling dust against
+5. SetDelegate - delegate authority to operate MangoAccount to another account
+6. upgrade packages
+7. impose price limits for placing limit orders
+8. ChangeSpotMarketParams
+9. CreateSpotOpenOrders using PDA for better UX
+
 ## v3.2.16
 Deployed: Jan 11, 2022 at 01:59:05 UTC | Slot: 115,691,635
 1. Checked math in all areas touched by place_perp_order

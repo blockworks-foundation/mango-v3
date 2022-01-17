@@ -38,7 +38,8 @@ pub enum MangoInstruction {
         quote_max_rate: I80F48,
     },
 
-    /// Initialize a mango account for a user
+    /// DEPRECATED Initialize a mango account for a user
+    /// Accounts created with this function cannot be closed without upgrading with UpgradeMangoAccountV0V1
     ///
     /// Accounts expected by this instruction (3):
     ///
@@ -78,8 +79,7 @@ pub enum MangoInstruction {
     /// 7. `[write]` token_account_ai, -
     /// 8. `[read]` signer_ai,        -
     /// 9. `[read]` token_prog_ai,    -
-    /// 10. `[read]` clock_ai,         -
-    /// 11..+ `[]` open_orders_accs - open orders for each of the spot market
+    /// 10..+ `[]` open_orders_accs - open orders for each of the spot market
     Withdraw {
         quantity: u64,
         allow_borrow: bool,
@@ -207,6 +207,16 @@ pub enum MangoInstruction {
     },
 
     /// Place an order on a perp market
+    ///
+    /// In case this order is matched, the corresponding order structs on both
+    /// PerpAccounts (taker & maker) will be adjusted, and the position size
+    /// will be adjusted w/o accounting for fees.
+    /// In addition a FillEvent will be placed on the event queue.
+    /// Through a subsequent invocation of ConsumeEvents the FillEvent can be
+    /// executed and the perp account balances (base/quote) and fees will be
+    /// paid from the quote position. Only at this point the position balance
+    /// is 100% refelecting the trade.
+    ///
     /// Accounts expected by this instruction (8):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
@@ -615,7 +625,7 @@ pub enum MangoInstruction {
     /// 5. `[]` root_bank_ai - RootBank
     /// 6. `[writable]` node_bank_ai - NodeBank
     /// 7+... `[]` liqee_open_orders_ais - Liqee open orders accs
-    ForceSettleQuotePositions,
+    ForceSettleQuotePositions, // instruction 40
 
     /// Place an order on the Serum Dex using Mango account. Improved over PlaceSpotOrder
     /// by reducing the tx size
@@ -770,6 +780,149 @@ pub enum MangoInstruction {
     ChangeMaxMangoAccounts {
         max_mango_accounts: u32,
     },
+    /// Delete a mango account and return lamports
+    ///
+    /// Accounts expected by this instruction (3):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
+    CloseMangoAccount, // instruction 50
+
+    /// Delete a spot open orders account and return lamports
+    ///
+    /// Accounts expected by this instruction (7):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
+    /// 3. `[]` dex_prog_ai - The serum dex program id
+    /// 4. `[writable]` open_orders_ai - The open orders account to close
+    /// 5. `[]` spot_market_ai - The spot market for the account
+    /// 6. `[]` signer_ai - Mango group signer key
+    CloseSpotOpenOrders,
+
+    /// Delete an advanced orders account and return lamports
+    ///
+    /// Accounts expected by this instruction (4):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
+    /// 3. `[writable]` advanced_orders_ai - the advanced orders account
+    CloseAdvancedOrders,
+
+    /// Create a PDA Mango Account for collecting dust owned by a group
+    ///
+    /// Accounts expected by this instruction (4)
+    /// 0. `[]` mango_group_ai - MangoGroup to create the dust account for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer, writable]` signer_ai - Signer and fee payer account
+    /// 3. `[writable]` system_prog_ai - System program
+    CreateDustAccount,
+
+    /// Transfer dust (< 1 native SPL token) assets and liabilities for a single token to the group's dust account
+    ///
+    /// Accounts expected by this instruction (7)
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup of the mango account
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer, writable]` owner_ai - Solana account of owner of the mango account
+    /// 3. `[writable]` dust_account_ai - Dust Account for the group
+    /// 4. `[]` root_bank_ai - The root bank for the token
+    /// 5. `[writable]` node_bank_ai - A node bank for the token
+    /// 6. `[]` mango_cache_ai - The cache for the group
+    ResolveDust,
+
+    /// Create a PDA mango account for a user
+    ///
+    /// Accounts expected by this instruction (4):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - the mango account data
+    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
+    /// 3. `[]` system_prog_ai - System program
+    CreateMangoAccount {
+        account_num: u64,
+    },
+
+    /// Upgrade a V0 Mango Account to V1 allowing it to be closed
+    ///
+    /// Accounts expected by this instruction (3):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
+    UpgradeMangoAccountV0V1,
+
+    /// Cancel all perp open orders for one side of the book
+    ///
+    /// Accounts expected: 6
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - Owner of Mango Account
+    /// 3. `[writable]` perp_market_ai - PerpMarket
+    /// 4. `[writable]` bids_ai - Bids acc
+    /// 5. `[writable]` asks_ai - Asks acc
+    CancelPerpOrdersSide {
+        side: Side,
+        limit: u8,
+    },
+
+    /// https://github.com/blockworks-foundation/mango-v3/pull/97/
+    /// Set delegate authority to mango account which can do everything regular account can do
+    /// except Withdraw and CloseMangoAccount. Set to Pubkey::default() to revoke delegate
+    ///
+    /// Accounts expected: 4
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - Owner of Mango Account
+    /// 3. `[]` delegate_ai - delegate
+    SetDelegate,
+
+    /// Change the params for a spot market.
+    ///
+    /// Accounts expected by this instruction (4):
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` spot_market_ai - Market
+    /// 2. `[writable]` root_bank_ai - RootBank
+    /// 3. `[signer]` admin_ai - MangoGroup admin
+    ChangeSpotMarketParams {
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        maint_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        init_leverage: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        liquidation_fee: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        optimal_util: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        optimal_rate: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        max_rate: Option<I80F48>,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        version: Option<u8>,
+    },
+
+    /// Create an OpenOrders PDA and initialize it with InitOpenOrders call to serum dex
+    ///
+    /// Accounts expected by this instruction (8):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[]` dex_prog_ai - program id of serum dex
+    /// 4. `[writable]` open_orders_ai - open orders PDA
+    /// 5. `[]` spot_market_ai - dex MarketState account
+    /// 6. `[]` signer_ai - Group Signer Account
+    /// 7. `[]` system_prog_ai - System program
+    CreateSpotOpenOrders, // instruction 60
 }
 
 impl MangoInstruction {
@@ -1167,14 +1320,57 @@ impl MangoInstruction {
                 }
             }
             48 => MangoInstruction::UpdateMarginBasket,
-
             49 => {
                 let data_arr = array_ref![data, 0, 4];
                 MangoInstruction::ChangeMaxMangoAccounts {
                     max_mango_accounts: u32::from_le_bytes(*data_arr),
                 }
             }
+            50 => MangoInstruction::CloseMangoAccount,
+            51 => MangoInstruction::CloseSpotOpenOrders,
+            52 => MangoInstruction::CloseAdvancedOrders,
+            53 => MangoInstruction::CreateDustAccount,
+            54 => MangoInstruction::ResolveDust,
+            55 => {
+                let account_num = array_ref![data, 0, 8];
+                MangoInstruction::CreateMangoAccount {
+                    account_num: u64::from_le_bytes(*account_num),
+                }
+            }
+            56 => MangoInstruction::UpgradeMangoAccountV0V1,
+            57 => {
+                let data_arr = array_ref![data, 0, 2];
+                let (side, limit) = array_refs![data_arr, 1, 1];
 
+                MangoInstruction::CancelPerpOrdersSide {
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    limit: u8::from_le_bytes(*limit),
+                }
+            }
+            58 => MangoInstruction::SetDelegate,
+            59 => {
+                let data_arr = array_ref![data, 0, 104];
+                let (
+                    maint_leverage,
+                    init_leverage,
+                    liquidation_fee,
+                    optimal_util,
+                    optimal_rate,
+                    max_rate,
+                    version,
+                ) = array_refs![data_arr, 17, 17, 17, 17, 17, 17, 2];
+
+                MangoInstruction::ChangeSpotMarketParams {
+                    maint_leverage: unpack_i80f48_opt(maint_leverage),
+                    init_leverage: unpack_i80f48_opt(init_leverage),
+                    liquidation_fee: unpack_i80f48_opt(liquidation_fee),
+                    optimal_util: unpack_i80f48_opt(optimal_util),
+                    optimal_rate: unpack_i80f48_opt(optimal_rate),
+                    max_rate: unpack_i80f48_opt(max_rate),
+                    version: unpack_u8_opt(version),
+                }
+            }
+            60 => MangoInstruction::CreateSpotOpenOrders,
             _ => {
                 return None;
             }
@@ -1316,6 +1512,79 @@ pub fn init_mango_account(
     ];
 
     let instr = MangoInstruction::InitMangoAccount;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn close_mango_account(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+    ];
+
+    let instr = MangoInstruction::CloseMangoAccount;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn create_mango_account(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    system_prog_pk: &Pubkey,
+    account_num: u64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*system_prog_pk, false),
+    ];
+
+    let instr = MangoInstruction::CreateMangoAccount { account_num };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn set_delegate(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    delegate_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*delegate_pk, false),
+    ];
+
+    let instr = MangoInstruction::SetDelegate {};
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn upgrade_mango_account_v0_v1(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+    ];
+
+    let instr = MangoInstruction::UpgradeMangoAccountV0V1;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1559,6 +1828,30 @@ pub fn cancel_all_perp_orders(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn cancel_perp_orders_side(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,   // read
+    mango_account_pk: &Pubkey, // write
+    owner_pk: &Pubkey,         // read, signer
+    perp_market_pk: &Pubkey,   // write
+    bids_pk: &Pubkey,          // write
+    asks_pk: &Pubkey,          // write
+    side: Side,
+    limit: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+    ];
+    let instr = MangoInstruction::CancelPerpOrdersSide { side, limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn force_cancel_perp_orders(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,         // read
@@ -1600,6 +1893,25 @@ pub fn init_advanced_orders(
         AccountMeta::new_readonly(*system_prog_pk, false),
     ];
     let instr = MangoInstruction::InitAdvancedOrders {};
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn close_advanced_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    advanced_orders_pk: &Pubkey,
+    owner_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new(*advanced_orders_pk, false),
+    ];
+
+    let instr = MangoInstruction::CloseAdvancedOrders;
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -1900,6 +2212,58 @@ pub fn init_spot_open_orders(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn create_spot_open_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    open_orders_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    signer_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*open_orders_pk, false),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(solana_program::system_program::ID, false),
+    ];
+
+    let instr = MangoInstruction::CreateSpotOpenOrders;
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn close_spot_open_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    open_orders_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    signer_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*open_orders_pk, false),
+        AccountMeta::new_readonly(*spot_market_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+    ];
+
+    let instr = MangoInstruction::CloseSpotOpenOrders;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 pub fn place_spot_order(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
@@ -2101,6 +2465,40 @@ pub fn liquidate_token_and_token(
     accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn change_spot_market_params(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    maint_leverage: Option<I80F48>,
+    init_leverage: Option<I80F48>,
+    liquidation_fee: Option<I80F48>,
+    optimal_util: Option<I80F48>,
+    optimal_rate: Option<I80F48>,
+    max_rate: Option<I80F48>,
+    version: Option<u8>,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*root_bank_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MangoInstruction::ChangeSpotMarketParams {
+        maint_leverage,
+        init_leverage,
+        liquidation_fee,
+        optimal_util,
+        optimal_rate,
+        max_rate,
+        version,
+    };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

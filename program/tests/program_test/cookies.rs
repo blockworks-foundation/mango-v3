@@ -1,4 +1,5 @@
 use fixed::types::I80F48;
+use fixed::FixedI128;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
@@ -495,6 +496,46 @@ impl SpotMarketCookie {
     }
 
     #[allow(dead_code)]
+    pub async fn change_params(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_pk: &Pubkey,
+        root_bank_pk: &Pubkey,
+        mint_index: usize,
+        init_leverage: Option<I80F48>,
+        maint_leverage: Option<I80F48>,
+        liquidation_fee: Option<I80F48>,
+        optimal_util: Option<I80F48>,
+        optimal_rate: Option<I80F48>,
+        max_rate: Option<I80F48>,
+        version: Option<u8>,
+    ) {
+        let mango_program_id = test.mango_program_id;
+        let mango_group_pk = mango_group_pk;
+        let spot_market_pk = self.market;
+        let root_bank_pk = root_bank_pk;
+        let admin_pk = test.get_payer_pk();
+
+        let instructions = [mango::instruction::change_spot_market_params(
+            &mango_program_id,
+            &mango_group_pk,
+            &spot_market_pk,
+            &root_bank_pk,
+            &admin_pk,
+            maint_leverage,
+            init_leverage,
+            liquidation_fee,
+            optimal_util,
+            optimal_rate,
+            max_rate,
+            version,
+        )
+        .unwrap()];
+
+        test.process_transaction(&instructions, None).await.unwrap();
+    }
+
+    #[allow(dead_code)]
     pub async fn place_order(
         &mut self,
         test: &mut MangoProgramTest,
@@ -531,6 +572,48 @@ impl SpotMarketCookie {
             .load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address)
             .await;
         mango_group_cookie.current_spot_order_id += 1;
+    }
+
+    #[allow(dead_code)]
+    pub async fn place_order_with_delegate(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_cookie: &mut MangoGroupCookie,
+        user_index: usize,
+        delegate_user_index: usize,
+        side: serum_dex::matching::Side,
+        size: f64,
+        price: f64,
+    ) -> Result<(), TransportError> {
+        let limit_price = test.price_number_to_lots(&self.mint, price);
+        let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
+        let max_native_pc_qty_including_fees = match side {
+            serum_dex::matching::Side::Bid => {
+                self.mint.quote_lot as u64 * limit_price * max_coin_qty
+            }
+            serum_dex::matching::Side::Ask => std::u64::MAX,
+        };
+
+        let order = serum_dex::instruction::NewOrderInstructionV3 {
+            side: side,
+            limit_price: NonZeroU64::new(limit_price).unwrap(),
+            max_coin_qty: NonZeroU64::new(max_coin_qty).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(max_native_pc_qty_including_fees)
+                .unwrap(),
+            self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
+            order_type: serum_dex::matching::OrderType::Limit,
+            client_order_id: mango_group_cookie.current_spot_order_id,
+            limit: u16::MAX,
+        };
+
+        test.place_spot_order_with_delegate(
+            &mango_group_cookie,
+            self,
+            user_index,
+            delegate_user_index,
+            order,
+        )
+        .await
     }
 }
 
