@@ -2061,7 +2061,7 @@ impl Processor {
             }
         };
 
-        // If not post allowed, locked amount (i.e. amount on the order book) should not increase)
+        // If not post allowed, locked amount (i.e. amount on the order book) should not increase
         check!(post_allowed || post_locked <= pre_locked, MangoErrorCode::InvalidParam)?;
 
         let (post_base, post_quote) = {
