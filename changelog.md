@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.3.0
-Deployed:  | Slot: 
+Deployed: Jan 17, 2022 at 00:45:05 UTC | Slot: 116,585,405
 1. CancelAllPerpOrdersSide - cancels all order on one side
 2. CloseMangoAccount - close account and retrieve lamports
 3. ResolveDust - settle anything below 1 native SPL against the dust account
