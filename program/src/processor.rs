@@ -3813,7 +3813,7 @@ impl Processor {
             let health_per_lot =
                 lot_price * (ONE_I80F48 - pmi.init_asset_weight - pmi.liquidation_fee);
             let max_transfer = -init_health / health_per_lot;
-            let max_transfer: i64 = max_transfer.checked_ceil().unwrap().to_num();
+            let max_transfer: i64 = max_transfer.checked_ceil().unwrap().checked_to_num().unwrap();
 
             let base_transfer =
                 max_transfer.min(base_transfer_request).min(liqee_perp_account.base_position);
@@ -3830,7 +3830,7 @@ impl Processor {
             let health_per_lot =
                 lot_price * (ONE_I80F48 - pmi.init_liab_weight + pmi.liquidation_fee);
             let max_transfer = -init_health / health_per_lot;
-            let max_transfer: i64 = max_transfer.checked_floor().unwrap().to_num();
+            let max_transfer: i64 = max_transfer.checked_floor().unwrap().checked_to_num().unwrap();
 
             let base_transfer =
                 max_transfer.max(base_transfer_request).max(liqee_perp_account.base_position);
@@ -3984,7 +3984,8 @@ impl Processor {
             .min(-quote_pos) // minimum of what liqor wants and what liqee has
             .checked_ceil() // round up and convert to native quote token
             .unwrap()
-            .to_num::<u64>()
+            .checked_to_num::<u64>()
+            .unwrap()
             .min(insurance_vault.amount); // take min of what ins. fund has
 
         if liab_transfer_u64 != 0 {
@@ -4158,20 +4159,24 @@ impl Processor {
         let insurance_transfer = (liab_transfer * liab_price / liab_fee)
             .checked_ceil()
             .unwrap()
-            .to_num::<u64>()
+            .checked_to_num::<u64>()
+            .unwrap()
             .min(insurance_vault.amount);
 
         if insurance_transfer != 0 {
+            // First transfer quote currency into Mango quote vault from insurance fund
             check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
                 insurance_vault_ai,
-                quote_vault_ai,
+                quote_vault_ai, // this vault is checked in conditional branch below
                 signer_ai,
                 &[&signers_seeds],
                 insurance_transfer,
             )?;
+
+            // Transfer equivalent amount of liabilities adjusted for fees
             let liab_transfer = I80F48::from_num(insurance_transfer) * liab_fee / liab_price;
 
             check!(
@@ -4180,7 +4185,11 @@ impl Processor {
             )?;
             let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
 
+            // Only load quote banks if they are different from liab banks to prevent double mut borrow
             if liab_index == QUOTE_INDEX {
+                check!(quote_vault_ai.key == &liab_node_bank.vault, MangoErrorCode::InvalidVault)?;
+
+                // Increase the quote balance on the liqor equivalent to insurance transfer
                 checked_change_net(
                     &mango_cache.root_bank_cache[QUOTE_INDEX],
                     &mut liab_node_bank,
@@ -4190,7 +4199,7 @@ impl Processor {
                     I80F48::from_num(insurance_transfer),
                 )?;
             } else {
-                // Load the bank for quote token
+                // Load the bank for quote token which we now know is different from liab banks
                 let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
                 check!(
                     &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
@@ -4202,6 +4211,7 @@ impl Processor {
                     quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
                     MangoErrorCode::InvalidNodeBank
                 )?;
+                check!(quote_vault_ai.key == &quote_node_bank.vault, MangoErrorCode::InvalidVault)?;
 
                 checked_change_net(
                     &mango_cache.root_bank_cache[QUOTE_INDEX],

@@ -1,5 +1,10 @@
 # Mango Program Change Log
 
+## v3.3.1
+Deployed: | Slot: 
+1. Check quote token vault inside resolve_token_bankruptcy
+2. Add checked to num for general safety
+
 ## v3.3.0
 Deployed: Jan 17, 2022 at 00:45:05 UTC | Slot: 116,585,405
 1. CancelAllPerpOrdersSide - cancels all order on one side
