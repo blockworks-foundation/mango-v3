@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.3.1
-Deployed: | Slot: 
+Deployed: Jan 18, 2022 at 21:06:57 UTC | Slot: 116,847,318
 1. Check quote token vault inside resolve_token_bankruptcy
 2. Add checked to num for general safety
 
