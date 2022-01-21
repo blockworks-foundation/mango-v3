@@ -16,6 +16,7 @@ use solana_program::{
 };
 use solana_program_test::*;
 use solana_sdk::{
+    account::ReadableAccount,
     instruction::Instruction,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -402,6 +403,11 @@ impl MangoProgramTest {
     #[allow(dead_code)]
     pub fn get_payer_pk(&mut self) -> Pubkey {
         return self.context.payer.pubkey();
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_lamport_balance(&mut self, address: Pubkey) -> u64 {
+        self.context.banks_client.get_account(address).await.unwrap().unwrap().lamports()
     }
 
     #[allow(dead_code)]
@@ -1008,35 +1014,88 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn create_mango_account(
+        &mut self,
+        mango_group_pk: &Pubkey,
+        user_index: usize,
+        account_num: u64,
+        payer: Option<&Keypair>,
+    ) -> Pubkey {
+        let owner_key = &self.users[user_index];
+        let owner_pk = owner_key.pubkey();
+        let seeds: &[&[u8]] =
+            &[&mango_group_pk.as_ref(), &owner_pk.as_ref(), &account_num.to_le_bytes()];
+        let (mango_account_pk, _) = Pubkey::find_program_address(seeds, &self.mango_program_id);
+
+        let mut instruction = create_mango_account(
+            &self.mango_program_id,
+            mango_group_pk,
+            &mango_account_pk,
+            &owner_pk,
+            &solana_sdk::system_program::id(),
+            &payer.map(|k| k.pubkey()).unwrap_or(owner_pk),
+            account_num,
+        )
+        .unwrap();
+
+        // Allow testing the compatibility case with no payer
+        if payer.is_none() {
+            instruction.accounts.pop();
+            instruction.accounts[2].is_writable = true; // owner pays lamports
+        }
+
+        let instructions = vec![instruction];
+        let owner_key_c = Keypair::from_base58_string(&owner_key.to_base58_string());
+        let mut signers = vec![&owner_key_c];
+        if let Some(payer_key) = payer {
+            signers.push(payer_key);
+        }
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+        mango_account_pk
+    }
+
+    #[allow(dead_code)]
     pub async fn create_spot_open_orders(
         &mut self,
         mango_group_pk: &Pubkey,
         mango_group: &MangoGroup,
         mango_account_pk: &Pubkey,
-        mango_account: &MangoAccount,
         user_index: usize,
         market_index: usize,
+        payer: Option<&Keypair>,
     ) -> Pubkey {
         let open_orders_seeds: &[&[u8]] =
             &[&mango_account_pk.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
         let (open_orders_pk, _) =
             Pubkey::find_program_address(open_orders_seeds, &self.mango_program_id);
 
-        let create_spot_open_orders_instruction = create_spot_open_orders(
+        let owner_key = &self.users[user_index];
+        let owner_pk = owner_key.pubkey();
+        let mut instruction = create_spot_open_orders(
             &self.mango_program_id,
             mango_group_pk,
             mango_account_pk,
-            &mango_account.owner,
+            &owner_pk,
             &self.serum_program_id,
             &open_orders_pk,
             &mango_group.spot_markets[market_index].spot_market,
             &mango_group.signer_key,
+            &payer.map(|k| k.pubkey()).unwrap_or(owner_pk),
         )
         .unwrap();
 
-        let instructions = vec![create_spot_open_orders_instruction];
-        let user = Keypair::from_bytes(&self.users[user_index].to_bytes()).unwrap();
-        let signers = vec![&user];
+        // Allow testing the compatibility case with no payer
+        if payer.is_none() {
+            instruction.accounts.pop();
+            instruction.accounts[2].is_writable = true; // owner pays lamports
+        }
+
+        let instructions = vec![instruction];
+        let owner_key_c = Keypair::from_bytes(&owner_key.to_bytes()).unwrap();
+        let mut signers = vec![&owner_key_c];
+        if let Some(payer_key) = payer {
+            signers.push(payer_key);
+        }
         self.process_transaction(&instructions, Some(&signers)).await.unwrap();
         open_orders_pk
     }
@@ -1217,9 +1276,9 @@ impl MangoProgramTest {
                         &mango_group_pk,
                         &mango_group,
                         &mango_account_pk,
-                        &mango_account,
                         user_index,
                         x,
+                        None,
                     )
                     .await,
                 );
@@ -1305,9 +1364,9 @@ impl MangoProgramTest {
                         &mango_group_pk,
                         &mango_group,
                         &mango_account_pk,
-                        &mango_account,
                         user_index,
                         x,
+                        None,
                     )
                     .await,
                 );
