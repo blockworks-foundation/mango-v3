@@ -28,7 +28,7 @@ safe-transmute = "^0.11.1"
 mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
 mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
-switchboard-program = "^0.1.52"
+switchboard-program = "^0.2.0"
 anchor-lang = "0.20.1"
 
 [dev-dependencies]
