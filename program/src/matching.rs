@@ -1407,15 +1407,19 @@ impl<'a> Book<'a> {
         let mut bids_and_sizes = vec![];
         let mut cuml_bids = 0;
 
-        for bid in self.bids.iter() {
+        let mut iter = self.bids.iter();
+        let mut curr = iter.next();
+        while let Some(bid) = curr {
             match my_bids.last() {
                 None => break,
                 Some(&my_highest_bid) => {
                     if bid.key > my_highest_bid {
                         cuml_bids += bid.quantity;
+                        curr = iter.next();
                     } else if bid.key == my_highest_bid {
                         bids_and_sizes.push((bid.key, cuml_bids));
                         my_bids.pop();
+                        curr = iter.next();
                     } else {
                         cuml_bids += bid.quantity;
                         my_bids.pop();
@@ -1478,15 +1482,20 @@ impl<'a> Book<'a> {
         my_asks.sort_unstable_by(|a, b| b.cmp(a));
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
-        for ask in self.asks.iter() {
+
+        let mut iter = self.asks.iter();
+        let mut curr = iter.next();
+        while let Some(ask) = curr {
             match my_asks.last() {
                 None => break,
                 Some(&my_lowest_ask) => {
                     if ask.key < my_lowest_ask {
                         cuml_asks += ask.quantity;
+                        curr = iter.next();
                     } else if ask.key == my_lowest_ask {
                         asks_and_sizes.push((ask.key, cuml_asks));
                         my_asks.pop();
+                        curr = iter.next();
                     } else {
                         cuml_asks += ask.quantity;
                         my_asks.pop();
