@@ -42,9 +42,13 @@ pub enum NodeTag {
 #[repr(C)]
 pub struct InnerNode {
     pub tag: u32,
+    /// number of highest `key` bits that all children share
+    /// e.g. if it's 2, the two highest bits of `key` will be the same on all children
     pub prefix_len: u32,
+    /// only the top `prefix_len` bits of `key` are relevant
     pub key: i128,
-    pub children: [u32; 2],
+    /// indexes into `BookSide::nodes`
+    pub children: [NodeHandle; 2],
     pub padding: [u8; NODE_SIZE - 32],
 }
 
@@ -58,6 +62,9 @@ impl InnerNode {
             padding: [0; NODE_SIZE - 32],
         }
     }
+
+    /// Returns the handle of the child that may contain the search key
+    /// and 0 or 1 depending on which child it was.
     fn walk_down(&self, search_key: i128) -> (NodeHandle, bool) {
         let crit_bit_mask = 1i128 << (127 - self.prefix_len);
         let crit_bit = (search_key & crit_bit_mask) != 0;
@@ -82,7 +89,7 @@ pub struct LeafNode {
     // Either the best bid or best ask at the time the order was placed
     pub best_initial: i64,
 
-    // The time the order was place
+    // The time the order was placed
     pub timestamp: u64,
 }
 
@@ -127,7 +134,7 @@ impl LeafNode {
 #[repr(C)]
 struct FreeNode {
     tag: u32,
-    next: u32,
+    next: NodeHandle,
     padding: [u8; NODE_SIZE - 8],
 }
 
@@ -160,7 +167,7 @@ impl AnyNode {
         }
     }
 
-    fn children(&self) -> Option<[u32; 2]> {
+    fn children(&self) -> Option<[NodeHandle; 2]> {
         match self.case().unwrap() {
             NodeRef::Inner(&InnerNode { children, .. }) => Some(children),
             NodeRef::Leaf(_) => None,
@@ -238,6 +245,9 @@ pub enum Side {
 
 pub const MAX_BOOK_NODES: usize = 1024; // NOTE: this cannot be larger than u32::MAX
 
+/// A binary tree on AnyNode::key()
+///
+/// The key encodes the price in the top 64 bits.
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct BookSide {
@@ -245,8 +255,8 @@ pub struct BookSide {
 
     pub bump_index: usize,
     pub free_list_len: usize,
-    pub free_list_head: u32,
-    pub root_node: u32,
+    pub free_list_head: NodeHandle,
+    pub root_node: NodeHandle,
     pub leaf_count: usize,
     pub nodes: [AnyNode; MAX_BOOK_NODES],
 }
@@ -254,8 +264,9 @@ pub struct BookSide {
 pub struct BookSideIter<'a> {
     book_side: &'a BookSide,
     stack: Vec<&'a InnerNode>,
-    current: NodeHandle,
     next_leaf: Option<&'a LeafNode>,
+
+    /// either 0, 1 to iterate low-to-high, or 1, 0 to iterate high-to-low
     left: usize,
     right: usize,
 }
@@ -267,7 +278,7 @@ impl<'a> BookSideIter<'a> {
         let mut stack = vec![];
         let mut current = book_side.root_node;
         if book_side.leaf_count == 0 {
-            Self { book_side, stack, current, next_leaf: None, left, right }
+            Self { book_side, stack, next_leaf: None, left, right }
         } else {
             loop {
                 match book_side.get(current).unwrap().case().unwrap() {
@@ -276,14 +287,7 @@ impl<'a> BookSideIter<'a> {
                         current = inner.children[left];
                     }
                     NodeRef::Leaf(leaf) => {
-                        return Self {
-                            book_side,
-                            stack,
-                            current,
-                            next_leaf: Some(leaf),
-                            left,
-                            right,
-                        }
+                        return Self { book_side, stack, next_leaf: Some(leaf), left, right }
                     }
                 }
             }
@@ -296,29 +300,26 @@ impl<'a> Iterator for BookSideIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // if next leaf is None just return it
-        // else pop the stack and keep processing until next leaf
-
         if self.next_leaf.is_none() {
-            return self.next_leaf;
+            return None;
         }
 
-        // start popping from stack and processing
+        // start popping from stack and get the other child
         let current_leaf = self.next_leaf;
-        match self.stack.pop() {
+        let mut current = match self.stack.pop() {
             None => {
                 self.next_leaf = None;
                 return current_leaf;
             }
-            Some(inner) => {
-                self.current = inner.children[self.right];
-            }
-        }
+            Some(inner) => inner.children[self.right],
+        };
 
+        // go down the left branch as much as possible until reaching a leaf
         loop {
-            match self.book_side.get(self.current).unwrap().case().unwrap() {
+            match self.book_side.get(current).unwrap().case().unwrap() {
                 NodeRef::Inner(inner) => {
                     self.stack.push(inner);
-                    self.current = inner.children[self.left];
+                    current = inner.children[self.left];
                 }
                 NodeRef::Leaf(leaf) => {
                     self.next_leaf = Some(leaf);
@@ -330,9 +331,14 @@ impl<'a> Iterator for BookSideIter<'a> {
 }
 
 impl BookSide {
+    /// Iterate over all entries in the book
+    ///
+    /// smallest to highest for asks
+    /// highest to smallest for bids
     pub fn iter(&self) -> BookSideIter {
         BookSideIter::new(self)
     }
+
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -370,7 +376,7 @@ impl BookSide {
         Ok(state)
     }
 
-    fn get_mut(&mut self, key: u32) -> Option<&mut AnyNode> {
+    fn get_mut(&mut self, key: NodeHandle) -> Option<&mut AnyNode> {
         let node = &mut self.nodes[key as usize];
         let tag = NodeTag::try_from(node.tag);
         match tag {
@@ -378,7 +384,7 @@ impl BookSide {
             _ => None,
         }
     }
-    fn get(&self, key: u32) -> Option<&AnyNode> {
+    fn get(&self, key: NodeHandle) -> Option<&AnyNode> {
         let node = &self.nodes[key as usize];
         let tag = NodeTag::try_from(node.tag);
         match tag {
@@ -483,6 +489,7 @@ impl BookSide {
     }
 
     fn remove_by_key(&mut self, search_key: i128) -> Option<LeafNode> {
+        // special case potentially removing the root
         let mut parent_h = self.root()?;
         let (mut child_h, mut crit_bit) = match self.get(parent_h).unwrap().case().unwrap() {
             NodeRef::Leaf(&leaf) if leaf.key == search_key => {
@@ -495,6 +502,8 @@ impl BookSide {
             NodeRef::Leaf(_) => return None,
             NodeRef::Inner(inner) => inner.walk_down(search_key),
         };
+
+        // walk down the tree until finding the key
         loop {
             match self.get(child_h).unwrap().case().unwrap() {
                 NodeRef::Inner(inner) => {
@@ -507,11 +516,11 @@ impl BookSide {
                     if leaf.key != search_key {
                         return None;
                     }
-
                     break;
                 }
             }
         }
+
         // replace parent with its remaining child node
         // free child_h, replace *parent_h with *other_child_h, free other_child_h
         let other_child_h = self.get(parent_h).unwrap().children().unwrap()[!crit_bit as usize];
@@ -521,7 +530,7 @@ impl BookSide {
         Some(cast(self.remove(child_h).unwrap()))
     }
 
-    fn remove(&mut self, key: u32) -> Option<AnyNode> {
+    fn remove(&mut self, key: NodeHandle) -> Option<AnyNode> {
         let val = *self.get(key)?;
 
         self.nodes[key as usize] = cast(FreeNode {
@@ -539,7 +548,7 @@ impl BookSide {
         Some(val)
     }
 
-    fn insert(&mut self, val: &AnyNode) -> MangoResult<u32> {
+    fn insert(&mut self, val: &AnyNode) -> MangoResult<NodeHandle> {
         match NodeTag::try_from(val.tag) {
             Ok(NodeTag::InnerNode) | Ok(NodeTag::LeafNode) => (),
             _ => unreachable!(),
@@ -577,6 +586,7 @@ impl BookSide {
         &mut self,
         new_leaf: &LeafNode,
     ) -> MangoResult<(NodeHandle, Option<LeafNode>)> {
+        // deal with inserts into an empty tree
         let mut root: NodeHandle = match self.root() {
             Some(h) => h,
             None => {
@@ -587,6 +597,7 @@ impl BookSide {
                 return Ok((handle, None));
             }
         };
+
         loop {
             // check if the new node will be a child of the root
             let root_contents = *self.get(root).unwrap();
@@ -598,6 +609,7 @@ impl BookSide {
                     *self.get_mut(root).unwrap() = *new_leaf.as_ref();
                     return Ok((root, Some(old_root_as_leaf)));
                 }
+                // InnerNodes have a random child's key, so matching can happen and is fine
             }
             let shared_prefix_len: u32 = (root_key ^ new_leaf.key).leading_zeros();
             match root_contents.case() {
@@ -612,6 +624,7 @@ impl BookSide {
                 _ => (),
             };
             // implies root is a Leaf or Inner where shared_prefix_len < prefix_len
+            // we'll replace root with a new InnerNode that has new_leaf and root as children
 
             // change the root in place to represent the LCA of [new_leaf] and [root]
             let crit_bit_mask: i128 = 1i128 << (127 - shared_prefix_len);
