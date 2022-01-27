@@ -836,12 +836,13 @@ pub enum MangoInstruction {
 
     /// Create a PDA mango account for a user
     ///
-    /// Accounts expected by this instruction (4):
+    /// Accounts expected by this instruction (5):
     ///
     /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account data
     /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
     /// 3. `[]` system_prog_ai - System program
+    /// 4. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateMangoAccount {
         account_num: u64,
     },
@@ -912,7 +913,7 @@ pub enum MangoInstruction {
 
     /// Create an OpenOrders PDA and initialize it with InitOpenOrders call to serum dex
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (9):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - MangoAccount
@@ -922,6 +923,7 @@ pub enum MangoInstruction {
     /// 5. `[]` spot_market_ai - dex MarketState account
     /// 6. `[]` signer_ai - Group Signer Account
     /// 7. `[]` system_prog_ai - System program
+    /// 8. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateSpotOpenOrders, // instruction 60
 }
 
@@ -1539,13 +1541,15 @@ pub fn create_mango_account(
     mango_account_pk: &Pubkey,
     owner_pk: &Pubkey,
     system_prog_pk: &Pubkey,
+    payer_pk: &Pubkey,
     account_num: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
-        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*owner_pk, true),
         AccountMeta::new_readonly(*system_prog_pk, false),
+        AccountMeta::new(*payer_pk, true),
     ];
 
     let instr = MangoInstruction::CreateMangoAccount { account_num };
@@ -2221,16 +2225,18 @@ pub fn create_spot_open_orders(
     open_orders_pk: &Pubkey,
     spot_market_pk: &Pubkey,
     signer_pk: &Pubkey,
+    payer_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
-        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*owner_pk, true),
         AccountMeta::new_readonly(*dex_prog_pk, false),
         AccountMeta::new(*open_orders_pk, false),
         AccountMeta::new_readonly(*spot_market_pk, false),
         AccountMeta::new_readonly(*signer_pk, false),
         AccountMeta::new_readonly(solana_program::system_program::ID, false),
+        AccountMeta::new(*payer_pk, true),
     ];
 
     let instr = MangoInstruction::CreateSpotOpenOrders;

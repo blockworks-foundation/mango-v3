@@ -736,7 +736,7 @@ impl Processor {
             event_queue_ai, // write
             bids_ai,        // write
             asks_ai,        // write
-            mngo_mint_ai,   // read 
+            mngo_mint_ai,   // read
             mngo_vault_ai,  // write
             admin_ai,       // signer (write if admin has SOL and no data)
             signer_ai,      // write  (if admin has data and is owned by governance)
@@ -1420,17 +1420,22 @@ impl Processor {
     /// Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
     fn create_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 8;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let fixed_accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
-            owner_ai,               // read
+            owner_ai,               // read (write if no payer passed) & signer
             dex_prog_ai,            // read
             open_orders_ai,         // write
             spot_market_ai,         // read
             signer_ai,              // read
             system_prog_ai,         // read
-        ] = accounts;
+        ] = fixed_accounts;
+        let payer_ai = if accounts.len() > NUM_FIXED {
+            &accounts[NUM_FIXED] // write & signer
+        } else {
+            owner_ai
+        };
         check!(
             system_prog_ai.key == &solana_program::system_program::id(),
             MangoErrorCode::InvalidProgramId
@@ -1451,13 +1456,14 @@ impl Processor {
             MangoErrorCode::InvalidOwner
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(payer_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let open_orders_seeds: &[&[u8]] =
             &[&mango_account_ai.key.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
         seed_and_create_pda(
             program_id,
-            owner_ai,
+            payer_ai,
             &Rent::get()?,
             size_of::<serum_dex::state::OpenOrders>() + 12,
             dex_prog_ai.key,
@@ -5227,18 +5233,24 @@ impl Processor {
         account_num: u64,
     ) -> MangoResult {
         const NUM_FIXED: usize = 4;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let fixed_accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // write
             mango_account_ai,       // write
-            owner_ai,               // write & signer
+            owner_ai,               // read (write if no payer passed) & signer
             system_prog_ai,         // read
-        ] = accounts;
+        ] = fixed_accounts;
+        let payer_ai = if accounts.len() > NUM_FIXED {
+            &accounts[NUM_FIXED] // write & signer
+        } else {
+            owner_ai
+        };
         check!(
             system_prog_ai.key == &solana_program::system_program::id(),
             MangoErrorCode::InvalidProgramId
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(payer_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check!(
@@ -5249,10 +5261,9 @@ impl Processor {
 
         let mango_account_seeds: &[&[u8]] =
             &[&mango_group_ai.key.as_ref(), &owner_ai.key.as_ref(), &account_num.to_le_bytes()];
-        // TODO - test passing in MangoAccount that already has some data in it
         seed_and_create_pda(
             program_id,
-            owner_ai,
+            payer_ai,
             &rent,
             size_of::<MangoAccount>(),
             program_id,
