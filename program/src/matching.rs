@@ -1421,8 +1421,8 @@ impl<'a> Book<'a> {
                         my_bids.pop();
                         curr = iter.next();
                     } else {
-                        // my_lowest_bid is not on the book:
-                        // check the next my_bid against bid
+                        // my_highest_bid is not on the book; it must be on EventQueue waiting to be processed
+                        // check the next my_highest_bid against bid
                         my_bids.pop();
                     }
 
@@ -1460,7 +1460,6 @@ impl<'a> Book<'a> {
                     canceled_order_ids.push(key);
                 }
                 Err(_) => {
-                    // Invalid state because we know it's on the book
                     msg!("Failed to cancel bid oid: {}; Either error state or bid is on EventQueue unprocessed", key)
                 }
             }
@@ -1498,8 +1497,8 @@ impl<'a> Book<'a> {
                         my_asks.pop();
                         curr = iter.next();
                     } else {
-                        // my_lowest_ask is not on the book:
-                        // check the next my_ask against ask
+                        // my_lowest_ask is not on the book; it must be on EventQueue waiting to be processed
+                        // check the next my_lowest_ask against ask
                         my_asks.pop();
                     }
                     if cuml_asks >= max_depth {
@@ -1535,7 +1534,6 @@ impl<'a> Book<'a> {
                     canceled_order_ids.push(key);
                 }
                 Err(_) => {
-                    // Invalid state because we know it's on the book
                     msg!("Failed to cancel ask oid: {}; Either error state or ask is on EventQueue unprocessed", key);
                 }
             }
