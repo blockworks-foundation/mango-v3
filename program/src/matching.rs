@@ -1421,7 +1421,8 @@ impl<'a> Book<'a> {
                         my_bids.pop();
                         curr = iter.next();
                     } else {
-                        cuml_bids += bid.quantity;
+                        // my_lowest_bid is not on the book:
+                        // check the next my_bid against bid
                         my_bids.pop();
                     }
 
@@ -1497,7 +1498,8 @@ impl<'a> Book<'a> {
                         my_asks.pop();
                         curr = iter.next();
                     } else {
-                        cuml_asks += ask.quantity;
+                        // my_lowest_ask is not on the book:
+                        // check the next my_ask against ask
                         my_asks.pop();
                     }
                     if cuml_asks >= max_depth {
