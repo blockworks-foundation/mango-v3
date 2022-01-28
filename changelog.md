@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.3.2
-Deployed: | Slot: 
+Deployed: Jan 28, 2022 at 17:06:13 | Slot: 118,253,990
 1. Fix the bug in cancel_all where some orders weren't canceled
 2. Add optional payer account to CreateMangoAccount and CreateSpotOpenOrders for better composability
 3. Clean up iteration code and add better documentation
