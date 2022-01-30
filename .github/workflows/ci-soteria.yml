@@ -15,4 +15,4 @@ jobs:
 
       - name: Soteria Scan
         uses: silas-x/soteria-action@v0.2
-        # continue-on-error: true
+        continue-on-error: true
