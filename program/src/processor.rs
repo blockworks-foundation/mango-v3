@@ -36,7 +36,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
-use crate::matching::{Book, BookSide, OrderType, Side};
+use crate::matching::{Book, BookSide, Order, OrderType, Side};
 #[cfg(not(feature = "devnet"))]
 use crate::oracle::PriceStatus;
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
@@ -2465,6 +2465,167 @@ impl Processor {
             market_index,
             side,
             price,
+            quantity,
+            order_type,
+            client_order_id,
+            now_ts,
+        )?;
+
+        health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+        check!(
+            post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
+    }
+
+    #[inline(never)]
+    fn place_perp_order_v2(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,
+        // Up to this limit price for OrderType IoC and Market. Regular price for others.
+        limit_price: i64,
+        // Up to the desired quantity for OrderType IoC and Market. Regular quantity for others
+        max_base_quantity: i64,
+        // Up to the max quote spent for OrderType IoC and Market. Regular quantity for others
+        max_quote_quantity: i64,
+        client_order_id: u64,
+        order_type: OrderType,
+        reduce_only: bool,
+    ) -> MangoResult<()> {
+        check!(limit_price > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_base_quantity > 0 || max_quote_quantity > 0, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            mango_cache_ai,     // read
+            perp_market_ai,     // write
+            bids_ai,            // write
+            asks_ai,            // write
+            event_queue_ai,     // write
+        ] = fixed_ais;
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+
+        let open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &mango_account,
+            vec![(AssetType::Perp, market_index)],
+        );
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            &open_orders_ais,
+        )?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let health_up_only = pre_health < ZERO_I80F48;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+
+        let order = match order_type {
+            OrderType::Limit | OrderType::PostOnly | OrderType::PostOnlySlide => {
+                MangoResult::Ok(Some(Order {
+                    quantity: max_base_quantity,
+                    price: limit_price,
+                    size: 0,
+                    side,
+                }))
+            }
+            OrderType::ImmediateOrCancel | OrderType::Market => {
+                // Goes through the order book and find the price of quantity for the order
+                let depth_limit = 10;
+                if max_base_quantity > 0 {
+                    book.get_best_order_for_base_quantity(side, max_base_quantity, depth_limit);
+                }
+                if max_quote_quantity > 0 {
+                    book.get_best_order_for_quote_amount(side, max_quote_quantity, depth_limit);
+                }
+                MangoResult::Ok(None)
+            }
+        }?
+        .ok_or(throw_err!(MangoErrorCode::OrderFulfillment))?;
+
+        // If ImmediateOrCancel the order must be fully fillable
+        if order_type == OrderType::ImmediateOrCancel {
+            check!(order.quantity == max_base_quantity, MangoErrorCode::PartiallyFilled);
+        }
+
+        // If reduce_only, position must only go down
+        let quantity = if reduce_only {
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
+
+            if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
+                0
+            } else {
+                base_pos.abs().min(order.quantity)
+            }
+        } else {
+            order.quantity
+        };
+
+        if order.quantity == 0 {
+            return Ok(());
+        }
+
+        book.new_order(
+            &mut event_queue,
+            &mut perp_market,
+            &mango_group.perp_markets[market_index],
+            mango_cache.get_price(market_index),
+            &mut mango_account,
+            mango_account_ai.key,
+            market_index,
+            side,
+            order.price,
             quantity,
             order_type,
             client_order_id,
@@ -6046,6 +6207,28 @@ impl Processor {
             MangoInstruction::CreateSpotOpenOrders => {
                 msg!("Mango: CreateSpotOpenOrders");
                 Self::create_spot_open_orders(program_id, accounts)
+            }
+            MangoInstruction::PlacePerpOrderV2 {
+                side,
+                limit_price,
+                max_base_quantity,
+                max_quote_quantity,
+                client_order_id,
+                order_type,
+                reduce_only,
+            } => {
+                msg!("Mango: PlacePerpOrderV2 client_order_id={}", client_order_id);
+                Self::place_perp_order_v2(
+                    program_id,
+                    accounts,
+                    side,
+                    limit_price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    client_order_id,
+                    order_type,
+                    reduce_only,
+                )
             }
         }
     }

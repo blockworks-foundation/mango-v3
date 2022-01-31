@@ -124,7 +124,12 @@ pub enum MangoErrorCode {
     #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
     MaxAccountsReached,
 
-    #[error("MangoErrorCode::Default Check the source code for more info")] // 40
+    #[error("MangoErrorCode::OrderFulfillment Order could'nt be fulfilled")] // 40
+    OrderFulfillment,
+    #[error("MangoErrorCode::PartiallyFilled The IoC order couldn't be fully filled")]
+    PartiallyFilled,
+
+    #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }
 

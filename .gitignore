@@ -4,3 +4,5 @@ mango-macro/target
 target
 
 .idea
+.cspell/custom-dictionary-workspace.txt
+.vscode/settings.json

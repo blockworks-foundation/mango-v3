@@ -237,6 +237,31 @@ pub enum MangoInstruction {
         reduce_only: bool,
     },
 
+    /// Place an order on a perp market Improved over PlacePerpOrder
+    /// by reducing the tx size, and using max base/quote.
+    /// 
+    /// For OrderTypes Limit, PostOnly, PostOnlySlide the 
+    /// `max_base_quantity` will simply be `quantity`, and the 
+    /// `limit_price` be `price`.
+    /// 
+    /// The max parameters are useful when using instantaneous
+    /// OrderTypes (IoC or Market).
+    /// Goal is to allow orders with thresholds, without knowing
+    /// the quantity nor price in advance. 
+    /// It will check wether it fits within the provided `limit_price`,
+    /// It will optionally checks wether it's fully filled for IoC.
+    PlacePerpOrderV2 {
+        limit_price: i64,
+        max_base_quantity: i64,
+        max_quote_quantity: i64,
+        client_order_id: u64,
+        side: Side,
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
+        order_type: OrderType,
+        /// Optional to be backward compatible; default false
+        reduce_only: bool,
+    },
+
     CancelPerpOrderByClientId {
         client_order_id: u64,
         invalid_id_ok: bool,
@@ -1752,6 +1777,52 @@ pub fn place_perp_order(
         side,
         price,
         quantity,
+        client_order_id,
+        order_type,
+        reduce_only,
+    };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn place_perp_order_v2(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    open_orders_pks: &[Pubkey; MAX_PAIRS],
+    side: Side,
+    // !! Seems that NewOrderInstructionV3 does what I'm doing, maybe could leverage that instead 
+    limit_price: i64,
+    max_base_quantity: i64,
+    max_quote_quantity: i64,
+    client_order_id: u64,
+    order_type: OrderType,
+    reduce_only: bool,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+    ];
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::PlacePerpOrderV2 {
+        side,
+        limit_price,
+        max_base_quantity,
+        max_quote_quantity,
         client_order_id,
         order_type,
         reduce_only,

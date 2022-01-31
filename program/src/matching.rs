@@ -271,6 +271,16 @@ pub struct BookSideIter<'a> {
     right: usize,
 }
 
+pub struct Order {
+    // The quantity, in base_lot
+    pub quantity: i64,
+    // Marginal Price, the price to place the order at, in quote (per base_lot)
+    pub price: i64,
+    // The resulting total amount that will be spent, in quote_lot (without fees)
+    pub size: i64,
+    pub side: Side,
+}
+
 impl<'a> BookSideIter<'a> {
     pub fn new(book_side: &'a BookSide) -> Self {
         let (left, right) =
@@ -754,6 +764,133 @@ impl<'a> Book<'a> {
         }
         s.min(max_depth)
     }
+
+    /// Walk through the book and find the best quantity and price to spend up to  given amount of quote.
+    pub fn get_best_order_for_quote_amount(
+        &self,
+        side: Side,
+        quote_amount_to_spend: i64, // in lots
+        limit: u8,
+    ) -> MangoResult<Option<Order>> {
+        let book_side = match side {
+            Side::Bid => self.bids.iter(),
+            Side::Ask => self.asks.iter(),
+        };
+        let mut cmlv_quantity: i64 = 0;
+        let mut execution_price = 0; // Will update at each step, depending of how far it needs to go
+        let mut quote_left_to_spend = quote_amount_to_spend; // in lots
+        let mut order_book_depth_limit = 0;
+
+        for order in book_side {
+            // This order total value in quote lots
+            let order_size = order.quantity.checked_mul(order.price()).ok_or(math_err!())?;
+            // How much base_lot we can fill for this order size
+            let quantity_matched = {
+                if quote_left_to_spend < order_size {
+                    // we can finish the operation by purchasing this order partially
+                    // find out how much quantity that is in base lots
+                    quote_left_to_spend.checked_div(order.price()).ok_or(math_err!())?
+                } else {
+                    // we eat this order
+                    order.quantity
+                }
+            };
+            // How much quote_lot were spent
+            let spent = quantity_matched.checked_mul(order.price()).ok_or(math_err!())?;
+            if spent > 0 {
+                // Current best execution price in quote_lot
+                execution_price = order.price();
+            }
+            //
+            cmlv_quantity = cmlv_quantity.checked_add(quantity_matched).ok_or(math_err!())?;
+            quote_left_to_spend = quote_left_to_spend.checked_sub(spent).ok_or(math_err!())?;
+
+            order_book_depth_limit += 1;
+
+            // when the amount left to spend is inferior to the price of a base lot, or if we are fully filled
+            if quote_left_to_spend == 0 || spent == 0 || order_book_depth_limit == limit {
+                // success
+                let quote_spent = quote_amount_to_spend // in lots
+                    .checked_sub(quote_left_to_spend)
+                    .ok_or(math_err!())?;
+                // Side is the matched side, invert for order side
+                let order_side = match side {
+                    Side::Bid => Side::Ask,
+                    Side::Ask => Side::Bid,
+                };
+                return Ok(Some(Order {
+                    quantity: cmlv_quantity,
+                    price: execution_price,
+                    size: quote_spent,
+                    side: order_side,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Walk through the book and find the price and total amount spent to order a given quantity of base_lot.
+    pub fn get_best_order_for_base_quantity(
+        &self,
+        side: Side,
+        base_quantity_to_order: i64, // in lots
+        limit: u8,                   // should set default value depending of computing used
+    ) -> MangoResult<Option<Order>> {
+        let book_side = match side {
+            Side::Bid => self.bids.iter(),
+            Side::Ask => self.asks.iter(),
+        };
+        let mut cmlv_quote_amount_spent: i64 = 0; // in lots
+        let mut execution_price = 0; // Will update at each step, depending of how far it needs to go
+        let mut base_quantity_left_to_order = base_quantity_to_order; // in lots
+        let mut order_book_depth_limit = 0;
+
+        for order in book_side {
+            // This current order size
+            let order_size = order.quantity;
+            // What's the value of this purchase in quote_lot
+            let spent = {
+                if base_quantity_left_to_order < order_size {
+                    // we can finish the operation by purchasing this order partially
+                    // find out how much we spend by doing so
+                    let spent = base_quantity_left_to_order
+                        .checked_mul(order.price())
+                        .ok_or(math_err!())?;
+                    base_quantity_left_to_order = 0;
+                    spent
+                } else {
+                    // we eat this order
+                    let spent = order_size.checked_mul(order.price()).ok_or(math_err!())?;
+                    base_quantity_left_to_order =
+                        base_quantity_left_to_order.checked_sub(order_size).ok_or(math_err!())?;
+                    spent
+                }
+            };
+            if spent > 0 {
+                // Update the current execution price
+                execution_price = order.price();
+                // Update how much we spent so far
+                cmlv_quote_amount_spent =
+                    cmlv_quote_amount_spent.checked_add(spent).ok_or(math_err!())?;
+            }
+            order_book_depth_limit += 1;
+            // Check if we need to go deeper in the book or if we'r done
+            if base_quantity_left_to_order == 0 || spent == 0 || order_book_depth_limit == limit {
+                // success - possibly partial
+                let base_quantity = base_quantity_to_order // in lots
+                    .checked_sub(base_quantity_left_to_order)
+                    .ok_or(math_err!())?;
+                return Ok(Some(Order {
+                    quantity: base_quantity,
+                    price: execution_price,
+                    size: cmlv_quote_amount_spent,
+                    side,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
     #[inline(never)]
     pub fn new_order(
         &mut self,
