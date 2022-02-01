@@ -1,5 +1,4 @@
 name: Soteria Scan
-
 on:
   push:
     branches: [main, v*.*]
