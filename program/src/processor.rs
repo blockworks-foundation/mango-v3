@@ -27,9 +27,9 @@ use mango_common::Loadable;
 use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, CancelAllPerpOrdersLog,
     DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog,
-    MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog,
-    SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog,
-    WithdrawLog, PerpBalanceLog
+    MngoAccrualLog, OpenOrdersBalanceLog, PerpBalanceLog, PerpBankruptcyLog, RedeemMngoLog,
+    SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog,
+    UpdateRootBankLog, WithdrawLog,
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
@@ -46,9 +46,9 @@ use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
-    MangoCache, MangoGroup, MetaData, NodeBank, PerpAccount, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
+    MangoCache, MangoGroup, MetaData, NodeBank, PerpAccount, PerpMarket, PerpMarketCache,
+    PerpMarketInfo, PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
+    TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
     NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
@@ -2834,14 +2834,14 @@ impl Processor {
             *mango_account_a_ai.key,
             market_index as u64,
             &mango_account_a.perp_accounts[market_index],
-            perp_market_cache
+            perp_market_cache,
         );
         emit_perp_balances(
             *mango_group_ai.key,
             *mango_account_b_ai.key,
             market_index as u64,
             &mango_account_b.perp_accounts[market_index],
-            perp_market_cache
+            perp_market_cache,
         );
 
         Ok(())
@@ -2946,7 +2946,7 @@ impl Processor {
             *mango_account_ai.key,
             market_index as u64,
             &mango_account.perp_accounts[market_index],
-            perp_market_cache
+            perp_market_cache,
         );
 
         Ok(())
@@ -3725,14 +3725,14 @@ impl Processor {
             *liqee_mango_account_ai.key,
             perp_market_index as u64,
             &liqee_ma.perp_accounts[perp_market_index],
-            &mango_cache.perp_market_cache[perp_market_index]
+            &mango_cache.perp_market_cache[perp_market_index],
         );
         emit_perp_balances(
             *mango_group_ai.key,
             *liqor_mango_account_ai.key,
             perp_market_index as u64,
             &liqor_ma.perp_accounts[perp_market_index],
-            &mango_cache.perp_market_cache[perp_market_index]
+            &mango_cache.perp_market_cache[perp_market_index],
         );
 
         Ok(())
@@ -3945,14 +3945,14 @@ impl Processor {
             *liqee_mango_account_ai.key,
             market_index as u64,
             &liqee_ma.perp_accounts[market_index],
-            &mango_cache.perp_market_cache[market_index]
+            &mango_cache.perp_market_cache[market_index],
         );
         emit_perp_balances(
             *mango_group_ai.key,
             *liqor_mango_account_ai.key,
             market_index as u64,
             &liqor_ma.perp_accounts[market_index],
-            &mango_cache.perp_market_cache[market_index]
+            &mango_cache.perp_market_cache[market_index],
         );
 
         Ok(())
@@ -4125,14 +4125,14 @@ impl Processor {
             *liqee_mango_account_ai.key,
             liab_index as u64,
             &liqee_ma.perp_accounts[liab_index],
-            &mango_cache.perp_market_cache[liab_index]
+            &mango_cache.perp_market_cache[liab_index],
         );
         emit_perp_balances(
             *mango_group_ai.key,
             *liqor_mango_account_ai.key,
             liab_index as u64,
             &liqor_ma.perp_accounts[liab_index],
-            &mango_cache.perp_market_cache[liab_index]
+            &mango_cache.perp_market_cache[liab_index],
         );
 
         Ok(())
@@ -4488,7 +4488,7 @@ impl Processor {
                             fill.maker,
                             market_index as u64,
                             &ma.perp_accounts[market_index],
-                            &mango_cache.perp_market_cache[market_index]
+                            &mango_cache.perp_market_cache[market_index],
                         );
                     } else {
                         let mut maker =
@@ -4542,14 +4542,14 @@ impl Processor {
                             fill.maker,
                             market_index as u64,
                             &maker.perp_accounts[market_index],
-                            &mango_cache.perp_market_cache[market_index]
+                            &mango_cache.perp_market_cache[market_index],
                         );
                         emit_perp_balances(
                             *mango_group_ai.key,
                             fill.taker,
                             market_index as u64,
                             &taker.perp_accounts[market_index],
-                            &mango_cache.perp_market_cache[market_index]
+                            &mango_cache.perp_market_cache[market_index],
                         );
                     }
                     mango_emit!(fill.to_fill_log(*mango_group_ai.key, market_index));
@@ -6896,9 +6896,8 @@ pub fn emit_perp_balances(
     mango_account: Pubkey,
     market_index: u64,
     pa: &PerpAccount,
-    perp_market_cache: &PerpMarketCache
+    perp_market_cache: &PerpMarketCache,
 ) {
-
     mango_emit!(PerpBalanceLog {
         mango_group: mango_group,
         mango_account: mango_account,
