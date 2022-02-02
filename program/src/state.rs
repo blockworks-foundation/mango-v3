@@ -898,6 +898,69 @@ impl HealthCache {
         }
     }
 
+    #[cfg(feature = "client")]
+    pub fn get_health_components(
+        &mut self,
+        mango_group: &MangoGroup,
+        health_type: HealthType,
+    ) -> (I80F48, I80F48) {
+        let (mut assets, mut liabilities) = if self.quote.is_negative() {
+            (ZERO_I80F48, -self.quote)
+        } else {
+            (self.quote, ZERO_I80F48)
+        };
+        for i in 0..mango_group.num_oracles {
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+
+            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
+                match health_type {
+                    HealthType::Maint => (
+                        spot_market_info.maint_asset_weight,
+                        spot_market_info.maint_liab_weight,
+                        perp_market_info.maint_asset_weight,
+                        perp_market_info.maint_liab_weight,
+                    ),
+                    HealthType::Init => (
+                        spot_market_info.init_asset_weight,
+                        spot_market_info.init_liab_weight,
+                        perp_market_info.init_asset_weight,
+                        perp_market_info.init_liab_weight,
+                    ),
+                };
+
+            if self.active_assets.spot[i] {
+                let (base, quote) = self.spot[i];
+                if quote.is_negative() {
+                    liabilities -= quote;
+                } else {
+                    assets += quote;
+                }
+                if base.is_negative() {
+                    liabilities -= base * spot_liab_weight;
+                } else {
+                    assets += base * spot_asset_weight;
+                }
+            }
+
+            if self.active_assets.perps[i] {
+                let (base, quote) = self.perp[i];
+                if quote.is_negative() {
+                    liabilities -= quote;
+                } else {
+                    assets += quote;
+                }
+                if base.is_negative() {
+                    liabilities -= base * perp_liab_weight;
+                } else {
+                    assets += base * perp_asset_weight;
+                }
+            }
+        }
+
+        (assets, liabilities)
+    }
+
     pub fn update_quote(&mut self, mango_cache: &MangoCache, mango_account: &MangoAccount) {
         let quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..NUM_HEALTHS {
