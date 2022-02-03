@@ -33,8 +33,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::msrm_token;
-use crate::ids::srm_token;
+use crate::ids::{mngo_token, msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 #[cfg(not(feature = "devnet"))]
@@ -50,7 +49,8 @@ use crate::state::{
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
     TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, REF_FEE_SHARE, REF_FEE_SURCHARGE, REF_MNGO_REQ,
+    ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -2367,13 +2367,12 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 8;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let (fixed_ais, var_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write
@@ -2384,6 +2383,14 @@ impl Processor {
             asks_ai,            // write
             event_queue_ai,     // write
         ] = fixed_ais;
+
+        let (referrer_mango_account_ai, open_orders_ais) = if var_ais.len() > MAX_PAIRS {
+            let (referrer_mango_account_ai, open_orders_ais) = var_ais.split_first().unwrap();
+            (Some(referrer_mango_account_ai), array_ref![open_orders_ais, 0, MAX_PAIRS])
+        } else {
+            (None, array_ref![var_ais, 0, MAX_PAIRS])
+        };
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         let mut mango_account =
@@ -2455,6 +2462,7 @@ impl Processor {
             return Ok(());
         }
 
+        let pre_taker_quote = mango_account.perp_accounts[market_index].taker_quote;
         book.new_order(
             &mut event_queue,
             &mut perp_market,
@@ -2470,6 +2478,56 @@ impl Processor {
             client_order_id,
             now_ts,
         )?;
+        let taker_quote_change = (mango_account.perp_accounts[market_index]
+            .taker_quote
+            .checked_sub(pre_taker_quote)
+            .unwrap())
+        .abs();
+        let mngo_index = mango_group.find_token_index(&mngo_token::id()).ok_or(throw!())?;
+        let mngo_deposits = mango_account
+            .get_native_deposit(&mango_cache.root_bank_cache[mngo_index], mngo_index)?;
+
+        if taker_quote_change > 0 && mngo_deposits < REF_MNGO_REQ {
+            let taker_quote_native = I80F48::from_num(
+                perp_market.quote_lot_size.checked_mul(taker_quote_change).unwrap(),
+            );
+
+            // since user doesn't have enough MNGO look at referrer
+            if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
+                let mut referrer_mango_account = MangoAccount::load_mut_checked(
+                    referrer_mango_account_ai,
+                    program_id,
+                    mango_group_ai.key,
+                )?;
+                let referrer_mngo_deposits = referrer_mango_account
+                    .get_native_deposit(&mango_cache.root_bank_cache[mngo_index], mngo_index)?;
+
+                // TODO - update the advanced orders execution as well
+                // TODO - talk to composers about quote change
+                if referrer_mango_account.is_bankrupt
+                    || referrer_mango_account.being_liquidated
+                    || referrer_mngo_deposits < REF_MNGO_REQ
+                {
+                    // user pays full 1 bp fee
+                    let ref_fees = taker_quote_native * REF_FEE_SURCHARGE;
+                    mango_account.perp_accounts[market_index].quote_position -= ref_fees;
+                    perp_market.fees_accrued += ref_fees;
+                    // TODO - log?
+                } else {
+                    let ref_fees = taker_quote_native * REF_FEE_SHARE;
+                    mango_account.perp_accounts[market_index].transfer_quote_position(
+                        &mut referrer_mango_account.perp_accounts[market_index],
+                        ref_fees,
+                    );
+                    // TODO - log this
+                }
+            } else {
+                // user pays full 1 bp fee
+                let ref_fees = taker_quote_native * REF_FEE_SURCHARGE;
+                mango_account.perp_accounts[market_index].quote_position -= ref_fees;
+                perp_market.fees_accrued += ref_fees;
+            }
+        }
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);

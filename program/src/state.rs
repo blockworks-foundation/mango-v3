@@ -46,7 +46,9 @@ pub const FREE_ORDER_SLOT: u8 = u8::MAX;
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
-
+pub const REF_MNGO_REQ: I80F48 = I80F48!(10_000_000_000); // 10,000 MNGO
+pub const REF_FEE_SHARE: I80F48 = I80F48!(0.00008); // 0.8 bps
+pub const REF_FEE_SURCHARGE: I80F48 = I80F48!(0.0001); // 1 bp if no referrer and no 10k MNGO
 declare_check_assert_macros!(SourceFileId::State);
 
 // NOTE: I80F48 multiplication ops are very expensive. Avoid when possible
@@ -246,6 +248,9 @@ impl MangoGroup {
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
         // TODO profile and optimize
         self.tokens.iter().position(|token_info| &token_info.root_bank == root_bank_pk)
+    }
+    pub fn find_token_index(&self, mint_pk: &Pubkey) -> Option<usize> {
+        self.tokens.iter().position(|token_info| &token_info.mint == mint_pk)
     }
     pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
         self.spot_markets
