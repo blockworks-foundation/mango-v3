@@ -46,8 +46,9 @@ pub const FREE_ORDER_SLOT: u8 = u8::MAX;
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
-pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
-
+pub const REF_MNGO_REQ: I80F48 = I80F48!(10_000_000_000); // 10,000 MNGO
+pub const REF_FEE_SHARE: I80F48 = I80F48!(0.00008); // 0.8 bps
+pub const REF_FEE_SURCHARGE: I80F48 = I80F48!(0.0001); // 1 bp if no referrer and no 10k MNGO
 declare_check_assert_macros!(SourceFileId::State);
 
 // NOTE: I80F48 multiplication ops are very expensive. Avoid when possible
@@ -204,10 +205,7 @@ pub struct MangoGroup {
     pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
     pub num_mango_accounts: u32, // number of MangoAccounts.v1
 
-    pub ref_surcharge_centibps: u32, // 100
-    pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
-    pub ref_mngo_required: u64,
-    pub padding: [u8; 8], // padding used for future expansions
+    pub padding: [u8; 24], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -2422,31 +2420,5 @@ impl AdvancedOrders {
         )?;
         check!(&mango_account.advanced_orders_key == account.key, MangoErrorCode::InvalidAccount)?;
         Ok(state)
-    }
-}
-
-/// *** Store the referrer's mango account
-#[derive(Copy, Clone, Pod, Loadable)]
-#[repr(C)]
-pub struct ReferrerMemory {
-    pub referrer_mango_account: Pubkey,
-}
-
-impl ReferrerMemory {
-    pub fn load_mut_checked<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-    ) -> MangoResult<RefMut<'a, Self>> {
-        // not really necessary because this is a PDA
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        Ok(Self::load_mut(account)?)
-    }
-    pub fn load_checked<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-    ) -> MangoResult<Ref<'a, Self>> {
-        // not really necessary because this is a PDA
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        Ok(Self::load(account)?)
     }
 }
