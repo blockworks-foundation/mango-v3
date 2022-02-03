@@ -4720,6 +4720,14 @@ impl Processor {
             redeemed_mngo: mngo,
         });
 
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_ai.key,
+            market_index as u64,
+            &mango_account.perp_accounts[market_index],
+            &mango_cache.perp_market_cache[market_index],
+        );
+
         Ok(())
     }
 
