@@ -937,21 +937,6 @@ pub enum MangoInstruction {
         ref_share_centibps: u32,
         ref_mngo_required: u64,
     },
-    /// Store the referrer's MangoAccount pubkey on the Referrer account
-    /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
-    /// This is primarily useful for the UI; the referrer address stored here is not necessarily
-    /// who earns the ref fees.
-    ///
-    /// Accounts expected by this instruction (7):
-    ///
-    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
-    /// 1. `[]` mango_account_ai - MangoAccount of the referred
-    /// 2. `[signer]` owner_ai - MangoAccount owner or delegate
-    /// 3. `[writable]` referrer_memory_ai - ReferrerMemory struct; will be initialized if required
-    /// 4. `[]` referrer_mango_account_ai - referrer's MangoAccount
-    /// 5. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
-    /// 6. `[]` system_prog_ai - System program
-    SetReferrerMemory,
 }
 
 impl MangoInstruction {
@@ -1410,7 +1395,7 @@ impl MangoInstruction {
                     ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
                 }
             }
-            62 => MangoInstruction::SetReferrerMemory,
+
             _ => {
                 return None;
             }

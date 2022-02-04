@@ -33,9 +33,8 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{mngo_token, msrm_token, srm_token};
+use crate::ids::{msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
-use crate::matching::OrderType::PostOnly;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
@@ -46,8 +45,8 @@ use crate::state::{
     AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
     MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
     PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, CENTIBPS_PER_UNIT, FREE_ORDER_SLOT,
-    INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
+    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
+    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
     NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
@@ -2363,9 +2362,9 @@ impl Processor {
         ref_share_centibps: u32,
         ref_mngo_required: u64,
     ) -> MangoResult {
-        check!(ref_surcharge_centibps > ref_share_centibps)?;
+        check!(ref_surcharge_centibps > ref_share_centibps, MangoErrorCode::InvalidParam)?;
 
-        const NUM_FIXED: usize = 4;
+        const NUM_FIXED: usize = 2;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -2493,50 +2492,13 @@ impl Processor {
             return Ok(());
         }
 
-        let pre_taker_quote = mango_account.perp_accounts[market_index].taker_quote;
-        let mngo_index = mango_group.find_token_index(&mngo_token::id()).ok_or(throw!())?;
-        let mngo_deposits = mango_account
-            .get_native_deposit(&mango_cache.root_bank_cache[mngo_index], mngo_index)?;
-        let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-
-        let ref_fee_rate = if order_type != OrderType::PostOnly
-            && order_type != OrderType::PostOnlySlide
-            && mngo_deposits < ref_mngo_req
-        {
-            // since user doesn't have enough MNGO look at referrer
-            if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
-                let mut referrer_mango_account = MangoAccount::load_mut_checked(
-                    referrer_mango_account_ai,
-                    program_id,
-                    mango_group_ai.key,
-                )?;
-                let referrer_mngo_deposits = referrer_mango_account
-                    .get_native_deposit(&mango_cache.root_bank_cache[mngo_index], mngo_index)?;
-
-                // TODO - update the advanced orders execution as well
-                // TODO - talk to composers about quote change
-                if referrer_mango_account.is_bankrupt
-                    || referrer_mango_account.being_liquidated
-                    || referrer_mngo_deposits < ref_mngo_req
-                {
-                    // user pays full 1 bp fee
-                    I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT
-                } else {
-                    I80F48::from_num(mango_group.ref_share_centibps) / CENTIBPS_PER_UNIT
-                    // TODO - log this
-                }
-            } else {
-                // user pays full 1 bp fee
-                I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT
-                // TODO - log?
-            }
-        } else {
-            ZERO_I80F48
-        };
         book.new_order(
+            program_id,
+            &mango_group,
+            mango_group_ai.key,
+            &mango_cache,
             &mut event_queue,
             &mut perp_market,
-            &mango_group.perp_markets[market_index],
             mango_cache.get_price(market_index),
             &mut mango_account,
             mango_account_ai.key,
@@ -2547,63 +2509,8 @@ impl Processor {
             order_type,
             client_order_id,
             now_ts,
-            mango_group.perp_markets[market_index].taker_fee + ref_fee_rate,
+            referrer_mango_account_ai,
         )?;
-        let taker_quote_change = (mango_account.perp_accounts[market_index]
-            .taker_quote
-            .checked_sub(pre_taker_quote)
-            .unwrap())
-        .abs();
-
-        let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-        if taker_quote_change > 0 && mngo_deposits < ref_mngo_req {
-            let taker_quote_native = I80F48::from_num(
-                perp_market.quote_lot_size.checked_mul(taker_quote_change).unwrap(),
-            );
-
-            // since user doesn't have enough MNGO look at referrer
-            if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
-                let mut referrer_mango_account = MangoAccount::load_mut_checked(
-                    referrer_mango_account_ai,
-                    program_id,
-                    mango_group_ai.key,
-                )?;
-                let referrer_mngo_deposits = referrer_mango_account
-                    .get_native_deposit(&mango_cache.root_bank_cache[mngo_index], mngo_index)?;
-
-                // TODO - update the advanced orders execution as well
-                // TODO - talk to composers about quote change
-                if referrer_mango_account.is_bankrupt
-                    || referrer_mango_account.being_liquidated
-                    || referrer_mngo_deposits < ref_mngo_req
-                {
-                    // user pays full 1 bp fee
-                    let fee_rate =
-                        I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT;
-                    let ref_fees = taker_quote_native * fee_rate;
-                    mango_account.perp_accounts[market_index].quote_position -= ref_fees;
-                    perp_market.fees_accrued += ref_fees;
-                    // TODO - log?
-                } else {
-                    let fee_rate =
-                        I80F48::from_num(mango_group.ref_share_centibps) / CENTIBPS_PER_UNIT;
-                    let ref_fees = taker_quote_native * fee_rate;
-                    mango_account.perp_accounts[market_index].transfer_quote_position(
-                        &mut referrer_mango_account.perp_accounts[market_index],
-                        ref_fees,
-                    );
-                    // TODO - log this
-                }
-            } else {
-                // user pays full 1 bp fee
-                let fee_rate =
-                    I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT;
-                let ref_fees = taker_quote_native * fee_rate;
-                mango_account.perp_accounts[market_index].quote_position -= ref_fees;
-                perp_market.fees_accrued += ref_fees;
-                // TODO - log?
-            }
-        }
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -5317,9 +5224,12 @@ impl Processor {
                 };
 
                 book.new_order(
+                    program_id,
+                    &mango_group,
+                    mango_group_ai.key,
+                    &mango_cache,
                     &mut event_queue,
                     &mut perp_market,
-                    &mango_group.perp_markets[market_index],
                     mango_cache.get_price(market_index),
                     &mut mango_account,
                     mango_account_ai.key,
@@ -5330,6 +5240,7 @@ impl Processor {
                     order.order_type,
                     order.client_order_id,
                     now_ts,
+                    None,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
@@ -6180,6 +6091,20 @@ impl Processor {
             MangoInstruction::CreateSpotOpenOrders => {
                 msg!("Mango: CreateSpotOpenOrders");
                 Self::create_spot_open_orders(program_id, accounts)
+            }
+            MangoInstruction::ChangeReferralFeeParams {
+                ref_surcharge_centibps,
+                ref_share_centibps,
+                ref_mngo_required,
+            } => {
+                msg!("Mango: ChangeReferralFeeParams");
+                Self::change_referral_fee_params(
+                    program_id,
+                    accounts,
+                    ref_surcharge_centibps,
+                    ref_share_centibps,
+                    ref_mngo_required,
+                )
             }
         }
     }
