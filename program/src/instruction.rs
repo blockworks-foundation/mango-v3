@@ -239,15 +239,15 @@ pub enum MangoInstruction {
 
     /// Place an order on a perp market Improved over PlacePerpOrder
     /// by reducing the tx size, and using max base/quote.
-    /// 
-    /// For OrderTypes Limit, PostOnly, PostOnlySlide the 
-    /// `max_base_quantity` will simply be `quantity`, and the 
+    ///
+    /// For OrderTypes Limit, PostOnly, PostOnlySlide the
+    /// `max_base_quantity` will simply be `quantity`, and the
     /// `limit_price` be `price`.
-    /// 
+    ///
     /// The max parameters are useful when using instantaneous
     /// OrderTypes (IoC or Market).
     /// Goal is to allow orders with thresholds, without knowing
-    /// the quantity nor price in advance. 
+    /// the quantity nor price in advance.
     /// It will check wether it fits within the provided `limit_price`,
     /// It will optionally checks wether it's fully filled for IoC.
     PlacePerpOrderV2 {
@@ -1401,6 +1401,21 @@ impl MangoInstruction {
             _ => {
                 return None;
             }
+            61 => {
+                let reduce_only = if data.len() > 34 { data[34] != 0 } else { false };
+                let data_arr = array_ref![data, 0, 34];
+                let (limit_price, max_base_quantity, max_quote_quantity, client_order_id, side, order_type) =
+                    array_refs![data_arr, 8, 8, 8, 8, 1, 1];
+                MangoInstruction::PlacePerpOrderV2 {
+                    limit_price: i64::from_le_bytes(*limit_price),
+                    max_base_quantity: i64::from_le_bytes(*max_base_quantity),
+                    max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only,
+                }
+            }
         })
     }
     pub fn pack(&self) -> Vec<u8> {
@@ -1798,7 +1813,7 @@ pub fn place_perp_order_v2(
     event_queue_pk: &Pubkey,
     open_orders_pks: &[Pubkey; MAX_PAIRS],
     side: Side,
-    // !! Seems that NewOrderInstructionV3 does what I'm doing, maybe could leverage that instead 
+    // !! Seems that NewOrderInstructionV3 does what I'm doing, maybe could leverage that instead
     limit_price: i64,
     max_base_quantity: i64,
     max_quote_quantity: i64,
