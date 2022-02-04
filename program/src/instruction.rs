@@ -226,12 +226,13 @@ pub enum MangoInstruction {
     /// 5. `[writable]` bids_ai - bids account for this PerpMarket
     /// 6. `[writable]` asks_ai - asks account for this PerpMarket
     /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8. `[writable]` referrer_mango_account_ai - optional, mango account of referrer
     PlacePerpOrder {
         price: i64,
         quantity: i64,
         client_order_id: u64,
         side: Side,
-        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
         /// Optional to be backward compatible; default false
         reduce_only: bool,
@@ -925,6 +926,17 @@ pub enum MangoInstruction {
     /// 7. `[]` system_prog_ai - System program
     /// 8. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateSpotOpenOrders, // instruction 60
+
+    /// Set the `ref_surcharge_centibps`, `ref_share_centibps` and `ref_mngo_required` on `MangoGroup`
+    ///
+    /// Accounts expected by this instruction (2):
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[signer]` admin_ai - mango_group.admin
+    ChangeReferralFeeParams {
+        ref_surcharge_centibps: u32,
+        ref_share_centibps: u32,
+        ref_mngo_required: u64,
+    },
 }
 
 impl MangoInstruction {
@@ -1373,6 +1385,17 @@ impl MangoInstruction {
                 }
             }
             60 => MangoInstruction::CreateSpotOpenOrders,
+            61 => {
+                let data = array_ref![data, 0, 16];
+                let (ref_surcharge_centibps, ref_share_centibps, ref_mngo_required) =
+                    array_refs![data, 4, 4, 8];
+                MangoInstruction::ChangeReferralFeeParams {
+                    ref_surcharge_centibps: u32::from_le_bytes(*ref_surcharge_centibps),
+                    ref_share_centibps: u32::from_le_bytes(*ref_share_centibps),
+                    ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
+                }
+            }
+
             _ => {
                 return None;
             }
@@ -1728,6 +1751,7 @@ pub fn place_perp_order(
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
     event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
     open_orders_pks: &[Pubkey; MAX_PAIRS],
     side: Side,
     price: i64,
@@ -1746,6 +1770,9 @@ pub fn place_perp_order(
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
+    if let Some(referrer_mango_account_pk) = referrer_mango_account_pk {
+        accounts.push(AccountMeta::new(*referrer_mango_account_pk, false));
+    }
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::PlacePerpOrder {
