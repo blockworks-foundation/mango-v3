@@ -6906,7 +6906,6 @@ pub fn emit_perp_balances(
         quote_position: pa.quote_position.to_bits(),
         long_settled_funding: pa.long_settled_funding.to_bits(),
         short_settled_funding: pa.short_settled_funding.to_bits(),
-        mngo_accrued: pa.mngo_accrued,
         long_funding: perp_market_cache.long_funding.to_bits(),
         short_funding: perp_market_cache.long_funding.to_bits(),
     });
