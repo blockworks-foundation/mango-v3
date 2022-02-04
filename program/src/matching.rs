@@ -770,6 +770,7 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
+        taker_fee: I80F48,
     ) -> MangoResult {
         match side {
             Side::Bid => self.new_bid(
@@ -785,6 +786,7 @@ impl<'a> Book<'a> {
                 order_type,
                 client_order_id,
                 now_ts,
+                taker_fee,
             ),
             Side::Ask => self.new_ask(
                 event_queue,
@@ -982,6 +984,7 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
+        taker_fee: I80F48, // this is info.taker_fee + referral surcharge (if any)
     ) -> MangoResult {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
@@ -1049,7 +1052,7 @@ impl<'a> Book<'a> {
                 *mango_account_pk,
                 order_id,
                 client_order_id,
-                info.taker_fee,
+                taker_fee,
                 best_ask_price,
                 match_quantity,
                 best_ask.version,

@@ -1,5 +1,13 @@
 # Mango Program Change Log
 
+## v3.3.3
+Deployed: | Slot:
+1. Add referral fee logic in place_perp_order
+2. 
+3. Add optional payer account to CreateMangoAccount and CreateSpotOpenOrders for better composability
+4. Clean up iteration code and add better documentation
+
+
 ## v3.3.2
 Deployed: Jan 28, 2022 at 20:38:57 UTC | Slot: 118,276,295
 1. Fix the bug in cancel_all where some orders weren't canceled
