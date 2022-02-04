@@ -1398,14 +1398,17 @@ impl MangoInstruction {
                 }
             }
             60 => MangoInstruction::CreateSpotOpenOrders,
-            _ => {
-                return None;
-            }
             61 => {
                 let reduce_only = if data.len() > 34 { data[34] != 0 } else { false };
                 let data_arr = array_ref![data, 0, 34];
-                let (limit_price, max_base_quantity, max_quote_quantity, client_order_id, side, order_type) =
-                    array_refs![data_arr, 8, 8, 8, 8, 1, 1];
+                let (
+                    limit_price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    client_order_id,
+                    side,
+                    order_type,
+                ) = array_refs![data_arr, 8, 8, 8, 8, 1, 1];
                 MangoInstruction::PlacePerpOrderV2 {
                     limit_price: i64::from_le_bytes(*limit_price),
                     max_base_quantity: i64::from_le_bytes(*max_base_quantity),
@@ -1415,6 +1418,9 @@ impl MangoInstruction {
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only,
                 }
+            }
+            _ => {
+                return None;
             }
         })
     }
