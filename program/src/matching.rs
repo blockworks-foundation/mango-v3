@@ -18,11 +18,9 @@ use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::mngo_token;
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
-    DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketInfo,
-    CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
+    DataType, MangoAccount, MetaData, PerpMarket, PerpMarketInfo, MAX_PERP_OPEN_ORDERS,
 };
 
 declare_check_assert_macros!(SourceFileId::Matching);
@@ -759,12 +757,9 @@ impl<'a> Book<'a> {
     #[inline(never)]
     pub fn new_order(
         &mut self,
-        program_id: &Pubkey,
-        mango_group: &MangoGroup,
-        mango_group_pk: &Pubkey,
-        mango_cache: &MangoCache,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         oracle_price: I80F48,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
@@ -775,16 +770,13 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
-        referrer_mango_account_ai: Option<&AccountInfo>,
+        taker_fee: I80F48,
     ) -> MangoResult {
         match side {
             Side::Bid => self.new_bid(
-                program_id,
-                mango_group,
-                mango_group_pk,
-                mango_cache,
                 event_queue,
                 market,
+                info,
                 oracle_price,
                 mango_account,
                 mango_account_pk,
@@ -794,15 +786,12 @@ impl<'a> Book<'a> {
                 order_type,
                 client_order_id,
                 now_ts,
-                referrer_mango_account_ai,
+                taker_fee,
             ),
             Side::Ask => self.new_ask(
-                program_id,
-                mango_group,
-                mango_group_pk,
-                mango_cache,
                 event_queue,
                 market,
+                info,
                 oracle_price,
                 mango_account,
                 mango_account_pk,
@@ -812,7 +801,6 @@ impl<'a> Book<'a> {
                 order_type,
                 client_order_id,
                 now_ts,
-                referrer_mango_account_ai,
             ),
         }
     }
@@ -984,12 +972,9 @@ impl<'a> Book<'a> {
     #[inline(never)]
     fn new_bid(
         &mut self,
-        program_id: &Pubkey,
-        mango_group: &MangoGroup,
-        mango_group_pk: &Pubkey,
-        mango_cache: &MangoCache,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         oracle_price: I80F48,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
@@ -999,7 +984,7 @@ impl<'a> Book<'a> {
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
-        referrer_mango_account_ai: Option<&AccountInfo>,
+        taker_fee: I80F48, // this is info.taker_fee + referral surcharge (if any)
     ) -> MangoResult {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
@@ -1017,19 +1002,12 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
-        let info = &mango_group.perp_markets[market_index];
         let native_price = market.lot_to_native_price(price);
         if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
             msg!("Posting on book disallowed due to price limits");
             post_allowed = false;
         }
 
-        // referral fee related variables
-        let mut ref_fee_rate = None;
-        let mut referrer_mango_account_opt = None;
-        let mut total_quote_taken = 0;
-
-        // generate new order id
         let order_id = market.gen_order_id(Side::Bid, price);
 
         // if post only and price >= best_ask, return
@@ -1055,28 +1033,10 @@ impl<'a> Book<'a> {
             let match_quantity = rem_quantity.min(best_ask.quantity);
             rem_quantity -= match_quantity;
             best_ask.quantity -= match_quantity;
-            let match_quote = match_quantity * best_ask_price;
-            total_quote_taken += match_quote;
 
-            mango_account.perp_accounts[market_index].add_taker_trade(match_quantity, -match_quote);
+            mango_account.perp_accounts[market_index]
+                .add_taker_trade(match_quantity, -match_quantity * best_ask_price);
             let maker_out = best_ask.quantity == 0;
-
-            // if ref_fee_rate is none, determine it
-            // if ref_valid, then pay into referrer, else pay to perp market
-            if ref_fee_rate.is_none() {
-                let (a, b) = determine_ref_vars(
-                    program_id,
-                    mango_group,
-                    mango_group_pk,
-                    mango_cache,
-                    mango_account,
-                    referrer_mango_account_ai,
-                    now_ts,
-                )?;
-                ref_fee_rate = Some(a);
-                referrer_mango_account_opt = b;
-            }
-
             let fill = FillEvent::new(
                 Side::Bid,
                 best_ask.owner_slot,
@@ -1092,7 +1052,7 @@ impl<'a> Book<'a> {
                 *mango_account_pk,
                 order_id,
                 client_order_id,
-                info.taker_fee + ref_fee_rate.unwrap(),
+                taker_fee,
                 best_ask_price,
                 match_quantity,
                 best_ask.version,
@@ -1156,52 +1116,26 @@ impl<'a> Book<'a> {
             mango_account.add_order(market_index, Side::Bid, &new_bid)?;
         }
 
-        // if there were matched taker quote apply ref fees
-        // we know ref_fee_rate is not None if total_quote_taken > 0
-        if total_quote_taken > 0 && ref_fee_rate.unwrap() > ZERO_I80F48 {
-            let taker_quote_native =
-                I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
-            let ref_fees = taker_quote_native * ref_fee_rate.unwrap();
-
-            // if ref mango account is some, then we send some fees over
-            if referrer_mango_account_opt.is_some() {
-                let mut referrer_mango_account = referrer_mango_account_opt.unwrap();
-                mango_account.perp_accounts[market_index].transfer_quote_position(
-                    &mut referrer_mango_account.perp_accounts[market_index],
-                    ref_fees,
-                );
-                // TODO log
-            } else {
-                // else user didn't have valid amount of MNGO and no valid referrer
-                mango_account.perp_accounts[market_index].quote_position -= ref_fees;
-                market.fees_accrued += ref_fees;
-                // TODO log
-            }
-        }
-
         Ok(())
     }
 
     #[inline(never)]
     pub fn new_ask(
         &mut self,
-        program_id: &Pubkey,
-        mango_group: &MangoGroup,
-        mango_group_pk: &Pubkey,
-        mango_cache: &MangoCache,
         event_queue: &mut EventQueue,
         market: &mut PerpMarket,
+        info: &PerpMarketInfo,
         oracle_price: I80F48,
         mango_account: &mut MangoAccount,
         mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
         order_type: OrderType,
         client_order_id: u64,
         now_ts: u64,
-        referrer_mango_account_ai: Option<&AccountInfo>,
     ) -> MangoResult {
+        // TODO proper error handling
         let (post_only, mut post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
@@ -1216,19 +1150,12 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
-        let info = &mango_group.perp_markets[market_index];
         let native_price = market.lot_to_native_price(price);
         if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
             msg!("Posting on book disallowed due to price limits");
             post_allowed = false;
         }
 
-        // referral fee related variables
-        let mut ref_fee_rate = None;
-        let mut referrer_mango_account_opt = None;
-        let mut total_quote_taken = 0;
-
-        // generate new order id
         let order_id = market.gen_order_id(Side::Ask, price);
 
         // if post only and price >= best_ask, return
@@ -1253,27 +1180,9 @@ impl<'a> Book<'a> {
             let match_quantity = rem_quantity.min(best_bid.quantity);
             rem_quantity -= match_quantity;
             best_bid.quantity -= match_quantity;
-
-            let match_quote = match_quantity * best_bid_price;
-            total_quote_taken += match_quote;
-            mango_account.perp_accounts[market_index].add_taker_trade(-match_quantity, match_quote);
+            mango_account.perp_accounts[market_index]
+                .add_taker_trade(-match_quantity, match_quantity * best_bid_price);
             let maker_out = best_bid.quantity == 0;
-
-            // if ref_fee_rate is none, determine it
-            // if ref_valid, then pay into referrer, else pay to perp market
-            if ref_fee_rate.is_none() {
-                let (a, b) = determine_ref_vars(
-                    program_id,
-                    mango_group,
-                    mango_group_pk,
-                    mango_cache,
-                    mango_account,
-                    referrer_mango_account_ai,
-                    now_ts,
-                )?;
-                ref_fee_rate = Some(a);
-                referrer_mango_account_opt = b;
-            }
 
             let fill = FillEvent::new(
                 Side::Ask,
@@ -1290,7 +1199,7 @@ impl<'a> Book<'a> {
                 *mango_account_pk,
                 order_id,
                 client_order_id,
-                info.taker_fee + ref_fee_rate.unwrap(),
+                info.taker_fee,
                 best_bid_price,
                 match_quantity,
                 best_bid.version,
@@ -1353,29 +1262,6 @@ impl<'a> Book<'a> {
 
             let _result = self.asks.insert_leaf(&new_ask)?;
             mango_account.add_order(market_index, Side::Ask, &new_ask)?;
-        }
-
-        // if there were matched taker quote apply ref fees
-        // we know ref_fee_rate is not None if total_quote_taken > 0
-        if total_quote_taken > 0 && ref_fee_rate.unwrap() > ZERO_I80F48 {
-            let taker_quote_native =
-                I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
-            let ref_fees = taker_quote_native * ref_fee_rate.unwrap();
-
-            // if ref mango account is some, then we send some fees over
-            if referrer_mango_account_opt.is_some() {
-                let mut referrer_mango_account = referrer_mango_account_opt.unwrap();
-                mango_account.perp_accounts[market_index].transfer_quote_position(
-                    &mut referrer_mango_account.perp_accounts[market_index],
-                    ref_fees,
-                );
-                // TODO log
-            } else {
-                // else user didn't have valid amount of MNGO and no valid referrer
-                mango_account.perp_accounts[market_index].quote_position -= ref_fees;
-                market.fees_accrued += ref_fees;
-                // TODO log
-            }
         }
 
         Ok(())
@@ -1725,53 +1611,5 @@ impl<'a> Book<'a> {
             }
         }
         Ok(())
-    }
-}
-
-fn determine_ref_vars<'a>(
-    program_id: &Pubkey,
-    mango_group: &MangoGroup,
-    mango_group_pk: &Pubkey,
-    mango_cache: &MangoCache,
-    mango_account: &MangoAccount,
-    referrer_mango_account_ai: Option<&'a AccountInfo>,
-    now_ts: u64,
-) -> MangoResult<(I80F48, Option<RefMut<'a, MangoAccount>>)> {
-    let mngo_index = match mango_group.find_token_index(&mngo_token::id()) {
-        None => return Ok((ZERO_I80F48, None)),
-        Some(i) => i,
-    };
-
-    let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
-    let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
-    let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-    if mngo_deposits >= ref_mngo_req {
-        Ok((ZERO_I80F48, None))
-    } else if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
-        let referrer_mango_account =
-            MangoAccount::load_mut_checked(referrer_mango_account_ai, program_id, mango_group_pk)?;
-
-        // Need to check if it's valid because user may not have mngo in active assets
-        mngo_cache.check_valid(mango_group, now_ts)?;
-        let ref_mngo_deposits =
-            referrer_mango_account.get_native_deposit(mngo_cache, mngo_index)?;
-
-        // TODO - update the advanced orders execution as well
-        // TODO - talk to composers about quote change
-        if referrer_mango_account.is_bankrupt
-            || referrer_mango_account.being_liquidated
-            || ref_mngo_deposits < ref_mngo_req
-        {
-            // user pays full 1 bp fee
-            Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
-        } else {
-            Ok((
-                I80F48::from_num(mango_group.ref_share_centibps) / CENTIBPS_PER_UNIT,
-                Some(referrer_mango_account),
-            ))
-        }
-    } else {
-        // user pays full 1 bp fee
-        Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
     }
 }
