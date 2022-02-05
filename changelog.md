@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.3.3
+Deployed: Feb 4, 2022 at 01:47:33 UTC | Slot: 119,226,876
+1. Pyth status check temporarily removed to let people use accounts with COPE
+
 ## v3.3.2
 Deployed: Jan 28, 2022 at 20:38:57 UTC | Slot: 118,276,295
 1. Fix the bug in cancel_all where some orders weren't canceled
