@@ -6213,6 +6213,7 @@ fn read_oracle(
             #[cfg(not(feature = "devnet"))]
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
+            // Pyth status check temporarily removed to let people use accounts with COPE
             #[cfg(not(feature = "devnet"))]
             if conf > PYTH_CONF_FILTER {
                 msg!(
