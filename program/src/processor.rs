@@ -572,7 +572,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// *** DEPRECATED Initialize perp market including orderbooks and queues
+    /// DEPRECATED Initialize perp market including orderbooks and queues
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -5221,7 +5221,7 @@ impl Processor {
         program_transfer_lamports(advanced_orders_ai, agent_ai, ADVANCED_ORDER_FEE)
     }
 
-    /// *** Create a MangoAccount PDA and initialize it
+    /// Create a MangoAccount PDA and initialize it
     #[inline(never)]
     fn create_mango_account(
         program_id: &Pubkey,
@@ -5339,7 +5339,7 @@ impl Processor {
         Ok(())
     }
 
-    /// *** Create a DustAccount PDA and initialize it
+    /// Create a DustAccount PDA and initialize it
     #[inline(never)]
     fn create_dust_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 4;
@@ -5575,7 +5575,7 @@ impl Processor {
         Ok(())
     }
 
-    /// *** Set the `ref_surcharge_centibps` and `ref_share_centibps` on `MangoGroup`
+    /// Set the `ref_surcharge_centibps`, `ref_share_centibps` and `ref_mngo_required` on `MangoGroup`
     #[inline(never)]
     fn change_referral_fee_params(
         program_id: &Pubkey,
@@ -5610,7 +5610,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// *** Store the referrer's MangoAccount pubkey on the Referrer account
+    /// Store the referrer's MangoAccount pubkey on the Referrer account
     /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
     /// This is primarily useful for the UI; the referrer address stored here is not necessarily
     /// who earns the ref fees.
@@ -5664,7 +5664,7 @@ impl Processor {
         Ok(())
     }
 
-    /// *** Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
     /// in a ref link
     /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
     #[inline(never)]

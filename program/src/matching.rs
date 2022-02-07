@@ -1765,32 +1765,27 @@ fn determine_ref_vars<'a>(
     let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
     let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
     if mngo_deposits >= ref_mngo_req {
-        Ok((ZERO_I80F48, None))
+        return Ok((ZERO_I80F48, None));
     } else if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
-        let referrer_mango_account =
-            MangoAccount::load_mut_checked(referrer_mango_account_ai, program_id, mango_group_pk)?;
-
-        // Need to check if it's valid because user may not have mngo in active assets
-        mngo_cache.check_valid(mango_group, now_ts)?;
-        let ref_mngo_deposits =
-            referrer_mango_account.get_native_deposit(mngo_cache, mngo_index)?;
-
-        // TODO - update the advanced orders execution as well
-        // TODO - talk to composers about quote change
-        if referrer_mango_account.is_bankrupt
-            || referrer_mango_account.being_liquidated
-            || ref_mngo_deposits < ref_mngo_req
+        if let Ok(referrer_mango_account) =
+            MangoAccount::load_mut_checked(referrer_mango_account_ai, program_id, mango_group_pk)
         {
-            // user pays full 1 bp fee
-            Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
-        } else {
-            Ok((
-                I80F48::from_num(mango_group.ref_share_centibps) / CENTIBPS_PER_UNIT,
-                Some(referrer_mango_account),
-            ))
+            // Need to check if it's valid because user may not have mngo in active assets
+            mngo_cache.check_valid(mango_group, now_ts)?;
+            let ref_mngo_deposits =
+                referrer_mango_account.get_native_deposit(mngo_cache, mngo_index)?;
+
+            if !referrer_mango_account.is_bankrupt
+                && !referrer_mango_account.being_liquidated
+                && ref_mngo_deposits >= ref_mngo_req
+            {
+                return Ok((
+                    I80F48::from_num(mango_group.ref_share_centibps) / CENTIBPS_PER_UNIT,
+                    Some(referrer_mango_account),
+                ));
+            }
         }
-    } else {
-        // user pays full 1 bp fee
-        Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
+        // If referrer_mango_account is invalid, just treat it as if it doesn't exist
     }
+    Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
 }

@@ -2424,7 +2424,7 @@ impl AdvancedOrders {
     }
 }
 
-/// *** Store the referrer's mango account
+/// Store the referrer's mango account
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct ReferrerMemory {
@@ -2450,7 +2450,7 @@ impl ReferrerMemory {
     }
 }
 
-/// *** Register the referrer's id to be used in the URL
+/// Register the referrer's id to be used in the URL
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct ReferrerIdRecord {
