@@ -844,10 +844,12 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
-        let native_price = market.lot_to_native_price(price);
-        if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
-            msg!("Posting on book disallowed due to price limits");
-            post_allowed = false;
+        if post_allowed {
+            let native_price = market.lot_to_native_price(price);
+            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+                msg!("Posting on book disallowed due to price limits");
+                post_allowed = false;
+            }
         }
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
@@ -925,10 +927,12 @@ impl<'a> Book<'a> {
                 (true, true, price)
             }
         };
-        let native_price = market.lot_to_native_price(price);
-        if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
-            msg!("Posting on book disallowed due to price limits");
-            post_allowed = false;
+        if post_allowed {
+            let native_price = market.lot_to_native_price(price);
+            if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
+                msg!("Posting on book disallowed due to price limits");
+                post_allowed = false;
+            }
         }
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
@@ -1018,10 +1022,12 @@ impl<'a> Book<'a> {
             }
         };
         let info = &mango_group.perp_markets[market_index];
-        let native_price = market.lot_to_native_price(price);
-        if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
-            msg!("Posting on book disallowed due to price limits");
-            post_allowed = false;
+        if post_allowed {
+            let native_price = market.lot_to_native_price(price);
+            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+                msg!("Posting on book disallowed due to price limits");
+                post_allowed = false;
+            }
         }
 
         // referral fee related variables
@@ -1209,10 +1215,12 @@ impl<'a> Book<'a> {
             }
         };
         let info = &mango_group.perp_markets[market_index];
-        let native_price = market.lot_to_native_price(price);
-        if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
-            msg!("Posting on book disallowed due to price limits");
-            post_allowed = false;
+        if post_allowed {
+            let native_price = market.lot_to_native_price(price);
+            if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
+                msg!("Posting on book disallowed due to price limits");
+                post_allowed = false;
+            }
         }
 
         // referral fee related variables
