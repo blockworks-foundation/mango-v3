@@ -4373,8 +4373,6 @@ impl Processor {
 
         perp_market_cache.check_valid(&mango_group, now_ts)?;
 
-        let info = &mango_group.perp_markets[market_index];
-
         for _ in 0..limit {
             let event = match event_queue.peek_front() {
                 None => break,
@@ -4400,20 +4398,8 @@ impl Processor {
                             )?,
                         };
                         let pre_mngo = ma.perp_accounts[market_index].mngo_accrued;
-                        ma.execute_maker(
-                            market_index,
-                            &mut perp_market,
-                            info,
-                            perp_market_cache,
-                            fill,
-                        )?;
-                        ma.execute_taker(
-                            market_index,
-                            &mut perp_market,
-                            info,
-                            perp_market_cache,
-                            fill,
-                        )?;
+                        ma.execute_maker(market_index, &mut perp_market, perp_market_cache, fill)?;
+                        ma.execute_taker(market_index, &mut perp_market, perp_market_cache, fill)?;
                         mango_emit!(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
@@ -4450,14 +4436,12 @@ impl Processor {
                         maker.execute_maker(
                             market_index,
                             &mut perp_market,
-                            info,
                             perp_market_cache,
                             fill,
                         )?;
                         taker.execute_taker(
                             market_index,
                             &mut perp_market,
-                            info,
                             perp_market_cache,
                             fill,
                         )?;

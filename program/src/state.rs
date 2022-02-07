@@ -1499,7 +1499,6 @@ impl MangoAccount {
         &mut self,
         market_index: usize,
         perp_market: &mut PerpMarket,
-        info: &PerpMarketInfo,
         cache: &PerpMarketCache,
         fill: &FillEvent,
     ) -> MangoResult<()> {
@@ -1509,9 +1508,10 @@ impl MangoAccount {
         pa.remove_taker_trade(base_change, quote_change);
         pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
-        let fees = quote.abs() * info.taker_fee;
-        perp_market.fees_accrued += fees;
-        pa.quote_position += quote - fees;
+
+        // fees are assessed at time of trade; no need to assess fees here
+
+        pa.quote_position += quote;
         Ok(())
     }
 
@@ -1519,7 +1519,6 @@ impl MangoAccount {
         &mut self,
         market_index: usize,
         perp_market: &mut PerpMarket,
-        info: &PerpMarketInfo,
         cache: &PerpMarketCache,
         fill: &FillEvent,
     ) -> MangoResult<()> {
@@ -1530,7 +1529,7 @@ impl MangoAccount {
         let (base_change, quote_change) = fill.base_quote_change(side);
         pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size.checked_mul(quote_change).unwrap());
-        let fees = quote.abs() * info.maker_fee;
+        let fees = quote.abs() * fill.maker_fee;
         perp_market.fees_accrued += fees;
         pa.quote_position = pa.quote_position.checked_add(quote - fees).unwrap();
 

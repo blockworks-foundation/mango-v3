@@ -1158,25 +1158,17 @@ impl<'a> Book<'a> {
 
         // if there were matched taker quote apply ref fees
         // we know ref_fee_rate is not None if total_quote_taken > 0
-        if total_quote_taken > 0 && ref_fee_rate.unwrap() > ZERO_I80F48 {
-            let taker_quote_native =
-                I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
-            let ref_fees = taker_quote_native * ref_fee_rate.unwrap();
-
-            // if ref mango account is some, then we send some fees over
-            if referrer_mango_account_opt.is_some() {
-                let mut referrer_mango_account = referrer_mango_account_opt.unwrap();
-                mango_account.perp_accounts[market_index].transfer_quote_position(
-                    &mut referrer_mango_account.perp_accounts[market_index],
-                    ref_fees,
-                );
-                // TODO log
-            } else {
-                // else user didn't have valid amount of MNGO and no valid referrer
-                mango_account.perp_accounts[market_index].quote_position -= ref_fees;
-                market.fees_accrued += ref_fees;
-                // TODO log
-            }
+        if total_quote_taken > 0 {
+            Self::apply_taker_fees(
+                market,
+                info,
+                mango_account,
+                mango_account_pk,
+                market_index,
+                referrer_mango_account_opt,
+                total_quote_taken,
+                ref_fee_rate.unwrap(),
+            );
         }
 
         Ok(())
@@ -1357,14 +1349,39 @@ impl<'a> Book<'a> {
 
         // if there were matched taker quote apply ref fees
         // we know ref_fee_rate is not None if total_quote_taken > 0
-        if total_quote_taken > 0 && ref_fee_rate.unwrap() > ZERO_I80F48 {
-            let taker_quote_native =
-                I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
-            let ref_fees = taker_quote_native * ref_fee_rate.unwrap();
+        if total_quote_taken > 0 {
+            Self::apply_taker_fees(
+                market,
+                info,
+                mango_account,
+                mango_account_pk,
+                market_index,
+                referrer_mango_account_opt,
+                total_quote_taken,
+                ref_fee_rate.unwrap(),
+            );
+        }
+
+        Ok(())
+    }
+    fn apply_taker_fees(
+        market: &mut PerpMarket,
+        info: &PerpMarketInfo,
+        mango_account: &mut MangoAccount,
+        mango_account_pk: &Pubkey,
+        market_index: usize,
+        referrer_mango_account_opt: Option<RefMut<MangoAccount>>,
+        total_quote_taken: i64,
+        ref_fee_rate: I80F48,
+    ) {
+        let taker_quote_native =
+            I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
+
+        if ref_fee_rate > ZERO_I80F48 {
+            let ref_fees = taker_quote_native * ref_fee_rate;
 
             // if ref mango account is some, then we send some fees over
-            if referrer_mango_account_opt.is_some() {
-                let mut referrer_mango_account = referrer_mango_account_opt.unwrap();
+            if let Some(mut referrer_mango_account) = referrer_mango_account_opt {
                 mango_account.perp_accounts[market_index].transfer_quote_position(
                     &mut referrer_mango_account.perp_accounts[market_index],
                     ref_fees,
@@ -1377,8 +1394,10 @@ impl<'a> Book<'a> {
                 // TODO log
             }
         }
-
-        Ok(())
+        let taker_fees = taker_quote_native * info.taker_fee;
+        mango_account.perp_accounts[market_index].quote_position -= taker_fees;
+        market.fees_accrued += taker_fees;
+        // TODO log
     }
 
     pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
