@@ -231,3 +231,17 @@ pub struct CancelAllPerpOrdersLog {
     pub all_order_ids: Vec<i128>,
     pub canceled_order_ids: Vec<i128>,
 }
+
+#[event]
+pub struct PerpBalanceLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub market_index: u64, // IDL doesn't support usize
+    pub base_position: i64,
+    pub quote_position: i128,        // I80F48
+    pub long_settled_funding: i128,  // I80F48
+    pub short_settled_funding: i128, // I80F48
+
+    pub long_funding: i128,  // I80F48
+    pub short_funding: i128, // I80F48
+}
