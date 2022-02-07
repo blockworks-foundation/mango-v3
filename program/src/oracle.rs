@@ -2,6 +2,7 @@ use fixed::types::I80F48;
 use mango_common::Loadable;
 use mango_macro::{Loadable, Pod};
 use solana_program::{account_info::AccountInfo, pubkey::Pubkey, rent::Rent};
+use std::cell::Ref;
 use std::{cell::RefMut, mem::size_of};
 
 use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
@@ -146,7 +147,7 @@ impl Product {
 }
 
 // contributing or aggregate price component
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PriceInfo {
     pub price: i64,           // product price
@@ -157,16 +158,16 @@ pub struct PriceInfo {
 }
 
 // latest component price and price used in aggregate snapshot
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct PriceComp {
-    publisher: AccKey, // key of contributing quoter
-    agg: PriceInfo,    // contributing price to last aggregate
-    latest: PriceInfo, // latest contributing price (not in agg.)
+    publisher: AccKey,  // key of contributing quoter
+    pub agg: PriceInfo, // contributing price to last aggregate
+    latest: PriceInfo,  // latest contributing price (not in agg.)
 }
 
 // Price account structure
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct Price {
     pub magic: u32,       // pyth magic number
@@ -195,13 +196,15 @@ pub struct Price {
 }
 
 impl Price {
-    pub fn get_price<'a>(account: &'a AccountInfo) -> MangoResult<Price> {
-        let borrowed = &account.data.borrow();
-        let price = cast::<Price>(&borrowed);
-        assert_eq!(price.magic, MAGIC, "not a valid pyth account");
-        assert_eq!(price.atype, AccountType::Price as u32, "not a valid pyth price account");
-        assert_eq!(price.ver, VERSION_2, "unexpected pyth price account version");
-        Ok(*price)
+    pub fn load_checked<'a>(account: &'a AccountInfo) -> MangoResult<Ref<'a, Self>> {
+        // Don't need to checker owner because oracle is assumed good when added in AddOracle
+        let state: Ref<'a, Self> = Self::load(account)?;
+
+        check!(state.magic == MAGIC, MangoErrorCode::InvalidAccount)?;
+        check!(state.atype == AccountType::Price as u32, MangoErrorCode::InvalidAccount)?;
+        check!(state.ver == VERSION_2, MangoErrorCode::InvalidAccount)?;
+
+        Ok(state)
     }
 }
 
@@ -221,15 +224,15 @@ impl AccKey {
     }
 }
 
-pub fn determine_oracle_type<'a>(account: &'a AccountInfo) -> OracleType {
-    let borrowed = &account.data.borrow();
+pub fn determine_oracle_type(account: &AccountInfo) -> OracleType {
+    let borrowed = account.data.borrow();
     if borrowed[0] == 212 && borrowed[1] == 195 && borrowed[2] == 178 && borrowed[3] == 161 {
-        return OracleType::Pyth;
+        OracleType::Pyth
     } else if borrowed[0] == 77 && borrowed[1] == 110 && borrowed[2] == 103 && borrowed[3] == 111 {
-        return OracleType::Stub;
+        OracleType::Stub
     } else if borrowed.len() == 1000 {
-        return OracleType::Switchboard;
+        OracleType::Switchboard
     } else {
-        return OracleType::Unknown;
+        OracleType::Unknown
     }
 }

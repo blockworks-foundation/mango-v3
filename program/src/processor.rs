@@ -37,7 +37,7 @@ use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
+use crate::oracle::{determine_oracle_type, OracleType, Price, PriceStatus, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 #[cfg(not(feature = "devnet"))]
 use crate::state::PYTH_CONF_FILTER;
@@ -6302,7 +6302,7 @@ fn read_oracle(
 
     let price = match oracle_type {
         OracleType::Pyth => {
-            let price_account = Price::get_price(oracle_ai)?;
+            let price_account = Price::load_checked(oracle_ai)?;
             let value = I80F48::from_num(price_account.agg.price);
 
             // Filter out bad prices on mainnet
@@ -6311,7 +6311,27 @@ fn read_oracle(
 
             // Pyth status check temporarily removed to let people use accounts with COPE
             #[cfg(not(feature = "devnet"))]
-            if conf > PYTH_CONF_FILTER {
+            if price_account.agg.status != PriceStatus::Trading {
+                msg!("Pyth status invalid: {}", price_account.agg.status as u8);
+                let pcs: Vec<i64> = price_account
+                    .comp
+                    .iter()
+                    .filter(|pc| pc.agg.status == PriceStatus::Trading)
+                    .map(|pc| pc.agg.price)
+                    .collect();
+
+                if pcs.len() == 2 {
+                    let average = (pcs[0].checked_add(pcs[1]).unwrap()) / 2;
+                    let diff = pcs[0].checked_sub(pcs[1]).unwrap().checked_abs().unwrap();
+                    // If there's more than a 10% difference, InvalidOraclePrice
+                    if diff >= average / 10 {
+                        msg!("Pyth prices invalid: average {} diff: {}", average, diff);
+                        return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+                    }
+                } else {
+                    return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+                }
+            } else if conf > PYTH_CONF_FILTER {
                 msg!(
                     "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
                     token_index,
