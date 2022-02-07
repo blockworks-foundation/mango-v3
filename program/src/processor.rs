@@ -37,20 +37,18 @@ use crate::ids::msrm_token;
 use crate::ids::srm_token;
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-#[cfg(not(feature = "devnet"))]
-use crate::oracle::PriceStatus;
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 #[cfg(not(feature = "devnet"))]
 use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
-    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
-    MangoCache, MangoGroup, MetaData, NodeBank, PerpAccount, PerpMarket, PerpMarketCache,
-    PerpMarketInfo, PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo,
-    TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
-    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
+    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpAccount, PerpMarket,
+    PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, RootBank, RootBankCache,
+    SpotMarketInfo, TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE,
+    FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
+    MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -367,12 +365,13 @@ impl Processor {
 
             // Make sure DustAccount satisfies health check only when it has taken on more borrows
             let mut health_cache = HealthCache::new(active_assets);
-            let open_orders_ais = vec![None; MAX_PAIRS];
+            let open_orders_accounts: Vec<Option<&serum_dex::state::OpenOrders>> =
+                vec![None; MAX_PAIRS];
             health_cache.init_vals_with_orders_vec(
                 &mango_group,
                 &mango_cache,
                 &dust_account,
-                &open_orders_ais,
+                &open_orders_accounts,
             )?;
             let health = health_cache.get_health(&mango_group, HealthType::Init);
             check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -1929,6 +1928,7 @@ impl Processor {
 
         let mut open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
         for i in 0..mango_group.num_oracles {
@@ -1957,7 +1957,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais,
+            &open_orders_accounts,
         )?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
@@ -4987,6 +4987,7 @@ impl Processor {
         )?;
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let market_index = mango_group
             .find_perp_market_index(perp_market_ai.key)
@@ -5009,7 +5010,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais,
+            &open_orders_accounts,
         )?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
@@ -5133,6 +5134,7 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
@@ -5186,7 +5188,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais,
+            &open_orders_accounts,
         )?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
@@ -6307,11 +6309,9 @@ fn read_oracle(
             #[cfg(not(feature = "devnet"))]
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
+            // Pyth status check temporarily removed to let people use accounts with COPE
             #[cfg(not(feature = "devnet"))]
-            if price_account.agg.status != PriceStatus::Trading {
-                msg!("Pyth status invalid: {}", price_account.agg.status as u8);
-                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
-            } else if conf > PYTH_CONF_FILTER {
+            if conf > PYTH_CONF_FILTER {
                 msg!(
                     "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
                     token_index,
