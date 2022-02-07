@@ -2,6 +2,7 @@ use std::cell::{Ref, RefMut};
 use std::cmp::{max, min};
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
+use std::ops::Deref;
 
 use bytemuck::{cast_ref, from_bytes, from_bytes_mut, try_from_bytes_mut};
 use enumflags2::BitFlags;
@@ -803,10 +804,10 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    if *open_orders_ais[i].key == Pubkey::default() {
+                    &if *open_orders_ais[i].key == Pubkey::default() {
                         None
                     } else {
-                        Some(&open_orders_ais[i])
+                        Some(load_open_orders(&open_orders_ais[i])?)
                     },
                 )?;
             }
@@ -821,12 +822,14 @@ impl HealthCache {
         }
         Ok(())
     }
-    pub fn init_vals_with_orders_vec(
+
+    // Accept T = &OpenOrders as well as Ref<OpenOrders>
+    pub fn init_vals_with_orders_vec<T: Deref<Target = serum_dex::state::OpenOrders>>(
         &mut self,
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
-        open_orders_ais: &Vec<Option<&AccountInfo>>,
+        open_orders: &[Option<T>],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
@@ -835,7 +838,7 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    open_orders_ais[i],
+                    &open_orders[i],
                 )?;
             }
 
@@ -902,6 +905,69 @@ impl HealthCache {
         }
     }
 
+    #[cfg(feature = "client")]
+    pub fn get_health_components(
+        &mut self,
+        mango_group: &MangoGroup,
+        health_type: HealthType,
+    ) -> (I80F48, I80F48) {
+        let (mut assets, mut liabilities) = if self.quote.is_negative() {
+            (ZERO_I80F48, -self.quote)
+        } else {
+            (self.quote, ZERO_I80F48)
+        };
+        for i in 0..mango_group.num_oracles {
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+
+            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
+                match health_type {
+                    HealthType::Maint => (
+                        spot_market_info.maint_asset_weight,
+                        spot_market_info.maint_liab_weight,
+                        perp_market_info.maint_asset_weight,
+                        perp_market_info.maint_liab_weight,
+                    ),
+                    HealthType::Init => (
+                        spot_market_info.init_asset_weight,
+                        spot_market_info.init_liab_weight,
+                        perp_market_info.init_asset_weight,
+                        perp_market_info.init_liab_weight,
+                    ),
+                };
+
+            if self.active_assets.spot[i] {
+                let (base, quote) = self.spot[i];
+                if quote.is_negative() {
+                    liabilities -= quote;
+                } else {
+                    assets += quote;
+                }
+                if base.is_negative() {
+                    liabilities -= base * spot_liab_weight;
+                } else {
+                    assets += base * spot_asset_weight;
+                }
+            }
+
+            if self.active_assets.perps[i] {
+                let (base, quote) = self.perp[i];
+                if quote.is_negative() {
+                    liabilities -= quote;
+                } else {
+                    assets += quote;
+                }
+                if base.is_negative() {
+                    liabilities -= base * perp_liab_weight;
+                } else {
+                    assets += base * perp_asset_weight;
+                }
+            }
+        }
+
+        (assets, liabilities)
+    }
+
     pub fn update_quote(&mut self, mango_cache: &MangoCache, mango_account: &MangoAccount) {
         let quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..NUM_HEALTHS {
@@ -925,7 +991,11 @@ impl HealthCache {
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
             market_index,
-            if *open_orders_ai.key == Pubkey::default() { None } else { Some(open_orders_ai) },
+            &if *open_orders_ai.key == Pubkey::default() {
+                None
+            } else {
+                Some(load_open_orders(open_orders_ai)?)
+            },
         )?;
 
         let (prev_base, prev_quote) = self.spot[market_index];
@@ -1238,20 +1308,19 @@ impl MangoAccount {
     /// Return the token value and quote token value for this market taking into account open order
     /// but not doing asset weighting
     #[inline(always)]
-    fn get_spot_val(
+    fn get_spot_val<T: Deref<Target = serum_dex::state::OpenOrders>>(
         &self,
         bank_cache: &RootBankCache,
         price: I80F48,
         market_index: usize,
-        open_orders_ai: Option<&AccountInfo>,
+        open_orders: &Option<T>,
     ) -> MangoResult<(I80F48, I80F48)> {
         let base_net = self.get_net(bank_cache, market_index);
-        if !self.in_margin_basket[market_index] || open_orders_ai.is_none() {
+        if !self.in_margin_basket[market_index] || open_orders.is_none() {
             Ok((base_net * price, ZERO_I80F48))
         } else {
-            let open_orders = load_open_orders(open_orders_ai.unwrap())?;
             let (quote_free, quote_locked, base_free, base_locked) =
-                split_open_orders(&open_orders);
+                split_open_orders(open_orders.as_ref().unwrap().deref());
 
             // Two "worst-case" scenarios are considered:
             // 1. All bids are executed at current price, producing a base amount of bids_base_net
@@ -2214,6 +2283,13 @@ pub fn load_open_orders<'a>(
     acc: &'a AccountInfo,
 ) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {
     Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
+}
+pub fn load_open_orders_accounts<'a>(
+    accs: &Vec<Option<&'a AccountInfo>>,
+) -> Result<Vec<Option<Ref<'a, serum_dex::state::OpenOrders>>>, ProgramError> {
+    accs.iter()
+        .map(|ai_opt| Ok(if let Some(ai) = ai_opt { Some(load_open_orders(ai)?) } else { None }))
+        .collect::<Result<Vec<_>, _>>()
 }
 
 pub fn check_open_orders(

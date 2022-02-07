@@ -8,6 +8,7 @@ edition = "2018"
 no-entrypoint = []
 test-bpf = []
 devnet = []
+client = ["no-entrypoint"]
 
 [dependencies]
 solana-program = "^1.8.1"
