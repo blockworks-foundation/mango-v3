@@ -2,6 +2,7 @@ use std::cell::RefMut;
 use std::convert::TryFrom;
 use std::mem::size_of;
 
+use anchor_lang::prelude::emit;
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -15,15 +16,17 @@ use solana_program::sysvar::Sysvar;
 use static_assertions::const_assert_eq;
 
 use mango_common::Loadable;
+use mango_logs::{mango_emit, ReferralFeeAccrualLog};
 use mango_macro::{Loadable, Pod};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
-    DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketInfo,
-    CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
+    DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketCache,
+    PerpMarketInfo, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
 };
+use crate::utils::emit_perp_balances;
 
 declare_check_assert_macros!(SourceFileId::Matching);
 pub type NodeHandle = u32;
@@ -1166,8 +1169,10 @@ impl<'a> Book<'a> {
                 mango_account_pk,
                 market_index,
                 referrer_mango_account_opt,
+                referrer_mango_account_ai,
                 total_quote_taken,
                 ref_fee_rate.unwrap(),
+                &mango_cache.perp_market_cache[market_index],
             );
         }
 
@@ -1357,8 +1362,10 @@ impl<'a> Book<'a> {
                 mango_account_pk,
                 market_index,
                 referrer_mango_account_opt,
+                referrer_mango_account_ai,
                 total_quote_taken,
                 ref_fee_rate.unwrap(),
+                &mango_cache.perp_market_cache[market_index],
             );
         }
 
@@ -1371,8 +1378,10 @@ impl<'a> Book<'a> {
         mango_account_pk: &Pubkey,
         market_index: usize,
         referrer_mango_account_opt: Option<RefMut<MangoAccount>>,
+        referrer_mango_account_ai: Option<&AccountInfo>,
         total_quote_taken: i64,
         ref_fee_rate: I80F48,
+        perp_market_cache: &PerpMarketCache,
     ) {
         let taker_quote_native =
             I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
@@ -1386,18 +1395,36 @@ impl<'a> Book<'a> {
                     &mut referrer_mango_account.perp_accounts[market_index],
                     ref_fees,
                 );
-                // TODO log
+                emit_perp_balances(
+                    referrer_mango_account.mango_group,
+                    *referrer_mango_account_ai.unwrap().key,
+                    market_index as u64,
+                    &referrer_mango_account.perp_accounts[market_index],
+                    perp_market_cache,
+                );
+                mango_emit!(ReferralFeeAccrualLog {
+                    mango_group: referrer_mango_account.mango_group,
+                    mango_account: *referrer_mango_account_ai.unwrap().key,
+                    market_index: market_index as u64,
+                    referral_fee_accrual: ref_fees.to_bits(),
+                });
             } else {
                 // else user didn't have valid amount of MNGO and no valid referrer
                 mango_account.perp_accounts[market_index].quote_position -= ref_fees;
                 market.fees_accrued += ref_fees;
-                // TODO log
             }
         }
         let taker_fees = taker_quote_native * info.taker_fee;
         mango_account.perp_accounts[market_index].quote_position -= taker_fees;
         market.fees_accrued += taker_fees;
-        // TODO log
+
+        emit_perp_balances(
+            mango_account.mango_group,
+            *mango_account_pk,
+            market_index as u64,
+            &mango_account.perp_accounts[market_index],
+            perp_market_cache,
+        )
     }
 
     pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {

@@ -27,9 +27,9 @@ use mango_common::Loadable;
 use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, CancelAllPerpOrdersLog,
     DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog,
-    MngoAccrualLog, OpenOrdersBalanceLog, PerpBalanceLog, PerpBankruptcyLog, RedeemMngoLog,
-    SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog,
-    UpdateRootBankLog, WithdrawLog,
+    MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog,
+    SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog,
+    WithdrawLog,
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
@@ -43,14 +43,14 @@ use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
-    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpAccount, PerpMarket,
+    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, ReferrerIdRecord,
     ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
     UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
     QUOTE_INDEX, ZERO_I80F48,
 };
-use crate::utils::{gen_signer_key, gen_signer_seeds};
+use crate::utils::{emit_perp_balances, gen_signer_key, gen_signer_seeds};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -7054,24 +7054,4 @@ pub fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
         (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
         (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
     )
-}
-
-pub fn emit_perp_balances(
-    mango_group: Pubkey,
-    mango_account: Pubkey,
-    market_index: u64,
-    pa: &PerpAccount,
-    perp_market_cache: &PerpMarketCache,
-) {
-    mango_emit!(PerpBalanceLog {
-        mango_group: mango_group,
-        mango_account: mango_account,
-        market_index: market_index,
-        base_position: pa.base_position,
-        quote_position: pa.quote_position.to_bits(),
-        long_settled_funding: pa.long_settled_funding.to_bits(),
-        short_settled_funding: pa.short_settled_funding.to_bits(),
-        long_funding: perp_market_cache.long_funding.to_bits(),
-        short_funding: perp_market_cache.long_funding.to_bits(),
-    });
 }
