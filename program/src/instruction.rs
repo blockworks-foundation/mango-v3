@@ -937,6 +937,36 @@ pub enum MangoInstruction {
         ref_share_centibps: u32,
         ref_mngo_required: u64,
     },
+    /// Store the referrer's MangoAccount pubkey on the Referrer account
+    /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
+    /// This is primarily useful for the UI; the referrer address stored here is not necessarily
+    /// who earns the ref fees.
+    ///
+    /// Accounts expected by this instruction (7):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[]` mango_account_ai - MangoAccount of the referred
+    /// 2. `[signer]` owner_ai - MangoAccount owner or delegate
+    /// 3. `[writable]` referrer_memory_ai - ReferrerMemory struct; will be initialized if required
+    /// 4. `[]` referrer_mango_account_ai - referrer's MangoAccount
+    /// 5. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 6. `[]` system_prog_ai - System program
+    SetReferrerMemory,
+
+    /// ssociate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// in a ref link
+    /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
+    ///
+    /// Accounts expected by this instruction (6):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` referrer_mango_account_ai - MangoAccount
+    /// 2. `[signer]` owner_ai - MangoAccount owner
+    /// 3. `[writable]` referrer_id_record_ai - The PDA to store the record on
+    /// 4. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 5. `[]` system_prog_ai - System program
+    RegisterReferrerId {
+        referrer_id: [u8; INFO_LEN],
+    },
 }
 
 impl MangoInstruction {
@@ -1395,7 +1425,11 @@ impl MangoInstruction {
                     ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
                 }
             }
-
+            62 => MangoInstruction::SetReferrerMemory,
+            63 => {
+                let referrer_id = array_ref![data, 0, INFO_LEN];
+                MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
+            }
             _ => {
                 return None;
             }

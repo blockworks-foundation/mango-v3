@@ -44,10 +44,10 @@ use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
     MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
-    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    PerpTriggerOrder, PriceCache, ReferrerIdRecord, ReferrerMemory, RootBank, RootBankCache,
+    SpotMarketInfo, TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE,
+    FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
+    MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
 use crate::utils::{gen_signer_key, gen_signer_seeds};
 
@@ -2352,39 +2352,6 @@ impl Processor {
             QUOTE_INDEX,
             I80F48::from_num(pre_quote - post_quote),
         )
-    }
-
-    /// *** Set the `ref_surcharge_centibps` and `ref_share_centibps` on `MangoGroup`
-    fn change_referral_fee_params(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        ref_surcharge_centibps: u32,
-        ref_share_centibps: u32,
-        ref_mngo_required: u64,
-    ) -> MangoResult {
-        check!(ref_surcharge_centibps > ref_share_centibps, MangoErrorCode::InvalidParam)?;
-
-        const NUM_FIXED: usize = 2;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-
-        let [
-            mango_group_ai, // write
-            admin_ai        // read, signer
-        ] = accounts;
-
-        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
-        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        msg!("old referral fee params: ref_surcharge_centibps: {} ref_share_centibps: {} ref_mngo_required: {}", mango_group.ref_surcharge_centibps, mango_group.ref_share_centibps, mango_group.ref_mngo_required);
-
-        // TODO - when this goes out, if there are any events on the EventQueue fee logging will be messed up
-
-        mango_group.ref_surcharge_centibps = ref_surcharge_centibps;
-        mango_group.ref_share_centibps = ref_share_centibps;
-        mango_group.ref_mngo_required = ref_mngo_required;
-
-        msg!("new referral fee params: ref_surcharge_centibps: {} ref_share_centibps: {} ref_mngo_required: {}", ref_surcharge_centibps, ref_share_centibps, ref_mngo_required);
-        Ok(())
     }
 
     #[inline(never)]
@@ -5624,6 +5591,150 @@ impl Processor {
         Ok(())
     }
 
+    /// *** Set the `ref_surcharge_centibps` and `ref_share_centibps` on `MangoGroup`
+    #[inline(never)]
+    fn change_referral_fee_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        ref_surcharge_centibps: u32,
+        ref_share_centibps: u32,
+        ref_mngo_required: u64,
+    ) -> MangoResult {
+        check!(ref_surcharge_centibps > ref_share_centibps, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        msg!("old referral fee params: ref_surcharge_centibps: {} ref_share_centibps: {} ref_mngo_required: {}", mango_group.ref_surcharge_centibps, mango_group.ref_share_centibps, mango_group.ref_mngo_required);
+
+        // TODO - when this goes out, if there are any events on the EventQueue fee logging will be messed up
+
+        mango_group.ref_surcharge_centibps = ref_surcharge_centibps;
+        mango_group.ref_share_centibps = ref_share_centibps;
+        mango_group.ref_mngo_required = ref_mngo_required;
+
+        msg!("new referral fee params: ref_surcharge_centibps: {} ref_share_centibps: {} ref_mngo_required: {}", ref_surcharge_centibps, ref_share_centibps, ref_mngo_required);
+        Ok(())
+    }
+
+    #[inline(never)]
+    /// *** Store the referrer's MangoAccount pubkey on the Referrer account
+    /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
+    /// This is primarily useful for the UI; the referrer address stored here is not necessarily
+    /// who earns the ref fees.
+    fn set_referrer_memory(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 7;
+        let [
+            mango_group_ai,             // read
+            mango_account_ai,           // read
+            owner_ai,                   // signer
+            referrer_memory_ai,         // write
+            referrer_mango_account_ai,  // read
+            payer_ai,                   // write, signer
+            system_prog_ai,             // read
+        ] = array_ref![accounts, 0, NUM_FIXED];
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let _ = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_account =
+            MangoAccount::load_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        let _ =
+            MangoAccount::load_checked(referrer_mango_account_ai, program_id, mango_group_ai.key)?;
+
+        if referrer_memory_ai.data_is_empty() {
+            // initialize it if it's not initialized yet
+            let referrer_seeds: &[&[u8]] = &[&mango_account_ai.key.as_ref(), b"ReferrerMemory"];
+            seed_and_create_pda(
+                program_id,
+                payer_ai,
+                &Rent::get()?,
+                size_of::<ReferrerMemory>(),
+                program_id,
+                system_prog_ai,
+                referrer_memory_ai,
+                referrer_seeds,
+                &[],
+            )?;
+        }
+
+        let mut referrer_memory = ReferrerMemory::load_mut_checked(referrer_memory_ai, program_id)?;
+        referrer_memory.referrer_mango_account = *referrer_mango_account_ai.key;
+
+        Ok(())
+    }
+
+    /// *** Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// in a ref link
+    /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
+    #[inline(never)]
+    fn register_referrer_id(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        referrer_id: [u8; INFO_LEN],
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 6;
+        let [
+            mango_group_ai,             // read
+            referrer_mango_account_ai,  // read
+            owner_ai,                   // signer
+            referrer_id_record_ai,      // write
+            payer_ai,                   // write, signer
+            system_prog_ai,             // read
+        ] = array_ref![accounts, 0, NUM_FIXED];
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let _ = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let referrer_mango_account =
+            MangoAccount::load_checked(referrer_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(
+            &referrer_mango_account.owner == owner_ai.key
+                || &referrer_mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        // referrer_id_record must be empty; cannot be transferred
+        check!(referrer_id_record_ai.data_is_empty(), MangoErrorCode::InvalidAccount)?;
+        let referrer_record_seeds: &[&[u8]] = &[&mango_group_ai.key.as_ref(), &referrer_id];
+        seed_and_create_pda(
+            program_id,
+            payer_ai,
+            &Rent::get()?,
+            size_of::<ReferrerIdRecord>(),
+            program_id,
+            system_prog_ai,
+            referrer_id_record_ai,
+            referrer_record_seeds,
+            &[],
+        )?;
+        let mut referrer_id_record =
+            ReferrerIdRecord::load_mut_checked(referrer_id_record_ai, program_id)?;
+        referrer_id_record.referrer_mango_account = *referrer_mango_account_ai.key;
+        referrer_id_record.id = referrer_id;
+
+        Ok(())
+    }
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -6105,6 +6216,14 @@ impl Processor {
                     ref_share_centibps,
                     ref_mngo_required,
                 )
+            }
+            MangoInstruction::SetReferrerMemory => {
+                msg!("Mango: SetReferrerMemory");
+                Self::set_referrer_memory(program_id, accounts)
+            }
+            MangoInstruction::RegisterReferrerId { referrer_id } => {
+                msg!("Mango: RegisterReferrerId");
+                Self::register_referrer_id(program_id, accounts, referrer_id)
             }
         }
     }

@@ -2424,3 +2424,56 @@ impl AdvancedOrders {
         Ok(state)
     }
 }
+
+/// *** Store the referrer's mango account
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct ReferrerMemory {
+    pub referrer_mango_account: Pubkey,
+}
+
+impl ReferrerMemory {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        // not really necessary because this is a PDA
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        Ok(Self::load_mut(account)?)
+    }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MangoResult<Ref<'a, Self>> {
+        // not really necessary because this is a PDA
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        Ok(Self::load(account)?)
+    }
+}
+
+/// *** Register the referrer's id to be used in the URL
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct ReferrerIdRecord {
+    pub referrer_mango_account: Pubkey,
+    pub id: [u8; INFO_LEN], // this id is one of the seeds
+}
+
+impl ReferrerIdRecord {
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        // not really necessary because this is a PDA
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        Ok(Self::load_mut(account)?)
+    }
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MangoResult<Ref<'a, Self>> {
+        // not really necessary because this is a PDA
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        Ok(Self::load(account)?)
+    }
+}
