@@ -27,9 +27,9 @@ use mango_common::Loadable;
 use mango_logs::{
     mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, CancelAllPerpOrdersLog,
     DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog,
-    MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog,
-    SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog,
-    WithdrawLog,
+    MngoAccrualLog, OpenOrdersBalanceLog, PerpBalanceLog, PerpBankruptcyLog, RedeemMngoLog,
+    SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog,
+    UpdateRootBankLog, WithdrawLog,
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
@@ -44,7 +44,7 @@ use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
-    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
+    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpAccount, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, RootBank, RootBankCache,
     SpotMarketInfo, TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE,
     FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS,
@@ -2829,6 +2829,20 @@ impl Processor {
             market_index: market_index as u64,
             settlement: a_settle.to_bits(), // Will be positive if a has positive pnl and settling with b
         });
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_a_ai.key,
+            market_index as u64,
+            &mango_account_a.perp_accounts[market_index],
+            perp_market_cache,
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_b_ai.key,
+            market_index as u64,
+            &mango_account_b.perp_accounts[market_index],
+            perp_market_cache,
+        );
 
         Ok(())
     }
@@ -2926,6 +2940,14 @@ impl Processor {
             market_index: market_index as u64,
             settlement: settlement.to_bits()
         });
+
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_ai.key,
+            market_index as u64,
+            &mango_account.perp_accounts[market_index],
+            perp_market_cache,
+        );
 
         Ok(())
     }
@@ -3692,6 +3714,27 @@ impl Processor {
             bankruptcy: liqee_ma.is_bankrupt,
         });
 
+        let perp_market_index: usize;
+        if asset_type == AssetType::Token {
+            perp_market_index = liab_index;
+        } else {
+            perp_market_index = asset_index;
+        }
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqee_mango_account_ai.key,
+            perp_market_index as u64,
+            &liqee_ma.perp_accounts[perp_market_index],
+            &mango_cache.perp_market_cache[perp_market_index],
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqor_mango_account_ai.key,
+            perp_market_index as u64,
+            &liqor_ma.perp_accounts[perp_market_index],
+            &mango_cache.perp_market_cache[perp_market_index],
+        );
+
         Ok(())
     }
 
@@ -3897,6 +3940,20 @@ impl Processor {
             quote_transfer: quote_transfer.to_bits(),
             bankruptcy: liqee_ma.is_bankrupt
         });
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqee_mango_account_ai.key,
+            market_index as u64,
+            &liqee_ma.perp_accounts[market_index],
+            &mango_cache.perp_market_cache[market_index],
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqor_mango_account_ai.key,
+            market_index as u64,
+            &liqor_ma.perp_accounts[market_index],
+            &mango_cache.perp_market_cache[market_index],
+        );
 
         Ok(())
     }
@@ -4063,6 +4120,20 @@ impl Processor {
             cache_long_funding: mango_cache.perp_market_cache[liab_index].long_funding.to_bits(),
             cache_short_funding: mango_cache.perp_market_cache[liab_index].short_funding.to_bits()
         });
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqee_mango_account_ai.key,
+            liab_index as u64,
+            &liqee_ma.perp_accounts[liab_index],
+            &mango_cache.perp_market_cache[liab_index],
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqor_mango_account_ai.key,
+            liab_index as u64,
+            &liqor_ma.perp_accounts[liab_index],
+            &mango_cache.perp_market_cache[liab_index],
+        );
 
         Ok(())
     }
@@ -4412,6 +4483,13 @@ impl Processor {
                             market_index: market_index as u64,
                             mngo_accrual: ma.perp_accounts[market_index].mngo_accrued - pre_mngo
                         });
+                        emit_perp_balances(
+                            *mango_group_ai.key,
+                            fill.maker,
+                            market_index as u64,
+                            &ma.perp_accounts[market_index],
+                            &mango_cache.perp_market_cache[market_index],
+                        );
                     } else {
                         let mut maker =
                             match mango_account_ais.iter().find(|ai| ai.key == &fill.maker) {
@@ -4459,6 +4537,20 @@ impl Processor {
                             market_index: market_index as u64,
                             mngo_accrual: maker.perp_accounts[market_index].mngo_accrued - pre_mngo
                         });
+                        emit_perp_balances(
+                            *mango_group_ai.key,
+                            fill.maker,
+                            market_index as u64,
+                            &maker.perp_accounts[market_index],
+                            &mango_cache.perp_market_cache[market_index],
+                        );
+                        emit_perp_balances(
+                            *mango_group_ai.key,
+                            fill.taker,
+                            market_index as u64,
+                            &taker.perp_accounts[market_index],
+                            &mango_cache.perp_market_cache[market_index],
+                        );
                     }
                     mango_emit!(fill.to_fill_log(*mango_group_ai.key, market_index));
                 }
@@ -6797,4 +6889,24 @@ pub fn get_leverage_weights(leverage: I80F48) -> (I80F48, I80F48) {
         (leverage - ONE_I80F48).checked_div(leverage).unwrap(),
         (leverage + ONE_I80F48).checked_div(leverage).unwrap(),
     )
+}
+
+pub fn emit_perp_balances(
+    mango_group: Pubkey,
+    mango_account: Pubkey,
+    market_index: u64,
+    pa: &PerpAccount,
+    perp_market_cache: &PerpMarketCache,
+) {
+    mango_emit!(PerpBalanceLog {
+        mango_group: mango_group,
+        mango_account: mango_account,
+        market_index: market_index,
+        base_position: pa.base_position,
+        quote_position: pa.quote_position.to_bits(),
+        long_settled_funding: pa.long_settled_funding.to_bits(),
+        short_settled_funding: pa.short_settled_funding.to_bits(),
+        long_funding: perp_market_cache.long_funding.to_bits(),
+        short_funding: perp_market_cache.long_funding.to_bits(),
+    });
 }
