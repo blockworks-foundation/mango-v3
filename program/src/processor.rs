@@ -2372,7 +2372,8 @@ impl Processor {
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 8;
-        let (fixed_ais, var_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let (fixed_ais, open_orders_ais, opt_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS; ..;];
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write
@@ -2384,12 +2385,7 @@ impl Processor {
             event_queue_ai,     // write
         ] = fixed_ais;
 
-        let (referrer_mango_account_ai, open_orders_ais) = if var_ais.len() > MAX_PAIRS {
-            let (referrer_mango_account_ai, open_orders_ais) = var_ais.split_first().unwrap();
-            (Some(referrer_mango_account_ai), array_ref![open_orders_ais, 0, MAX_PAIRS])
-        } else {
-            (None, array_ref![var_ais, 0, MAX_PAIRS])
-        };
+        let referrer_mango_account_ai = opt_ais.first();
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 

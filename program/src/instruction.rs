@@ -217,7 +217,7 @@ pub enum MangoInstruction {
     /// paid from the quote position. Only at this point the position balance
     /// is 100% refelecting the trade.
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (8 + `MAX_PAIRS` + (optional 1)):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2. `[signer]` owner_ai - owner of MangoAccount
@@ -226,7 +226,8 @@ pub enum MangoInstruction {
     /// 5. `[writable]` bids_ai - bids account for this PerpMarket
     /// 6. `[writable]` asks_ai - asks account for this PerpMarket
     /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
-    /// 8. `[writable]` referrer_mango_account_ai - optional, mango account of referrer
+    /// 8..23 `[]` open_orders_ais - array of open orders accounts on this MangoAccount
+    /// 23. `[writable]` referrer_mango_account_ai - optional, mango account of referrer
     PlacePerpOrder {
         price: i64,
         quantity: i64,
@@ -1804,10 +1805,10 @@ pub fn place_perp_order(
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
     ];
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     if let Some(referrer_mango_account_pk) = referrer_mango_account_pk {
         accounts.push(AccountMeta::new(*referrer_mango_account_pk, false));
     }
-    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::PlacePerpOrder {
         side,
