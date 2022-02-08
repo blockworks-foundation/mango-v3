@@ -1412,7 +1412,8 @@ impl<'a> Book<'a> {
                 );
                 mango_emit!(ReferralFeeAccrualLog {
                     mango_group: referrer_mango_account.mango_group,
-                    mango_account: *referrer_mango_account_ai.unwrap().key,
+                    referrer_mango_account: *referrer_mango_account_ai.unwrap().key,
+                    referree_mango_account: *mango_account_pk,
                     market_index: market_index as u64,
                     referral_fee_accrual: ref_fees.to_bits(),
                 });
