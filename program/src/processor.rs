@@ -6313,24 +6313,7 @@ fn read_oracle(
             #[cfg(not(feature = "devnet"))]
             if price_account.agg.status != PriceStatus::Trading {
                 msg!("Pyth status invalid: {}", price_account.agg.status as u8);
-                let pcs: Vec<i64> = price_account
-                    .comp
-                    .iter()
-                    .filter(|pc| pc.agg.status == PriceStatus::Trading)
-                    .map(|pc| pc.agg.price)
-                    .collect();
-
-                if pcs.len() == 2 {
-                    let average = (pcs[0].checked_add(pcs[1]).unwrap()) / 2;
-                    let diff = pcs[0].checked_sub(pcs[1]).unwrap().checked_abs().unwrap();
-                    // If there's more than a 10% difference, InvalidOraclePrice
-                    if diff >= average / 10 {
-                        msg!("Pyth prices invalid: average {} diff: {}", average, diff);
-                        return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
-                    }
-                } else {
-                    return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
-                }
+                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
             } else if conf > PYTH_CONF_FILTER {
                 msg!(
                     "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
