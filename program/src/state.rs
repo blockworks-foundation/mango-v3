@@ -1070,8 +1070,9 @@ impl HealthCache {
         bids_quantity: i64,
         asks_quantity: i64,
     ) -> MangoResult<I80F48> {
+        let info = &mango_group.perp_markets[market_index];
         let (base, quote) = mango_account.perp_accounts[market_index].sim_get_val(
-            &mango_group.perp_markets[market_index],
+            info,
             &mango_cache.perp_market_cache[market_index],
             mango_cache.price_cache[market_index].price,
             taker_base,
@@ -1102,7 +1103,32 @@ impl HealthCache {
         };
 
         let h = self.health[health_type as usize].ok_or(throw!())?;
-        Ok(h + curr_perp_health - prev_perp_health)
+
+        // Apply taker fees; Assume no referrer
+        let taker_fees = if taker_quote != 0 {
+            let taker_quote_native =
+                I80F48::from_num(info.quote_lot_size.checked_mul(taker_quote.abs()).unwrap());
+            match mango_group.find_token_index(&mngo_token::id()) {
+                None => info.taker_fee * taker_quote_native,
+                Some(mngo_index) => {
+                    let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
+                    let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
+                    let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
+                    if mngo_deposits >= ref_mngo_req {
+                        info.taker_fee * taker_quote_native
+                    } else {
+                        // done in two steps to perfectly simulate what happens in `apply_taker_fees`
+                        info.taker_fee * taker_quote_native
+                            + I80F48::from_num(mango_group.ref_surcharge_centibps)
+                                / CENTIBPS_PER_UNIT
+                                * taker_quote_native
+                    }
+                }
+            }
+        } else {
+            ZERO_I80F48
+        };
+        Ok(h + curr_perp_health - prev_perp_health - taker_fees)
     }
 
     /// Update perp val and then update the healths
