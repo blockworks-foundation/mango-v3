@@ -36,6 +36,8 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::{msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
+#[cfg(not(feature = "devnet"))]
+use crate::oracle::PriceStatus;
 use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 #[cfg(not(feature = "devnet"))]
@@ -6467,9 +6469,11 @@ fn read_oracle(
             #[cfg(not(feature = "devnet"))]
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
-            // Pyth status check temporarily removed to let people use accounts with COPE
             #[cfg(not(feature = "devnet"))]
-            if conf > PYTH_CONF_FILTER {
+            if price_account.agg.status != PriceStatus::Trading {
+                msg!("Pyth status invalid: {}", price_account.agg.status as u8);
+                return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
+            } else if conf > PYTH_CONF_FILTER {
                 msg!(
                     "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
                     token_index,

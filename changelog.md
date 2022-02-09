@@ -4,6 +4,7 @@
 Deployed: | Slot:
 1. Added three instructions (ChangeReferralFeeParams, SetReferrerMemory, RegisterReferrerId) to help with referral program
 2. Assess taker fees at the time of the taker trade
+3. Add back Pyth status checks
 
 ## v3.3.3
 Deployed: Feb 4, 2022 at 01:47:33 UTC | Slot: 119,226,876
