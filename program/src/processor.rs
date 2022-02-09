@@ -6945,7 +6945,7 @@ fn seed_and_create_pda<'a>(
     pda_account: &AccountInfo<'a>,
     seeds: &[&[u8]],
     funder_seeds: &[&[u8]],
-) -> ProgramResult {
+) -> MangoResult {
     let (pda_address, bump) = Pubkey::find_program_address(seeds, program_id);
     check!(&pda_address == pda_account.key, MangoErrorCode::InvalidAccount)?;
     create_pda_account(
@@ -6957,7 +6957,8 @@ fn seed_and_create_pda<'a>(
         pda_account,
         &[seeds, &[&[bump]]].concat(),
         funder_seeds,
-    )
+    )?;
+    Ok(())
 }
 fn create_pda_account<'a>(
     funder: &AccountInfo<'a>,
