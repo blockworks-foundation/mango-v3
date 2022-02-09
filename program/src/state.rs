@@ -79,6 +79,8 @@ pub enum DataType {
     MangoCache,
     EventQueue,
     AdvancedOrders,
+    ReferrerMemory,
+    ReferrerIdRecord,
 }
 
 const NUM_HEALTHS: usize = 2;
@@ -2504,25 +2506,41 @@ impl AdvancedOrders {
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct ReferrerMemory {
+    pub meta_data: MetaData,
     pub referrer_mango_account: Pubkey,
 }
 
 impl ReferrerMemory {
+    pub fn init(
+        account: &AccountInfo,
+        program_id: &Pubkey,
+        referrer_mango_account_ai: &AccountInfo,
+    ) -> MangoResult {
+        let mut state: RefMut<Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        state.meta_data = MetaData::new(DataType::ReferrerMemory, 0, true);
+        state.referrer_mango_account = *referrer_mango_account_ai.key;
+
+        Ok(())
+    }
     pub fn load_mut_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
     ) -> MangoResult<RefMut<'a, Self>> {
         // not really necessary because this is a PDA
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        Ok(Self::load_mut(account)?)
-    }
-    pub fn load_checked<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-    ) -> MangoResult<Ref<'a, Self>> {
-        // not really necessary because this is a PDA
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        Ok(Self::load(account)?)
+
+        let state: RefMut<'a, Self> = Self::load_mut(account)?;
+
+        check!(state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(
+            state.meta_data.data_type == DataType::ReferrerMemory as u8,
+            MangoErrorCode::InvalidAccountState
+        )?;
+
+        Ok(state)
     }
 }
 
@@ -2530,25 +2548,26 @@ impl ReferrerMemory {
 #[derive(Copy, Clone, Pod, Loadable)]
 #[repr(C)]
 pub struct ReferrerIdRecord {
+    pub meta_data: MetaData,
     pub referrer_mango_account: Pubkey,
     pub id: [u8; INFO_LEN], // this id is one of the seeds
 }
 
 impl ReferrerIdRecord {
-    pub fn load_mut_checked<'a>(
-        account: &'a AccountInfo,
+    pub fn init(
+        account: &AccountInfo,
         program_id: &Pubkey,
-    ) -> MangoResult<RefMut<'a, Self>> {
-        // not really necessary because this is a PDA
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        Ok(Self::load_mut(account)?)
-    }
-    pub fn load_checked<'a>(
-        account: &'a AccountInfo,
-        program_id: &Pubkey,
-    ) -> MangoResult<Ref<'a, Self>> {
-        // not really necessary because this is a PDA
-        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
-        Ok(Self::load(account)?)
+        referrer_mango_account_ai: &AccountInfo,
+        referrer_id: [u8; INFO_LEN],
+    ) -> MangoResult {
+        let mut state: RefMut<Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        state.meta_data = MetaData::new(DataType::ReferrerIdRecord, 0, true);
+        state.referrer_mango_account = *referrer_mango_account_ai.key;
+        state.id = referrer_id;
+
+        Ok(())
     }
 }

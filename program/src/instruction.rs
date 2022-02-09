@@ -954,17 +954,16 @@ pub enum MangoInstruction {
     /// 6. `[]` system_prog_ai - System program
     SetReferrerMemory,
 
-    /// ssociate the referrer's MangoAccount with a human readable `referrer_id` which can be used
-    /// in a ref link
+    /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// in a ref link. This is primarily useful for the UI.
     /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
     ///
-    /// Accounts expected by this instruction (6):
+    /// Accounts expected by this instruction (5):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[]` referrer_mango_account_ai - MangoAccount
-    /// 2. `[signer]` owner_ai - MangoAccount owner
-    /// 3. `[writable]` referrer_id_record_ai - The PDA to store the record on
-    /// 4. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
-    /// 5. `[]` system_prog_ai - System program
+    /// 2. `[writable]` referrer_id_record_ai - The PDA to store the record on
+    /// 3. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 4. `[]` system_prog_ai - System program
     RegisterReferrerId {
         referrer_id: [u8; INFO_LEN],
     },

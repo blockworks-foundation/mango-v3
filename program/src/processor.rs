@@ -5749,12 +5749,14 @@ impl Processor {
                 referrer_seeds,
                 &[],
             )?;
+            ReferrerMemory::init(referrer_memory_ai, program_id, referrer_mango_account_ai)
+        } else {
+            // otherwise just set referrer pubkey
+            let mut referrer_memory =
+                ReferrerMemory::load_mut_checked(referrer_memory_ai, program_id)?;
+            referrer_memory.referrer_mango_account = *referrer_mango_account_ai.key;
+            Ok(())
         }
-
-        let mut referrer_memory = ReferrerMemory::load_mut_checked(referrer_memory_ai, program_id)?;
-        referrer_memory.referrer_mango_account = *referrer_mango_account_ai.key;
-
-        Ok(())
     }
 
     /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
@@ -5766,11 +5768,10 @@ impl Processor {
         accounts: &[AccountInfo],
         referrer_id: [u8; INFO_LEN],
     ) -> MangoResult {
-        const NUM_FIXED: usize = 6;
+        const NUM_FIXED: usize = 5;
         let [
             mango_group_ai,             // read
             referrer_mango_account_ai,  // read
-            owner_ai,                   // signer
             referrer_id_record_ai,      // write
             payer_ai,                   // write, signer
             system_prog_ai,             // read
@@ -5782,18 +5783,13 @@ impl Processor {
 
         let _ = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
-        let referrer_mango_account =
+        let _ =
             MangoAccount::load_checked(referrer_mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(
-            &referrer_mango_account.owner == owner_ai.key
-                || &referrer_mango_account.delegate == owner_ai.key,
-            MangoErrorCode::InvalidOwner
-        )?;
-        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
 
         // referrer_id_record must be empty; cannot be transferred
         check!(referrer_id_record_ai.data_is_empty(), MangoErrorCode::InvalidAccount)?;
-        let referrer_record_seeds: &[&[u8]] = &[&mango_group_ai.key.as_ref(), &referrer_id];
+        let referrer_record_seeds: &[&[u8]] =
+            &[&mango_group_ai.key.as_ref(), b"ReferrerIdRecord", &referrer_id];
         seed_and_create_pda(
             program_id,
             payer_ai,
@@ -5805,12 +5801,13 @@ impl Processor {
             referrer_record_seeds,
             &[],
         )?;
-        let mut referrer_id_record =
-            ReferrerIdRecord::load_mut_checked(referrer_id_record_ai, program_id)?;
-        referrer_id_record.referrer_mango_account = *referrer_mango_account_ai.key;
-        referrer_id_record.id = referrer_id;
 
-        Ok(())
+        ReferrerIdRecord::init(
+            referrer_id_record_ai,
+            program_id,
+            referrer_mango_account_ai,
+            referrer_id,
+        )
     }
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =

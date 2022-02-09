@@ -848,6 +848,7 @@ impl<'a> Book<'a> {
             }
         };
         if post_allowed {
+            // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
             if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
                 msg!("Posting on book disallowed due to price limits");
@@ -931,6 +932,7 @@ impl<'a> Book<'a> {
             }
         };
         if post_allowed {
+            // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
             if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
                 msg!("Posting on book disallowed due to price limits");
@@ -1026,6 +1028,7 @@ impl<'a> Book<'a> {
         };
         let info = &mango_group.perp_markets[market_index];
         if post_allowed {
+            // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
             if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
                 msg!("Posting on book disallowed due to price limits");
@@ -1168,7 +1171,7 @@ impl<'a> Book<'a> {
         // if there were matched taker quote apply ref fees
         // we know ref_fee_rate is not None if total_quote_taken > 0
         if total_quote_taken > 0 {
-            Self::apply_taker_fees(
+            apply_taker_fees(
                 market,
                 info,
                 mango_account,
@@ -1221,6 +1224,7 @@ impl<'a> Book<'a> {
         };
         let info = &mango_group.perp_markets[market_index];
         if post_allowed {
+            // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
             if native_price.checked_div(oracle_price).unwrap() < info.maint_asset_weight {
                 msg!("Posting on book disallowed due to price limits");
@@ -1363,7 +1367,7 @@ impl<'a> Book<'a> {
         // if there were matched taker quote apply ref fees
         // we know ref_fee_rate is not None if total_quote_taken > 0
         if total_quote_taken > 0 {
-            Self::apply_taker_fees(
+            apply_taker_fees(
                 market,
                 info,
                 mango_account,
@@ -1378,62 +1382,6 @@ impl<'a> Book<'a> {
         }
 
         Ok(())
-    }
-    fn apply_taker_fees(
-        market: &mut PerpMarket,
-        info: &PerpMarketInfo,
-        mango_account: &mut MangoAccount,
-        mango_account_pk: &Pubkey,
-        market_index: usize,
-        referrer_mango_account_opt: Option<RefMut<MangoAccount>>,
-        referrer_mango_account_ai: Option<&AccountInfo>,
-        total_quote_taken: i64,
-        ref_fee_rate: I80F48,
-        perp_market_cache: &PerpMarketCache,
-    ) {
-        let taker_quote_native =
-            I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
-
-        if ref_fee_rate > ZERO_I80F48 {
-            let ref_fees = taker_quote_native * ref_fee_rate;
-
-            // if ref mango account is some, then we send some fees over
-            if let Some(mut referrer_mango_account) = referrer_mango_account_opt {
-                mango_account.perp_accounts[market_index].transfer_quote_position(
-                    &mut referrer_mango_account.perp_accounts[market_index],
-                    ref_fees,
-                );
-                emit_perp_balances(
-                    referrer_mango_account.mango_group,
-                    *referrer_mango_account_ai.unwrap().key,
-                    market_index as u64,
-                    &referrer_mango_account.perp_accounts[market_index],
-                    perp_market_cache,
-                );
-                mango_emit!(ReferralFeeAccrualLog {
-                    mango_group: referrer_mango_account.mango_group,
-                    referrer_mango_account: *referrer_mango_account_ai.unwrap().key,
-                    referree_mango_account: *mango_account_pk,
-                    market_index: market_index as u64,
-                    referral_fee_accrual: ref_fees.to_bits(),
-                });
-            } else {
-                // else user didn't have valid amount of MNGO and no valid referrer
-                mango_account.perp_accounts[market_index].quote_position -= ref_fees;
-                market.fees_accrued += ref_fees;
-            }
-        }
-        let taker_fees = taker_quote_native * info.taker_fee;
-        mango_account.perp_accounts[market_index].quote_position -= taker_fees;
-        market.fees_accrued += taker_fees;
-
-        emit_perp_balances(
-            mango_account.mango_group,
-            *mango_account_pk,
-            market_index as u64,
-            &mango_account.perp_accounts[market_index],
-            perp_market_cache,
-        )
     }
 
     pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
@@ -1798,11 +1746,15 @@ fn determine_ref_vars<'a>(
     };
 
     let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
+
+    // If the user's MNGO deposit is non-zero then the rootbank cache will be checked already in `place_perp_order`.
+    // If it's zero then cache may be out of date, but it doesn't matter because 0 * index = 0
     let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
     let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
     if mngo_deposits >= ref_mngo_req {
         return Ok((ZERO_I80F48, None));
     } else if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
+        // If referrer_mango_account is invalid, just treat it as if it doesn't exist
         if let Ok(referrer_mango_account) =
             MangoAccount::load_mut_checked(referrer_mango_account_ai, program_id, mango_group_pk)
         {
@@ -1821,7 +1773,63 @@ fn determine_ref_vars<'a>(
                 ));
             }
         }
-        // If referrer_mango_account is invalid, just treat it as if it doesn't exist
     }
     Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
+}
+
+fn apply_taker_fees(
+    market: &mut PerpMarket,
+    info: &PerpMarketInfo,
+    mango_account: &mut MangoAccount,
+    mango_account_pk: &Pubkey,
+    market_index: usize,
+    referrer_mango_account_opt: Option<RefMut<MangoAccount>>,
+    referrer_mango_account_ai: Option<&AccountInfo>,
+    total_quote_taken: i64,
+    ref_fee_rate: I80F48,
+    perp_market_cache: &PerpMarketCache,
+) {
+    let taker_quote_native =
+        I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
+
+    if ref_fee_rate > ZERO_I80F48 {
+        let ref_fees = taker_quote_native * ref_fee_rate;
+
+        // if ref mango account is some, then we send some fees over
+        if let Some(mut referrer_mango_account) = referrer_mango_account_opt {
+            mango_account.perp_accounts[market_index].transfer_quote_position(
+                &mut referrer_mango_account.perp_accounts[market_index],
+                ref_fees,
+            );
+            emit_perp_balances(
+                referrer_mango_account.mango_group,
+                *referrer_mango_account_ai.unwrap().key,
+                market_index as u64,
+                &referrer_mango_account.perp_accounts[market_index],
+                perp_market_cache,
+            );
+            mango_emit!(ReferralFeeAccrualLog {
+                mango_group: referrer_mango_account.mango_group,
+                referrer_mango_account: *referrer_mango_account_ai.unwrap().key,
+                referree_mango_account: *mango_account_pk,
+                market_index: market_index as u64,
+                referral_fee_accrual: ref_fees.to_bits(),
+            });
+        } else {
+            // else user didn't have valid amount of MNGO and no valid referrer
+            mango_account.perp_accounts[market_index].quote_position -= ref_fees;
+            market.fees_accrued += ref_fees;
+        }
+    }
+    let taker_fees = taker_quote_native * info.taker_fee;
+    mango_account.perp_accounts[market_index].quote_position -= taker_fees;
+    market.fees_accrued += taker_fees;
+
+    emit_perp_balances(
+        mango_account.mango_group,
+        *mango_account_pk,
+        market_index as u64,
+        &mango_account.perp_accounts[market_index],
+        perp_market_cache,
+    )
 }
