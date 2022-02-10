@@ -2546,7 +2546,8 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         // If order version doesn't match the perp market version, no incentives
-        if order.version != perp_market.meta_data.version {
+        // time in force invalid orders don't get rewards
+        if order.version != perp_market.meta_data.version || !order.is_valid(now_ts) {
             return Ok(());
         }
 
@@ -2644,7 +2645,8 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         // If order version doesn't match the perp market version, no incentives
-        if order.version != perp_market.meta_data.version {
+        // time in force invalid orders don't get rewards
+        if order.version != perp_market.meta_data.version || !order.is_valid(now_ts) {
             return Ok(());
         }
 
