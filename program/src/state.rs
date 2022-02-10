@@ -2202,8 +2202,8 @@ impl PerpMarket {
         const IMPACT_QUANTITY: i64 = 100;
 
         // Get current book price & compare it to index price
-        let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY);
-        let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY);
+        let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY, now_ts);
+        let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY, now_ts);
 
         const MAX_FUNDING: I80F48 = I80F48!(0.05);
         const MIN_FUNDING: I80F48 = I80F48!(-0.05);
