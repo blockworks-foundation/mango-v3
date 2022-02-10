@@ -1108,23 +1108,18 @@ impl HealthCache {
         let taker_fees = if taker_quote != 0 {
             let taker_quote_native =
                 I80F48::from_num(info.quote_lot_size.checked_mul(taker_quote.abs()).unwrap());
-            match mango_group.find_token_index(&mngo_token::id()) {
-                None => info.taker_fee * taker_quote_native,
-                Some(mngo_index) => {
-                    let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
-                    let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
-                    let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-                    if mngo_deposits >= ref_mngo_req {
-                        info.taker_fee * taker_quote_native
-                    } else {
-                        // done in two steps to perfectly simulate what happens in `apply_taker_fees`
-                        info.taker_fee * taker_quote_native
-                            + I80F48::from_num(mango_group.ref_surcharge_centibps)
-                                / CENTIBPS_PER_UNIT
-                                * taker_quote_native
-                    }
+            let mut market_fees = info.taker_fee * taker_quote_native;
+            if let Some(mngo_index) = mango_group.find_token_index(&mngo_token::id()) {
+                let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
+                let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
+                let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
+                if mngo_deposits < ref_mngo_req {
+                    market_fees += I80F48::from_num(mango_group.ref_surcharge_centibps)
+                        / CENTIBPS_PER_UNIT
+                        * taker_quote_native;
                 }
             }
+            market_fees
         } else {
             ZERO_I80F48
         };
