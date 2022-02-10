@@ -1577,14 +1577,17 @@ impl<'a> Book<'a> {
         let mut bids_and_sizes = vec![];
         let mut cuml_bids = 0;
 
-        let mut iter = self.bids.iter(now_ts);
+        let mut iter = self.bids.iter(0); // pass in 0 so all orders are considered valid
         let mut curr = iter.next();
         while let Some(bid) = curr {
             match my_bids.last() {
                 None => break,
                 Some(&my_highest_bid) => {
                     if bid.key > my_highest_bid {
-                        cuml_bids += bid.quantity;
+                        if bid.is_valid(now_ts) {
+                            // if bid is not valid, it doesn't count towards book liquidity
+                            cuml_bids += bid.quantity;
+                        }
                         curr = iter.next();
                     } else if bid.key == my_highest_bid {
                         bids_and_sizes.push((bid.key, cuml_bids));
@@ -1616,18 +1619,20 @@ impl<'a> Book<'a> {
             match self.cancel_order(key, Side::Bid) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
-                    if order.version != perp_market.meta_data.version {
-                        continue;
-                    }
-                    mango_account.perp_accounts[market_index].apply_size_incentives(
-                        perp_market,
-                        order.best_initial,
-                        cuml_size,
-                        order.timestamp,
-                        now_ts,
-                        order.quantity,
-                    )?;
                     canceled_order_ids.push(key);
+                    if order.version == perp_market.meta_data.version
+                        && order.version != 0
+                        && order.is_valid(now_ts)
+                    {
+                        mango_account.perp_accounts[market_index].apply_size_incentives(
+                            perp_market,
+                            order.best_initial,
+                            cuml_size,
+                            order.timestamp,
+                            now_ts,
+                            order.quantity,
+                        )?;
+                    }
                 }
                 Err(_) => {
                     msg!("Failed to cancel bid oid: {}; Either error state or bid is on EventQueue unprocessed", key)
@@ -1653,14 +1658,17 @@ impl<'a> Book<'a> {
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
 
-        let mut iter = self.asks.iter(now_ts);
+        let mut iter = self.asks.iter(0); // pass in 0 so all orders are considered valid
         let mut curr = iter.next();
         while let Some(ask) = curr {
             match my_asks.last() {
                 None => break,
                 Some(&my_lowest_ask) => {
                     if ask.key < my_lowest_ask {
-                        cuml_asks += ask.quantity;
+                        if ask.is_valid(now_ts) {
+                            // if ask is not valid, it doesn't count towards book liquidity
+                            cuml_asks += ask.quantity;
+                        }
                         curr = iter.next();
                     } else if ask.key == my_lowest_ask {
                         asks_and_sizes.push((ask.key, cuml_asks));
@@ -1690,18 +1698,20 @@ impl<'a> Book<'a> {
             match self.cancel_order(key, Side::Ask) {
                 Ok(order) => {
                     mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
-                    if order.version != perp_market.meta_data.version {
-                        continue;
-                    }
-                    mango_account.perp_accounts[market_index].apply_size_incentives(
-                        perp_market,
-                        order.best_initial,
-                        cuml_size,
-                        order.timestamp,
-                        now_ts,
-                        order.quantity,
-                    )?;
                     canceled_order_ids.push(key);
+                    if order.version == perp_market.meta_data.version
+                        && order.version != 0
+                        && order.is_valid(now_ts)
+                    {
+                        mango_account.perp_accounts[market_index].apply_size_incentives(
+                            perp_market,
+                            order.best_initial,
+                            cuml_size,
+                            order.timestamp,
+                            now_ts,
+                            order.quantity,
+                        )?;
+                    }
                 }
                 Err(_) => {
                     msg!("Failed to cancel ask oid: {}; Either error state or ask is on EventQueue unprocessed", key);
