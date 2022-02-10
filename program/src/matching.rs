@@ -53,7 +53,8 @@ pub struct InnerNode {
     pub key: i128,
     /// indexes into `BookSide::nodes`
     pub children: [NodeHandle; 2],
-    pub padding: [u8; NODE_SIZE - 32],
+    pub child_expiry: [u64; 2],
+    pub padding: [u8; NODE_SIZE - 48],
 }
 
 impl InnerNode {
@@ -63,7 +64,8 @@ impl InnerNode {
             prefix_len,
             key,
             children: [0; 2],
-            padding: [0; NODE_SIZE - 32],
+            child_expiry: [u64::MAX; 2],
+            padding: [0; NODE_SIZE - 48],
         }
     }
 
@@ -73,6 +75,11 @@ impl InnerNode {
         let crit_bit_mask = 1i128 << (127 - self.prefix_len);
         let crit_bit = (search_key & crit_bit_mask) != 0;
         (self.children[crit_bit as usize], crit_bit)
+    }
+
+    #[inline(always)]
+    pub fn expiry(&self) -> u64 {
+        std::cmp::min(self.child_expiry[0], self.child_expiry[1])
     }
 }
 
@@ -132,6 +139,15 @@ impl LeafNode {
     #[inline(always)]
     pub fn price(&self) -> i64 {
         key_to_price(self.key)
+    }
+
+    #[inline(always)]
+    pub fn expiry(&self) -> u64 {
+        if self.time_in_force == 0 {
+            u64::MAX
+        } else {
+            self.timestamp + self.time_in_force as u64
+        }
     }
 
     #[inline(always)]
@@ -213,6 +229,22 @@ impl AnyNode {
         match self.case_mut() {
             Some(NodeRefMut::Leaf(leaf_ref)) => Some(leaf_ref),
             _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_inner_mut(&mut self) -> Option<&mut InnerNode> {
+        match self.case_mut() {
+            Some(NodeRefMut::Inner(inner_ref)) => Some(inner_ref),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn expiry(&self) -> u64 {
+        match self.case().unwrap() {
+            NodeRef::Inner(inner) => inner.expiry(),
+            NodeRef::Leaf(leaf) => leaf.expiry(),
         }
     }
 }
@@ -536,6 +568,9 @@ impl BookSide {
     }
 
     fn remove_by_key(&mut self, search_key: i128) -> Option<LeafNode> {
+        // path of InnerNode handles that lead to the removed leaf
+        let mut stack: Vec<(NodeHandle, bool)> = vec![];
+
         // special case potentially removing the root
         let mut parent_h = self.root()?;
         let (mut child_h, mut crit_bit) = match self.get(parent_h).unwrap().case().unwrap() {
@@ -549,6 +584,7 @@ impl BookSide {
             NodeRef::Leaf(_) => return None,
             NodeRef::Inner(inner) => inner.walk_down(search_key),
         };
+        stack.push((parent_h, crit_bit));
 
         // walk down the tree until finding the key
         loop {
@@ -558,6 +594,7 @@ impl BookSide {
                     let (new_child_h, new_crit_bit) = inner.walk_down(search_key);
                     child_h = new_child_h;
                     crit_bit = new_crit_bit;
+                    stack.push((parent_h, crit_bit));
                 }
                 NodeRef::Leaf(leaf) => {
                     if leaf.key != search_key {
@@ -572,9 +609,17 @@ impl BookSide {
         // free child_h, replace *parent_h with *other_child_h, free other_child_h
         let other_child_h = self.get(parent_h).unwrap().children().unwrap()[!crit_bit as usize];
         let other_child_node_contents = self.remove(other_child_h).unwrap();
+        let new_expiry = other_child_node_contents.expiry();
         *self.get_mut(parent_h).unwrap() = other_child_node_contents;
         self.leaf_count -= 1;
-        Some(cast(self.remove(child_h).unwrap()))
+        let removed_leaf: LeafNode = cast(self.remove(child_h).unwrap());
+
+        // update child min expiry back up to the root
+        let outdated_expiry = removed_leaf.expiry();
+        stack.pop(); // the final parent has been replaced by the remaining leaf
+        self.update_expiry(&stack, outdated_expiry, new_expiry);
+
+        Some(removed_leaf)
     }
 
     fn remove(&mut self, key: NodeHandle) -> Option<AnyNode> {
@@ -633,6 +678,9 @@ impl BookSide {
         &mut self,
         new_leaf: &LeafNode,
     ) -> MangoResult<(NodeHandle, Option<LeafNode>)> {
+        // path of InnerNode handles that lead to the removed leaf
+        let mut stack: Vec<(NodeHandle, bool)> = vec![];
+
         // deal with inserts into an empty tree
         let mut root: NodeHandle = match self.root() {
             Some(h) => h,
@@ -654,6 +702,7 @@ impl BookSide {
                 if let Some(NodeRef::Leaf(&old_root_as_leaf)) = root_contents.case() {
                     // clobber the existing leaf
                     *self.get_mut(root).unwrap() = *new_leaf.as_ref();
+                    self.update_expiry(&stack, old_root_as_leaf.expiry(), new_leaf.expiry());
                     return Ok((root, Some(old_root_as_leaf)));
                 }
                 // InnerNodes have a random child's key, so matching can happen and is fine
@@ -664,7 +713,9 @@ impl BookSide {
                 Some(NodeRef::Inner(inner)) => {
                     let keep_old_root = shared_prefix_len >= inner.prefix_len;
                     if keep_old_root {
-                        root = inner.walk_down(new_leaf.key).0;
+                        let (child, crit_bit) = inner.walk_down(new_leaf.key);
+                        stack.push((root, crit_bit));
+                        root = child;
                         continue;
                     };
                 }
@@ -692,6 +743,17 @@ impl BookSide {
 
             new_root.children[new_leaf_crit_bit as usize] = new_leaf_handle;
             new_root.children[old_root_crit_bit as usize] = moved_root_handle;
+
+            let new_leaf_expiry = new_leaf.expiry();
+            let old_root_expiry = root_contents.expiry();
+            new_root.child_expiry[new_leaf_crit_bit as usize] = new_leaf_expiry;
+            new_root.child_expiry[old_root_crit_bit as usize] = old_root_expiry;
+
+            // walk up the stack and fix up the new min if needed
+            if new_leaf_expiry < old_root_expiry {
+                self.update_expiry(&stack, old_root_expiry, new_leaf_expiry);
+            }
+
             self.leaf_count += 1;
             return Ok((new_leaf_handle, None));
         }
@@ -699,6 +761,44 @@ impl BookSide {
 
     pub fn is_full(&self) -> bool {
         self.free_list_len <= 1 && self.bump_index >= self.nodes.len() - 1
+    }
+
+    fn update_expiry(
+        &mut self,
+        stack: &[(NodeHandle, bool)],
+        mut outdated_expiry: u64,
+        mut new_expiry: u64,
+    ) {
+        for (parent_h, crit_bit) in stack.iter().rev() {
+            let parent = self.get_mut(*parent_h).unwrap().as_inner_mut().unwrap();
+            if parent.child_expiry[*crit_bit as usize] != outdated_expiry {
+                break;
+            }
+            outdated_expiry = parent.expiry();
+            parent.child_expiry[*crit_bit as usize] = new_expiry;
+            new_expiry = std::cmp::min(new_expiry, parent.child_expiry[!*crit_bit as usize]);
+        }
+    }
+
+    pub fn soonest_expiry(&self) -> Option<(NodeHandle, u64)> {
+        let mut current: NodeHandle = match self.root() {
+            Some(h) => h,
+            None => return None,
+        };
+
+        loop {
+            let contents = *self.get(current).unwrap();
+            match contents.case() {
+                None => unreachable!(),
+                Some(NodeRef::Inner(inner)) => {
+                    current =
+                        inner.children[(inner.child_expiry[0] > inner.child_expiry[1]) as usize];
+                }
+                _ => {
+                    return Some((current, contents.expiry()));
+                }
+            };
+        }
     }
 }
 
@@ -1888,4 +1988,132 @@ fn apply_fees(
         &mango_account.perp_accounts[market_index],
         perp_market_cache,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn new_bookside(data_type: DataType) -> BookSide {
+        BookSide {
+            meta_data: MetaData::new(data_type, 0, true),
+            bump_index: 0,
+            free_list_len: 0,
+            free_list_head: 0,
+            root_node: 0,
+            leaf_count: 0,
+            nodes: [AnyNode { tag: 0, data: [0u8; NODE_SIZE - 4] }; MAX_BOOK_NODES],
+        }
+    }
+
+    fn verify_bookside_expiry(bookside: &BookSide) {
+        let r = match bookside.root() {
+            Some(h) => h,
+            None => return,
+        };
+
+        fn recursive_check(bookside: &BookSide, h: NodeHandle) {
+            match bookside.get(h).unwrap().case().unwrap() {
+                NodeRef::Inner(&inner) => {
+                    let left = bookside.get(inner.children[0]).unwrap().expiry();
+                    let right = bookside.get(inner.children[1]).unwrap().expiry();
+                    assert_eq!(inner.child_expiry[0], left);
+                    assert_eq!(inner.child_expiry[1], right);
+                    recursive_check(bookside, inner.children[0]);
+                    recursive_check(bookside, inner.children[1]);
+                }
+                _ => {}
+            }
+        };
+        recursive_check(bookside, r);
+    }
+
+    #[test]
+    fn bookside_expiry_manual() {
+        let mut bids = new_bookside(DataType::Bids);
+        let new_expiring_leaf = |key: i128, expiry: u64| {
+            LeafNode::new(0, 0, key, Pubkey::default(), 0, 0, expiry - 1, 0, OrderType::Limit, 1)
+        };
+
+        assert!(bids.soonest_expiry().is_none());
+
+        bids.insert_leaf(&new_expiring_leaf(0, 5000)).unwrap();
+        assert_eq!(bids.soonest_expiry().unwrap(), (bids.root_node, 5000));
+        verify_bookside_expiry(&bids);
+
+        let (new4000_h, _) = bids.insert_leaf(&new_expiring_leaf(1, 4000)).unwrap();
+        assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
+        verify_bookside_expiry(&bids);
+
+        let (new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
+        assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
+        verify_bookside_expiry(&bids);
+
+        let (new3500_h, _) = bids.insert_leaf(&new_expiring_leaf(3, 3500)).unwrap();
+        assert_eq!(bids.soonest_expiry().unwrap(), (new3500_h, 3500));
+        verify_bookside_expiry(&bids);
+        // the first two levels of the tree are innernodes, with 0;1 on one side and 2;3 on the other
+        assert_eq!(
+            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
+            [4000, 3500]
+        );
+
+        bids.remove_by_key(3).unwrap();
+        verify_bookside_expiry(&bids);
+        assert_eq!(
+            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
+            [4000, 4500]
+        );
+        assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
+
+        bids.remove_by_key(0).unwrap();
+        verify_bookside_expiry(&bids);
+        assert_eq!(
+            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
+            [4000, 4500]
+        );
+        assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
+
+        bids.remove_by_key(1).unwrap();
+        verify_bookside_expiry(&bids);
+        assert_eq!(bids.soonest_expiry().unwrap().1, 4500);
+
+        bids.remove_by_key(2).unwrap();
+        verify_bookside_expiry(&bids);
+        assert!(bids.soonest_expiry().is_none());
+    }
+
+    #[test]
+    fn bookside_expiry_random() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        let mut bids = new_bookside(DataType::Bids);
+        let new_expiring_leaf = |key: i128, expiry: u64| {
+            LeafNode::new(0, 0, key, Pubkey::default(), 0, 0, expiry - 1, 0, OrderType::Limit, 1)
+        };
+
+        // add 200 random leaves
+        let mut keys = vec![];
+        for _ in 0..200 {
+            let key: i128 = rng.gen_range(0..10000); // overlap in key bits
+            if keys.contains(&key) {
+                continue;
+            }
+            keys.push(key);
+            bids.insert_leaf(&new_expiring_leaf(key, rng.gen_range(1..200))); // give good chance of duplicate expiry times
+            verify_bookside_expiry(&bids);
+        }
+
+        // remove 50 at random
+        for _ in 0..50 {
+            if keys.len() == 0 {
+                break;
+            }
+            let k = keys[rng.gen_range(0..keys.len())];
+            bids.remove_by_key(k);
+            keys.retain(|v| *v != k);
+            verify_bookside_expiry(&bids);
+        }
+    }
 }
