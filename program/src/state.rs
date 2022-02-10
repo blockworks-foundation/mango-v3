@@ -1114,8 +1114,8 @@ impl HealthCache {
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
                 if mngo_deposits < ref_mngo_req {
-                    market_fees += I80F48::from_num(mango_group.ref_surcharge_centibps)
-                        / CENTIBPS_PER_UNIT
+                    market_fees += (I80F48::from_num(mango_group.ref_surcharge_centibps)
+                        / CENTIBPS_PER_UNIT)
                         * taker_quote_native;
                 }
             }
