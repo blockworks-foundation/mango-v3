@@ -2475,6 +2475,7 @@ impl Processor {
             price,
             quantity,
             order_type,
+            0,
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
@@ -2521,6 +2522,7 @@ impl Processor {
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         let (order_id, side) = mango_account
             .find_order_with_client_id(market_index, client_order_id)
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
@@ -2534,8 +2536,8 @@ impl Processor {
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
-                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth, now_ts),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth, now_ts),
             }
         };
 
@@ -2557,7 +2559,7 @@ impl Processor {
                 order.best_initial,
                 best_final,
                 order.timestamp,
-                Clock::get()?.unix_timestamp as u64,
+                now_ts,
                 order.quantity,
             )?;
         } else {
@@ -2616,6 +2618,9 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
         let side = mango_account
             .find_order_side(market_index, order_id)
             .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
@@ -2629,8 +2634,8 @@ impl Processor {
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
-                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth, now_ts),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth, now_ts),
             }
         };
 
@@ -2652,7 +2657,7 @@ impl Processor {
                 order.best_initial,
                 best_final,
                 order.timestamp,
-                Clock::get()?.unix_timestamp as u64,
+                now_ts,
                 order.quantity,
             )?;
         } else {
@@ -5234,6 +5239,7 @@ impl Processor {
                     order.price,
                     quantity,
                     order.order_type,
+                    now_ts,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,
@@ -5242,6 +5248,7 @@ impl Processor {
                     order.price,
                     quantity,
                     order.order_type,
+                    now_ts,
                 )?,
             };
 
@@ -5284,6 +5291,7 @@ impl Processor {
                     order.price,
                     quantity,
                     order.order_type,
+                    0,
                     order.client_order_id,
                     now_ts,
                     None,
