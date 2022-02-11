@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.3.5
-Deployed: | Slot: 
+Deployed: Feb 11, 2022 at 17:36:15 UTC | Slot: 120,380,891 
 1. reduce consume_events limit to 4 to prevent memory issues
 2. record maker fees on PerpMarket at time of trade to prevent it later going negative
 3. fix typo in emit_perp_balances to print correct short_funding
