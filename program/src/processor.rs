@@ -4420,8 +4420,8 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
-        // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 6);
+        // Limit may be max 4 because of compute and memory limits from logging. Increase if compute/mem goes up
+        let limit = min(limit, 4);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
