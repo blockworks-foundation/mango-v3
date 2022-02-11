@@ -5679,7 +5679,7 @@ impl Processor {
         ref_share_centibps: u32,
         ref_mngo_required: u64,
     ) -> MangoResult {
-        check!(ref_surcharge_centibps > ref_share_centibps, MangoErrorCode::InvalidParam)?;
+        check!(ref_surcharge_centibps >= ref_share_centibps, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 2;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
