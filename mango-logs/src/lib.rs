@@ -245,3 +245,12 @@ pub struct PerpBalanceLog {
     pub long_funding: i128,  // I80F48
     pub short_funding: i128, // I80F48
 }
+
+#[event]
+pub struct ReferralFeeAccrualLog {
+    pub mango_group: Pubkey,
+    pub referrer_mango_account: Pubkey,
+    pub referree_mango_account: Pubkey,
+    pub market_index: u64,
+    pub referral_fee_accrual: i128, // I80F48
+}

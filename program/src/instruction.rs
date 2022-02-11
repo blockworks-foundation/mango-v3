@@ -217,7 +217,7 @@ pub enum MangoInstruction {
     /// paid from the quote position. Only at this point the position balance
     /// is 100% refelecting the trade.
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (8 + `MAX_PAIRS` + (optional 1)):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2. `[signer]` owner_ai - owner of MangoAccount
@@ -226,12 +226,14 @@ pub enum MangoInstruction {
     /// 5. `[writable]` bids_ai - bids account for this PerpMarket
     /// 6. `[writable]` asks_ai - asks account for this PerpMarket
     /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8..23 `[]` open_orders_ais - array of open orders accounts on this MangoAccount
+    /// 23. `[writable]` referrer_mango_account_ai - optional, mango account of referrer
     PlacePerpOrder {
         price: i64,
         quantity: i64,
         client_order_id: u64,
         side: Side,
-        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
         /// Optional to be backward compatible; default false
         reduce_only: bool,
@@ -925,6 +927,46 @@ pub enum MangoInstruction {
     /// 7. `[]` system_prog_ai - System program
     /// 8. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateSpotOpenOrders, // instruction 60
+
+    /// Set the `ref_surcharge_centibps`, `ref_share_centibps` and `ref_mngo_required` on `MangoGroup`
+    ///
+    /// Accounts expected by this instruction (2):
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[signer]` admin_ai - mango_group.admin
+    ChangeReferralFeeParams {
+        ref_surcharge_centibps: u32,
+        ref_share_centibps: u32,
+        ref_mngo_required: u64,
+    },
+    /// Store the referrer's MangoAccount pubkey on the Referrer account
+    /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
+    /// This is primarily useful for the UI; the referrer address stored here is not necessarily
+    /// who earns the ref fees.
+    ///
+    /// Accounts expected by this instruction (7):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[]` mango_account_ai - MangoAccount of the referred
+    /// 2. `[signer]` owner_ai - MangoAccount owner or delegate
+    /// 3. `[writable]` referrer_memory_ai - ReferrerMemory struct; will be initialized if required
+    /// 4. `[]` referrer_mango_account_ai - referrer's MangoAccount
+    /// 5. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 6. `[]` system_prog_ai - System program
+    SetReferrerMemory,
+
+    /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// in a ref link. This is primarily useful for the UI.
+    /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
+    ///
+    /// Accounts expected by this instruction (5):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` referrer_mango_account_ai - MangoAccount
+    /// 2. `[writable]` referrer_id_record_ai - The PDA to store the record on
+    /// 3. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 4. `[]` system_prog_ai - System program
+    RegisterReferrerId {
+        referrer_id: [u8; INFO_LEN],
+    },
 }
 
 impl MangoInstruction {
@@ -1373,6 +1415,21 @@ impl MangoInstruction {
                 }
             }
             60 => MangoInstruction::CreateSpotOpenOrders,
+            61 => {
+                let data = array_ref![data, 0, 16];
+                let (ref_surcharge_centibps, ref_share_centibps, ref_mngo_required) =
+                    array_refs![data, 4, 4, 8];
+                MangoInstruction::ChangeReferralFeeParams {
+                    ref_surcharge_centibps: u32::from_le_bytes(*ref_surcharge_centibps),
+                    ref_share_centibps: u32::from_le_bytes(*ref_share_centibps),
+                    ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
+                }
+            }
+            62 => MangoInstruction::SetReferrerMemory,
+            63 => {
+                let referrer_id = array_ref![data, 0, INFO_LEN];
+                MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
+            }
             _ => {
                 return None;
             }
@@ -1728,6 +1785,7 @@ pub fn place_perp_order(
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
     event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
     open_orders_pks: &[Pubkey; MAX_PAIRS],
     side: Side,
     price: i64,
@@ -1747,6 +1805,9 @@ pub fn place_perp_order(
         AccountMeta::new(*event_queue_pk, false),
     ];
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    if let Some(referrer_mango_account_pk) = referrer_mango_account_pk {
+        accounts.push(AccountMeta::new(*referrer_mango_account_pk, false));
+    }
 
     let instr = MangoInstruction::PlacePerpOrder {
         side,

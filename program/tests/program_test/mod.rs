@@ -724,6 +724,7 @@ impl MangoProgramTest {
             &perp_market.bids,
             &perp_market.asks,
             &perp_market.event_queue,
+            None,
             &mango_account.spot_open_orders,
             order_side,
             order_price as i64,
