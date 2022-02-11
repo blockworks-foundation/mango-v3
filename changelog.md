@@ -1,6 +1,6 @@
 # Mango Program Change Log
 
-##v 3.3.5
+## v3.3.5
 Deployed: | Slot: 
 1. reduce consume_events limit to 4 to prevent memory issues
 2. record maker fees on PerpMarket at time of trade to prevent it later going negative
