@@ -1183,6 +1183,12 @@ impl<'a> Book<'a> {
                 ref_fee_rate.unwrap(),
                 &mango_cache.perp_market_cache[market_index],
             );
+
+            // Track maker fees immediately: they can be negative and applying them later
+            // risks that fees_accrued has been settled to 0. It going negative breaks assumptions.
+            let total_quote_native =
+                I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
+            market.fees_accrued += total_quote_native * info.maker_fee;
         }
 
         Ok(())
@@ -1379,6 +1385,12 @@ impl<'a> Book<'a> {
                 ref_fee_rate.unwrap(),
                 &mango_cache.perp_market_cache[market_index],
             );
+
+            // Track maker fees immediately: they can be negative and applying them later
+            // risks that fees_accrued has been settled to 0. It going negative breaks assumptions.
+            let total_quote_native =
+                I80F48::from_num(market.quote_lot_size.checked_mul(total_quote_taken).unwrap());
+            market.fees_accrued += total_quote_native * info.maker_fee;
         }
 
         Ok(())
