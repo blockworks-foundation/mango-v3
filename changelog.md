@@ -4,6 +4,7 @@
 Deployed: | Slot: 
 1. reduce consume_events limit to 4 to prevent memory issues
 2. record maker fees on PerpMarket at time of trade to prevent it later going negative
+3. fix typo in emit_perp_balances to print correct short_funding
 
 ## v3.3.4
 Deployed: Feb 11, 2022 at 01:55:57 UTC | Slot: 120,283,217
