@@ -106,6 +106,6 @@ pub fn emit_perp_balances(
         long_settled_funding: pa.long_settled_funding.to_bits(),
         short_settled_funding: pa.short_settled_funding.to_bits(),
         long_funding: perp_market_cache.long_funding.to_bits(),
-        short_funding: perp_market_cache.long_funding.to_bits(),
+        short_funding: perp_market_cache.short_funding.to_bits(),
     });
 }
