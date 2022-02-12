@@ -14,6 +14,7 @@ use std::str::FromStr;
 
 #[tokio::test]
 /// Simple test for ix liquidate_perp_market
+/// Transfers liqees base and quote positions to liqor
 /// note: doesnt check the numbers to exact accuracy
 async fn test_liquidation_perp_market_basic() {
     // === Arrange ===

@@ -37,6 +37,7 @@ fn get_borrow_for_user(
 
 #[tokio::test]
 /// Simple test for ix liquidate_token_and_perp
+/// Transfers liqees quote deposits and quote positions to liqor
 /// note: doesnt check the numbers to exact accuracy
 async fn test_liquidation_token_and_perp_basic() {
     // === Arrange ===
