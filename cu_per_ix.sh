@@ -13,3 +13,5 @@ rg -N 'Mango: (\w+) .* consumed (\d+) .*' consumed_per_instruction.log -r '$1,$2
   | uniq | xsv sort -s 2 -N -R \
   | sort -t ',' -k 1,1 -u \
   | sort > consumed_per_instruction_uniq.log
+
+cat consumed_per_instruction_uniq.log| awk '{print $2}' | sort > consumed_per_instruction_uniq.log
