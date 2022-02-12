@@ -1,0 +1,281 @@
+   1 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20512 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20579 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20657 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20696 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20774 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20852 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20891 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20930 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20969 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21008 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21071 of 200000 compute units
+   1 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 56013 of 200000 compute units
+   1 Mango: AddPerpTriggerOrder client_order_id=20000 type=Limit side=Bid trigger_condition=Above price=100000 quantity=10000 trigger=11000 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11760 of 200000 compute units
+   1 Mango: AddPerpTriggerOrder client_order_id=20001 type=Limit side=Bid trigger_condition=Below price=91000 quantity=10000 trigger=9000 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11709 of 200000 compute units
+   1 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 16058 of 200000 compute units
+   1 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18920 of 200000 compute units
+   1 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 44130 of 200000 compute units
+   1 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6381 of 200000 compute units
+   1 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8519 of 200000 compute units
+   1 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 91739 of 200000 compute units
+   1 Mango: CachePerpMarkets Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21047 of 200000 compute units
+   1 Mango: CachePerpMarkets Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 23481 of 200000 compute units
+   1 Mango: CachePerpMarkets Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2771 of 200000 compute units
+   1 Mango: CachePerpMarkets Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9360 of 200000 compute units
+   1 Mango: CachePrices Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21086 of 200000 compute units
+   1 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12149 of 200000 compute units
+   1 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18318 of 200000 compute units
+   1 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20813 of 200000 compute units
+   1 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 24418 of 200000 compute units
+   1 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 4874 of 200000 compute units
+   1 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9360 of 200000 compute units
+   1 Mango: ConsumeEvents limit=3 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20337 of 200000 compute units
+   1 Mango: CreateMangoAccount Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11837 of 200000 compute units
+   1 Mango: CreateMangoAccount Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6021 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 13215 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 13293 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 13371 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 14754 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 17832 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19176 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19242 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6499 of 200000 compute units
+   1 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9751 of 200000 compute units
+   1 Mango: Deposit Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20618 of 200000 compute units
+   1 Mango: ExecutePerpTriggerOrder 1 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28875 of 200000 compute units
+   1 Mango: ExecutePerpTriggerOrder 1 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6572 of 200000 compute units
+   1 Mango: InitAdvancedOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6497 of 200000 compute units
+   1 Mango: LiquidatePerpMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28240 of 200000 compute units
+   1 Mango: LiquidatePerpMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28457 of 200000 compute units
+   1 Mango: LiquidatePerpMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28463 of 200000 compute units
+   1 Mango: LiquidatePerpMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28465 of 200000 compute units
+   1 Mango: LiquidatePerpMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28466 of 200000 compute units
+   1 Mango: LiquidatePerpMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 28467 of 200000 compute units
+   1 Mango: LiquidateTokenAndPerp Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 37537 of 200000 compute units
+   1 Mango: LiquidateTokenAndPerp Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 37542 of 200000 compute units
+   1 Mango: LiquidateTokenAndToken Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 56229 of 200000 compute units
+   1 Mango: LiquidateTokenAndToken Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 56239 of 200000 compute units
+   1 Mango: LiquidateTokenAndToken Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 56363 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10000 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20735 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10000 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 47417 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10001 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 48474 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10001 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9946 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10002 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19193 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10002 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19438 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10002 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 49529 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10002 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6460 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10003 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19874 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10003 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 22157 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10003 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 50861 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10004 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 51262 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10005 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 52824 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10006 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 53748 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10007 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 54803 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10008 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 55857 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10009 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 56912 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10010 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 57967 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10011 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 59022 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10012 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 60077 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10013 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 61131 of 200000 compute units
+   1 Mango: PlacePerpOrder client_order_id=10014 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 62186 of 200000 compute units
+   1 Mango: PlaceSpotOrder Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12032 of 200000 compute units
+   1 Mango: PlaceSpotOrder Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 24427 of 200000 compute units
+   1 Mango: PlaceSpotOrder Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8102 of 200000 compute units
+   1 Mango: RemoveAdvancedOrder 0 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2159 of 200000 compute units
+   1 Mango: RemoveAdvancedOrder 0 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2232 of 200000 compute units
+   1 Mango: RemoveAdvancedOrder 2 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2159 of 200000 compute units
+   1 Mango: SetDelegate Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1357 of 200000 compute units
+   1 Mango: SetDelegate Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1358 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1590 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1629 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1668 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1707 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1746 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1785 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1824 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1863 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1902 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1941 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1980 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2019 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20539 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2058 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 2097 of 200000 compute units
+   1 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21071 of 200000 compute units
+   1 Mango: SettlePnl Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 26769 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 101496 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12071 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12110 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 14637 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 17080 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 17598 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18182 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18221 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18318 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 3669 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6415 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6423 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6463 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6502 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6541 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6585 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6624 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6658 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6697 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6736 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6775 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6781 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6814 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6853 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6859 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6892 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6931 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6970 of 200000 compute units
+   1 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9109 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11643 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18318 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 23463 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 24427 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6421 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6460 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6538 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6577 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6616 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6655 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9031 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9040 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9389 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9400 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9439 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9478 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9517 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9556 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9595 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9634 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9673 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9712 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9790 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9829 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9877 of 200000 compute units
+   1 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9907 of 200000 compute units
+   1 Mango: Withdraw Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 5523 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20564 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20603 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20642 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20681 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20720 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20759 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20798 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20837 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20876 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20915 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20954 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20993 of 200000 compute units
+   2 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21032 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20552 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20591 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20630 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20669 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20708 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20747 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20786 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20825 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20864 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20903 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20942 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20981 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21020 of 200000 compute units
+   2 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 21059 of 200000 compute units
+   2 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 13058 of 200000 compute units
+   2 Mango: CreateSpotOpenOrders Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 16058 of 200000 compute units
+   2 Mango: LiquidateTokenAndPerp Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 37536 of 200000 compute units
+   2 Mango: LiquidateTokenAndPerp Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 37539 of 200000 compute units
+   2 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 16621 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11798 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11838 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11877 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11916 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11955 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11994 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12032 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12033 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12071 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12072 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12110 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12111 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8563 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8602 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8641 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8680 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8719 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8758 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8797 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8836 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8875 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8914 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8953 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8992 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9070 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9109 of 200000 compute units
+   2 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9359 of 200000 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 173890 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 175755 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 177620 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 179485 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 181350 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 183215 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 185080 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 186945 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 188810 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 190675 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 192540 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 194405 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 196270 compute units
+   3 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 198135 compute units
+   3 Mango: ConsumeEvents limit=3 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19818 of 200000 compute units
+   3 Mango: PlacePerpOrder client_order_id=10000 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 19343 of 200000 compute units
+   3 Mango: PlacePerpOrder client_order_id=10001 Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 22058 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11797 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11837 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11876 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11915 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11954 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 11993 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12149 of 200000 compute units
+   3 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9364 of 200000 compute units
+   5 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 24427 of 200000 compute units
+   5 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6460 of 200000 compute units
+   5 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6772 of 200000 compute units
+   5 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12188 of 200000 compute units
+   5 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12227 of 200000 compute units
+   5 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12266 of 200000 compute units
+   5 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12314 of 200000 compute units
+   5 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 12344 of 200000 compute units
+   5 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9946 of 200000 compute units
+   6 Mango: CachePerpMarkets Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 23463 of 200000 compute units
+   6 Mango: CachePrices Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 18318 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6421 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6499 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6538 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6577 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6616 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6655 of 200000 compute units
+   6 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6850 of 200000 compute units
+   7 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6694 of 200000 compute units
+   7 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6733 of 200000 compute units
+   7 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6811 of 200000 compute units
+   7 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6889 of 200000 compute units
+   7 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6928 of 200000 compute units
+   7 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8519 of 200000 compute units
+  11 Mango: AddSpotMarket Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20512 of 200000 compute units
+  11 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 8523 of 200000 compute units
+  12 Mango: AddPerpMarket DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 20524 of 200000 compute units
+  12 Mango: SetOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1550 of 200000 compute units
+  13 Mango: AddOracle Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1865 of 200000 compute units
+  13 Mango: InitMangoGroup Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 13160 of 200000 compute units
+  26 Mango: InitMangoAccount DEPRECATED Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 1828 of 200000 compute units
+  41 Mango: UpdateRootBank Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 9360 of 200000 compute units
+  66 Mango: CacheRootBanks Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 5857 of 200000 compute units
+  67 Mango: CachePerpMarkets Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 4331 of 200000 compute units
+  67 Mango: CachePrices Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 3669 of 200000 compute units
+  69 Mango: UpdateFunding Program 4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM consumed 6381 of 200000 compute units
