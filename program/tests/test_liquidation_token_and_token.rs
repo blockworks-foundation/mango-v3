@@ -83,21 +83,28 @@ async fn test_token_and_token_liquidation_v1() {
     // Step 4: Assert that the order has been matched and the bidder has 1 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;
 
+    // assert that bidder has btc deposit and quote borrows
     let bidder_btc_deposit =
         get_deposit_for_user(&mango_group_cookie, bidder_user_index, mint_index);
     let bidder_quote_borrow =
         get_borrow_for_user(&mango_group_cookie, bidder_user_index, QUOTE_INDEX);
-    let asker_btc_deposit = get_deposit_for_user(&mango_group_cookie, asker_user_index, mint_index);
-
     // dbg!(bidder_btc_deposit);
     // dbg!(bidder_quote_borrow);
-    // dbg!(asker_btc_deposit);
     // [program/tests/test_liquidation_token_and_token:92] bidder_btc_deposit = 1000000
     // [program/tests/test_liquidation_token_and_token:93] bidder_quote_borrow = 4995500000
-    // [program/tests/test_liquidation_token_and_token:94] asker_btc_deposit = 0
     assert!(bidder_btc_deposit == I80F48::from_str("1000000").unwrap());
-    assert!(bidder_quote_borrow == I80F48::from_str("4995500000").unwrap()); // todo: where did the 4.5 quote go?
-    assert!(asker_btc_deposit == I80F48::from_str("0").unwrap());
+    assert!(bidder_quote_borrow == I80F48::from_str("4995500000").unwrap());
+
+    // assert that liqor has no btc deposit and full quote deposits
+    let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_user_index, mint_index);
+    let liqor_quote_deposit =
+        get_deposit_for_user(&mango_group_cookie, liqor_user_index, QUOTE_INDEX);
+    // dbg!(liqor_btc_deposit);
+    // dbg!(liqor_quote_deposit);
+    // [program/tests/test_liquidation_token_and_token.rs:101] liqor_btc_deposit = 0
+    // [program/tests/test_liquidation_token_and_token.rs:102] liqor_quote_deposit = 10000000000
+    assert!(liqor_btc_deposit == I80F48::from_str("0").unwrap());
+    assert!(liqor_quote_deposit == I80F48::from_str("10000000000").unwrap());
 
     // Step 5: Change the oracle price so that bidder becomes liqee
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 15.0).await;
@@ -118,24 +125,26 @@ async fn test_token_and_token_liquidation_v1() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
+    // assert that bidders btc deposits and quote borrows have reduced
     let bidder_btc_deposit =
         get_deposit_for_user(&mango_group_cookie, bidder_user_index, mint_index);
     let bidder_quote_borrow =
         get_borrow_for_user(&mango_group_cookie, bidder_user_index, QUOTE_INDEX);
+    // dbg!(bidder_btc_deposit);
+    // dbg!(bidder_quote_borrow);
+    // [program/tests/test_liquidation_token_and_token:123] bidder_btc_deposit = 999938.5000000060586
+    // [program/tests/test_liquidation_token_and_token:124] bidder_quote_borrow = 4995440000.000000011937118
+    assert!(bidder_btc_deposit < I80F48::from_str("999940").unwrap());
+    assert!(bidder_quote_borrow < I80F48::from_str("4995460000").unwrap());
+
+    // assert that liqors btc deposits have increased and quote deposits have reduced
     let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_user_index, mint_index);
     let liqor_quote_deposit =
         get_deposit_for_user(&mango_group_cookie, liqor_user_index, QUOTE_INDEX);
-
-    // dbg!(bidder_btc_deposit);
-    // dbg!(bidder_quote_borrow);
     // dbg!(liqor_btc_deposit);
     // dbg!(liqor_quote_deposit);
-    // [program/tests/test_liquidation_token_and_token:123] bidder_btc_deposit = 999938.5000000060586
-    // [program/tests/test_liquidation_token_and_token:124] bidder_quote_borrow = 4995440000.000000011937118
     // [program/tests/test_liquidation_token_and_token:125] liqor_btc_deposit = 61.4999999939414
     // [program/tests/test_liquidation_token_and_token:126] liqor_quote_deposit = 9999940000.000000011937118
-    assert!(bidder_btc_deposit < I80F48::from_str("999940").unwrap());
-    assert!(bidder_quote_borrow < I80F48::from_str("4995450000").unwrap());
     assert!(liqor_btc_deposit > I80F48::from_str("60").unwrap());
     assert!(liqor_quote_deposit < I80F48::from_str("9999941000").unwrap());
 }
