@@ -38,7 +38,6 @@ solana-program-test = "^1.8.1"
 solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
 
-
 [lib]
 name = "mango"
 crate-type = ["cdylib", "lib"]
