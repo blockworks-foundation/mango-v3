@@ -229,7 +229,8 @@ pub struct FillEvent {
     pub maker_slot: u8,
     pub maker_out: bool, // true if maker order quantity == 0
     pub version: u8,
-    pub padding: [u8; 3],
+    pub market_fees_applied: bool,
+    pub padding: [u8; 2],
     pub timestamp: u64,
     pub seq_num: usize, // note: usize same as u64
 
@@ -282,7 +283,8 @@ impl FillEvent {
             maker_slot,
             maker_out,
             version,
-            padding: [0u8; 3],
+            market_fees_applied: true, // Since mango v3.3.5, market fees are adjusted at matching time
+            padding: [0u8; 2],
             timestamp,
             seq_num,
             maker,

@@ -1190,7 +1190,7 @@ impl<'a> Book<'a> {
         // if there were matched taker quote apply ref fees
         // we know ref_fee_rate is not None if total_quote_taken > 0
         if total_quote_taken > 0 {
-            apply_taker_fees(
+            apply_fees(
                 market,
                 info,
                 mango_account,
@@ -1405,7 +1405,7 @@ impl<'a> Book<'a> {
         // if there were matched taker quote apply ref fees
         // we know ref_fee_rate is not None if total_quote_taken > 0
         if total_quote_taken > 0 {
-            apply_taker_fees(
+            apply_fees(
                 market,
                 info,
                 mango_account,
@@ -1825,7 +1825,9 @@ fn determine_ref_vars<'a>(
     Ok((I80F48::from_num(mango_group.ref_surcharge_centibps) / CENTIBPS_PER_UNIT, None))
 }
 
-fn apply_taker_fees(
+/// Apply taker fees to the taker account and update the markets' fees_accrued for
+/// both the maker and taker fees.
+fn apply_fees(
     market: &mut PerpMarket,
     info: &PerpMarketInfo,
     mango_account: &mut MangoAccount,
@@ -1869,9 +1871,16 @@ fn apply_taker_fees(
             market.fees_accrued += ref_fees;
         }
     }
+
+    // Track maker fees immediately: they can be negative and applying them later
+    // risks that fees_accrued is settled to 0 before they apply. It going negative
+    // breaks assumptions.
+    // The maker fees apply to the maker's account only when the fill event is consumed.
+    let maker_fees = taker_quote_native * info.maker_fee;
+
     let taker_fees = taker_quote_native * info.taker_fee;
     mango_account.perp_accounts[market_index].quote_position -= taker_fees;
-    market.fees_accrued += taker_fees;
+    market.fees_accrued += taker_fees + maker_fees;
 
     emit_perp_balances(
         mango_account.mango_group,

@@ -4427,8 +4427,8 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
-        // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 10);
+        // Limit may be max 4 because of compute and memory limits from logging. Increase if compute/mem goes up
+        let limit = min(limit, 4);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -5689,7 +5689,7 @@ impl Processor {
         ref_share_centibps: u32,
         ref_mngo_required: u64,
     ) -> MangoResult {
-        check!(ref_surcharge_centibps > ref_share_centibps, MangoErrorCode::InvalidParam)?;
+        check!(ref_surcharge_centibps >= ref_share_centibps, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 2;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
