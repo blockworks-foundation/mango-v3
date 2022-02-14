@@ -480,6 +480,15 @@ impl BookSide {
         self.remove_by_key(self.get(self.find_max()?)?.key()?)
     }
 
+    pub fn remove_one_expired(&mut self, now_ts: u64) -> Option<LeafNode> {
+        let (expired_h, expires_at) = self.soonest_expiry()?;
+        if expires_at < now_ts {
+            self.remove_by_key(self.get(expired_h)?.key()?)
+        } else {
+            None
+        }
+    }
+
     pub fn find_max(&self) -> Option<NodeHandle> {
         self.find_min_max(true)
     }
@@ -1239,18 +1248,31 @@ impl<'a> Book<'a> {
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
             if self.bids.is_full() {
-                // If this bid is higher than lowest bid, boot that bid and insert this one
-                let min_bid = self.bids.remove_min().unwrap();
-                check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
-                let event = OutEvent::new(
-                    Side::Bid,
-                    min_bid.owner_slot,
-                    now_ts,
-                    event_queue.header.seq_num,
-                    min_bid.owner,
-                    min_bid.quantity,
-                );
-                event_queue.push_back(cast(event)).unwrap();
+                // Drop an expired if possible
+                if let Some(expired_bid) = self.bids.remove_one_expired(now_ts) {
+                    let event = OutEvent::new(
+                        Side::Bid,
+                        expired_bid.owner_slot,
+                        now_ts,
+                        event_queue.header.seq_num,
+                        expired_bid.owner,
+                        expired_bid.quantity,
+                    );
+                    event_queue.push_back(cast(event)).unwrap();
+                } else {
+                    // If this bid is higher than lowest bid, boot that bid and insert this one
+                    let min_bid = self.bids.remove_min().unwrap();
+                    check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
+                    let event = OutEvent::new(
+                        Side::Bid,
+                        min_bid.owner_slot,
+                        now_ts,
+                        event_queue.header.seq_num,
+                        min_bid.owner,
+                        min_bid.quantity,
+                    );
+                    event_queue.push_back(cast(event)).unwrap();
+                }
             }
 
             // iterate through book on the bid side
@@ -1454,18 +1476,31 @@ impl<'a> Book<'a> {
         // If there are still quantity unmatched, place on the book
         if rem_quantity > 0 && post_allowed {
             if self.asks.is_full() {
-                // If this asks is lower than highest ask, boot that ask and insert this one
-                let max_ask = self.asks.remove_max().unwrap();
-                check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
-                let event = OutEvent::new(
-                    Side::Ask,
-                    max_ask.owner_slot,
-                    now_ts,
-                    event_queue.header.seq_num,
-                    max_ask.owner,
-                    max_ask.quantity,
-                );
-                event_queue.push_back(cast(event)).unwrap();
+                // Drop an expired if possible
+                if let Some(expired_ask) = self.asks.remove_one_expired(now_ts) {
+                    let event = OutEvent::new(
+                        Side::Ask,
+                        expired_ask.owner_slot,
+                        now_ts,
+                        event_queue.header.seq_num,
+                        expired_ask.owner,
+                        expired_ask.quantity,
+                    );
+                    event_queue.push_back(cast(event)).unwrap();
+                } else {
+                    // If this asks is lower than highest ask, boot that ask and insert this one
+                    let max_ask = self.asks.remove_max().unwrap();
+                    check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
+                    let event = OutEvent::new(
+                        Side::Ask,
+                        max_ask.owner_slot,
+                        now_ts,
+                        event_queue.header.seq_num,
+                        max_ask.owner,
+                        max_ask.quantity,
+                    );
+                    event_queue.push_back(cast(event)).unwrap();
+                }
             }
 
             let best_initial = if market.meta_data.version == 0 {
