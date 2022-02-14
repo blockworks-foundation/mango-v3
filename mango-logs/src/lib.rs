@@ -5,9 +5,9 @@ declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
 /// Log to Program Log with a prologue so transaction scraper knows following line is valid mango log
 ///
-/// Warning: This will allocate large buffers on the heap which will never be released. Since the max
-/// heap size is limited (32k currently), calling this multiple times can lead to memory allocation
-/// failures.
+/// Warning: This will allocate large buffers on the heap which will never be released as Solana
+/// uses a simple bump allocator where free() is a noop. Since the max heap size is limited
+// (32k currently), calling this multiple times can lead to memory allocation failures.
 #[macro_export]
 macro_rules! mango_emit_heap {
     ($e:expr) => {
