@@ -2041,8 +2041,14 @@ mod tests {
         }
     }
 
-    // check that BookSide binary tree key invariant holds
     fn verify_bookside(bookside: &BookSide) {
+        verify_bookside_invariant(bookside);
+        verify_bookside_iteration(bookside);
+        verify_bookside_expiry(bookside);
+    }
+
+    // check that BookSide binary tree key invariant holds
+    fn verify_bookside_invariant(bookside: &BookSide) {
         let r = match bookside.root() {
             Some(h) => h,
             None => return,
@@ -2072,10 +2078,26 @@ mod tests {
         recursive_check(bookside, r);
     }
 
+    // check that iteration of bookside has the right order and misses no leaves
+    fn verify_bookside_iteration(bookside: &BookSide) {
+        let mut total = 0;
+        let ascending = bookside.meta_data.data_type == DataType::Asks as u8;
+        let mut last_key = if ascending { 0 } else { i128::MAX };
+        for node in BookSideIter::new(bookside, 0) {
+            let key = node.key;
+            if ascending {
+                assert!(key >= last_key);
+            } else {
+                assert!(key <= last_key);
+            }
+            last_key = key;
+            total += 1;
+        }
+        assert_eq!(bookside.leaf_count, total);
+    }
+
     // check that BookSide::child_expiry invariant holds
     fn verify_bookside_expiry(bookside: &BookSide) {
-        verify_bookside(bookside);
-
         let r = match bookside.root() {
             Some(h) => h,
             None => return,
@@ -2111,19 +2133,19 @@ mod tests {
 
         bids.insert_leaf(&new_expiring_leaf(0, 5000)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (bids.root_node, 5000));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
 
         let (new4000_h, _) = bids.insert_leaf(&new_expiring_leaf(1, 4000)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
 
         let (_new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
 
         let (new3500_h, _) = bids.insert_leaf(&new_expiring_leaf(3, 3500)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new3500_h, 3500));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         // the first two levels of the tree are innernodes, with 0;1 on one side and 2;3 on the other
         assert_eq!(
             bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
@@ -2131,7 +2153,7 @@ mod tests {
         );
 
         bids.remove_by_key(3).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert_eq!(
             bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
             [4000, 4500]
@@ -2139,7 +2161,7 @@ mod tests {
         assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
 
         bids.remove_by_key(0).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert_eq!(
             bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
             [4000, 4500]
@@ -2147,11 +2169,11 @@ mod tests {
         assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
 
         bids.remove_by_key(1).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert_eq!(bids.soonest_expiry().unwrap().1, 4500);
 
         bids.remove_by_key(2).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert!(bids.soonest_expiry().is_none());
     }
 
@@ -2175,7 +2197,7 @@ mod tests {
             let expiry = rng.gen_range(1..200); // give good chance of duplicate expiry times
             keys.push(key);
             bids.insert_leaf(&new_expiring_leaf(key, expiry)).unwrap();
-            verify_bookside_expiry(&bids);
+            verify_bookside(&bids);
         }
 
         // remove 50 at random
@@ -2186,7 +2208,7 @@ mod tests {
             let k = keys[rng.gen_range(0..keys.len())];
             bids.remove_by_key(k).unwrap();
             keys.retain(|v| *v != k);
-            verify_bookside_expiry(&bids);
+            verify_bookside(&bids);
         }
     }
 }
