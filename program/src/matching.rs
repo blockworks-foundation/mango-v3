@@ -2041,7 +2041,41 @@ mod tests {
         }
     }
 
+    // check that BookSide binary tree key invariant holds
+    fn verify_bookside(bookside: &BookSide) {
+        let r = match bookside.root() {
+            Some(h) => h,
+            None => return,
+        };
+
+        fn recursive_check(bookside: &BookSide, h: NodeHandle) {
+            match bookside.get(h).unwrap().case().unwrap() {
+                NodeRef::Inner(&inner) => {
+                    let left = bookside.get(inner.children[0]).unwrap().key().unwrap();
+                    let right = bookside.get(inner.children[1]).unwrap().key().unwrap();
+
+                    // the left and right keys share the InnerNode's prefix
+                    assert!((inner.key ^ left).leading_zeros() >= inner.prefix_len);
+                    assert!((inner.key ^ right).leading_zeros() >= inner.prefix_len);
+
+                    // the left and right node key have the critbit unset and set respectively
+                    let crit_bit_mask: i128 = 1i128 << (127 - inner.prefix_len);
+                    assert!(left & crit_bit_mask == 0);
+                    assert!(right & crit_bit_mask != 0);
+
+                    recursive_check(bookside, inner.children[0]);
+                    recursive_check(bookside, inner.children[1]);
+                }
+                _ => {}
+            }
+        }
+        recursive_check(bookside, r);
+    }
+
+    // check that BookSide::child_expiry invariant holds
     fn verify_bookside_expiry(bookside: &BookSide) {
+        verify_bookside(bookside);
+
         let r = match bookside.root() {
             Some(h) => h,
             None => return,
@@ -2052,14 +2086,17 @@ mod tests {
                 NodeRef::Inner(&inner) => {
                     let left = bookside.get(inner.children[0]).unwrap().expiry();
                     let right = bookside.get(inner.children[1]).unwrap().expiry();
+
+                    // child_expiry must hold the expiry of the children
                     assert_eq!(inner.child_expiry[0], left);
                     assert_eq!(inner.child_expiry[1], right);
+
                     recursive_check(bookside, inner.children[0]);
                     recursive_check(bookside, inner.children[1]);
                 }
                 _ => {}
             }
-        };
+        }
         recursive_check(bookside, r);
     }
 
@@ -2080,7 +2117,7 @@ mod tests {
         assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
         verify_bookside_expiry(&bids);
 
-        let (new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
+        let (_new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
         verify_bookside_expiry(&bids);
 
@@ -2135,8 +2172,9 @@ mod tests {
             if keys.contains(&key) {
                 continue;
             }
+            let expiry = rng.gen_range(1..200); // give good chance of duplicate expiry times
             keys.push(key);
-            bids.insert_leaf(&new_expiring_leaf(key, rng.gen_range(1..200))); // give good chance of duplicate expiry times
+            bids.insert_leaf(&new_expiring_leaf(key, expiry)).unwrap();
             verify_bookside_expiry(&bids);
         }
 
@@ -2146,7 +2184,7 @@ mod tests {
                 break;
             }
             let k = keys[rng.gen_range(0..keys.len())];
-            bids.remove_by_key(k);
+            bids.remove_by_key(k).unwrap();
             keys.retain(|v| *v != k);
             verify_bookside_expiry(&bids);
         }
