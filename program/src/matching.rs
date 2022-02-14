@@ -2211,4 +2211,118 @@ mod tests {
             verify_bookside(&bids);
         }
     }
+
+    fn bookside_contains_key(bookside: &BookSide, key: i128) -> bool {
+        for leaf in BookSideIter::new(bookside, 0) {
+            if leaf.key == key {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn book_bids_full() {
+        use crate::queue::{AnyEvent, EventQueueHeader};
+        use crate::state::FREE_ORDER_SLOT;
+        use bytemuck::Zeroable;
+        use std::cell::RefCell;
+
+        let bids = RefCell::new(new_bookside(DataType::Bids));
+        let asks = RefCell::new(new_bookside(DataType::Asks));
+        let mut book = Book { bids: bids.borrow_mut(), asks: asks.borrow_mut() };
+
+        let mut mango_group = MangoGroup::zeroed();
+        mango_group.perp_markets[0] = PerpMarketInfo {
+            perp_market: Pubkey::default(),
+            maint_asset_weight: I80F48::ONE,
+            init_asset_weight: I80F48::ONE,
+            maint_liab_weight: I80F48::ONE,
+            init_liab_weight: I80F48::ONE,
+            liquidation_fee: I80F48::ZERO,
+            maker_fee: I80F48::ZERO,
+            taker_fee: I80F48::ZERO,
+            base_lot_size: 1,
+            quote_lot_size: 1,
+        };
+
+        let mango_cache = MangoCache::zeroed();
+
+        let event_queue_header = RefCell::new(EventQueueHeader::zeroed());
+        let event_queue_buf = RefCell::new([AnyEvent::zeroed(); 1000]);
+        let mut event_queue =
+            EventQueue::new(event_queue_header.borrow_mut(), event_queue_buf.borrow_mut());
+
+        let oracle_price = I80F48::from_num(5000.0);
+
+        let mut perp_market = PerpMarket::zeroed();
+        perp_market.quote_lot_size = 1;
+        perp_market.base_lot_size = 1;
+
+        let mut mango_account = MangoAccount::zeroed();
+        mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
+
+        let mut new_order =
+            |book: &mut Book, event_queue: &mut EventQueue, side, price, now_ts| -> i128 {
+                let mut mango_account = MangoAccount::zeroed();
+                mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
+
+                let quantity = 1;
+                let tif = 100;
+
+                book.new_order(
+                    &Pubkey::default(),
+                    &mango_group,
+                    &Pubkey::default(),
+                    &mango_cache,
+                    event_queue,
+                    &mut perp_market,
+                    oracle_price,
+                    &mut mango_account,
+                    &Pubkey::default(),
+                    0,
+                    side,
+                    price,
+                    quantity,
+                    OrderType::Limit,
+                    tif,
+                    0,
+                    now_ts,
+                    None,
+                )
+                .unwrap();
+                mango_account.orders[0]
+            };
+
+        // insert bids until book side is full
+        let mut i: u32 = 1;
+        for _ in 0..1000 {
+            new_order(&mut book, &mut event_queue, Side::Bid, 1000 + i as i64, 1000000 + i as u64);
+            i += 1;
+            if book.bids.is_full() {
+                break;
+            }
+        }
+        assert!(book.bids.is_full());
+        assert_eq!(book.bids.get_min().unwrap().price(), 1001);
+        assert_eq!(book.bids.get_max().unwrap().price(), (1000 + i - 1) as i64);
+
+        // add another bid at a higher price before expiry, replacing the lowest-price one (1001)
+        let order_id = new_order(&mut book, &mut event_queue, Side::Bid, 1005, 1000000 - 1);
+        assert_eq!(book.bids.get_min().unwrap().price(), 1002);
+        assert_eq!(event_queue.len(), 1);
+
+        // adding another bid after expiry removes the soonest-expiring order (1005)
+        new_order(&mut book, &mut event_queue, Side::Bid, 999, 2000000);
+        assert_eq!(book.bids.get_min().unwrap().price(), 999);
+        assert!(!bookside_contains_key(&book.bids, 1005));
+        assert_eq!(event_queue.len(), 2);
+
+        // adding an ask wipes all expired bids: here only the 999 bid survives
+        let bids_count = book.bids.leaf_count;
+        new_order(&mut book, &mut event_queue, Side::Ask, 6000, 1500000);
+        assert_eq!(book.bids.leaf_count, 1);
+        assert_eq!(book.bids.get_max().unwrap().price(), 999);
+        assert_eq!(event_queue.len(), 2 + bids_count - 1);
+    }
 }
