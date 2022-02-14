@@ -2212,4 +2212,11 @@ mod tests {
             verify_bookside(&bids);
         }
     }
+
+    #[test]
+    fn book_new_orders() {
+        let bids = std::cell::RefCell::new(new_bookside(DataType::Bids));
+        let asks = std::cell::RefCell::new(new_bookside(DataType::Asks));
+        let mut book = Book { bids: bids.borrow_mut(), asks: asks.borrow_mut() };
+    }
 }
