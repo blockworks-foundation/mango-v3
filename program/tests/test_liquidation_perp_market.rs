@@ -18,7 +18,8 @@ use std::str::FromStr;
 /// note: doesnt check the numbers to exact accuracy
 async fn test_liquidation_perp_market_basic() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 3, num_mints: 2 };
+    let config =
+        MangoProgramTestConfig { num_users: 3, ..MangoProgramTestConfig::default_two_mints() };
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
