@@ -13,7 +13,7 @@ use solana_program_test::*;
 #[tokio::test]
 async fn test_perp_trigger_orders_basic() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
     // Disable all logs except error
     // solana_logger::setup_with("error");
@@ -158,7 +158,7 @@ async fn test_perp_trigger_orders_basic() {
 #[tokio::test]
 async fn test_perp_trigger_orders_health() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
     // Disable all logs except error
     // solana_logger::setup_with("error");

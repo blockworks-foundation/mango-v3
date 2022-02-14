@@ -33,7 +33,7 @@ async fn test_init_perp_markets() {
 #[tokio::test]
 async fn test_place_perp_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
@@ -76,7 +76,7 @@ async fn test_place_perp_order() {
 #[tokio::test]
 async fn test_match_perp_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;

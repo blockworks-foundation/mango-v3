@@ -90,12 +90,22 @@ pub struct MangoProgramTestConfig {
     pub compute_limit: u64,
     pub num_users: usize,
     pub num_mints: usize,
+    pub consume_perp_events_count: usize,
 }
 
 impl MangoProgramTestConfig {
     #[allow(dead_code)]
     pub fn default() -> Self {
-        MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 }
+        MangoProgramTestConfig {
+            compute_limit: 200_000,
+            num_users: 2,
+            num_mints: 16,
+            consume_perp_events_count: 3,
+        }
+    }
+    #[allow(dead_code)]
+    pub fn default_two_mints() -> Self {
+        MangoProgramTestConfig { num_mints: 2, ..Self::default() }
     }
 }
 
@@ -111,6 +121,7 @@ pub struct MangoProgramTest {
     pub num_users: usize,
     pub users: Vec<Keypair>,
     pub token_accounts: Vec<Pubkey>, // user x mint
+    pub consume_perp_events_count: usize,
 }
 
 impl MangoProgramTest {
@@ -369,6 +380,7 @@ impl MangoProgramTest {
             num_users,
             users,
             token_accounts,
+            consume_perp_events_count: config.consume_perp_events_count,
         }
     }
 
@@ -757,7 +769,7 @@ impl MangoProgramTest {
             &perp_market_pk,
             &perp_market.event_queue,
             &mut mango_account_pks[..],
-            3,
+            self.consume_perp_events_count,
         )
         .unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();

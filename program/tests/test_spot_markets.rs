@@ -101,7 +101,7 @@ async fn test_change_spot_market_params() {
 #[tokio::test]
 async fn test_place_spot_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
@@ -156,7 +156,7 @@ async fn test_place_spot_order() {
 #[tokio::test]
 async fn test_match_spot_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
@@ -253,7 +253,7 @@ async fn test_match_spot_order() {
 #[tokio::test]
 async fn test_match_and_settle_spot_order() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 2 };
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;

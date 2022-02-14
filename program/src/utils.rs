@@ -3,10 +3,8 @@ use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 use crate::error::MangoResult;
 use crate::matching::Side;
 use crate::state::ONE_I80F48;
-use anchor_lang::prelude::emit;
 use fixed::types::I80F48;
 use solana_program::account_info::AccountInfo;
-use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::pubkey::Pubkey;
 use std::cell::RefMut;
@@ -14,7 +12,7 @@ use std::mem::size_of;
 
 use crate::state::{PerpAccount, PerpMarketCache};
 
-use mango_logs::{mango_emit, PerpBalanceLog};
+use mango_logs::{mango_emit_stack, PerpBalanceLog};
 
 pub fn gen_signer_seeds<'a>(nonce: &'a u64, acc_pk: &'a Pubkey) -> [&'a [u8]; 2] {
     [acc_pk.as_ref(), bytes_of(nonce)]
@@ -90,6 +88,7 @@ pub fn pow_i80f48(mut base: I80F48, mut exp: u8) -> I80F48 {
     }
 }
 
+/// Warning: This function needs 512+ bytes free on the stack
 pub fn emit_perp_balances(
     mango_group: Pubkey,
     mango_account: Pubkey,
@@ -97,7 +96,7 @@ pub fn emit_perp_balances(
     pa: &PerpAccount,
     perp_market_cache: &PerpMarketCache,
 ) {
-    mango_emit!(PerpBalanceLog {
+    mango_emit_stack::<_, 256>(PerpBalanceLog {
         mango_group: mango_group,
         mango_account: mango_account,
         market_index: market_index,
