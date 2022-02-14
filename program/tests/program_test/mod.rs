@@ -1,6 +1,7 @@
 use anchor_lang::Key;
 use std::borrow::Borrow;
 use std::mem::size_of;
+use std::str::FromStr;
 
 use bincode::deserialize;
 use fixed::types::I80F48;
@@ -38,7 +39,8 @@ const RUST_LOG_DEFAULT: &str = "solana_rbpf::vm=info,\
              solana_program_runtime::stable_log=debug,\
              solana_runtime::message_processor=debug,\
              solana_runtime::system_instruction_processor=info,\
-             solana_program_test=info";
+             solana_program_test=info,\
+             solana_bpf_loader_program=debug"; // for - Program ... consumed 5857 of 200000 compute units
 
 trait AddPacked {
     fn add_packable_account<T: Pack>(
@@ -1701,6 +1703,102 @@ impl MangoProgramTest {
             &liqee_mango_account.spot_open_orders,
             &liqor_mango_account.spot_open_orders,
             max_liab_transfer,
+        )
+        .unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&liqor])).await.unwrap();
+
+        mango_group_cookie.mango_accounts[liqee_index].mango_account =
+            self.load_account::<MangoAccount>(liqee_mango_account_pk).await;
+
+        mango_group_cookie.mango_accounts[liqor_index].mango_account =
+            self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_liquidate_token_and_perp(
+        &mut self,
+        mango_group_cookie: &mut MangoGroupCookie,
+        liqee_index: usize,
+        liqor_index: usize,
+        asset_type: AssetType,
+        asset_index: usize,
+        liab_type: AssetType,
+        liab_index: usize,
+        max_liab_transfer: I80F48,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
+        let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;
+        let liqor_mango_account = mango_group_cookie.mango_accounts[liqor_index].mango_account;
+        let liqor_mango_account_pk = mango_group_cookie.mango_accounts[liqor_index].address;
+
+        let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, asset_index).await;
+        let (node_bank_pk, _node_bank) = self.with_node_bank(&root_bank, 0).await;
+
+        let instructions = vec![mango::instruction::liquidate_token_and_perp(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &liqee_mango_account_pk,
+            &liqor_mango_account_pk,
+            &liqor.pubkey(),
+            &root_bank_pk,
+            &node_bank_pk,
+            &liqee_mango_account.spot_open_orders,
+            &liqor_mango_account.spot_open_orders,
+            asset_type,
+            asset_index,
+            liab_type,
+            liab_index,
+            max_liab_transfer,
+        )
+        .unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&liqor])).await.unwrap();
+
+        mango_group_cookie.mango_accounts[liqee_index].mango_account =
+            self.load_account::<MangoAccount>(liqee_mango_account_pk).await;
+
+        mango_group_cookie.mango_accounts[liqor_index].mango_account =
+            self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_liquidate_perp_market(
+        &mut self,
+        mango_group_cookie: &mut MangoGroupCookie,
+        mint_index: usize,
+        liqee_index: usize,
+        liqor_index: usize,
+        base_transfer_request: i64,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
+        let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;
+        let liqor_mango_account = mango_group_cookie.mango_accounts[liqor_index].mango_account;
+        let liqor_mango_account_pk = mango_group_cookie.mango_accounts[liqor_index].address;
+
+        let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
+
+        let instructions = vec![mango::instruction::liquidate_perp_market(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &mango_group.perp_markets[mint_index].perp_market.key(),
+            &mango_group_cookie.perp_markets[mint_index].perp_market.event_queue.key(),
+            &liqee_mango_account_pk,
+            &liqor_mango_account_pk,
+            &liqor.pubkey(),
+            &liqee_mango_account.spot_open_orders,
+            &liqor_mango_account.spot_open_orders,
+            base_transfer_request,
         )
         .unwrap()];
 
