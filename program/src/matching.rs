@@ -2,7 +2,6 @@ use std::cell::RefMut;
 use std::convert::TryFrom;
 use std::mem::size_of;
 
-use anchor_lang::prelude::emit;
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -16,7 +15,7 @@ use solana_program::sysvar::Sysvar;
 use static_assertions::const_assert_eq;
 
 use mango_common::Loadable;
-use mango_logs::{mango_emit, ReferralFeeAccrualLog};
+use mango_logs::{mango_emit_stack, ReferralFeeAccrualLog};
 use mango_macro::{Loadable, Pod};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
@@ -1810,7 +1809,7 @@ fn apply_fees(
                 &referrer_mango_account.perp_accounts[market_index],
                 perp_market_cache,
             );
-            mango_emit!(ReferralFeeAccrualLog {
+            mango_emit_stack::<_, 200>(ReferralFeeAccrualLog {
                 mango_group: referrer_mango_account.mango_group,
                 referrer_mango_account: *referrer_mango_account_ai.unwrap().key,
                 referree_mango_account: *mango_account_pk,

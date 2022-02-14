@@ -1,6 +1,6 @@
 [package]
 name = "mango"
-version = "3.3.4"
+version = "3.3.5"
 authors = ["blockworks"]
 edition = "2018"
 
@@ -37,7 +37,6 @@ solana-sdk = "^1.8.1"
 solana-program-test = "^1.8.1"
 solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
-
 
 [lib]
 name = "mango"

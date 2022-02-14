@@ -1622,6 +1622,9 @@ impl MangoAccount {
         pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size.checked_mul(quote_change).unwrap());
         let fees = quote.abs() * fill.maker_fee;
+        if !fill.market_fees_applied {
+            perp_market.fees_accrued += fees;
+        }
         pa.quote_position = pa.quote_position.checked_add(quote - fees).unwrap();
 
         // if versions don't match, no LM

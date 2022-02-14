@@ -11,7 +11,7 @@ use std::collections::HashMap;
 #[tokio::test]
 async fn test_worst_case_v1() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
+    let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
@@ -97,7 +97,7 @@ async fn test_worst_case_v1() {
 #[tokio::test]
 async fn test_worst_case_v2() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
+    let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
