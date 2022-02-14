@@ -785,7 +785,7 @@ impl BookSide {
             }
             outdated_expiry = parent.expiry();
             parent.child_expiry[*crit_bit as usize] = new_expiry;
-            new_expiry = std::cmp::min(new_expiry, parent.child_expiry[!*crit_bit as usize]);
+            new_expiry = parent.expiry();
         }
     }
 
