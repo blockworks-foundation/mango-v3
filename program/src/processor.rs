@@ -2530,8 +2530,8 @@ impl Processor {
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let best_final = if perp_market.meta_data.version == 0 {
             match side {
-                Side::Bid => book.get_best_bid_price().unwrap(),
-                Side::Ask => book.get_best_ask_price().unwrap(),
+                Side::Bid => book.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => book.get_best_ask_price(now_ts).unwrap(),
             }
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
@@ -2629,8 +2629,8 @@ impl Processor {
 
         let best_final = if perp_market.meta_data.version == 0 {
             match side {
-                Side::Bid => book.get_best_bid_price().unwrap(),
-                Side::Ask => book.get_best_ask_price().unwrap(),
+                Side::Bid => book.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => book.get_best_ask_price(now_ts).unwrap(),
             }
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
