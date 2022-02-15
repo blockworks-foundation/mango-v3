@@ -296,12 +296,12 @@ pub const MAX_BOOK_NODES: usize = 1024; // NOTE: this cannot be larger than u32:
 pub struct BookSide {
     pub meta_data: MetaData,
 
-    pub bump_index: usize,
-    pub free_list_len: usize,
-    pub free_list_head: NodeHandle,
-    pub root_node: NodeHandle,
-    pub leaf_count: usize,
-    pub nodes: [AnyNode; MAX_BOOK_NODES],
+    bump_index: usize,
+    free_list_len: usize,
+    free_list_head: NodeHandle,
+    root_node: NodeHandle,
+    leaf_count: usize,
+    nodes: [AnyNode; MAX_BOOK_NODES],
 }
 
 pub struct BookSideIter<'a> {
@@ -415,8 +415,13 @@ impl BookSide {
     ///
     /// smallest to highest for asks
     /// highest to smallest for bids
-    pub fn iter(&self, now_ts: u64) -> BookSideIter {
+    pub fn iter_valid(&self, now_ts: u64) -> BookSideIter {
         BookSideIter::new(self, now_ts)
+    }
+
+    /// Iterate over all entries, including invalid orders
+    pub fn iter_all_including_invalid(&self) -> BookSideIter {
+        BookSideIter::new(self, 0)
     }
 
     pub fn load_mut_checked<'a>(
@@ -481,6 +486,7 @@ impl BookSide {
         self.remove_by_key(self.get(self.find_max()?)?.key()?)
     }
 
+    /// Remove the order with the lowest expiry timestamp, if that's < now_ts.
     pub fn remove_one_expired(&mut self, now_ts: u64) -> Option<LeafNode> {
         let (expired_h, expires_at) = self.soonest_expiry()?;
         if expires_at < now_ts {
@@ -832,26 +838,28 @@ impl<'a> Book<'a> {
         })
     }
 
-    fn get_best_bid_handle(&self) -> Option<NodeHandle> {
+    fn get_best_bid_handle_maybe_invalid(&self) -> Option<NodeHandle> {
         self.bids.find_max()
     }
 
-    pub fn get_best_bid_price(&self) -> Option<i64> {
-        Some(self.bids.get_max()?.price())
-    }
-
-    fn get_best_ask_handle(&self) -> Option<NodeHandle> {
+    fn get_best_ask_handle_maybe_invalid(&self) -> Option<NodeHandle> {
         self.asks.find_min()
     }
 
-    pub fn get_best_ask_price(&self) -> Option<i64> {
-        Some(self.asks.get_min()?.price())
+    /// returns best valid bid
+    pub fn get_best_bid_price(&self, now_ts: u64) -> Option<i64> {
+        Some(self.bids.iter_valid(now_ts).next()?.price())
     }
 
-    /// Get the quantity of bids above and including the price
+    /// returns best valid ask
+    pub fn get_best_ask_price(&self, now_ts: u64) -> Option<i64> {
+        Some(self.asks.iter_valid(now_ts).next()?.price())
+    }
+
+    /// Get the quantity of valid bids above and including the price
     pub fn get_bids_size_above(&self, price: i64, max_depth: i64, now_ts: u64) -> i64 {
         let mut s = 0;
-        for bid in self.bids.iter(now_ts) {
+        for bid in self.bids.iter_valid(now_ts) {
             if price > bid.price() || s >= max_depth {
                 break;
             }
@@ -865,8 +873,8 @@ impl<'a> Book<'a> {
     pub fn get_impact_price(&self, side: Side, quantity: i64, now_ts: u64) -> Option<i64> {
         let mut s = 0;
         let book_side = match side {
-            Side::Bid => self.bids.iter(now_ts),
-            Side::Ask => self.asks.iter(now_ts),
+            Side::Bid => self.bids.iter_valid(now_ts),
+            Side::Ask => self.asks.iter_valid(now_ts),
         };
         for order in book_side {
             s += order.quantity;
@@ -877,10 +885,10 @@ impl<'a> Book<'a> {
         None
     }
 
-    /// Get the quantity of asks below and including the price
+    /// Get the quantity of valid asks below and including the price
     pub fn get_asks_size_below(&self, price: i64, max_depth: i64, now_ts: u64) -> i64 {
         let mut s = 0;
-        for ask in self.asks.iter(now_ts) {
+        for ask in self.asks.iter_valid(now_ts) {
             if price < ask.price() || s >= max_depth {
                 break;
             }
@@ -888,10 +896,10 @@ impl<'a> Book<'a> {
         }
         s.min(max_depth)
     }
-    /// Get the quantity of bids above this order id. Will return full size of book if order id not found
+    /// Get the quantity of valid bids above this order id. Will return full size of book if order id not found
     pub fn get_bids_size_above_order(&self, order_id: i128, max_depth: i64, now_ts: u64) -> i64 {
         let mut s = 0;
-        for bid in self.bids.iter(now_ts) {
+        for bid in self.bids.iter_valid(now_ts) {
             if bid.key == order_id || s >= max_depth {
                 break;
             }
@@ -900,10 +908,10 @@ impl<'a> Book<'a> {
         s.min(max_depth)
     }
 
-    /// Get the quantity of bids above this order id. Will return full size of book if order id not found
+    /// Get the quantity of valid asks above this order id. Will return full size of book if order id not found
     pub fn get_asks_size_below_order(&self, order_id: i128, max_depth: i64, now_ts: u64) -> i64 {
         let mut s = 0;
-        for ask in self.asks.iter(now_ts) {
+        for ask in self.asks.iter_valid(now_ts) {
             if ask.key == order_id || s >= max_depth {
                 break;
             }
@@ -995,7 +1003,7 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true, price),
             OrderType::Market => (false, false, i64::MAX),
             OrderType::PostOnlySlide => {
-                let price = if let Some(best_ask_price) = self.get_best_ask_price() {
+                let price = if let Some(best_ask_price) = self.get_best_ask_price(now_ts) {
                     price.min(best_ask_price.checked_sub(1).ok_or(math_err!())?)
                 } else {
                     price
@@ -1014,7 +1022,7 @@ impl<'a> Book<'a> {
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
 
-        for best_ask in self.asks.iter(now_ts) {
+        for best_ask in self.asks.iter_valid(now_ts) {
             let best_ask_price = best_ask.price();
             if price < best_ask_price {
                 break;
@@ -1056,7 +1064,7 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true, price),
             OrderType::Market => (false, false, 0),
             OrderType::PostOnlySlide => {
-                let price = if let Some(best_bid_price) = self.get_best_bid_price() {
+                let price = if let Some(best_bid_price) = self.get_best_bid_price(now_ts) {
                     price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
                 } else {
                     price
@@ -1075,7 +1083,7 @@ impl<'a> Book<'a> {
 
         let mut rem_quantity = quantity; // base lots (aka contracts)
 
-        for best_bid in self.bids.iter(now_ts) {
+        for best_bid in self.bids.iter_valid(now_ts) {
             let best_bid_price = best_bid.price();
             if price > best_bid_price {
                 break;
@@ -1128,7 +1136,7 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true, price),
             OrderType::Market => (false, false, i64::MAX),
             OrderType::PostOnlySlide => {
-                let price = if let Some(best_ask_price) = self.get_best_ask_price() {
+                let price = if let Some(best_ask_price) = self.get_best_ask_price(now_ts) {
                     price.min(best_ask_price.checked_sub(1).ok_or(math_err!())?)
                 } else {
                     price
@@ -1158,7 +1166,7 @@ impl<'a> Book<'a> {
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
         while rem_quantity > 0 {
-            let best_ask_h = match self.get_best_ask_handle() {
+            let best_ask_h = match self.get_best_ask_handle_maybe_invalid() {
                 None => break,
                 Some(h) => h,
             };
@@ -1278,7 +1286,7 @@ impl<'a> Book<'a> {
 
             // iterate through book on the bid side
             let best_initial = if market.meta_data.version == 0 {
-                match self.get_best_bid_price() {
+                match self.get_best_bid_price(now_ts) {
                     None => price,
                     Some(p) => p,
                 }
@@ -1356,7 +1364,7 @@ impl<'a> Book<'a> {
             OrderType::PostOnly => (true, true, price),
             OrderType::Market => (false, false, 0),
             OrderType::PostOnlySlide => {
-                let price = if let Some(best_bid_price) = self.get_best_bid_price() {
+                let price = if let Some(best_bid_price) = self.get_best_bid_price(now_ts) {
                     price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
                 } else {
                     price
@@ -1386,7 +1394,7 @@ impl<'a> Book<'a> {
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
         while rem_quantity > 0 {
-            let best_bid_h = match self.get_best_bid_handle() {
+            let best_bid_h = match self.get_best_bid_handle_maybe_invalid() {
                 None => break,
                 Some(h) => h,
             };
@@ -1505,7 +1513,7 @@ impl<'a> Book<'a> {
             }
 
             let best_initial = if market.meta_data.version == 0 {
-                match self.get_best_ask_price() {
+                match self.get_best_ask_price(now_ts) {
                     None => price,
                     Some(p) => p,
                 }
@@ -1713,7 +1721,7 @@ impl<'a> Book<'a> {
         let mut bids_and_sizes = vec![];
         let mut cuml_bids = 0;
 
-        let mut iter = self.bids.iter(0); // pass in 0 so all orders are considered valid
+        let mut iter = self.bids.iter_all_including_invalid();
         let mut curr = iter.next();
         while let Some(bid) = curr {
             match my_bids.last() {
@@ -1794,7 +1802,7 @@ impl<'a> Book<'a> {
         let mut asks_and_sizes = vec![];
         let mut cuml_asks = 0;
 
-        let mut iter = self.asks.iter(0); // pass in 0 so all orders are considered valid
+        let mut iter = self.asks.iter_all_including_invalid();
         let mut curr = iter.next();
         while let Some(ask) = curr {
             match my_asks.last() {
@@ -1877,8 +1885,8 @@ impl<'a> Book<'a> {
             let order_side = mango_account.order_side[i];
 
             let best_final = match order_side {
-                Side::Bid => self.get_best_bid_price().unwrap(),
-                Side::Ask => self.get_best_ask_price().unwrap(),
+                Side::Bid => self.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => self.get_best_ask_price(now_ts).unwrap(),
             };
 
             match self.cancel_order(order_id, order_side) {
@@ -2042,6 +2050,62 @@ mod tests {
         }
     }
 
+    fn verify_bookside(bookside: &BookSide) {
+        verify_bookside_invariant(bookside);
+        verify_bookside_iteration(bookside);
+        verify_bookside_expiry(bookside);
+    }
+
+    // check that BookSide binary tree key invariant holds
+    fn verify_bookside_invariant(bookside: &BookSide) {
+        let r = match bookside.root() {
+            Some(h) => h,
+            None => return,
+        };
+
+        fn recursive_check(bookside: &BookSide, h: NodeHandle) {
+            match bookside.get(h).unwrap().case().unwrap() {
+                NodeRef::Inner(&inner) => {
+                    let left = bookside.get(inner.children[0]).unwrap().key().unwrap();
+                    let right = bookside.get(inner.children[1]).unwrap().key().unwrap();
+
+                    // the left and right keys share the InnerNode's prefix
+                    assert!((inner.key ^ left).leading_zeros() >= inner.prefix_len);
+                    assert!((inner.key ^ right).leading_zeros() >= inner.prefix_len);
+
+                    // the left and right node key have the critbit unset and set respectively
+                    let crit_bit_mask: i128 = 1i128 << (127 - inner.prefix_len);
+                    assert!(left & crit_bit_mask == 0);
+                    assert!(right & crit_bit_mask != 0);
+
+                    recursive_check(bookside, inner.children[0]);
+                    recursive_check(bookside, inner.children[1]);
+                }
+                _ => {}
+            }
+        }
+        recursive_check(bookside, r);
+    }
+
+    // check that iteration of bookside has the right order and misses no leaves
+    fn verify_bookside_iteration(bookside: &BookSide) {
+        let mut total = 0;
+        let ascending = bookside.meta_data.data_type == DataType::Asks as u8;
+        let mut last_key = if ascending { 0 } else { i128::MAX };
+        for node in bookside.iter_all_including_invalid() {
+            let key = node.key;
+            if ascending {
+                assert!(key >= last_key);
+            } else {
+                assert!(key <= last_key);
+            }
+            last_key = key;
+            total += 1;
+        }
+        assert_eq!(bookside.leaf_count, total);
+    }
+
+    // check that BookSide::child_expiry invariant holds
     fn verify_bookside_expiry(bookside: &BookSide) {
         let r = match bookside.root() {
             Some(h) => h,
@@ -2053,14 +2117,17 @@ mod tests {
                 NodeRef::Inner(&inner) => {
                     let left = bookside.get(inner.children[0]).unwrap().expiry();
                     let right = bookside.get(inner.children[1]).unwrap().expiry();
+
+                    // child_expiry must hold the expiry of the children
                     assert_eq!(inner.child_expiry[0], left);
                     assert_eq!(inner.child_expiry[1], right);
+
                     recursive_check(bookside, inner.children[0]);
                     recursive_check(bookside, inner.children[1]);
                 }
                 _ => {}
             }
-        };
+        }
         recursive_check(bookside, r);
     }
 
@@ -2075,19 +2142,19 @@ mod tests {
 
         bids.insert_leaf(&new_expiring_leaf(0, 5000)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (bids.root_node, 5000));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
 
         let (new4000_h, _) = bids.insert_leaf(&new_expiring_leaf(1, 4000)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
 
-        let (new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
+        let (_new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
 
         let (new3500_h, _) = bids.insert_leaf(&new_expiring_leaf(3, 3500)).unwrap();
         assert_eq!(bids.soonest_expiry().unwrap(), (new3500_h, 3500));
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         // the first two levels of the tree are innernodes, with 0;1 on one side and 2;3 on the other
         assert_eq!(
             bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
@@ -2095,7 +2162,7 @@ mod tests {
         );
 
         bids.remove_by_key(3).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert_eq!(
             bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
             [4000, 4500]
@@ -2103,7 +2170,7 @@ mod tests {
         assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
 
         bids.remove_by_key(0).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert_eq!(
             bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
             [4000, 4500]
@@ -2111,11 +2178,11 @@ mod tests {
         assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
 
         bids.remove_by_key(1).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert_eq!(bids.soonest_expiry().unwrap().1, 4500);
 
         bids.remove_by_key(2).unwrap();
-        verify_bookside_expiry(&bids);
+        verify_bookside(&bids);
         assert!(bids.soonest_expiry().is_none());
     }
 
@@ -2136,9 +2203,10 @@ mod tests {
             if keys.contains(&key) {
                 continue;
             }
+            let expiry = rng.gen_range(1..200); // give good chance of duplicate expiry times
             keys.push(key);
-            bids.insert_leaf(&new_expiring_leaf(key, rng.gen_range(1..200))); // give good chance of duplicate expiry times
-            verify_bookside_expiry(&bids);
+            bids.insert_leaf(&new_expiring_leaf(key, expiry)).unwrap();
+            verify_bookside(&bids);
         }
 
         // remove 50 at random
@@ -2147,9 +2215,123 @@ mod tests {
                 break;
             }
             let k = keys[rng.gen_range(0..keys.len())];
-            bids.remove_by_key(k);
+            bids.remove_by_key(k).unwrap();
             keys.retain(|v| *v != k);
-            verify_bookside_expiry(&bids);
+            verify_bookside(&bids);
         }
+    }
+
+    fn bookside_contains_key(bookside: &BookSide, key: i128) -> bool {
+        for leaf in bookside.iter_all_including_invalid() {
+            if leaf.key == key {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn book_bids_full() {
+        use crate::queue::{AnyEvent, EventQueueHeader};
+        use crate::state::FREE_ORDER_SLOT;
+        use bytemuck::Zeroable;
+        use std::cell::RefCell;
+
+        let bids = RefCell::new(new_bookside(DataType::Bids));
+        let asks = RefCell::new(new_bookside(DataType::Asks));
+        let mut book = Book { bids: bids.borrow_mut(), asks: asks.borrow_mut() };
+
+        let mut mango_group = MangoGroup::zeroed();
+        mango_group.perp_markets[0] = PerpMarketInfo {
+            perp_market: Pubkey::default(),
+            maint_asset_weight: I80F48::ONE,
+            init_asset_weight: I80F48::ONE,
+            maint_liab_weight: I80F48::ONE,
+            init_liab_weight: I80F48::ONE,
+            liquidation_fee: I80F48::ZERO,
+            maker_fee: I80F48::ZERO,
+            taker_fee: I80F48::ZERO,
+            base_lot_size: 1,
+            quote_lot_size: 1,
+        };
+
+        let mango_cache = MangoCache::zeroed();
+
+        let event_queue_header = RefCell::new(EventQueueHeader::zeroed());
+        let event_queue_buf = RefCell::new([AnyEvent::zeroed(); 1000]);
+        let mut event_queue =
+            EventQueue::new(event_queue_header.borrow_mut(), event_queue_buf.borrow_mut());
+
+        let oracle_price = I80F48::from_num(5000.0);
+
+        let mut perp_market = PerpMarket::zeroed();
+        perp_market.quote_lot_size = 1;
+        perp_market.base_lot_size = 1;
+
+        let mut mango_account = MangoAccount::zeroed();
+        mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
+
+        let mut new_order =
+            |book: &mut Book, event_queue: &mut EventQueue, side, price, now_ts| -> i128 {
+                let mut mango_account = MangoAccount::zeroed();
+                mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
+
+                let quantity = 1;
+                let tif = 100;
+
+                book.new_order(
+                    &Pubkey::default(),
+                    &mango_group,
+                    &Pubkey::default(),
+                    &mango_cache,
+                    event_queue,
+                    &mut perp_market,
+                    oracle_price,
+                    &mut mango_account,
+                    &Pubkey::default(),
+                    0,
+                    side,
+                    price,
+                    quantity,
+                    OrderType::Limit,
+                    tif,
+                    0,
+                    now_ts,
+                    None,
+                )
+                .unwrap();
+                mango_account.orders[0]
+            };
+
+        // insert bids until book side is full
+        let mut i: u32 = 1;
+        for _ in 0..1000 {
+            new_order(&mut book, &mut event_queue, Side::Bid, 1000 + i as i64, 1000000 + i as u64);
+            i += 1;
+            if book.bids.is_full() {
+                break;
+            }
+        }
+        assert!(book.bids.is_full());
+        assert_eq!(book.bids.get_min().unwrap().price(), 1001);
+        assert_eq!(book.bids.get_max().unwrap().price(), (1000 + i - 1) as i64);
+
+        // add another bid at a higher price before expiry, replacing the lowest-price one (1001)
+        let order_id = new_order(&mut book, &mut event_queue, Side::Bid, 1005, 1000000 - 1);
+        assert_eq!(book.bids.get_min().unwrap().price(), 1002);
+        assert_eq!(event_queue.len(), 1);
+
+        // adding another bid after expiry removes the soonest-expiring order (1005)
+        new_order(&mut book, &mut event_queue, Side::Bid, 999, 2000000);
+        assert_eq!(book.bids.get_min().unwrap().price(), 999);
+        assert!(!bookside_contains_key(&book.bids, 1005));
+        assert_eq!(event_queue.len(), 2);
+
+        // adding an ask wipes all expired bids: here only the 999 bid survives
+        let bids_count = book.bids.leaf_count;
+        new_order(&mut book, &mut event_queue, Side::Ask, 6000, 1500000);
+        assert_eq!(book.bids.leaf_count, 1);
+        assert_eq!(book.bids.get_max().unwrap().price(), 999);
+        assert_eq!(event_queue.len(), 2 + bids_count - 1);
     }
 }
