@@ -32,6 +32,10 @@ pub type NodeHandle = u32;
 
 const NODE_SIZE: usize = 88;
 
+/// Drop at most this many expired orders from a BookSide when trying to match orders.
+/// This exists as a guard against excessive compute use.
+const DROP_EXPIRED_ORDER_LIMIT: usize = 3;
+
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u32)]
 pub enum NodeTag {
@@ -1164,6 +1168,7 @@ impl<'a> Book<'a> {
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut number_of_dropped_expired_orders = 0;
         while rem_quantity > 0 {
             let best_ask_h = match self.get_best_ask_handle_maybe_invalid() {
                 None => break,
@@ -1173,18 +1178,21 @@ impl<'a> Book<'a> {
             let best_ask = self.asks.get_mut(best_ask_h).unwrap().as_leaf_mut().unwrap();
 
             if !best_ask.is_valid(now_ts) {
-                // Remove the order from the book
-                let event = OutEvent::new(
-                    Side::Ask,
-                    best_ask.owner_slot,
-                    now_ts,
-                    event_queue.header.seq_num,
-                    best_ask.owner,
-                    best_ask.quantity,
-                );
-                event_queue.push_back(cast(event)).unwrap();
-                let key = best_ask.key;
-                let _removed_node = self.asks.remove_by_key(key).unwrap();
+                // Remove the order from the book unless we've done that enough
+                if number_of_dropped_expired_orders < DROP_EXPIRED_ORDER_LIMIT {
+                    number_of_dropped_expired_orders += 1;
+                    let event = OutEvent::new(
+                        Side::Ask,
+                        best_ask.owner_slot,
+                        now_ts,
+                        event_queue.header.seq_num,
+                        best_ask.owner,
+                        best_ask.quantity,
+                    );
+                    event_queue.push_back(cast(event)).unwrap();
+                    let key = best_ask.key;
+                    let _removed_node = self.asks.remove_by_key(key).unwrap();
+                }
                 continue;
             }
 
@@ -1392,6 +1400,7 @@ impl<'a> Book<'a> {
         // if post only and price >= best_ask, return
         // Iterate through book and match against this new bid
         let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut number_of_dropped_expired_orders = 0;
         while rem_quantity > 0 {
             let best_bid_h = match self.get_best_bid_handle_maybe_invalid() {
                 None => break,
@@ -1401,18 +1410,21 @@ impl<'a> Book<'a> {
             let best_bid = self.bids.get_mut(best_bid_h).unwrap().as_leaf_mut().unwrap();
 
             if !best_bid.is_valid(now_ts) {
-                // Remove the order from the book
-                let event = OutEvent::new(
-                    Side::Bid,
-                    best_bid.owner_slot,
-                    now_ts,
-                    event_queue.header.seq_num,
-                    best_bid.owner,
-                    best_bid.quantity,
-                );
-                event_queue.push_back(cast(event)).unwrap();
-                let key = best_bid.key;
-                let _removed_node = self.bids.remove_by_key(key).unwrap();
+                // Remove the order from the book unless we've done that enough
+                if number_of_dropped_expired_orders < DROP_EXPIRED_ORDER_LIMIT {
+                    number_of_dropped_expired_orders += 1;
+                    let event = OutEvent::new(
+                        Side::Bid,
+                        best_bid.owner_slot,
+                        now_ts,
+                        event_queue.header.seq_num,
+                        best_bid.owner,
+                        best_bid.quantity,
+                    );
+                    event_queue.push_back(cast(event)).unwrap();
+                    let key = best_bid.key;
+                    let _removed_node = self.bids.remove_by_key(key).unwrap();
+                }
                 continue;
             }
 
