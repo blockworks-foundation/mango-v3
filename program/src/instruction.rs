@@ -983,6 +983,7 @@ pub enum MangoInstruction {
     /// 7. payer
     /// 8. system program
     /// 9. token program
+    /// 10. rent program
     CreateOptionMarket {
         option_type:OptionType,
         contract_size:u64,

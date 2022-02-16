@@ -2620,6 +2620,7 @@ pub struct OptionMarket {
     pub underlying_asset_pool: Pubkey,
     pub quote_asset_pool: Pubkey,
     pub expired: bool,
+    pub owner : Pubkey,
 }
 
 impl OptionMarket {

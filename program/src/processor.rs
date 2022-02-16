@@ -20,7 +20,9 @@ use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
-use spl_token::state::{Account, Mint};
+use spl_token::state::{Account, Mint,};
+use spl_token::instruction::{initialize_mint};
+
 use switchboard_program::FastRoundResultAccountData;
 
 use mango_common::Loadable;
@@ -48,7 +50,7 @@ use crate::state::{
     HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, ReferrerIdRecord,
     ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
-    UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
+    UserActiveAssets, OptionType, OptionMarket, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
     QUOTE_INDEX, ZERO_I80F48,
 };
@@ -5815,11 +5817,11 @@ impl Processor {
     #[inline(never)]
     fn create_option_market(program_id: &Pubkey,
         accounts: &[AccountInfo],
-        option_type:OptionType,
+        option_type : OptionType,
         contract_size:u64,
         quote_amount:u64,
         expiry:u64,) -> MangoResult {
-        const NUM_FIXED: usize = 10;
+        const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [option_market_ai,
@@ -5831,19 +5833,20 @@ impl Processor {
              quote_asset_pool,
              payer, 
              system_program,
-             token_program,] = accounts;
+             token_program,
+             rent] = accounts;
         
         let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
-            [option_type], 
+            &[option_type as u8], 
             &contract_size.to_le_bytes(), 
             &quote_amount.to_le_bytes(), 
             &expiry.to_le_bytes()];
-        
-        let rent = Rent::get()?;
+        // create pds for option market
+        let rent_info = Rent::get()?;
         seed_and_create_pda(
             program_id,
             payer,
-            &rent,
+            &rent_info,
             size_of::<OptionMarket>(),
             program_id,
             system_program,
@@ -5852,7 +5855,44 @@ impl Processor {
             &[],
         )?;
 
+        // create the two mints
+        create_a_mint(program_id, 
+            option_mint, 
+            &rent_info, 
+            payer, 
+            system_program, 
+            token_program, 
+            rent,
+            &[b"mango_option_mint", option_market_ai.key.as_ref()],
+            &[],
+        )?;
+
+        create_a_mint(program_id, 
+            writer_token_mint, 
+            &rent_info, 
+            payer, 
+            system_program, 
+            token_program, 
+            rent,
+            &[b"mango_option_writer_mint", option_market_ai.key.as_ref()],
+            &[],
+        )?;
+
         let mut option_market: RefMut<OptionMarket> = OptionMarket::load_mut(option_market_ai)?;
+        option_market.meta_data = MetaData::new(DataType::OptionMarket, 0, true);
+        option_market.option_type = option_type;
+        option_market.option_mint = *option_mint.key;
+        option_market.writer_token_mint = *writer_token_mint.key;
+        option_market.underlying_asset_mint = *underlying_asset_mint.key;
+        option_market.quote_asset_mint = *quote_asset_mint.key;
+        option_market.contract_size = contract_size;
+        option_market.quote_amount = quote_amount;
+        option_market.expiry = expiry;
+        option_market.underlying_asset_pool = *underlying_asset_pool.key;
+        option_market.quote_asset_pool = *quote_asset_pool.key;
+        option_market.owner = *payer.key;
+        option_market.expired = false;
+        
         Ok(())
     }
 
@@ -6346,10 +6386,10 @@ impl Processor {
                 msg!("Mango: RegisterReferrerId");
                 Self::register_referrer_id(program_id, accounts, referrer_id)
             MangoInstruction::CreateOptionMarket{
-                option_type:OptionType,
-                contract_size:u64,
-                quote_amount:u64,
-                expiry:u64,
+                option_type,
+                contract_size,
+                quote_amount,
+                expiry,
             } => {
                 msg!("Mango: CreateOptionMarket");
                 Self::create_option_market(program_id, accounts, option_type, contract_size, quote_amount, expiry)
@@ -7068,6 +7108,44 @@ fn create_pda_account<'a>(
             all_signer_seeds.as_slice(),
         )
     }
+}
+
+fn create_a_mint<'a>(program_id: &Pubkey, 
+    mint_account: &AccountInfo<'a>,
+    rent_info : &Rent,
+    payer: &AccountInfo<'a>,
+    system_program: &AccountInfo<'a>,
+    token_program: &AccountInfo<'a>,
+    rent: &AccountInfo<'a>,
+    seeds: &[&[u8]],
+    funder_seeds: &[&[u8]],
+    ) -> ProgramResult
+{
+    seed_and_create_pda(
+        program_id,
+        payer,
+        rent_info,
+        Mint::LEN,
+        token_program.key,
+        system_program,
+        mint_account,
+        seeds,
+        funder_seeds,
+    )?;
+    let instruction = initialize_mint(token_program.key,
+        mint_account.key,
+        program_id,
+        Some(program_id),
+        6,
+    )?;
+    solana_program::program::invoke(
+        &instruction,
+        &[
+            mint_account.clone(),
+            rent.clone(),
+            token_program.clone(),
+        ]
+    )
 }
 
 /// Transfer lamports from a src account owned by the currently executing program id
