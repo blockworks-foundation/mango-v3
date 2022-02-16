@@ -46,6 +46,11 @@ pub enum NodeTag {
     LastFreeNode = 4,
 }
 
+/// InnerNodes and LeafNodes compose the binary tree of orders.
+///
+/// Each InnerNode has exactly two children, which are either InnerNodes themselves,
+/// or LeafNodes. The children share the top `prefix_len` bits of `key`. The left
+/// child has a 0 in the next bit, and the right a 1.
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct InnerNode {
@@ -57,7 +62,8 @@ pub struct InnerNode {
     pub key: i128,
     /// indexes into `BookSide::nodes`
     pub children: [NodeHandle; 2],
-    pub child_expiry: [u64; 2],
+    /// the lowest expiry timestamp for the left and right subtrees
+    pub child_lowest_expiry: [u64; 2],
     pub padding: [u8; NODE_SIZE - 48],
 }
 
@@ -68,7 +74,7 @@ impl InnerNode {
             prefix_len,
             key,
             children: [0; 2],
-            child_expiry: [u64::MAX; 2],
+            child_lowest_expiry: [u64::MAX; 2],
             padding: [0; NODE_SIZE - 48],
         }
     }
@@ -81,12 +87,14 @@ impl InnerNode {
         (self.children[crit_bit as usize], crit_bit)
     }
 
+    /// The lowest timestamp at which one of the contained LeafNodes expires.
     #[inline(always)]
-    pub fn expiry(&self) -> u64 {
-        std::cmp::min(self.child_expiry[0], self.child_expiry[1])
+    pub fn lowest_expiry(&self) -> u64 {
+        std::cmp::min(self.child_lowest_expiry[0], self.child_lowest_expiry[1])
     }
 }
 
+/// LeafNodes represent an order in the binary tree
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Pod)]
 #[repr(C)]
 pub struct LeafNode {
@@ -94,8 +102,14 @@ pub struct LeafNode {
     pub owner_slot: u8,
     pub order_type: OrderType, // this was added for TradingView move order
     pub version: u8,
+
+    /// Time in seconds after `timestamp` at which the order expires.
+    /// A value of 0 means no expiry.
     pub time_in_force: u8,
+
+    /// The binary tree key
     pub key: i128,
+
     pub owner: Pubkey,
     pub quantity: i64,
     pub client_order_id: u64,
@@ -145,6 +159,7 @@ impl LeafNode {
         key_to_price(self.key)
     }
 
+    /// Time at which this order will expire, u64::MAX if never
     #[inline(always)]
     pub fn expiry(&self) -> u64 {
         if self.time_in_force == 0 {
@@ -245,9 +260,9 @@ impl AnyNode {
     }
 
     #[inline]
-    pub fn expiry(&self) -> u64 {
+    pub fn lowest_expiry(&self) -> u64 {
         match self.case().unwrap() {
-            NodeRef::Inner(inner) => inner.expiry(),
+            NodeRef::Inner(inner) => inner.lowest_expiry(),
             NodeRef::Leaf(leaf) => leaf.expiry(),
         }
     }
@@ -491,7 +506,7 @@ impl BookSide {
 
     /// Remove the order with the lowest expiry timestamp, if that's < now_ts.
     pub fn remove_one_expired(&mut self, now_ts: u64) -> Option<LeafNode> {
-        let (expired_h, expires_at) = self.soonest_expiry()?;
+        let (expired_h, expires_at) = self.find_lowest_expiry()?;
         if expires_at < now_ts {
             self.remove_by_key(self.get(expired_h)?.key()?)
         } else {
@@ -628,7 +643,7 @@ impl BookSide {
         // free child_h, replace *parent_h with *other_child_h, free other_child_h
         let other_child_h = self.get(parent_h).unwrap().children().unwrap()[!crit_bit as usize];
         let other_child_node_contents = self.remove(other_child_h).unwrap();
-        let new_expiry = other_child_node_contents.expiry();
+        let new_expiry = other_child_node_contents.lowest_expiry();
         *self.get_mut(parent_h).unwrap() = other_child_node_contents;
         self.leaf_count -= 1;
         let removed_leaf: LeafNode = cast(self.remove(child_h).unwrap());
@@ -636,7 +651,7 @@ impl BookSide {
         // update child min expiry back up to the root
         let outdated_expiry = removed_leaf.expiry();
         stack.pop(); // the final parent has been replaced by the remaining leaf
-        self.update_expiry(&stack, outdated_expiry, new_expiry);
+        self.update_parent_lowest_expiry(&stack, outdated_expiry, new_expiry);
 
         Some(removed_leaf)
     }
@@ -721,7 +736,11 @@ impl BookSide {
                 if let Some(NodeRef::Leaf(&old_root_as_leaf)) = root_contents.case() {
                     // clobber the existing leaf
                     *self.get_mut(root).unwrap() = *new_leaf.as_ref();
-                    self.update_expiry(&stack, old_root_as_leaf.expiry(), new_leaf.expiry());
+                    self.update_parent_lowest_expiry(
+                        &stack,
+                        old_root_as_leaf.expiry(),
+                        new_leaf.expiry(),
+                    );
                     return Ok((root, Some(old_root_as_leaf)));
                 }
                 // InnerNodes have a random child's key, so matching can happen and is fine
@@ -764,13 +783,13 @@ impl BookSide {
             new_root.children[old_root_crit_bit as usize] = moved_root_handle;
 
             let new_leaf_expiry = new_leaf.expiry();
-            let old_root_expiry = root_contents.expiry();
-            new_root.child_expiry[new_leaf_crit_bit as usize] = new_leaf_expiry;
-            new_root.child_expiry[old_root_crit_bit as usize] = old_root_expiry;
+            let old_root_expiry = root_contents.lowest_expiry();
+            new_root.child_lowest_expiry[new_leaf_crit_bit as usize] = new_leaf_expiry;
+            new_root.child_lowest_expiry[old_root_crit_bit as usize] = old_root_expiry;
 
             // walk up the stack and fix up the new min if needed
             if new_leaf_expiry < old_root_expiry {
-                self.update_expiry(&stack, old_root_expiry, new_leaf_expiry);
+                self.update_parent_lowest_expiry(&stack, old_root_expiry, new_leaf_expiry);
             }
 
             self.leaf_count += 1;
@@ -782,7 +801,11 @@ impl BookSide {
         self.free_list_len <= 1 && self.bump_index >= self.nodes.len() - 1
     }
 
-    fn update_expiry(
+    /// When a node changes, the parents' child_lowest_expiry may need to be updated.
+    ///
+    /// This function walks up the `stack` of parents and applies the change where the
+    /// previous child's `outdated_expiry` is replaced by `new_expiry`.
+    fn update_parent_lowest_expiry(
         &mut self,
         stack: &[(NodeHandle, bool)],
         mut outdated_expiry: u64,
@@ -790,16 +813,17 @@ impl BookSide {
     ) {
         for (parent_h, crit_bit) in stack.iter().rev() {
             let parent = self.get_mut(*parent_h).unwrap().as_inner_mut().unwrap();
-            if parent.child_expiry[*crit_bit as usize] != outdated_expiry {
+            if parent.child_lowest_expiry[*crit_bit as usize] != outdated_expiry {
                 break;
             }
-            outdated_expiry = parent.expiry();
-            parent.child_expiry[*crit_bit as usize] = new_expiry;
-            new_expiry = parent.expiry();
+            outdated_expiry = parent.lowest_expiry();
+            parent.child_lowest_expiry[*crit_bit as usize] = new_expiry;
+            new_expiry = parent.lowest_expiry();
         }
     }
 
-    pub fn soonest_expiry(&self) -> Option<(NodeHandle, u64)> {
+    /// Returns the handle of the node with the lowest expiry timestamp, and this timestamp
+    pub fn find_lowest_expiry(&self) -> Option<(NodeHandle, u64)> {
         let mut current: NodeHandle = match self.root() {
             Some(h) => h,
             None => return None,
@@ -810,11 +834,11 @@ impl BookSide {
             match contents.case() {
                 None => unreachable!(),
                 Some(NodeRef::Inner(inner)) => {
-                    current =
-                        inner.children[(inner.child_expiry[0] > inner.child_expiry[1]) as usize];
+                    current = inner.children
+                        [(inner.child_lowest_expiry[0] > inner.child_lowest_expiry[1]) as usize];
                 }
                 _ => {
-                    return Some((current, contents.expiry()));
+                    return Some((current, contents.lowest_expiry()));
                 }
             };
         }
@@ -2126,12 +2150,12 @@ mod tests {
         fn recursive_check(bookside: &BookSide, h: NodeHandle) {
             match bookside.get(h).unwrap().case().unwrap() {
                 NodeRef::Inner(&inner) => {
-                    let left = bookside.get(inner.children[0]).unwrap().expiry();
-                    let right = bookside.get(inner.children[1]).unwrap().expiry();
+                    let left = bookside.get(inner.children[0]).unwrap().lowest_expiry();
+                    let right = bookside.get(inner.children[1]).unwrap().lowest_expiry();
 
                     // child_expiry must hold the expiry of the children
-                    assert_eq!(inner.child_expiry[0], left);
-                    assert_eq!(inner.child_expiry[1], right);
+                    assert_eq!(inner.child_lowest_expiry[0], left);
+                    assert_eq!(inner.child_lowest_expiry[1], right);
 
                     recursive_check(bookside, inner.children[0]);
                     recursive_check(bookside, inner.children[1]);
@@ -2149,52 +2173,52 @@ mod tests {
             LeafNode::new(0, 0, key, Pubkey::default(), 0, 0, expiry - 1, 0, OrderType::Limit, 1)
         };
 
-        assert!(bids.soonest_expiry().is_none());
+        assert!(bids.find_lowest_expiry().is_none());
 
         bids.insert_leaf(&new_expiring_leaf(0, 5000)).unwrap();
-        assert_eq!(bids.soonest_expiry().unwrap(), (bids.root_node, 5000));
+        assert_eq!(bids.find_lowest_expiry().unwrap(), (bids.root_node, 5000));
         verify_bookside(&bids);
 
         let (new4000_h, _) = bids.insert_leaf(&new_expiring_leaf(1, 4000)).unwrap();
-        assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
+        assert_eq!(bids.find_lowest_expiry().unwrap(), (new4000_h, 4000));
         verify_bookside(&bids);
 
         let (_new4500_h, _) = bids.insert_leaf(&new_expiring_leaf(2, 4500)).unwrap();
-        assert_eq!(bids.soonest_expiry().unwrap(), (new4000_h, 4000));
+        assert_eq!(bids.find_lowest_expiry().unwrap(), (new4000_h, 4000));
         verify_bookside(&bids);
 
         let (new3500_h, _) = bids.insert_leaf(&new_expiring_leaf(3, 3500)).unwrap();
-        assert_eq!(bids.soonest_expiry().unwrap(), (new3500_h, 3500));
+        assert_eq!(bids.find_lowest_expiry().unwrap(), (new3500_h, 3500));
         verify_bookside(&bids);
         // the first two levels of the tree are innernodes, with 0;1 on one side and 2;3 on the other
         assert_eq!(
-            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
+            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_lowest_expiry,
             [4000, 3500]
         );
 
         bids.remove_by_key(3).unwrap();
         verify_bookside(&bids);
         assert_eq!(
-            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
+            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_lowest_expiry,
             [4000, 4500]
         );
-        assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
+        assert_eq!(bids.find_lowest_expiry().unwrap().1, 4000);
 
         bids.remove_by_key(0).unwrap();
         verify_bookside(&bids);
         assert_eq!(
-            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_expiry,
+            bids.get_mut(bids.root_node).unwrap().as_inner_mut().unwrap().child_lowest_expiry,
             [4000, 4500]
         );
-        assert_eq!(bids.soonest_expiry().unwrap().1, 4000);
+        assert_eq!(bids.find_lowest_expiry().unwrap().1, 4000);
 
         bids.remove_by_key(1).unwrap();
         verify_bookside(&bids);
-        assert_eq!(bids.soonest_expiry().unwrap().1, 4500);
+        assert_eq!(bids.find_lowest_expiry().unwrap().1, 4500);
 
         bids.remove_by_key(2).unwrap();
         verify_bookside(&bids);
-        assert!(bids.soonest_expiry().is_none());
+        assert!(bids.find_lowest_expiry().is_none());
     }
 
     #[test]
