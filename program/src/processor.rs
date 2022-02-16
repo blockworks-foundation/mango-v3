@@ -5811,6 +5811,51 @@ impl Processor {
             referrer_id,
         )
     }
+    
+    #[inline(never)]
+    fn create_option_market(program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        option_type:OptionType,
+        contract_size:u64,
+        quote_amount:u64,
+        expiry:u64,) -> MangoResult {
+        const NUM_FIXED: usize = 10;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [option_market_ai,
+             option_mint, 
+             writer_token_mint, 
+             underlying_asset_mint, 
+             quote_asset_mint, 
+             underlying_asset_pool, 
+             quote_asset_pool,
+             payer, 
+             system_program,
+             token_program,] = accounts;
+        
+        let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
+            [option_type], 
+            &contract_size.to_le_bytes(), 
+            &quote_amount.to_le_bytes(), 
+            &expiry.to_le_bytes()];
+        
+        let rent = Rent::get()?;
+        seed_and_create_pda(
+            program_id,
+            payer,
+            &rent,
+            size_of::<OptionMarket>(),
+            program_id,
+            system_program,
+            option_market_ai,
+            mango_options_market_seeds,
+            &[],
+        )?;
+
+        let mut option_market: RefMut<OptionMarket> = OptionMarket::load_mut(option_market_ai)?;
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -6300,6 +6345,14 @@ impl Processor {
             MangoInstruction::RegisterReferrerId { referrer_id } => {
                 msg!("Mango: RegisterReferrerId");
                 Self::register_referrer_id(program_id, accounts, referrer_id)
+            MangoInstruction::CreateOptionMarket{
+                option_type:OptionType,
+                contract_size:u64,
+                quote_amount:u64,
+                expiry:u64,
+            } => {
+                msg!("Mango: CreateOptionMarket");
+                Self::create_option_market(program_id, accounts, option_type, contract_size, quote_amount, expiry)
             }
         }
     }

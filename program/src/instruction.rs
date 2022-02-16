@@ -1,6 +1,7 @@
 use crate::matching::{OrderType, Side};
 use crate::state::{AssetType, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
+use crate::state::{OptionType};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -928,6 +929,7 @@ pub enum MangoInstruction {
     /// 8. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateSpotOpenOrders, // instruction 60
 
+<<<<<<< HEAD
     /// Set the `ref_surcharge_centibps`, `ref_share_centibps` and `ref_mngo_required` on `MangoGroup`
     ///
     /// Accounts expected by this instruction (2):
@@ -966,6 +968,27 @@ pub enum MangoInstruction {
     /// 4. `[]` system_prog_ai - System program
     RegisterReferrerId {
         referrer_id: [u8; INFO_LEN],
+=======
+    /// Create an Option market / this will initialize a state called MarketOption
+    /// 
+    /// Accounts expected by this instruction (9)
+    /// 
+    /// 0. Option Market a pda account which will store all the information related to the option market [b"mango_option_market", [optiontype],contract_size.le, quote_amount.le, expiry.le]]
+    /// 1. create a PDA for option mint with following keys [b"mango_option_mint", option_market.key]
+    /// 2. create a PDA for writer mint with following keys [b"mango_option_writer_mint", option_market.key]
+    /// 3. Underlying mint
+    /// 4. quote mint
+    /// 5. underlying pool (Nodebank vault)
+    /// 6. quote pool (Quote token vault)
+    /// 7. payer
+    /// 8. system program
+    /// 9. token program
+    CreateOptionMarket {
+        option_type:OptionType,
+        contract_size:u64,
+        quote_amount:u64,
+        expiry:u64,
+>>>>>>> a705cd6... Initial commit for adding options.
     },
 }
 
