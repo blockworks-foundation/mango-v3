@@ -2,7 +2,7 @@ use bytemuck::{bytes_of, cast_slice_mut, from_bytes_mut, Contiguous, Pod};
 
 use crate::error::MangoResult;
 use crate::matching::Side;
-use crate::state::ONE_I80F48;
+use crate::state::{ONE_I80F48, RootBank};
 use fixed::types::I80F48;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
@@ -108,3 +108,18 @@ pub fn emit_perp_balances(
         short_funding: perp_market_cache.short_funding.to_bits(),
     });
 }
+
+
+pub fn compute_interest_rate(
+    root_bank: &RootBank,
+    utilization: I80F48
+) -> I80F48 {
+    if utilization > root_bank.optimal_util {
+        let extra_util = utilization - root_bank.optimal_util;
+        let slope = (root_bank.max_rate - root_bank.optimal_rate) / (ONE_I80F48 - root_bank.optimal_util);
+        root_bank.optimal_rate + slope * extra_util
+    } else {
+        let slope = root_bank.optimal_rate / root_bank.optimal_util;
+        slope * utilization
+    }
+} 
