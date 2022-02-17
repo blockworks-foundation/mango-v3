@@ -752,6 +752,53 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn place_perp_order2(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_index: usize,
+        order_side: Side,
+        order_size: u64,
+        order_price: u64,
+        order_id: u64,
+        order_type: OrderType,
+        reduce_only: bool,
+        time_in_force: u8,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let instructions = [place_perp_order2(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &perp_market.event_queue,
+            None,
+            &mango_account.spot_open_orders,
+            order_side,
+            order_price as i64,
+            order_size as i64,
+            order_id,
+            order_type,
+            reduce_only,
+            time_in_force,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
     pub async fn consume_perp_events(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,

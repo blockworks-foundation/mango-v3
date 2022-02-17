@@ -34,7 +34,7 @@ const NODE_SIZE: usize = 88;
 
 /// Drop at most this many expired orders from a BookSide when trying to match orders.
 /// This exists as a guard against excessive compute use.
-const DROP_EXPIRED_ORDER_LIMIT: usize = 3;
+const DROP_EXPIRED_ORDER_LIMIT: usize = 5;
 
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u32)]
@@ -2355,7 +2355,7 @@ mod tests {
         assert_eq!(book.bids.get_max().unwrap().price(), (1000 + book.bids.leaf_count) as i64);
 
         // add another bid at a higher price before expiry, replacing the lowest-price one (1001)
-        let order_id = new_order(&mut book, &mut event_queue, Side::Bid, 1005, 1000000 - 1);
+        new_order(&mut book, &mut event_queue, Side::Bid, 1005, 1000000 - 1);
         assert_eq!(book.bids.get_min().unwrap().price(), 1002);
         assert_eq!(event_queue.len(), 1);
 
@@ -2369,12 +2369,14 @@ mod tests {
         let bids_max = book.bids.get_max().unwrap().price();
         let bids_count = book.bids.leaf_count;
         new_order(&mut book, &mut event_queue, Side::Ask, 6000, 1500000);
-        assert_eq!(book.bids.leaf_count, bids_count - 3);
+        assert_eq!(book.bids.leaf_count, bids_count - 5);
         assert_eq!(book.asks.leaf_count, 1);
-        assert_eq!(event_queue.len(), 2 + 3);
+        assert_eq!(event_queue.len(), 2 + 5);
         assert!(!bookside_contains_price(&book.bids, bids_max));
         assert!(!bookside_contains_price(&book.bids, bids_max - 1));
         assert!(!bookside_contains_price(&book.bids, bids_max - 2));
-        assert!(bookside_contains_price(&book.bids, bids_max - 3));
+        assert!(!bookside_contains_price(&book.bids, bids_max - 3));
+        assert!(!bookside_contains_price(&book.bids, bids_max - 4));
+        assert!(bookside_contains_price(&book.bids, bids_max - 5));
     }
 }
