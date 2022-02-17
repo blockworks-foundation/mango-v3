@@ -979,7 +979,7 @@ pub enum MangoInstruction {
     /// paid from the quote position. Only at this point the position balance
     /// is 100% refelecting the trade.
     ///
-    /// Accounts expected by this instruction (8 + `MAX_PAIRS` + (optional 1)):
+    /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2. `[signer]` owner_ai - owner of MangoAccount
@@ -988,20 +988,19 @@ pub enum MangoInstruction {
     /// 5. `[writable]` bids_ai - bids account for this PerpMarket
     /// 6. `[writable]` asks_ai - asks account for this PerpMarket
     /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
-    /// 8..23 `[]` open_orders_ais - array of open orders accounts on this MangoAccount
-    /// 23. `[writable]` referrer_mango_account_ai - optional, mango account of referrer
+    /// 8. `[writable]` referrer_mango_account_ai - referrer's mango account;
+    ///                 pass in mango_account_ai as duplicate if you don't have a referrer
+    /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
     PlacePerpOrder2 {
         price: i64,
         quantity: i64,
         client_order_id: u64,
+        /// Timestamp of when order will expire; Send 0 if you want the order to never expire
+        expiry_timestamp: u64,
         side: Side,
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
-        /// Optional to be backward compatible; default false
         reduce_only: bool,
-
-        #[serde(serialize_with = "serialize_option_fixed_width")]
-        expiry_timestamp: Option<u64>,
     },
 }
 
@@ -1467,16 +1466,16 @@ impl MangoInstruction {
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             }
             64 => {
-                let data_arr = array_ref![data, 0, 36];
+                let data_arr = array_ref![data, 0, 35];
                 let (
                     price,
                     quantity,
                     client_order_id,
+                    expiry_timestamp,
                     side,
                     order_type,
                     reduce_only,
-                    expiry_timestamp,
-                ) = array_refs![data_arr, 8, 8, 8, 1, 1, 1, 9];
+                ) = array_refs![data_arr, 8, 8, 8, 8, 1, 1, 1];
                 MangoInstruction::PlacePerpOrder2 {
                     price: i64::from_le_bytes(*price),
                     quantity: i64::from_le_bytes(*quantity),
@@ -1484,7 +1483,7 @@ impl MangoInstruction {
                     side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
-                    expiry_timestamp: unpack_u64_opt(expiry_timestamp),
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
                 }
             }
             _ => {
@@ -1890,14 +1889,14 @@ pub fn place_perp_order2(
     asks_pk: &Pubkey,
     event_queue_pk: &Pubkey,
     referrer_mango_account_pk: Option<&Pubkey>,
-    open_orders_pks: &[Pubkey; MAX_PAIRS],
+    open_orders_pks: &[Pubkey],
     side: Side,
     price: i64,
     quantity: i64,
     client_order_id: u64,
     order_type: OrderType,
     reduce_only: bool,
-    expiry_timestamp: Option<u64>,
+    expiry_timestamp: Option<u64>, // Send 0 if you want to ignore time in force
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1908,11 +1907,10 @@ pub fn place_perp_order2(
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
         AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*referrer_mango_account_pk.unwrap_or(mango_account_pk), false),
     ];
+
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
-    if let Some(referrer_mango_account_pk) = referrer_mango_account_pk {
-        accounts.push(AccountMeta::new(*referrer_mango_account_pk, false));
-    }
 
     let instr = MangoInstruction::PlacePerpOrder2 {
         side,
@@ -1921,7 +1919,7 @@ pub fn place_perp_order2(
         client_order_id,
         order_type,
         reduce_only,
-        expiry_timestamp,
+        expiry_timestamp: expiry_timestamp.unwrap_or(0),
     };
     let data = instr.pack();
 

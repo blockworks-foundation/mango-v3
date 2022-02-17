@@ -774,6 +774,13 @@ impl MangoProgramTest {
         let perp_market_pk = perp_market_cookie.address;
 
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let open_orders_pks: Vec<Pubkey> = mango_account
+            .spot_open_orders
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &pk)| if mango_account.in_margin_basket[i] { Some(pk) } else { None })
+            .collect();
+
         let instructions = [place_perp_order2(
             &mango_program_id,
             &mango_group_pk,
@@ -785,7 +792,7 @@ impl MangoProgramTest {
             &perp_market.asks,
             &perp_market.event_queue,
             None,
-            &mango_account.spot_open_orders,
+            &open_orders_pks,
             order_side,
             order_price as i64,
             order_size as i64,
