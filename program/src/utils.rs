@@ -109,22 +109,20 @@ pub fn emit_perp_balances(
     });
 }
 
-/// returns the current interest rate in APR
+/// returns the current interest rate in APR for a given RootBank
 pub fn compute_interest_rate(
     root_bank: &RootBank,
     utilization: I80F48
 ) -> I80F48 {
-    if utilization > root_bank.optimal_util {
-        let extra_util = utilization - root_bank.optimal_util;
-        let slope = (root_bank.max_rate - root_bank.optimal_rate) / (ONE_I80F48 - root_bank.optimal_util);
-        root_bank.optimal_rate + slope * extra_util
-    } else {
-        let slope = root_bank.optimal_rate / root_bank.optimal_util;
-        slope * utilization
-    }
+    interest_rate_curve_calculator(
+        utilization,
+        root_bank.optimal_util,
+        root_bank.optimal_rate,
+        root_bank.max_rate
+    )
 }
 
-/// returns a tuple of (deposit_rate, interest_rate)
+/// returns a tuple of (deposit_rate, interest_rate) for a given RootBank
 /// values are in APR
 pub fn compute_deposit_rate(
     root_bank: &RootBank,
@@ -136,4 +134,22 @@ pub fn compute_deposit_rate(
     } else {
         None
     }
+}
+
+/// calcualtor function that can be used to compute an interest
+/// rate based on the given parameters
+pub fn interest_rate_curve_calculator(
+    utilization: I80F48,
+    optimal_util: I80F48,
+    optimal_rate: I80F48,
+    max_rate: I80F48,
+) -> I80F48 {
+    if utilization > optimal_util {
+        let extra_util = utilization - optimal_util;
+        let slope = (max_rate - optimal_rate) / (ONE_I80F48 - optimal_util);
+        optimal_rate + slope * extra_util
+    } else {
+        let slope = optimal_rate / optimal_util;
+        slope * utilization
+    }    
 }
