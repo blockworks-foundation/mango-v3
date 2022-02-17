@@ -109,6 +109,7 @@ pub fn emit_perp_balances(
     });
 }
 
+/// returns the current interest rate in APR
 pub fn compute_interest_rate(
     root_bank: &RootBank,
     utilization: I80F48
@@ -123,10 +124,16 @@ pub fn compute_interest_rate(
     }
 }
 
+/// returns a tuple of (deposit_rate, interest_rate)
+/// values are in APR
 pub fn compute_deposit_rate(
     root_bank: &RootBank,
     utilization: I80F48
-) -> Option<I80F48> {
+) -> Option<(I80F48, I80F48)> {
     let interest_rate = compute_interest_rate(root_bank, utilization);
-    interest_rate.checked_mul(interest_rate)
+    if let Some(deposit_rate) = interest_rate.checked_mul(utilization) {
+        Some((deposit_rate, interest_rate))
+    } else {
+        None
+    }
 }
