@@ -2369,6 +2369,7 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
+        time_in_force: u8,
     ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
@@ -2475,7 +2476,7 @@ impl Processor {
             price,
             quantity,
             order_type,
-            0,
+            time_in_force,
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
@@ -5975,6 +5976,7 @@ impl Processor {
                     client_order_id,
                     order_type,
                     reduce_only,
+                    0, // time in force
                 )
             }
             MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok } => {
@@ -6310,6 +6312,28 @@ impl Processor {
             MangoInstruction::RegisterReferrerId { referrer_id } => {
                 msg!("Mango: RegisterReferrerId");
                 Self::register_referrer_id(program_id, accounts, referrer_id)
+            }
+            MangoInstruction::PlacePerpOrder2 {
+                side,
+                price,
+                quantity,
+                client_order_id,
+                order_type,
+                reduce_only,
+                time_in_force,
+            } => {
+                msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
+                Self::place_perp_order(
+                    program_id,
+                    accounts,
+                    side,
+                    price,
+                    quantity,
+                    client_order_id,
+                    order_type,
+                    reduce_only,
+                    time_in_force,
+                )
             }
         }
     }
