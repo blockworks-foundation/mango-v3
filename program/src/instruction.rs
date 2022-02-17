@@ -999,7 +999,9 @@ pub enum MangoInstruction {
         order_type: OrderType,
         /// Optional to be backward compatible; default false
         reduce_only: bool,
-        time_in_force: u8,
+
+        #[serde(serialize_with = "serialize_option_fixed_width")]
+        expiry_timestamp: Option<u64>,
     },
 }
 
@@ -1465,7 +1467,7 @@ impl MangoInstruction {
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             }
             64 => {
-                let data_arr = array_ref![data, 0, 28];
+                let data_arr = array_ref![data, 0, 36];
                 let (
                     price,
                     quantity,
@@ -1473,8 +1475,8 @@ impl MangoInstruction {
                     side,
                     order_type,
                     reduce_only,
-                    time_in_force,
-                ) = array_refs![data_arr, 8, 8, 8, 1, 1, 1, 1];
+                    expiry_timestamp,
+                ) = array_refs![data_arr, 8, 8, 8, 1, 1, 1, 9];
                 MangoInstruction::PlacePerpOrder2 {
                     price: i64::from_le_bytes(*price),
                     quantity: i64::from_le_bytes(*quantity),
@@ -1482,7 +1484,7 @@ impl MangoInstruction {
                     side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
-                    time_in_force: time_in_force[0],
+                    expiry_timestamp: unpack_u64_opt(expiry_timestamp),
                 }
             }
             _ => {
@@ -1895,7 +1897,7 @@ pub fn place_perp_order2(
     client_order_id: u64,
     order_type: OrderType,
     reduce_only: bool,
-    time_in_force: u8,
+    expiry_timestamp: Option<u64>,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1919,7 +1921,7 @@ pub fn place_perp_order2(
         client_order_id,
         order_type,
         reduce_only,
-        time_in_force,
+        expiry_timestamp,
     };
     let data = instr.pack();
 
