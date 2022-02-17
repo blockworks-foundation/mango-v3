@@ -123,8 +123,11 @@ pub enum MangoErrorCode {
     InvalidOraclePrice,
     #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
     MaxAccountsReached,
+    #[error("MangoErrorCode::ExpiryTooFarInFuture The order expiry timestamp may at most be 255s in the future")]
+    // 40
+    ExpiryTooFarInFuture,
 
-    #[error("MangoErrorCode::Default Check the source code for more info")] // 40
+    #[error("MangoErrorCode::Default Check the source code for more info")] // 41
     Default = u32::MAX_VALUE,
 }
 

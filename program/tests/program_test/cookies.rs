@@ -710,7 +710,7 @@ impl PerpMarketCookie {
         side: mango::matching::Side,
         size: f64,
         price: f64,
-        time_in_force: u8,
+        expiry_timestamp: Option<u64>,
     ) {
         let order_size = test.base_size_number_to_lots(&self.mint, size);
         let order_price = test.price_number_to_lots(&self.mint, price);
@@ -725,7 +725,7 @@ impl PerpMarketCookie {
             mango_group_cookie.current_perp_order_id,
             mango::matching::OrderType::Limit,
             false,
-            time_in_force,
+            expiry_timestamp,
         )
         .await;
 

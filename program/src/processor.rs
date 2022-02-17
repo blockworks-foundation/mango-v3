@@ -2369,7 +2369,7 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
-        time_in_force: u8,
+        expiry_timestamp_opt: Option<u64>,
     ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
@@ -2404,6 +2404,19 @@ impl Processor {
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
+
+        let time_in_force = if let Some(expiry_timestamp) = expiry_timestamp_opt {
+            let tif = expiry_timestamp.saturating_sub(now_ts);
+            if tif == 0 {
+                msg!("Order is already expired");
+                return Ok(());
+            } else if tif > 255 {
+                return Err(throw_err!(MangoErrorCode::ExpiryTooFarInFuture));
+            }
+            tif as u8
+        } else {
+            0 // never expire
+        };
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -5976,7 +5989,7 @@ impl Processor {
                     client_order_id,
                     order_type,
                     reduce_only,
-                    0, // time in force
+                    None, // expiry timestamp
                 )
             }
             MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok } => {
@@ -6320,7 +6333,7 @@ impl Processor {
                 client_order_id,
                 order_type,
                 reduce_only,
-                time_in_force,
+                expiry_timestamp,
             } => {
                 msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
                 Self::place_perp_order(
@@ -6332,7 +6345,7 @@ impl Processor {
                     client_order_id,
                     order_type,
                     reduce_only,
-                    time_in_force,
+                    expiry_timestamp,
                 )
             }
         }

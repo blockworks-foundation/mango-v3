@@ -160,7 +160,7 @@ pub async fn place_perp_order_scenario(
                 order_side,
                 order_size,
                 order_price,
-                0,
+                None, // expiry timestamp
             ) // TODO - pass in reduce only param
             .await;
 
