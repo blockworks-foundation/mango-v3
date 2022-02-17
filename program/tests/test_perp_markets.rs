@@ -182,6 +182,7 @@ async fn test_match_against_expired_orders() {
 
     // Step 2: Place many expiring perp bid orders
     use mango::matching::Side;
+    let clock = test.get_clock().await;
     let mut perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
     for bidder_user_index in 0..2 {
         for i in 0..64 {
@@ -193,7 +194,7 @@ async fn test_match_against_expired_orders() {
                     Side::Bid,
                     1.0,
                     (9930 + i) as f64,
-                    1,
+                    Some(clock.unix_timestamp as u64 + 2),
                 )
                 .await;
         }
@@ -213,7 +214,7 @@ async fn test_match_against_expired_orders() {
             Side::Ask,
             1.0,
             9_950.0,
-            0,
+            None,
         )
         .await;
     // TODO: Would be very nice to be able to access compute units, stack use, heap use in the test!
