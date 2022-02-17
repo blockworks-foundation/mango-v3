@@ -1816,11 +1816,16 @@ impl MangoProgramTest {
         contract_size : u64,
         quote_amount : u64,
         expiry : u64,
-    ){
+    ) -> OptionMarket {
         let mango_group = mango_group_cookie.mango_group;
         let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
+        let mango_program_id = self.mango_program_id;
+        let underlying_mint = self.mints[token_index].pubkey.unwrap();
+        let quote_mint = self.mints[self.quote_index].pubkey.unwrap();
 
         let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
+            underlying_mint.as_ref(),
+            quote_mint.as_ref(),
             &[option_type as u8], 
             &contract_size.to_le_bytes(), 
             &quote_amount.to_le_bytes(), 
@@ -1829,9 +1834,6 @@ impl MangoProgramTest {
         let (mint_pda, _) = Pubkey::find_program_address( &[b"mango_option_mint", market_pda.as_ref()], &self.mango_program_id );
         let (writer_pda, _) = Pubkey::find_program_address( &[b"mango_option_writer_mint", market_pda.as_ref()], &self.mango_program_id );
 
-        let mango_program_id = self.mango_program_id;
-        let underlying_mint = self.mints[token_index].pubkey.unwrap();
-        let quote_mint = self.quote_mint.pubkey.unwrap();
         let instructions = vec![mango::instruction::create_option_market(
             &mango_program_id,
             &market_pda,
@@ -1850,6 +1852,9 @@ impl MangoProgramTest {
         ).unwrap()];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+
+        let option_market = self.load_account::<OptionMarket>(market_pda).await;
+        option_market
     }
 }
 
