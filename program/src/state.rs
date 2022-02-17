@@ -2617,10 +2617,8 @@ pub struct OptionMarket {
     pub contract_size: u64,
     pub quote_amount: u64,
     pub expiry: u64,            // expiry in unix time
-    pub underlying_asset_pool: Pubkey,
-    pub quote_asset_pool: Pubkey,
     pub expired: bool,
-    pub owner : Pubkey,
+    pub creator : Pubkey,
 }
 
 impl OptionMarket {

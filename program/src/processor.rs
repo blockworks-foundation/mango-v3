@@ -5821,16 +5821,18 @@ impl Processor {
         contract_size:u64,
         quote_amount:u64,
         expiry:u64,) -> MangoResult {
-        const NUM_FIXED: usize = 11;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        check!(expiry > now_ts, MangoErrorCode::ExpiryInvalid)?;
 
         let [option_market_ai,
              option_mint, 
              writer_token_mint, 
              underlying_asset_mint, 
-             quote_asset_mint, 
-             underlying_asset_pool, 
-             quote_asset_pool,
+             quote_asset_mint,
              payer, 
              system_program,
              token_program,
@@ -5888,9 +5890,7 @@ impl Processor {
         option_market.contract_size = contract_size;
         option_market.quote_amount = quote_amount;
         option_market.expiry = expiry;
-        option_market.underlying_asset_pool = *underlying_asset_pool.key;
-        option_market.quote_asset_pool = *quote_asset_pool.key;
-        option_market.owner = *payer.key;
+        option_market.creator = *payer.key;
         option_market.expired = false;
         
         Ok(())

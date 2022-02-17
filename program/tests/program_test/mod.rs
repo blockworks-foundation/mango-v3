@@ -1809,6 +1809,47 @@ impl MangoProgramTest {
 
         mango_group_cookie.mango_accounts[liqor_index].mango_account =
             self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
+    pub async fn create_option_market( &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_type: mango::state::OptionType,
+        token_index: usize,
+        contract_size : u64,
+        quote_amount : u64,
+        expiry : u64,
+    ){
+        let mango_group = mango_group_cookie.mango_group;
+        let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
+
+        let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
+            &[option_type as u8], 
+            &contract_size.to_le_bytes(), 
+            &quote_amount.to_le_bytes(), 
+            &expiry.to_le_bytes()];
+        let (market_pda, _) = Pubkey::find_program_address( mango_options_market_seeds, &self.mango_program_id );
+        let (mint_pda, _) = Pubkey::find_program_address( &[b"mango_option_mint", market_pda.as_ref()], &self.mango_program_id );
+        let (writer_pda, _) = Pubkey::find_program_address( &[b"mango_option_writer_mint", market_pda.as_ref()], &self.mango_program_id );
+
+        let mango_program_id = self.mango_program_id;
+        let underlying_mint = self.mints[token_index].pubkey.unwrap();
+        let quote_mint = self.quote_mint.pubkey.unwrap();
+        let instructions = vec![mango::instruction::create_option_market(
+            &mango_program_id,
+            &market_pda,
+            &mint_pda,
+            &writer_pda,
+            &underlying_mint,
+            &quote_mint,
+            &user.pubkey(),
+            &solana_sdk::system_program::id(),
+            &spl_token::id(),
+            &solana_program::sysvar::rent::ID,
+            option_type,
+            contract_size,
+            quote_amount,
+            expiry,
+        ).unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
 }
 
