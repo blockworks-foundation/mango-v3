@@ -26,7 +26,9 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, OrderType, Side};
 use crate::queue::{EventQueue, EventType, FillEvent};
-use crate::utils::{invert_side, pow_i80f48, remove_slop_mut, split_open_orders};
+use crate::utils::{
+    compute_interest_rate, invert_side, pow_i80f48, remove_slop_mut, split_open_orders,
+};
 
 pub const MAX_TOKENS: usize = 16; // Just changed
 pub const MAX_PAIRS: usize = MAX_TOKENS - 1;
@@ -415,14 +417,7 @@ impl RootBank {
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
 
         // Calculate interest rate
-        let interest_rate = if utilization > self.optimal_util {
-            let extra_util = utilization - self.optimal_util;
-            let slope = (self.max_rate - self.optimal_rate) / (ONE_I80F48 - self.optimal_util);
-            self.optimal_rate + slope * extra_util
-        } else {
-            let slope = self.optimal_rate / self.optimal_util;
-            slope * utilization
-        };
+        let interest_rate = compute_interest_rate(&self, utilization);
 
         let borrow_interest: I80F48 =
             interest_rate.checked_mul(I80F48::from_num(now_ts - self.last_updated)).unwrap();
