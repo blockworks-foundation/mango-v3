@@ -109,7 +109,6 @@ pub fn emit_perp_balances(
     });
 }
 
-
 pub fn compute_interest_rate(
     root_bank: &RootBank,
     utilization: I80F48
@@ -122,4 +121,12 @@ pub fn compute_interest_rate(
         let slope = root_bank.optimal_rate / root_bank.optimal_util;
         slope * utilization
     }
-} 
+}
+
+pub fn compute_deposit_rate(
+    root_bank: &RootBank,
+    utilization: I80F48
+) -> Option<I80F48> {
+    let interest_rate = compute_interest_rate(root_bank, utilization);
+    interest_rate.checked_mul(interest_rate)
+}
