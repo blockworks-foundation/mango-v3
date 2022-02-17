@@ -5817,11 +5817,13 @@ impl Processor {
     #[inline(never)]
     fn create_option_market(program_id: &Pubkey,
         accounts: &[AccountInfo],
+        underlying_token_index: u8,
+        quote_token_index: u8,
         option_type : OptionType,
-        contract_size:u64,
-        quote_amount:u64,
+        contract_size: I80F48,
+        quote_amount: I80F48,
         expiry:u64,) -> MangoResult {
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let clock = Clock::get()?;
@@ -5830,17 +5832,14 @@ impl Processor {
 
         let [option_market_ai,
              option_mint, 
-             writer_token_mint, 
-             underlying_asset_mint, 
-             quote_asset_mint,
+             writer_token_mint,
              payer, 
              system_program,
              token_program,
              rent] = accounts;
         
         let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
-            underlying_asset_mint.key.as_ref(),
-            quote_asset_mint.key.as_ref(),
+            &[underlying_token_index, quote_token_index],
             &[option_type as u8], 
             &contract_size.to_le_bytes(), 
             &quote_amount.to_le_bytes(), 
@@ -5887,14 +5886,15 @@ impl Processor {
         option_market.option_type = option_type;
         option_market.option_mint = *option_mint.key;
         option_market.writer_token_mint = *writer_token_mint.key;
-        option_market.underlying_asset_mint = *underlying_asset_mint.key;
-        option_market.quote_asset_mint = *quote_asset_mint.key;
+        option_market.underlying_token_index = underlying_token_index as usize;
+        option_market.quote_token_index = quote_token_index as usize;
         option_market.contract_size = contract_size;
         option_market.quote_amount = quote_amount;
         option_market.expiry = expiry;
         option_market.creator = *payer.key;
         option_market.expired = false;
-        
+        option_market.tokens_in_quote_pool = I80F48::from_num(0);
+        option_market.tokens_in_underlying_pool = I80F48::from_num(0);
         Ok(())
     }
 
@@ -6388,13 +6388,21 @@ impl Processor {
                 msg!("Mango: RegisterReferrerId");
                 Self::register_referrer_id(program_id, accounts, referrer_id)
             MangoInstruction::CreateOptionMarket{
+                underlying_token_index,
+                quote_token_index,
                 option_type,
                 contract_size,
                 quote_amount,
                 expiry,
             } => {
                 msg!("Mango: CreateOptionMarket");
-                Self::create_option_market(program_id, accounts, option_type, contract_size, quote_amount, expiry)
+                Self::create_option_market(program_id, accounts, underlying_token_index, quote_token_index, option_type, contract_size, quote_amount, expiry)
+            }
+            MangoInstruction::WriteOption {
+                amount
+            } => {
+                msg!("Mango: Write option");
+                Ok(())
             }
         }
     }

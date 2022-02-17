@@ -140,6 +140,14 @@ fn test_instruction_serialization() {
         },
         MangoInstruction::RemoveAdvancedOrder { order_index: 42 },
         MangoInstruction::ExecutePerpTriggerOrder { order_index: 249 },
+        MangoInstruction::CreateOptionMarket {
+            underlying_token_index : 0,
+            quote_token_index : 15,
+            contract_size:I80F48::from_num(100.45645646),
+            quote_amount:I80F48::from_num(10.45645646),
+            option_type: OptionType::European,
+            expiry: 1000000000,
+        },
     ];
     for case in cases {
         assert!(MangoInstruction::unpack(&case.pack()).unwrap() == case);

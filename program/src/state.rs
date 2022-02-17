@@ -2612,13 +2612,15 @@ pub struct OptionMarket {
     pub option_type: OptionType,
     pub option_mint: Pubkey,
     pub writer_token_mint: Pubkey,
-    pub underlying_asset_mint: Pubkey,
-    pub quote_asset_mint: Pubkey,
-    pub contract_size: u64,
-    pub quote_amount: u64,
+    pub underlying_token_index: usize,
+    pub quote_token_index: usize,
+    pub contract_size: I80F48,
+    pub quote_amount: I80F48,
     pub expiry: u64,            // expiry in unix time
     pub expired: bool,
     pub creator : Pubkey,
+    pub tokens_in_underlying_pool : I80F48, // Tokens in the mango underlying pool related to this market
+    pub tokens_in_quote_pool : I80F48, // Tokens in the mango quote pool related to this market
 }
 
 impl OptionMarket {

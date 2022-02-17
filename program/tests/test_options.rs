@@ -7,9 +7,10 @@ use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
 use std::{mem::size_of, mem::size_of_val};
+use fixed::types::I80F48;
 
 #[tokio::test]
-async fn test_init_option_market() {
+async fn test_options() {
     let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
@@ -21,10 +22,18 @@ async fn test_init_option_market() {
     println!("Creating option market");
     let clock = test.get_clock().await;
     let expiry = clock.unix_timestamp as u64 + 60 * 60 * 10 * solana_program::clock::DEFAULT_TICKS_PER_SECOND; // after 10 hrs
-    let option_market = test.create_option_market(&mango_group_cookie, OptionType::American, 0, 100000000, 10000000, expiry).await;
+    let option_market = test.create_option_market(&mango_group_cookie,
+        0,
+        15,
+         OptionType::American,
+         I80F48::from_num(100.2), 
+         I80F48::from_num(10.2), 
+         expiry).await;
     assert_eq!(option_market.meta_data.data_type, DataType::OptionMarket as u8);
     assert_eq!(option_market.option_type, OptionType::American);
-    assert_eq!(option_market.contract_size, 100000000);
-    assert_eq!(option_market.quote_amount, 10000000);
+    assert_eq!(option_market.contract_size, I80F48::from_num(100.2));
+    assert_eq!(option_market.quote_amount, I80F48::from_num(10.2));
     assert_eq!(option_market.expiry, expiry);
+    assert_eq!(option_market.tokens_in_underlying_pool,  I80F48::from_num(0));
+    assert_eq!(option_market.tokens_in_quote_pool,  I80F48::from_num(0));
 }

@@ -971,7 +971,7 @@ pub enum MangoInstruction {
     /// 
     /// Accounts expected by this instruction (9)
     /// 
-    /// 0. [writable] Option Market a pda account which will store all the information related to the option market [b"mango_option_market", underlying.key, quote.key, [optiontype],contract_size.le, quote_amount.le, expiry.le]]
+    /// 0. [writable] Option Market a pda account which will store all the information related to the option market [b"mango_option_market", [underlying_index, quote_index], [optiontype],contract_size.le, quote_amount.le, expiry.le]]
     /// 1. [writable] create a PDA for option mint with following keys [b"mango_option_mint", option_market.key]
     /// 2. [writable] create a PDA for writer mint with following keys [b"mango_option_writer_mint", option_market.key]
     /// 3. Underlying mint
@@ -981,10 +981,21 @@ pub enum MangoInstruction {
     /// 9. token program
     /// 10. rent program
     CreateOptionMarket {
+        underlying_token_index:u8,
+        quote_token_index:u8,
         option_type:OptionType,
-        contract_size:u64,
-        quote_amount:u64,
+        contract_size:I80F48,
+        quote_amount:I80F48,
         expiry:u64,
+    },
+
+    /// Write an option / by this user can write an option. 
+    /// 
+    /// A writer token will have to deposit the underlying asset into mango to write an option
+    /// Option writer will get two tokens / a writers tokens and a option token
+    /// Writer token can be 
+    WriteOption {
+        amount : u64,
     },
 }
 
@@ -1436,6 +1447,7 @@ impl MangoInstruction {
             60 => MangoInstruction::CreateSpotOpenOrders,
             61 => {
 <<<<<<< HEAD
+<<<<<<< HEAD
                 let data = array_ref![data, 0, 16];
                 let (ref_surcharge_centibps, ref_share_centibps, ref_mngo_required) =
                     array_refs![data, 4, 4, 8];
@@ -1453,14 +1465,22 @@ impl MangoInstruction {
 =======
                 let data_arr = array_ref![data, 0 , 25];
                 let ( option_type,
+=======
+                let data_arr = array_ref![data, 0 , 43];
+                let ( underlying_token_index,
+                    quote_token_index,
+                    option_type,
+>>>>>>> 63a245d... using token indexes instead of mint addresses, changing from u64 to I80F48
                     contract_size,
                     quote_amount,
                     expiry,
-                ) = array_refs![data_arr, 1, 8, 8, 8];
+                ) = array_refs![data_arr, 1, 1, 1, 16, 16, 8];
                 MangoInstruction::CreateOptionMarket {
+                    underlying_token_index : underlying_token_index[0],
+                    quote_token_index: quote_token_index[0],
                     option_type : OptionType::try_from_primitive(option_type[0]).ok()?,
-                    contract_size: u64::from_le_bytes(*contract_size),
-                    quote_amount: u64::from_le_bytes(*quote_amount),
+                    contract_size: I80F48::from_le_bytes(*contract_size),
+                    quote_amount: I80F48::from_le_bytes(*quote_amount),
                     expiry: u64::from_le_bytes(*expiry)
                 }
             }
@@ -2682,23 +2702,21 @@ pub fn create_option_market(
     market_pda: &Pubkey,
     mint_pda: &Pubkey,
     writer_pda: &Pubkey,
-    underlying_mint: &Pubkey,
-    quote_mint: &Pubkey,
+    underlying_token_index: u8,
+    quote_token_index: u8,
     payer: &Pubkey,
     system_program : &Pubkey,
     token_program: &Pubkey,
     rent_program: &Pubkey,
     option_type: OptionType,
-    contract_size: u64,
-    quote_amount: u64,
+    contract_size: I80F48,
+    quote_amount: I80F48,
     expiry: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*market_pda, false),
         AccountMeta::new(*mint_pda, false),
         AccountMeta::new(*writer_pda, false),
-        AccountMeta::new_readonly(*underlying_mint, false),
-        AccountMeta::new_readonly(*quote_mint, false),
         AccountMeta::new(*payer, true),
         AccountMeta::new_readonly(*system_program, false),
         AccountMeta::new_readonly(*token_program, false),
@@ -2706,6 +2724,8 @@ pub fn create_option_market(
     ];
 
     let instr = MangoInstruction::CreateOptionMarket {
+        underlying_token_index,
+        quote_token_index,
         option_type,
         contract_size,
         quote_amount,

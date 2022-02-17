@@ -1811,21 +1811,19 @@ impl MangoProgramTest {
             self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
     pub async fn create_option_market( &mut self,
         mango_group_cookie: &MangoGroupCookie,
+        underlying_index: u8,
+        quote_index: u8,
         option_type: mango::state::OptionType,
-        token_index: usize,
-        contract_size : u64,
-        quote_amount : u64,
+        contract_size : I80F48,
+        quote_amount : I80F48,
         expiry : u64,
     ) -> OptionMarket {
         let mango_group = mango_group_cookie.mango_group;
         let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
         let mango_program_id = self.mango_program_id;
-        let underlying_mint = self.mints[token_index].pubkey.unwrap();
-        let quote_mint = self.mints[self.quote_index].pubkey.unwrap();
 
         let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
-            underlying_mint.as_ref(),
-            quote_mint.as_ref(),
+            &[underlying_index, quote_index],
             &[option_type as u8], 
             &contract_size.to_le_bytes(), 
             &quote_amount.to_le_bytes(), 
@@ -1839,8 +1837,8 @@ impl MangoProgramTest {
             &market_pda,
             &mint_pda,
             &writer_pda,
-            &underlying_mint,
-            &quote_mint,
+            underlying_index,
+            quote_index,
             &user.pubkey(),
             &solana_sdk::system_program::id(),
             &spl_token::id(),
