@@ -6475,6 +6475,13 @@ impl Processor {
                 order_type,
                 reduce_only,
             } => {
+                use std::str::FromStr;
+                let mango_mainnet =
+                    Pubkey::from_str("mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68").unwrap();
+                if *program_id == mango_mainnet {
+                    msg!("Mango: PlacePerpOrder2 is not available yet");
+                    return Err(throw_err!(MangoErrorCode::Unimplemented));
+                }
                 msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
                 Self::place_perp_order2(
                     program_id,
