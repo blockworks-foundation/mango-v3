@@ -154,8 +154,12 @@ async fn test_match_perp_order() {
 #[tokio::test]
 async fn test_match_against_expired_orders() {
     // === Arrange ===
-    // Use intentionally low CU: this test wants to verify the limit is sufficient
-    let config = MangoProgramTestConfig { compute_limit: 50_000, num_users: 3, num_mints: 2 };
+    let config = MangoProgramTestConfig {
+        // Use intentionally low CU: this test wants to verify the limit is sufficient
+        compute_limit: 50_000,
+        num_users: 3,
+        ..MangoProgramTestConfig::default_two_mints()
+    };
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
