@@ -2480,6 +2480,7 @@ impl Processor {
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
+            u8::MAX,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2502,10 +2503,12 @@ impl Processor {
         order_type: OrderType,
         reduce_only: bool,
         expiry_timestamp: u64,
+        limit: u8,
     ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(max_base_quantity > 0, MangoErrorCode::InvalidParam)?;
         check!(max_quote_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(limit > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 9;
         let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -2637,6 +2640,7 @@ impl Processor {
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
+            limit,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -5458,6 +5462,7 @@ impl Processor {
                     order.client_order_id,
                     now_ts,
                     None,
+                    u8::MAX,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
@@ -6481,6 +6486,7 @@ impl Processor {
                 expiry_timestamp,
                 order_type,
                 reduce_only,
+                limit,
             } => {
                 use std::str::FromStr;
                 let mango_mainnet =
@@ -6501,6 +6507,7 @@ impl Processor {
                     order_type,
                     reduce_only,
                     expiry_timestamp,
+                    limit,
                 )
             }
         }

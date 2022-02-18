@@ -642,7 +642,7 @@ impl PerpMarketCookie {
         let perp_market_pk = test.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
         let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
-        let max_num_events = 32;
+        let max_num_events = 256;
         let event_queue_pk = test
             .create_account(
                 size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events,
@@ -731,6 +731,7 @@ impl PerpMarketCookie {
             mango::matching::OrderType::Limit,
             false,
             expiry_timestamp,
+            39,
         )
         .await;
 

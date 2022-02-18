@@ -983,6 +983,7 @@ impl<'a> Book<'a> {
         client_order_id: u64,
         now_ts: u64,
         referrer_mango_account_ai: Option<&AccountInfo>,
+        limit: u8,
     ) -> MangoResult {
         match side {
             Side::Bid => self.new_bid(
@@ -1004,6 +1005,7 @@ impl<'a> Book<'a> {
                 client_order_id,
                 now_ts,
                 referrer_mango_account_ai,
+                limit,
             ),
             Side::Ask => self.new_ask(
                 program_id,
@@ -1024,6 +1026,7 @@ impl<'a> Book<'a> {
                 client_order_id,
                 now_ts,
                 referrer_mango_account_ai,
+                limit,
             ),
         }
     }
@@ -1186,6 +1189,7 @@ impl<'a> Book<'a> {
         client_order_id: u64,
         now_ts: u64,
         referrer_mango_account_ai: Option<&AccountInfo>,
+        mut limit: u8, // max number of FillEvents allowed; guaranteed to be greater than 0
     ) -> MangoResult {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
@@ -1256,6 +1260,10 @@ impl<'a> Book<'a> {
                 msg!("Order could not be placed due to PostOnly");
                 return Ok(()); // return silently to not fail other instructions in tx
                                // return Err(throw_err!(MangoErrorCode::PostOnly));
+            } else if limit == 0 {
+                msg!("Order matching limit reached");
+                post_allowed = false;
+                break;
             }
 
             let max_match_by_quote = rem_quote_quantity / best_ask_price;
@@ -1312,6 +1320,7 @@ impl<'a> Book<'a> {
                 best_ask.version,
             );
             event_queue.push_back(cast(fill)).unwrap();
+            limit -= 1;
 
             if done {
                 break;
@@ -1437,6 +1446,7 @@ impl<'a> Book<'a> {
         client_order_id: u64,
         now_ts: u64,
         referrer_mango_account_ai: Option<&AccountInfo>,
+        mut limit: u8, // max number of FillEvents allowed; guaranteed to be greater than 0
     ) -> MangoResult {
         let (post_only, mut post_allowed, price) = match order_type {
             OrderType::Limit => (false, true, price),
@@ -1504,6 +1514,10 @@ impl<'a> Book<'a> {
             } else if post_only {
                 msg!("Order could not be placed due to PostOnly");
                 return Ok(()); // return silently to not fail other instructions in tx
+            } else if limit == 0 {
+                msg!("Order matching limit reached");
+                post_allowed = false;
+                break;
             }
 
             let max_match_by_quote = rem_quote_quantity / best_bid_price;
@@ -1561,6 +1575,7 @@ impl<'a> Book<'a> {
             );
 
             event_queue.push_back(cast(fill)).unwrap();
+            limit -= 1;
 
             if done {
                 break;
@@ -2408,6 +2423,7 @@ mod tests {
                     0,
                     now_ts,
                     None,
+                    u8::MAX,
                 )
                 .unwrap();
                 mango_account.orders[0]

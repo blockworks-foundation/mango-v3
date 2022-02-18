@@ -1002,6 +1002,8 @@ pub enum MangoInstruction {
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
         reduce_only: bool,
+        /// Maximum number of FillEvent before terminating order execution
+        limit: u8,
     },
 }
 
@@ -1467,7 +1469,7 @@ impl MangoInstruction {
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             }
             64 => {
-                let data_arr = array_ref![data, 0, 43];
+                let data_arr = array_ref![data, 0, 44];
                 let (
                     price,
                     max_base_quantity,
@@ -1477,16 +1479,18 @@ impl MangoInstruction {
                     side,
                     order_type,
                     reduce_only,
-                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 1, 1, 1];
+                    limit,
+                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 1, 1, 1, 1];
                 MangoInstruction::PlacePerpOrder2 {
                     price: i64::from_le_bytes(*price),
                     max_base_quantity: i64::from_le_bytes(*max_base_quantity),
                     max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
                     client_order_id: u64::from_le_bytes(*client_order_id),
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
                     side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
-                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
+                    limit: u8::from_le_bytes(*limit),
                 }
             }
             _ => {
@@ -1901,6 +1905,7 @@ pub fn place_perp_order2(
     order_type: OrderType,
     reduce_only: bool,
     expiry_timestamp: Option<u64>, // Send 0 if you want to ignore time in force
+    limit: u8,                     // maximum number of FillEvents before terminating
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1925,6 +1930,7 @@ pub fn place_perp_order2(
         order_type,
         reduce_only,
         expiry_timestamp: expiry_timestamp.unwrap_or(0),
+        limit,
     };
     let data = instr.pack();
 

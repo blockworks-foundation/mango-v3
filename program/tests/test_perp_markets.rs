@@ -233,3 +233,70 @@ async fn test_match_against_expired_orders() {
     let asks = test.load_account::<BookSide>(perp_market_cookie.asks_pk).await;
     assert_eq!(asks.iter_all_including_invalid().count(), 1);
 }
+
+#[tokio::test]
+async fn test_full_book() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig {
+        // Use intentionally low CU: this test wants to verify the limit is sufficient
+        compute_limit: 200_000,
+        num_users: 9,
+        ..MangoProgramTestConfig::default_two_mints()
+    };
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let asker_user_index: usize = 0;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Create 8 users who spam 1 lot orders and one regular taker
+    let mut user_deposits = vec![(asker_user_index, mint_index, 1000.0)];
+    for i in 1..config.num_users {
+        user_deposits.push((i, test.quote_index, 1000.0 * base_price))
+    }
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+    // Step 2: Create a (almost) full bid boook
+    use mango::matching::Side;
+    let mut perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+    for bidder_user_index in 1..config.num_users {
+        for i in 0..64 {
+            perp_market_cookie
+                .place_order(
+                    &mut test,
+                    &mut mango_group_cookie,
+                    bidder_user_index,
+                    Side::Bid,
+                    0.0001 * ((i + 1) as f64),
+                    None,
+                    base_price,
+                    None,
+                )
+                .await;
+        }
+    }
+
+    // Step 3: Place an ask that matches against the orders
+    perp_market_cookie
+        .place_order(
+            &mut test,
+            &mut mango_group_cookie,
+            asker_user_index,
+            Side::Ask,
+            1.0,
+            None,
+            9_950.0,
+            None,
+        )
+        .await;
+}

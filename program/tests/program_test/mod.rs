@@ -765,6 +765,7 @@ impl MangoProgramTest {
         order_type: OrderType,
         reduce_only: bool,
         expiry_timestamp: Option<u64>,
+        limit: u8,
     ) {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
@@ -802,6 +803,7 @@ impl MangoProgramTest {
             order_type,
             reduce_only,
             expiry_timestamp,
+            limit,
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
