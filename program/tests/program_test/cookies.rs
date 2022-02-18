@@ -708,11 +708,15 @@ impl PerpMarketCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         side: mango::matching::Side,
-        size: f64,
+        base_size: f64,
+        quote_size: Option<f64>,
         price: f64,
         expiry_timestamp: Option<u64>,
     ) {
-        let order_size = test.base_size_number_to_lots(&self.mint, size);
+        let order_base_size = test.base_size_number_to_lots(&self.mint, base_size);
+        let order_quote_size = quote_size
+            .map(|s| ((s * test.quote_mint.unit) / self.mint.quote_lot) as u64)
+            .unwrap_or(u64::MAX);
         let order_price = test.price_number_to_lots(&self.mint, price);
 
         test.place_perp_order2(
@@ -720,7 +724,8 @@ impl PerpMarketCookie {
             self,
             user_index,
             side,
-            order_size,
+            order_base_size,
+            order_quote_size,
             order_price,
             mango_group_cookie.current_perp_order_id,
             mango::matching::OrderType::Limit,

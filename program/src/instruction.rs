@@ -993,7 +993,8 @@ pub enum MangoInstruction {
     /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
     PlacePerpOrder2 {
         price: i64,
-        quantity: i64,
+        max_base_quantity: i64,
+        max_quote_quantity: i64,
         client_order_id: u64,
         /// Timestamp of when order will expire; Send 0 if you want the order to never expire
         expiry_timestamp: u64,
@@ -1466,19 +1467,21 @@ impl MangoInstruction {
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             }
             64 => {
-                let data_arr = array_ref![data, 0, 35];
+                let data_arr = array_ref![data, 0, 43];
                 let (
                     price,
-                    quantity,
+                    max_base_quantity,
+                    max_quote_quantity,
                     client_order_id,
                     expiry_timestamp,
                     side,
                     order_type,
                     reduce_only,
-                ) = array_refs![data_arr, 8, 8, 8, 8, 1, 1, 1];
+                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 1, 1, 1];
                 MangoInstruction::PlacePerpOrder2 {
                     price: i64::from_le_bytes(*price),
-                    quantity: i64::from_le_bytes(*quantity),
+                    max_base_quantity: i64::from_le_bytes(*max_base_quantity),
+                    max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
                     client_order_id: u64::from_le_bytes(*client_order_id),
                     side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
@@ -1892,7 +1895,8 @@ pub fn place_perp_order2(
     open_orders_pks: &[Pubkey],
     side: Side,
     price: i64,
-    quantity: i64,
+    max_base_quantity: i64,
+    max_quote_quantity: i64,
     client_order_id: u64,
     order_type: OrderType,
     reduce_only: bool,
@@ -1915,7 +1919,8 @@ pub fn place_perp_order2(
     let instr = MangoInstruction::PlacePerpOrder2 {
         side,
         price,
-        quantity,
+        max_base_quantity,
+        max_quote_quantity,
         client_order_id,
         order_type,
         reduce_only,

@@ -197,6 +197,7 @@ async fn test_match_against_expired_orders() {
                     bidder_user_index,
                     Side::Bid,
                     1.0,
+                    None,
                     (9930 + i) as f64,
                     Some(clock.unix_timestamp as u64 + 2),
                 )
@@ -217,6 +218,7 @@ async fn test_match_against_expired_orders() {
             asker_user_index,
             Side::Ask,
             1.0,
+            None,
             9_950.0,
             None,
         )

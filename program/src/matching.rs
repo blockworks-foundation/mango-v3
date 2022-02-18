@@ -948,7 +948,8 @@ impl<'a> Book<'a> {
         market_index: usize,
         side: Side,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         time_in_force: u8,
         client_order_id: u64,
@@ -968,7 +969,8 @@ impl<'a> Book<'a> {
                 mango_account_pk,
                 market_index,
                 price,
-                quantity,
+                max_base_quantity,
+                max_quote_quantity,
                 order_type,
                 time_in_force,
                 client_order_id,
@@ -987,7 +989,8 @@ impl<'a> Book<'a> {
                 mango_account_pk,
                 market_index,
                 price,
-                quantity,
+                max_base_quantity,
+                max_quote_quantity,
                 order_type,
                 time_in_force,
                 client_order_id,
@@ -1135,7 +1138,8 @@ impl<'a> Book<'a> {
         mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         time_in_force: u8,
         client_order_id: u64,
@@ -1171,7 +1175,6 @@ impl<'a> Book<'a> {
         // referral fee related variables
         let mut ref_fee_rate = None;
         let mut referrer_mango_account_opt = None;
-        let mut total_quote_taken = 0;
 
         // generate new order id
         let order_id = market.gen_order_id(Side::Bid, price);
@@ -1180,15 +1183,12 @@ impl<'a> Book<'a> {
         //
         // Any changes to matching asks are collected in ask_changes
         // and then applied after this loop.
-        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut rem_base_quantity = max_base_quantity; // base lots (aka contracts)
+        let mut rem_quote_quantity = max_quote_quantity;
         let mut ask_changes: Vec<(NodeHandle, i64)> = vec![];
         let mut ask_deletes: Vec<i128> = vec![];
         let mut number_of_dropped_expired_orders = 0;
         for (best_ask_h, best_ask) in self.asks.iter_all_including_invalid() {
-            if rem_quantity <= 0 {
-                break;
-            }
-
             if !best_ask.is_valid(now_ts) {
                 // Remove the order from the book unless we've done that enough
                 if number_of_dropped_expired_orders < DROP_EXPIRED_ORDER_LIMIT {
@@ -1217,8 +1217,15 @@ impl<'a> Book<'a> {
                                // return Err(throw_err!(MangoErrorCode::PostOnly));
             }
 
-            let match_quantity = rem_quantity.min(best_ask.quantity);
-            rem_quantity -= match_quantity;
+            let max_match_by_quote = rem_quote_quantity / best_ask_price;
+            let match_quantity = rem_base_quantity.min(best_ask.quantity).min(max_match_by_quote);
+            let done = match_quantity == max_match_by_quote || match_quantity == rem_base_quantity;
+
+            let match_quote = match_quantity * best_ask_price;
+            rem_base_quantity -= match_quantity;
+            rem_quote_quantity -= match_quote;
+            mango_account.perp_accounts[market_index].add_taker_trade(match_quantity, -match_quote);
+
             let new_best_ask_quantity = best_ask.quantity - match_quantity;
             let maker_out = new_best_ask_quantity == 0;
             if maker_out {
@@ -1226,10 +1233,6 @@ impl<'a> Book<'a> {
             } else {
                 ask_changes.push((best_ask_h, new_best_ask_quantity));
             }
-
-            let match_quote = match_quantity * best_ask_price;
-            total_quote_taken += match_quote;
-            mango_account.perp_accounts[market_index].add_taker_trade(match_quantity, -match_quote);
 
             // if ref_fee_rate is none, determine it
             // if ref_valid, then pay into referrer, else pay to perp market
@@ -1269,8 +1272,11 @@ impl<'a> Book<'a> {
             );
             event_queue.push_back(cast(fill)).unwrap();
 
-            // now either best_ask.quantity == 0 or rem_quantity == 0 or both
+            if done {
+                break;
+            }
         }
+        let total_quote_taken = max_quote_quantity - rem_quote_quantity;
 
         // Apply changes to matched asks (handles invalidate on delete!)
         for (handle, new_quantity) in ask_changes {
@@ -1281,7 +1287,9 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if rem_quantity > 0 && post_allowed {
+        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
+            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+
             // Drop an expired order if possible
             if let Some(expired_bid) = self.bids.remove_one_expired(now_ts) {
                 let event = OutEvent::new(
@@ -1329,7 +1337,7 @@ impl<'a> Book<'a> {
                 owner_slot as u8,
                 order_id,
                 *mango_account_pk,
-                rem_quantity,
+                book_base_quantity,
                 client_order_id,
                 now_ts,
                 best_initial,
@@ -1339,7 +1347,12 @@ impl<'a> Book<'a> {
             let _result = self.bids.insert_leaf(&new_bid)?;
 
             // TODO OPT remove if PlacePerpOrder needs more compute
-            msg!("bid on book order_id={} quantity={} price={}", order_id, rem_quantity, price);
+            msg!(
+                "bid on book order_id={} quantity={} price={}",
+                order_id,
+                book_base_quantity,
+                price
+            );
             mango_account.add_order(market_index, Side::Bid, &new_bid)?;
         }
 
@@ -1377,7 +1390,8 @@ impl<'a> Book<'a> {
         mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         time_in_force: u8,
         client_order_id: u64,
@@ -1411,7 +1425,6 @@ impl<'a> Book<'a> {
         // referral fee related variables
         let mut ref_fee_rate = None;
         let mut referrer_mango_account_opt = None;
-        let mut total_quote_taken = 0;
 
         // generate new order id
         let order_id = market.gen_order_id(Side::Ask, price);
@@ -1420,15 +1433,12 @@ impl<'a> Book<'a> {
         //
         // Any changes to matching bids are collected in bid_changes
         // and then applied after this loop.
-        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut rem_base_quantity = max_base_quantity; // base lots (aka contracts)
+        let mut rem_quote_quantity = max_quote_quantity;
         let mut bid_changes: Vec<(NodeHandle, i64)> = vec![];
         let mut bid_deletes: Vec<i128> = vec![];
         let mut number_of_dropped_expired_orders = 0;
         for (best_bid_h, best_bid) in self.bids.iter_all_including_invalid() {
-            if rem_quantity <= 0 {
-                break;
-            }
-
             if !best_bid.is_valid(now_ts) {
                 // Remove the order from the book unless we've done that enough
                 if number_of_dropped_expired_orders < DROP_EXPIRED_ORDER_LIMIT {
@@ -1456,8 +1466,15 @@ impl<'a> Book<'a> {
                 return Ok(()); // return silently to not fail other instructions in tx
             }
 
-            let match_quantity = rem_quantity.min(best_bid.quantity);
-            rem_quantity -= match_quantity;
+            let max_match_by_quote = rem_quote_quantity / best_bid_price;
+            let match_quantity = rem_base_quantity.min(best_bid.quantity).min(max_match_by_quote);
+            let done = match_quantity == max_match_by_quote || match_quantity == rem_base_quantity;
+
+            let match_quote = match_quantity * best_bid_price;
+            rem_base_quantity -= match_quantity;
+            rem_quote_quantity -= match_quote;
+            mango_account.perp_accounts[market_index].add_taker_trade(-match_quantity, match_quote);
+
             let new_best_bid_quantity = best_bid.quantity - match_quantity;
             let maker_out = new_best_bid_quantity == 0;
             if maker_out {
@@ -1465,10 +1482,6 @@ impl<'a> Book<'a> {
             } else {
                 bid_changes.push((best_bid_h, new_best_bid_quantity));
             }
-
-            let match_quote = match_quantity * best_bid_price;
-            total_quote_taken += match_quote;
-            mango_account.perp_accounts[market_index].add_taker_trade(-match_quantity, match_quote);
 
             // if ref_fee_rate is none, determine it
             // if ref_valid, then pay into referrer, else pay to perp market
@@ -1509,8 +1522,11 @@ impl<'a> Book<'a> {
 
             event_queue.push_back(cast(fill)).unwrap();
 
-            // now either best_bid.quantity == 0 or rem_quantity == 0 or both
+            if done {
+                break;
+            }
         }
+        let total_quote_taken = max_quote_quantity - rem_quote_quantity;
 
         // Apply changes to matched bids (handles invalidate on delete!)
         for (handle, new_quantity) in bid_changes {
@@ -1521,7 +1537,9 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if rem_quantity > 0 && post_allowed {
+        if rem_base_quantity > 0 && post_allowed {
+            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+
             // Drop an expired order if possible
             if let Some(expired_ask) = self.asks.remove_one_expired(now_ts) {
                 let event = OutEvent::new(
@@ -1568,18 +1586,23 @@ impl<'a> Book<'a> {
                 owner_slot as u8,
                 order_id,
                 *mango_account_pk,
-                rem_quantity,
+                book_base_quantity,
                 client_order_id,
                 now_ts,
                 best_initial,
                 order_type,
                 time_in_force,
             );
+            let _result = self.asks.insert_leaf(&new_ask)?;
 
             // TODO OPT remove if PlacePerpOrder needs more compute
-            msg!("ask on book order_id={} quantity={} price={}", order_id, rem_quantity, price);
+            msg!(
+                "ask on book order_id={} quantity={} price={}",
+                order_id,
+                book_base_quantity,
+                price
+            );
 
-            let _result = self.asks.insert_leaf(&new_ask)?;
             mango_account.add_order(market_index, Side::Ask, &new_ask)?;
         }
 
@@ -2340,6 +2363,7 @@ mod tests {
                     side,
                     price,
                     quantity,
+                    i64::MAX,
                     OrderType::Limit,
                     tif,
                     0,
