@@ -1090,9 +1090,8 @@ impl<'a> Book<'a> {
                 break;
             }
         }
-
-        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
-            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+        let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+        if post_allowed && book_base_quantity > 0 {
             bids_quantity = bids_quantity.checked_add(book_base_quantity).unwrap();
         }
         Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
@@ -1159,8 +1158,8 @@ impl<'a> Book<'a> {
             }
         }
 
-        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
-            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+        let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+        if post_allowed && book_base_quantity > 0 {
             asks_quantity = asks_quantity.checked_add(book_base_quantity).unwrap();
         }
         Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
@@ -1329,9 +1328,8 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
-            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
-
+        let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+        if post_allowed && book_base_quantity > 0 {
             // Drop an expired order if possible
             if let Some(expired_bid) = self.bids.remove_one_expired(now_ts) {
                 let event = OutEvent::new(
@@ -1579,9 +1577,8 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if rem_base_quantity > 0 && post_allowed {
-            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
-
+        let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+        if book_base_quantity > 0 && post_allowed {
             // Drop an expired order if possible
             if let Some(expired_ask) = self.asks.remove_one_expired(now_ts) {
                 let event = OutEvent::new(
