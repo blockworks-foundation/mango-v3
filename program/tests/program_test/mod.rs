@@ -1831,12 +1831,14 @@ impl MangoProgramTest {
         let (market_pda, _) = Pubkey::find_program_address( mango_options_market_seeds, &self.mango_program_id );
         let (mint_pda, _) = Pubkey::find_program_address( &[b"mango_option_mint", market_pda.as_ref()], &self.mango_program_id );
         let (writer_pda, _) = Pubkey::find_program_address( &[b"mango_option_writer_mint", market_pda.as_ref()], &self.mango_program_id );
+        let (authority_pda, _) = Pubkey::find_program_address( &[b"mango_option_mint_authority", market_pda.as_ref()], &self.mango_program_id );
 
         let instructions = vec![mango::instruction::create_option_market(
             &mango_program_id,
             &market_pda,
             &mint_pda,
             &writer_pda,
+            &authority_pda,
             underlying_index,
             quote_index,
             &user.pubkey(),

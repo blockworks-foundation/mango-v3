@@ -4,6 +4,7 @@ use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 use std::vec;
 
+use anchor_lang::Key;
 use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
@@ -5822,17 +5823,24 @@ impl Processor {
         option_type : OptionType,
         contract_size: I80F48,
         quote_amount: I80F48,
-        expiry:u64,) -> MangoResult {
-        const NUM_FIXED: usize = 7;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-
+        expiry:u64,) -> MangoResult {    
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
         check!(expiry > now_ts, MangoErrorCode::ExpiryInvalid)?;
+        let underlying_token_index_usize = underlying_token_index as usize;
+        let quote_token_index_usize = quote_token_index as usize;
+        check!(underlying_token_index_usize < MAX_TOKENS, MangoErrorCode::InvalidToken)?;
+        check!(quote_token_index_usize < MAX_TOKENS,  MangoErrorCode::InvalidToken)?;
+        check!(quote_amount.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(contract_size.is_positive(), MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 8;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [option_market_ai,
              option_mint, 
              writer_token_mint,
+             market_mint_authority,
              payer, 
              system_program,
              token_program,
@@ -5844,6 +5852,10 @@ impl Processor {
             &contract_size.to_le_bytes(), 
             &quote_amount.to_le_bytes(), 
             &expiry.to_le_bytes()];
+        
+        let (authority_pda, auth_bump) = Pubkey::find_program_address( &[b"mango_option_mint_authority", option_market_ai.key.as_ref()], program_id);
+        check!(&authority_pda == market_mint_authority.key, MangoErrorCode::InvalidAccount)?;
+        let authority_seeds = &[b"mango_option_mint_authority", option_market_ai.key.as_ref(), &[auth_bump]];
         // create pds for option market
         let rent_info = Rent::get()?;
         seed_and_create_pda(
@@ -5860,7 +5872,8 @@ impl Processor {
 
         // create the two mints
         create_a_mint(program_id, 
-            option_mint, 
+            option_mint,
+            market_mint_authority,
             &rent_info, 
             payer, 
             system_program, 
@@ -5868,10 +5881,12 @@ impl Processor {
             rent,
             &[b"mango_option_mint", option_market_ai.key.as_ref()],
             &[],
+            authority_seeds,
         )?;
 
         create_a_mint(program_id, 
-            writer_token_mint, 
+            writer_token_mint,
+            market_mint_authority, 
             &rent_info, 
             payer, 
             system_program, 
@@ -5879,6 +5894,7 @@ impl Processor {
             rent,
             &[b"mango_option_writer_mint", option_market_ai.key.as_ref()],
             &[],
+            authority_seeds,
         )?;
 
         let mut option_market: RefMut<OptionMarket> = OptionMarket::load_mut(option_market_ai)?;
@@ -5886,8 +5902,9 @@ impl Processor {
         option_market.option_type = option_type;
         option_market.option_mint = *option_mint.key;
         option_market.writer_token_mint = *writer_token_mint.key;
-        option_market.underlying_token_index = underlying_token_index as usize;
-        option_market.quote_token_index = quote_token_index as usize;
+        option_market.market_mint_authority = *market_mint_authority.key;
+        option_market.underlying_token_index = underlying_token_index_usize;
+        option_market.quote_token_index = quote_token_index_usize;
         option_market.contract_size = contract_size;
         option_market.quote_amount = quote_amount;
         option_market.expiry = expiry;
@@ -5895,6 +5912,48 @@ impl Processor {
         option_market.expired = false;
         option_market.tokens_in_quote_pool = I80F48::from_num(0);
         option_market.tokens_in_underlying_pool = I80F48::from_num(0);
+        option_market.number_of_decimals = 6;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn write_option(program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount : I80F48, ) -> MangoResult {
+
+        const NUM_FIXED: usize = 13;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group, // read
+            mango_account, // mut
+            owner_ai, // read, signer
+            option_market_ai, // mut
+            mango_cache_ai, // read
+            root_bank_ai, // read
+            node_bank_ai, // write
+            option_mint, // write
+            excerise_mint, // write
+            market_mint_authority, //read
+            user_option_account, // write
+            user_excerise_account, // write
+            token_program, // read
+        ] = accounts;
+        let option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
+        check!(option_mint.key() == option_market.option_mint, MangoErrorCode::InvalidAccount)?;
+        check!(option_mint.key() == option_market.option_mint, MangoErrorCode::InvalidAccount)?;
+
+        let (authority_pda, auth_bump) = Pubkey::find_program_address( &[b"mango_option_mint_authority", option_market_ai.key.as_ref()], program_id);
+        check!(&authority_pda == market_mint_authority.key, MangoErrorCode::InvalidAccount)?;
+        let authority_seeds = &[b"mango_option_mint_authority", option_market_ai.key.as_ref(), &[auth_bump]];
+        
+        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap();
+        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+
+        check!(total_underlying_amount > 0, MangoErrorCode::MathError)?;
+        //checked_sub_net(root_bank, node_bank, mango_account, option_market.underlying_token_index,total_underlying_amount)?;
         Ok(())
     }
 
@@ -7121,7 +7180,8 @@ fn create_pda_account<'a>(
 }
 
 fn create_a_mint<'a>(program_id: &Pubkey, 
-    mint_account: &AccountInfo<'a>,
+    mint: &AccountInfo<'a>,
+    autority: &AccountInfo<'a>,
     rent_info : &Rent,
     payer: &AccountInfo<'a>,
     system_program: &AccountInfo<'a>,
@@ -7129,6 +7189,7 @@ fn create_a_mint<'a>(program_id: &Pubkey,
     rent: &AccountInfo<'a>,
     seeds: &[&[u8]],
     funder_seeds: &[&[u8]],
+    authority_seeds: &[&[u8]],
     ) -> ProgramResult
 {
     seed_and_create_pda(
@@ -7138,23 +7199,51 @@ fn create_a_mint<'a>(program_id: &Pubkey,
         Mint::LEN,
         token_program.key,
         system_program,
-        mint_account,
+        mint,
         seeds,
         funder_seeds,
     )?;
     let instruction = initialize_mint(token_program.key,
-        mint_account.key,
-        program_id,
-        Some(program_id),
+        mint.key,
+        autority.key,
+        Some(autority.key),
         6,
     )?;
-    solana_program::program::invoke(
+    solana_program::program::invoke_signed(
         &instruction,
         &[
-            mint_account.clone(),
+            mint.clone(),
             rent.clone(),
             token_program.clone(),
-        ]
+        ],
+        &[&authority_seeds[..]],
+    )
+}
+
+fn mint_to<'a>( mint: &AccountInfo<'a>,
+        user_account: &AccountInfo<'a>,
+        mint_authority: &AccountInfo<'a>,
+        token_program: &AccountInfo<'a>,
+        amount : I80F48,
+        signer_seeds : &[&[u8]]
+    ) -> ProgramResult {
+    let ix = spl_token::instruction::mint_to(
+        &spl_token::ID,
+        mint.key,
+        user_account.key,
+        mint_authority.key,
+        &[],
+        0,
+    )?;
+    solana_program::program::invoke_signed(
+        &ix,
+        &[
+            user_account.clone(),
+            mint_authority.clone(),
+            mint_authority.clone(),
+            token_program.clone(),
+        ],
+        &[&signer_seeds[..]],
     )
 }
 

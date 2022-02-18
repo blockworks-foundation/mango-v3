@@ -974,12 +974,13 @@ pub enum MangoInstruction {
     /// 0. [writable] Option Market a pda account which will store all the information related to the option market [b"mango_option_market", [underlying_index, quote_index], [optiontype],contract_size.le, quote_amount.le, expiry.le]]
     /// 1. [writable] create a PDA for option mint with following keys [b"mango_option_mint", option_market.key]
     /// 2. [writable] create a PDA for writer mint with following keys [b"mango_option_writer_mint", option_market.key]
-    /// 3. Underlying mint
-    /// 4. quote mint
-    /// 7. [signer] payer
-    /// 8. system program
-    /// 9. token program
-    /// 10. rent program
+    /// 3. [writable] create a PDA for authority mint with following keys [b"mango_option_mint_authority", option_market.key]
+    /// 4. Underlying mint
+    /// 5. quote mint
+    /// 6. [signer] payer
+    /// 7. system program
+    /// 8. token program
+    /// 9. rent program
     CreateOptionMarket {
         underlying_token_index:u8,
         quote_token_index:u8,
@@ -989,13 +990,14 @@ pub enum MangoInstruction {
         expiry:u64,
     },
 
-    /// Write an option / by this user can write an option. 
+    /// Write an option / by this instruction user can write an option. 
     /// 
-    /// A writer token will have to deposit the underlying asset into mango to write an option
+    /// A writer token will have to deposit the underlying asset into mango to write an option.
     /// Option writer will get two tokens / a writers tokens and a option token
-    /// Writer token can be 
+    /// Option token can be sold on serum market
+    /// Writer token can be exchanged for either underlying tokens or quote tokens after expiry
     WriteOption {
-        amount : u64,
+        amount : I80F48,
     },
 }
 
@@ -2702,6 +2704,7 @@ pub fn create_option_market(
     market_pda: &Pubkey,
     mint_pda: &Pubkey,
     writer_pda: &Pubkey,
+    authority_pda: &Pubkey,
     underlying_token_index: u8,
     quote_token_index: u8,
     payer: &Pubkey,
@@ -2717,6 +2720,7 @@ pub fn create_option_market(
         AccountMeta::new(*market_pda, false),
         AccountMeta::new(*mint_pda, false),
         AccountMeta::new(*writer_pda, false),
+        AccountMeta::new(*authority_pda, false),
         AccountMeta::new(*payer, true),
         AccountMeta::new_readonly(*system_program, false),
         AccountMeta::new_readonly(*token_program, false),
