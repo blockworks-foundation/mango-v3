@@ -1036,7 +1036,8 @@ impl<'a> Book<'a> {
         info: &PerpMarketInfo,
         oracle_price: I80F48,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         now_ts: u64,
     ) -> MangoResult<(i64, i64, i64, i64)> {
@@ -1065,7 +1066,8 @@ impl<'a> Book<'a> {
             }
         }
 
-        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut rem_base_quantity = max_base_quantity; // base lots (aka contracts)
+        let mut rem_quote_quantity = max_quote_quantity;
 
         for (_, best_ask) in self.asks.iter_valid(now_ts) {
             let best_ask_price = best_ask.price();
@@ -1075,18 +1077,23 @@ impl<'a> Book<'a> {
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
             }
 
-            let match_quantity = rem_quantity.min(best_ask.quantity);
-            rem_quantity -= match_quantity;
+            let max_match_by_quote = rem_quote_quantity / best_ask_price;
+            let match_quantity = rem_base_quantity.min(best_ask.quantity).min(max_match_by_quote);
+
+            let match_quote = match_quantity * best_ask_price;
+            rem_base_quantity -= match_quantity;
+            rem_quote_quantity -= match_quote;
 
             taker_base += match_quantity;
-            taker_quote -= match_quantity * best_ask_price;
-            if rem_quantity == 0 {
+            taker_quote -= match_quote;
+            if match_quantity == max_match_by_quote || match_quantity == rem_base_quantity {
                 break;
             }
         }
 
-        if rem_quantity > 0 && post_allowed {
-            bids_quantity = bids_quantity.checked_add(rem_quantity).unwrap();
+        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
+            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+            bids_quantity = bids_quantity.checked_add(book_base_quantity).unwrap();
         }
         Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
     }
@@ -1097,7 +1104,8 @@ impl<'a> Book<'a> {
         info: &PerpMarketInfo,
         oracle_price: I80F48,
         price: i64,
-        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         now_ts: u64,
     ) -> MangoResult<(i64, i64, i64, i64)> {
@@ -1126,7 +1134,8 @@ impl<'a> Book<'a> {
             }
         }
 
-        let mut rem_quantity = quantity; // base lots (aka contracts)
+        let mut rem_base_quantity = max_base_quantity; // base lots (aka contracts)
+        let mut rem_quote_quantity = max_quote_quantity;
 
         for (_, best_bid) in self.bids.iter_valid(now_ts) {
             let best_bid_price = best_bid.price();
@@ -1136,18 +1145,23 @@ impl<'a> Book<'a> {
                 return Ok((taker_base, taker_quote, bids_quantity, asks_quantity));
             }
 
-            let match_quantity = rem_quantity.min(best_bid.quantity);
-            rem_quantity -= match_quantity;
+            let max_match_by_quote = rem_quote_quantity / best_bid_price;
+            let match_quantity = rem_base_quantity.min(best_bid.quantity).min(max_match_by_quote);
+
+            let match_quote = match_quantity * best_bid_price;
+            rem_base_quantity -= match_quantity;
+            rem_quote_quantity -= match_quote;
 
             taker_base -= match_quantity;
-            taker_quote += match_quantity * best_bid_price;
-            if rem_quantity == 0 {
+            taker_quote += match_quote;
+            if match_quantity == max_match_by_quote || match_quantity == rem_base_quantity {
                 break;
             }
         }
 
-        if rem_quantity > 0 && post_allowed {
-            asks_quantity = asks_quantity.checked_add(rem_quantity).unwrap();
+        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
+            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+            asks_quantity = asks_quantity.checked_add(book_base_quantity).unwrap();
         }
         Ok((taker_base, taker_quote, bids_quantity, asks_quantity))
     }
