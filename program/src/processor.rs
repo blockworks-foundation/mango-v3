@@ -2496,16 +2496,16 @@ impl Processor {
         accounts: &[AccountInfo],
         side: Side,
         price: i64,
-        base_quantity: i64,
-        quote_quantity: i64,
+        max_base_quantity: i64,
+        max_quote_quantity: i64,
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
         expiry_timestamp: u64,
     ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
-        check!(base_quantity > 0, MangoErrorCode::InvalidParam)?;
-        check!(quote_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_base_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_quote_quantity > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 9;
         let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -2598,7 +2598,7 @@ impl Processor {
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
         // If reduce_only, position must only go down
-        let base_quantity = if reduce_only {
+        let max_base_quantity = if reduce_only {
             let base_pos = mango_account.get_complete_base_pos(
                 market_index,
                 &event_queue,
@@ -2608,13 +2608,12 @@ impl Processor {
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
             } else {
-                base_pos.abs().min(base_quantity)
+                base_pos.abs().min(max_base_quantity)
             }
         } else {
-            base_quantity
+            max_base_quantity
         };
-
-        if base_quantity == 0 {
+        if max_base_quantity == 0 {
             return Ok(());
         }
 
@@ -2631,8 +2630,8 @@ impl Processor {
             market_index,
             side,
             price,
-            base_quantity,
-            quote_quantity,
+            max_base_quantity,
+            max_quote_quantity,
             order_type,
             time_in_force,
             client_order_id,
@@ -6474,8 +6473,8 @@ impl Processor {
             MangoInstruction::PlacePerpOrder2 {
                 side,
                 price,
-                base_quantity,
-                quote_quantity,
+                max_base_quantity,
+                max_quote_quantity,
                 client_order_id,
                 expiry_timestamp,
                 order_type,
@@ -6494,8 +6493,8 @@ impl Processor {
                     accounts,
                     side,
                     price,
-                    base_quantity,
-                    quote_quantity,
+                    max_base_quantity,
+                    max_quote_quantity,
                     client_order_id,
                     order_type,
                     reduce_only,

@@ -948,8 +948,8 @@ impl<'a> Book<'a> {
         market_index: usize,
         side: Side,
         price: i64,
-        base_quantity: i64, // guaranteed to be greater than zero due to initial check
-        quote_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         time_in_force: u8,
         client_order_id: u64,
@@ -969,8 +969,8 @@ impl<'a> Book<'a> {
                 mango_account_pk,
                 market_index,
                 price,
-                base_quantity,
-                quote_quantity,
+                max_base_quantity,
+                max_quote_quantity,
                 order_type,
                 time_in_force,
                 client_order_id,
@@ -989,8 +989,8 @@ impl<'a> Book<'a> {
                 mango_account_pk,
                 market_index,
                 price,
-                base_quantity,
-                quote_quantity,
+                max_base_quantity,
+                max_quote_quantity,
                 order_type,
                 time_in_force,
                 client_order_id,
@@ -1138,8 +1138,8 @@ impl<'a> Book<'a> {
         mango_account_pk: &Pubkey,
         market_index: usize,
         price: i64,
-        base_quantity: i64, // guaranteed to be greater than zero due to initial check
-        quote_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
+        max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         time_in_force: u8,
         client_order_id: u64,
@@ -1170,12 +1170,6 @@ impl<'a> Book<'a> {
                 msg!("Posting on book disallowed due to price limits");
                 post_allowed = false;
             }
-            if quote_quantity != i64::MAX {
-                // TODO: sensible error: don't support quote limits on the book
-                // or should this adapt the limit price to make the on-book order
-                // confirm to the remaining quote limit?
-                return Err(throw_err!(MangoErrorCode::Unimplemented));
-            }
         }
 
         // referral fee related variables
@@ -1190,8 +1184,8 @@ impl<'a> Book<'a> {
         //
         // Any changes to matching asks are collected in ask_changes
         // and then applied after this loop.
-        let mut rem_base_quantity = base_quantity; // base lots (aka contracts)
-        let mut rem_quote_quantity = quote_quantity;
+        let mut rem_base_quantity = max_base_quantity; // base lots (aka contracts)
+        let mut rem_quote_quantity = max_quote_quantity;
         let mut ask_changes: Vec<(NodeHandle, i64)> = vec![];
         let mut ask_deletes: Vec<i128> = vec![];
         let mut number_of_dropped_expired_orders = 0;
@@ -1294,7 +1288,9 @@ impl<'a> Book<'a> {
         }
 
         // If there are still quantity unmatched, place on the book
-        if rem_base_quantity > 0 && post_allowed {
+        if post_allowed && rem_base_quantity > 0 && rem_quote_quantity > 0 {
+            let book_base_quantity = rem_base_quantity.min(rem_quote_quantity / price);
+
             // Drop an expired order if possible
             if let Some(expired_bid) = self.bids.remove_one_expired(now_ts) {
                 let event = OutEvent::new(
@@ -1342,7 +1338,7 @@ impl<'a> Book<'a> {
                 owner_slot as u8,
                 order_id,
                 *mango_account_pk,
-                rem_base_quantity,
+                book_base_quantity,
                 client_order_id,
                 now_ts,
                 best_initial,
@@ -1355,7 +1351,7 @@ impl<'a> Book<'a> {
             msg!(
                 "bid on book order_id={} quantity={} price={}",
                 order_id,
-                rem_base_quantity,
+                book_base_quantity,
                 price
             );
             mango_account.add_order(market_index, Side::Bid, &new_bid)?;
