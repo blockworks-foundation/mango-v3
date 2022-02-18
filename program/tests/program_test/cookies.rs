@@ -624,6 +624,9 @@ pub struct PerpMarketCookie {
     pub perp_market: PerpMarket,
 
     pub mint: MintCookie,
+
+    pub bids_pk: Pubkey,
+    pub asks_pk: Pubkey,
 }
 
 impl PerpMarketCookie {
@@ -693,6 +696,8 @@ impl PerpMarketCookie {
             address: perp_market_pk,
             perp_market: perp_market,
             mint: test.with_mint(mint_index),
+            bids_pk,
+            asks_pk,
         }
     }
 
@@ -705,11 +710,12 @@ impl PerpMarketCookie {
         side: mango::matching::Side,
         size: f64,
         price: f64,
+        expiry_timestamp: Option<u64>,
     ) {
         let order_size = test.base_size_number_to_lots(&self.mint, size);
         let order_price = test.price_number_to_lots(&self.mint, price);
 
-        test.place_perp_order(
+        test.place_perp_order2(
             &mango_group_cookie,
             self,
             user_index,
@@ -719,6 +725,7 @@ impl PerpMarketCookie {
             mango_group_cookie.current_perp_order_id,
             mango::matching::OrderType::Limit,
             false,
+            expiry_timestamp,
         )
         .await;
 

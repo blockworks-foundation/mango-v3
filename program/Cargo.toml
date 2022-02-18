@@ -44,6 +44,7 @@ solana-sdk = "^1.8.1"
 solana-program-test = "^1.8.1"
 solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
+rand = "0.8.4"
 
 [lib]
 name = "mango"

@@ -153,7 +153,15 @@ pub async fn place_perp_order_scenario(
         let (user_index, market_index, order_side, order_size, order_price) = *perp_order;
         let mut perp_market_cookie = mango_group_cookie.perp_markets[market_index];
         perp_market_cookie
-            .place_order(test, mango_group_cookie, user_index, order_side, order_size, order_price) // TODO - pass in reduce only param
+            .place_order(
+                test,
+                mango_group_cookie,
+                user_index,
+                order_side,
+                order_size,
+                order_price,
+                None, // expiry timestamp
+            ) // TODO - pass in reduce only param
             .await;
 
         mango_group_cookie.users_with_perp_event[market_index].push(user_index);

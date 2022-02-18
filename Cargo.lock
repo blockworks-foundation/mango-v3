@@ -1528,6 +1528,7 @@ dependencies = [
  "mango-logs",
  "mango-macro",
  "num_enum",
+ "rand 0.8.5",
  "safe-transmute",
  "serde",
  "serum_dex",

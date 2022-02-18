@@ -319,6 +319,7 @@ async fn test_perp_trigger_orders_health() {
             Side::Ask,
             base_size,
             0.99 * base_price,
+            None,
         )
         .await;
 

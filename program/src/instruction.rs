@@ -967,6 +967,41 @@ pub enum MangoInstruction {
     RegisterReferrerId {
         referrer_id: [u8; INFO_LEN],
     },
+
+    /// Place an order on a perp market
+    ///
+    /// In case this order is matched, the corresponding order structs on both
+    /// PerpAccounts (taker & maker) will be adjusted, and the position size
+    /// will be adjusted w/o accounting for fees.
+    /// In addition a FillEvent will be placed on the event queue.
+    /// Through a subsequent invocation of ConsumeEvents the FillEvent can be
+    /// executed and the perp account balances (base/quote) and fees will be
+    /// paid from the quote position. Only at this point the position balance
+    /// is 100% refelecting the trade.
+    ///
+    /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[signer]` owner_ai - owner of MangoAccount
+    /// 3. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 4. `[writable]` perp_market_ai
+    /// 5. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 6. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8. `[writable]` referrer_mango_account_ai - referrer's mango account;
+    ///                 pass in mango_account_ai as duplicate if you don't have a referrer
+    /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
+    PlacePerpOrder2 {
+        price: i64,
+        quantity: i64,
+        client_order_id: u64,
+        /// Timestamp of when order will expire; Send 0 if you want the order to never expire
+        expiry_timestamp: u64,
+        side: Side,
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
+        order_type: OrderType,
+        reduce_only: bool,
+    },
 }
 
 impl MangoInstruction {
@@ -1430,6 +1465,27 @@ impl MangoInstruction {
                 let referrer_id = array_ref![data, 0, INFO_LEN];
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             }
+            64 => {
+                let data_arr = array_ref![data, 0, 35];
+                let (
+                    price,
+                    quantity,
+                    client_order_id,
+                    expiry_timestamp,
+                    side,
+                    order_type,
+                    reduce_only,
+                ) = array_refs![data_arr, 8, 8, 8, 8, 1, 1, 1];
+                MangoInstruction::PlacePerpOrder2 {
+                    price: i64::from_le_bytes(*price),
+                    quantity: i64::from_le_bytes(*quantity),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only: reduce_only[0] != 0,
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
+                }
+            }
             _ => {
                 return None;
             }
@@ -1816,6 +1872,54 @@ pub fn place_perp_order(
         client_order_id,
         order_type,
         reduce_only,
+    };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn place_perp_order2(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
+    open_orders_pks: &[Pubkey],
+    side: Side,
+    price: i64,
+    quantity: i64,
+    client_order_id: u64,
+    order_type: OrderType,
+    reduce_only: bool,
+    expiry_timestamp: Option<u64>, // Send 0 if you want to ignore time in force
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*referrer_mango_account_pk.unwrap_or(mango_account_pk), false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::PlacePerpOrder2 {
+        side,
+        price,
+        quantity,
+        client_order_id,
+        order_type,
+        reduce_only,
+        expiry_timestamp: expiry_timestamp.unwrap_or(0),
     };
     let data = instr.pack();
 

@@ -2475,6 +2475,162 @@ impl Processor {
             price,
             quantity,
             order_type,
+            0,
+            client_order_id,
+            now_ts,
+            referrer_mango_account_ai,
+        )?;
+
+        health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+        check!(
+            post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
+    }
+
+    #[inline(never)]
+    fn place_perp_order2(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,
+        price: i64,
+        quantity: i64,
+        client_order_id: u64,
+        order_type: OrderType,
+        reduce_only: bool,
+        expiry_timestamp: u64,
+    ) -> MangoResult {
+        check!(price > 0, MangoErrorCode::InvalidParam)?;
+        check!(quantity > 0, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 9;
+        let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,             // read
+            mango_account_ai,           // write
+            owner_ai,                   // read, signer
+            mango_cache_ai,             // read
+            perp_market_ai,             // write
+            bids_ai,                    // write
+            asks_ai,                    // write
+            event_queue_ai,             // write
+            referrer_mango_account_ai,  // write
+        ] = fixed_ais;
+
+        // If referrer same as user, assume no referrer
+        let referrer_mango_account_ai = if referrer_mango_account_ai.key == mango_account_ai.key {
+            None
+        } else {
+            Some(referrer_mango_account_ai)
+        };
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+
+        let open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let time_in_force = if expiry_timestamp != 0 {
+            // If expiry is far in the future, clamp to 255 seconds
+            let tif = expiry_timestamp.saturating_sub(now_ts).min(255);
+            if tif == 0 {
+                // If expiry is in the past, ignore the order
+                msg!("Order is already expired");
+                return Ok(());
+            }
+            tif as u8
+        } else {
+            0 // never expire
+        };
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &mango_account,
+            vec![(AssetType::Perp, market_index)],
+        );
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            &open_orders_accounts,
+        )?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let health_up_only = pre_health < ZERO_I80F48;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+
+        // If reduce_only, position must only go down
+        let quantity = if reduce_only {
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
+
+            if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
+                0
+            } else {
+                base_pos.abs().min(quantity)
+            }
+        } else {
+            quantity
+        };
+
+        if quantity == 0 {
+            return Ok(());
+        }
+
+        book.new_order(
+            program_id,
+            &mango_group,
+            mango_group_ai.key,
+            &mango_cache,
+            &mut event_queue,
+            &mut perp_market,
+            mango_cache.get_price(market_index),
+            &mut mango_account,
+            mango_account_ai.key,
+            market_index,
+            side,
+            price,
+            quantity,
+            order_type,
+            time_in_force,
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
@@ -2521,6 +2677,7 @@ impl Processor {
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         let (order_id, side) = mango_account
             .find_order_with_client_id(market_index, client_order_id)
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
@@ -2528,14 +2685,14 @@ impl Processor {
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let best_final = if perp_market.meta_data.version == 0 {
             match side {
-                Side::Bid => book.get_best_bid_price().unwrap(),
-                Side::Ask => book.get_best_ask_price().unwrap(),
+                Side::Bid => book.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => book.get_best_ask_price(now_ts).unwrap(),
             }
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
-                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth, now_ts),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth, now_ts),
             }
         };
 
@@ -2544,7 +2701,8 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         // If order version doesn't match the perp market version, no incentives
-        if order.version != perp_market.meta_data.version {
+        // time in force invalid orders don't get rewards
+        if order.version != perp_market.meta_data.version || !order.is_valid(now_ts) {
             return Ok(());
         }
 
@@ -2557,7 +2715,7 @@ impl Processor {
                 order.best_initial,
                 best_final,
                 order.timestamp,
-                Clock::get()?.unix_timestamp as u64,
+                now_ts,
                 order.quantity,
             )?;
         } else {
@@ -2616,6 +2774,9 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
         let side = mango_account
             .find_order_side(market_index, order_id)
             .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
@@ -2623,14 +2784,14 @@ impl Processor {
 
         let best_final = if perp_market.meta_data.version == 0 {
             match side {
-                Side::Bid => book.get_best_bid_price().unwrap(),
-                Side::Ask => book.get_best_ask_price().unwrap(),
+                Side::Bid => book.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => book.get_best_ask_price(now_ts).unwrap(),
             }
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
-                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth, now_ts),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth, now_ts),
             }
         };
 
@@ -2639,7 +2800,8 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         // If order version doesn't match the perp market version, no incentives
-        if order.version != perp_market.meta_data.version {
+        // time in force invalid orders don't get rewards
+        if order.version != perp_market.meta_data.version || !order.is_valid(now_ts) {
             return Ok(());
         }
 
@@ -2652,7 +2814,7 @@ impl Processor {
                 order.best_initial,
                 best_final,
                 order.timestamp,
-                Clock::get()?.unix_timestamp as u64,
+                now_ts,
                 order.quantity,
             )?;
         } else {
@@ -5234,6 +5396,7 @@ impl Processor {
                     order.price,
                     quantity,
                     order.order_type,
+                    now_ts,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,
@@ -5242,6 +5405,7 @@ impl Processor {
                     order.price,
                     quantity,
                     order.order_type,
+                    now_ts,
                 )?,
             };
 
@@ -5284,6 +5448,7 @@ impl Processor {
                     order.price,
                     quantity,
                     order.order_type,
+                    0,
                     order.client_order_id,
                     now_ts,
                     None,
@@ -6300,6 +6465,35 @@ impl Processor {
             MangoInstruction::RegisterReferrerId { referrer_id } => {
                 msg!("Mango: RegisterReferrerId");
                 Self::register_referrer_id(program_id, accounts, referrer_id)
+            }
+            MangoInstruction::PlacePerpOrder2 {
+                side,
+                price,
+                quantity,
+                client_order_id,
+                expiry_timestamp,
+                order_type,
+                reduce_only,
+            } => {
+                use std::str::FromStr;
+                let mango_mainnet =
+                    Pubkey::from_str("mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68").unwrap();
+                if *program_id == mango_mainnet {
+                    msg!("Mango: PlacePerpOrder2 is not available yet");
+                    return Err(throw_err!(MangoErrorCode::Unimplemented));
+                }
+                msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
+                Self::place_perp_order2(
+                    program_id,
+                    accounts,
+                    side,
+                    price,
+                    quantity,
+                    client_order_id,
+                    order_type,
+                    reduce_only,
+                    expiry_timestamp,
+                )
             }
         }
     }
