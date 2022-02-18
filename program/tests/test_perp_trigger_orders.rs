@@ -318,6 +318,7 @@ async fn test_perp_trigger_orders_health() {
             user2_index,
             Side::Ask,
             base_size,
+            None,
             0.99 * base_price,
             None,
         )
