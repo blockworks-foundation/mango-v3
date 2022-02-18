@@ -996,6 +996,20 @@ pub enum MangoInstruction {
     /// Option writer will get two tokens / a writers tokens and a option token
     /// Option token can be sold on serum market
     /// Writer token can be exchanged for either underlying tokens or quote tokens after expiry
+    /// 
+    /// mango_group_ai - Mango Group
+    /// [writable] mango_account_ai - Mango Account
+    /// [signer] owner_ai - Owner
+    /// [writable] option_market_ai - Option Market
+    /// mango_cache_ai - Mango cache
+    /// root_bank_ai - Root bank
+    /// [writable] node_bank_ai - Node bank
+    /// [writable] option_mint - Option mint
+    /// [writable] writer_token_mint - Writer token mint
+    /// market_mint_authority - Mint authority pda for the market
+    /// [writable] user_option_account - Acount where user will recieve option tokens
+    /// [writable] user_excerise_account - Accout where user will recieve writers tokens
+    /// token_program
     WriteOption {
         amount : I80F48,
     },
@@ -1484,6 +1498,12 @@ impl MangoInstruction {
                     contract_size: I80F48::from_le_bytes(*contract_size),
                     quote_amount: I80F48::from_le_bytes(*quote_amount),
                     expiry: u64::from_le_bytes(*expiry)
+                }
+            },
+            62 => {
+                let amount = array_ref![data, 0 , 16];
+                MangoInstruction::WriteOption {
+                    amount:  I80F48::from_le_bytes(*amount),
                 }
             }
 >>>>>>> 3d67043... Impl serialize deserializing of instruction, Adding tests for options.
@@ -2737,6 +2757,46 @@ pub fn create_option_market(
     };
     let data = instr.pack();
 
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn write_option (
+    program_id: &Pubkey,
+    mango_group: &Pubkey, // read
+    mango_account: &Pubkey, // mut
+    owner: &Pubkey, // read, signer
+    option_market: &Pubkey, // mut
+    mango_cache: &Pubkey, // read
+    root_bank: &Pubkey, // read
+    node_bank: &Pubkey, // write
+    option_mint: &Pubkey, // write
+    writers_mint: &Pubkey, // write
+    market_mint_authority: &Pubkey, //read
+    user_option_account: &Pubkey, // write
+    user_writers_account: &Pubkey, // write
+    token_program: &Pubkey, // read
+    amount: I80F48,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group, false),
+        AccountMeta::new(*mango_account, false),
+        AccountMeta::new_readonly(*owner, true),
+        AccountMeta::new(*option_market, false),
+        AccountMeta::new_readonly(*mango_cache, false),
+        AccountMeta::new_readonly(*root_bank, false),
+        AccountMeta::new(*node_bank, false),
+        AccountMeta::new(*option_mint, false),
+        AccountMeta::new(*writers_mint, false),
+        AccountMeta::new_readonly(*market_mint_authority, false),
+        AccountMeta::new(*user_option_account, false),
+        AccountMeta::new(*user_writers_account, false),
+        AccountMeta::new_readonly(*token_program, false),
+    ];
+
+    let instr = MangoInstruction::WriteOption {
+        amount,
+    };
+    let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 

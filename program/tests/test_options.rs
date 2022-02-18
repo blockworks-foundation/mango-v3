@@ -22,7 +22,7 @@ async fn test_options() {
     println!("Creating option market");
     let clock = test.get_clock().await;
     let expiry = clock.unix_timestamp as u64 + 60 * 60 * 10 * solana_program::clock::DEFAULT_TICKS_PER_SECOND; // after 10 hrs
-    let option_market = test.create_option_market(&mango_group_cookie,
+    let (om__key, option_market) = test.create_option_market(&mango_group_cookie,
         0,
         15,
          OptionType::American,
@@ -36,4 +36,7 @@ async fn test_options() {
     assert_eq!(option_market.expiry, expiry);
     assert_eq!(option_market.tokens_in_underlying_pool,  I80F48::from_num(0));
     assert_eq!(option_market.tokens_in_quote_pool,  I80F48::from_num(0));
+    mango_group_cookie.run_keeper(&mut test).await;
+    mango_group_cookie.run_keeper(&mut test).await;
+   let (mint_key_0, writer_key_0) = test.write_option(&mango_group_cookie, om__key, option_market, 0, I80F48::from_num(10.0)).await;
 }

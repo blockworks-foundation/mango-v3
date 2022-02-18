@@ -148,6 +148,9 @@ fn test_instruction_serialization() {
             option_type: OptionType::European,
             expiry: 1000000000,
         },
+        MangoInstruction::WriteOption {
+            amount:I80F48::from_num(100.45645646),
+        },
     ];
     for case in cases {
         assert!(MangoInstruction::unpack(&case.pack()).unwrap() == case);

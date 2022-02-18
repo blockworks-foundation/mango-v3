@@ -125,7 +125,8 @@ pub enum MangoErrorCode {
     MaxAccountsReached,
     #[error("MangoErrorCode::ExpiryInvalid expiry should be in the future")]
     ExpiryInvalid,
-
+    #[error("MangoErrorCode::OptionAlreadyExpired option has already expired")]
+    OptionExpired,
     #[error("MangoErrorCode::Default Check the source code for more info")] // 40
     Default = u32::MAX_VALUE,
 }

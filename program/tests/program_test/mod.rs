@@ -14,6 +14,7 @@ use solana_program::{
     pubkey::*,
     rent::*,
     system_instruction, sysvar,
+    instruction::{AccountMeta},
 };
 use solana_program_test::*;
 use solana_sdk::{
@@ -1817,7 +1818,7 @@ impl MangoProgramTest {
         contract_size : I80F48,
         quote_amount : I80F48,
         expiry : u64,
-    ) -> OptionMarket {
+    ) -> (Pubkey, OptionMarket) {
         let mango_group = mango_group_cookie.mango_group;
         let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
         let mango_program_id = self.mango_program_id;
@@ -1854,8 +1855,51 @@ impl MangoProgramTest {
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
 
         let option_market = self.load_account::<OptionMarket>(market_pda).await;
-        option_market
+        (market_pda, option_market)
     }
+
+    #[allow(dead_code)]
+    pub async fn write_option(&mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_market_pda :Pubkey,
+        option_market :OptionMarket,
+        user_index : usize,
+        amount : I80F48,
+    ) -> (Pubkey, Pubkey){
+        let mango_group = mango_group_cookie.mango_group;
+        let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
+        let (nb_key, nb) = self.with_node_bank(&rb,0).await;
+        let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
+        let mint_account_key = self.create_token_account(&user.pubkey(), &option_market.option_mint).await;
+        let writers_account_key = self.create_token_account(&user.pubkey(), &option_market.writer_token_mint).await;
+        let mango_program_id = self.mango_program_id;
+        let load_amount = 2_000_000 * amount;
+        self.perform_deposit(mango_group_cookie, user_index, option_market.underlying_token_index, load_amount.to_num()).await;
+        let instructions = vec![
+            //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
+            //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
+            mango::instruction::write_option(
+                &mango_program_id,
+                &mango_group_cookie.address,
+                &mango_group_cookie.mango_accounts[user_index].address,
+                &user.pubkey(),
+                &option_market_pda,
+                &mango_group.mango_cache,
+                &rb_key,
+                &nb_key,
+                &option_market.option_mint,
+                &option_market.writer_token_mint,
+                &option_market.market_mint_authority,
+                &mint_account_key,
+                &writers_account_key,
+                &spl_token::id(),
+                amount,
+        ).unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        (mint_account_key, writers_account_key)
+    }
+
 }
 
 fn process_serum_instruction(
@@ -1865,3 +1909,24 @@ fn process_serum_instruction(
 ) -> ProgramResult {
     Ok(serum_dex::state::State::process(program_id, accounts, instruction_data)?)
 }
+
+pub fn create_account_for_mint (
+    program_id: Pubkey,
+    account : &Pubkey,
+    mint : &Pubkey,
+    user : & Pubkey,
+) -> Instruction {
+    let accounts = vec![
+        AccountMeta::new(*account, false),
+        AccountMeta::new(*mint, false),
+        AccountMeta::new(*user, true),
+        AccountMeta::new(solana_program::sysvar::rent::ID, false),
+    ];
+
+    let instr = spl_token::instruction::TokenInstruction::InitializeAccount {
+    };
+    let data = instr.pack();
+    Instruction { program_id: program_id, accounts, data }
+}
+
+
