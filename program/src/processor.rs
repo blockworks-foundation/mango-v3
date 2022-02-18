@@ -5968,7 +5968,6 @@ impl Processor {
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
         check!(total_underlying_amount.is_positive(), MangoErrorCode::MathError)?;
-        msg!("1");
         {
             let msg = format!("account money : {} , nb_tokens {}", mango_account.deposits[option_market.underlying_token_index].to_string(), total_underlying_amount.to_string() );
             msg!(&msg[..]);
@@ -5979,14 +5978,11 @@ impl Processor {
             &mut mango_account, 
             option_market.underlying_token_index,
             total_underlying_amount)?;
-        msg!("2");
         option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_add(total_underlying_amount).unwrap();
-        msg!("3");
         let decimal_multiplier =  I80F48::from_num(10u64.pow(option_market.number_of_decimals as u32));
         let minted_amount = amount.checked_mul(decimal_multiplier).unwrap().checked_to_num::<u64>().unwrap();
         mint_to(option_mint, user_option_account, market_mint_authority, token_program, minted_amount, authority_seeds)?;
         mint_to(writer_token_mint, user_excerise_account, market_mint_authority, token_program, minted_amount, authority_seeds)?;
-        msg!("4");
         Ok(())
     }
 
@@ -7271,8 +7267,8 @@ fn mint_to<'a>( mint: &AccountInfo<'a>,
     solana_program::program::invoke_signed(
         &ix,
         &[
+            mint.clone(),
             user_account.clone(),
-            mint_authority.clone(),
             mint_authority.clone(),
             token_program.clone(),
         ],
