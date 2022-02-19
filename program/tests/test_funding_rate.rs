@@ -24,8 +24,8 @@ async fn test_funding_rate() {
     let new_ask_price: f64 = 10_200.0;
     let clock = test.get_clock().await;
     let start_time = clock.unix_timestamp;
-    let end_time = start_time + 3600 * 48; // 48 Hours
-                                           // TODO: Figure out assertion
+    let end_time = start_time + 3600 * 1; // 1 Hour
+                                          // TODO: Figure out assertion
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
