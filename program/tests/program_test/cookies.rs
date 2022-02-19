@@ -617,6 +617,26 @@ impl SpotMarketCookie {
     }
 }
 
+pub struct PlacePerpOptions {
+    pub reduce_only: bool,
+    pub max_quote_size: Option<f64>,
+    pub order_type: mango::matching::OrderType,
+    pub limit: u8,
+    pub expiry_timestamp: Option<u64>,
+}
+
+impl Default for PlacePerpOptions {
+    fn default() -> Self {
+        Self {
+            reduce_only: false,
+            max_quote_size: None,
+            order_type: mango::matching::OrderType::Limit,
+            limit: 10,
+            expiry_timestamp: None,
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct PerpMarketCookie {
     pub address: Pubkey,
@@ -709,12 +729,12 @@ impl PerpMarketCookie {
         user_index: usize,
         side: mango::matching::Side,
         base_size: f64,
-        quote_size: Option<f64>,
         price: f64,
-        expiry_timestamp: Option<u64>,
+        options: PlacePerpOptions,
     ) {
         let order_base_size = test.base_size_number_to_lots(&self.mint, base_size);
-        let order_quote_size = quote_size
+        let order_quote_size = options
+            .max_quote_size
             .map(|s| ((s * test.quote_mint.unit) / self.mint.quote_lot) as u64)
             .unwrap_or(u64::MAX);
         let order_price = test.price_number_to_lots(&self.mint, price);
@@ -728,10 +748,10 @@ impl PerpMarketCookie {
             order_quote_size,
             order_price,
             mango_group_cookie.current_perp_order_id,
-            mango::matching::OrderType::Limit,
-            false,
-            expiry_timestamp,
-            39,
+            options.order_type,
+            options.reduce_only,
+            options.expiry_timestamp,
+            options.limit,
         )
         .await;
 

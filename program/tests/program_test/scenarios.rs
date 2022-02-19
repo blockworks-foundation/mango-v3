@@ -159,10 +159,9 @@ pub async fn place_perp_order_scenario(
                 user_index,
                 order_side,
                 order_size,
-                None,
                 order_price,
-                None, // expiry timestamp
-            ) // TODO - pass in reduce only param
+                PlacePerpOptions::default(),
+            )
             .await;
 
         mango_group_cookie.users_with_perp_event[market_index].push(user_index);
