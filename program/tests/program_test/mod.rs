@@ -758,12 +758,14 @@ impl MangoProgramTest {
         perp_market_cookie: &PerpMarketCookie,
         user_index: usize,
         order_side: Side,
-        order_size: u64,
+        order_base_size: u64,
+        order_quote_size: u64,
         order_price: u64,
         order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
         expiry_timestamp: Option<u64>,
+        limit: u8,
     ) {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
@@ -795,11 +797,13 @@ impl MangoProgramTest {
             &open_orders_pks,
             order_side,
             order_price as i64,
-            order_size as i64,
+            order_base_size as i64,
+            order_quote_size.min(i64::MAX as u64) as i64,
             order_id,
             order_type,
             reduce_only,
             expiry_timestamp,
+            limit,
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();

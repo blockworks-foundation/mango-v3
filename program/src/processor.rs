@@ -2474,11 +2474,13 @@ impl Processor {
             side,
             price,
             quantity,
+            i64::MAX, // no limit on quote quantity
             order_type,
             0,
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
+            u8::MAX,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2495,14 +2497,18 @@ impl Processor {
         accounts: &[AccountInfo],
         side: Side,
         price: i64,
-        quantity: i64,
+        max_base_quantity: i64,
+        max_quote_quantity: i64,
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
         expiry_timestamp: u64,
+        limit: u8,
     ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
-        check!(quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_base_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_quote_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(limit > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 9;
         let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -2595,7 +2601,7 @@ impl Processor {
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
 
         // If reduce_only, position must only go down
-        let quantity = if reduce_only {
+        let max_base_quantity = if reduce_only {
             let base_pos = mango_account.get_complete_base_pos(
                 market_index,
                 &event_queue,
@@ -2605,13 +2611,12 @@ impl Processor {
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
             } else {
-                base_pos.abs().min(quantity)
+                base_pos.abs().min(max_base_quantity)
             }
         } else {
-            quantity
+            max_base_quantity
         };
-
-        if quantity == 0 {
+        if max_base_quantity == 0 {
             return Ok(());
         }
 
@@ -2628,12 +2633,14 @@ impl Processor {
             market_index,
             side,
             price,
-            quantity,
+            max_base_quantity,
+            max_quote_quantity,
             order_type,
             time_in_force,
             client_order_id,
             now_ts,
             referrer_mango_account_ai,
+            limit,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -5395,6 +5402,7 @@ impl Processor {
                     mango_cache.get_price(market_index),
                     order.price,
                     quantity,
+                    i64::MAX,
                     order.order_type,
                     now_ts,
                 )?,
@@ -5404,6 +5412,7 @@ impl Processor {
                     mango_cache.get_price(market_index),
                     order.price,
                     quantity,
+                    i64::MAX,
                     order.order_type,
                     now_ts,
                 )?,
@@ -5447,11 +5456,13 @@ impl Processor {
                     order.side,
                     order.price,
                     quantity,
+                    i64::MAX, // no limit on quote quantity
                     order.order_type,
                     0,
                     order.client_order_id,
                     now_ts,
                     None,
+                    u8::MAX,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
@@ -6469,30 +6480,27 @@ impl Processor {
             MangoInstruction::PlacePerpOrder2 {
                 side,
                 price,
-                quantity,
+                max_base_quantity,
+                max_quote_quantity,
                 client_order_id,
                 expiry_timestamp,
                 order_type,
                 reduce_only,
+                limit,
             } => {
-                use std::str::FromStr;
-                let mango_mainnet =
-                    Pubkey::from_str("mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68").unwrap();
-                if *program_id == mango_mainnet {
-                    msg!("Mango: PlacePerpOrder2 is not available yet");
-                    return Err(throw_err!(MangoErrorCode::Unimplemented));
-                }
                 msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
                 Self::place_perp_order2(
                     program_id,
                     accounts,
                     side,
                     price,
-                    quantity,
+                    max_base_quantity,
+                    max_quote_quantity,
                     client_order_id,
                     order_type,
                     reduce_only,
                     expiry_timestamp,
+                    limit,
                 )
             }
         }

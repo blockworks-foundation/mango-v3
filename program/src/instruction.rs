@@ -977,7 +977,7 @@ pub enum MangoInstruction {
     /// Through a subsequent invocation of ConsumeEvents the FillEvent can be
     /// executed and the perp account balances (base/quote) and fees will be
     /// paid from the quote position. Only at this point the position balance
-    /// is 100% refelecting the trade.
+    /// is 100% reflecting the trade.
     ///
     /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
     /// 0. `[]` mango_group_ai - MangoGroup
@@ -992,15 +992,43 @@ pub enum MangoInstruction {
     ///                 pass in mango_account_ai as duplicate if you don't have a referrer
     /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
     PlacePerpOrder2 {
+        /// Price in quote lots per base lots.
+        ///
+        /// Effect is based on order type, it's usually
+        /// - fill orders on the book up to this price or
+        /// - place an order on the book at this price.
+        ///
+        /// Ignored for Market orders and potentially adjusted for PostOnlySlide orders.
         price: i64,
-        quantity: i64,
+
+        /// Max base lots to buy/sell.
+        max_base_quantity: i64,
+
+        /// Max quote lots to pay/receive (not taking fees into account).
+        max_quote_quantity: i64,
+
+        /// Arbitrary user-controlled order id.
         client_order_id: u64,
-        /// Timestamp of when order will expire; Send 0 if you want the order to never expire
+
+        /// Timestamp of when order expires
+        ///
+        /// Send 0 if you want the order to never expire.
+        /// Timestamps in the past mean the instruction is skipped.
+        /// Timestamps in the future are reduced to now + 255s.
         expiry_timestamp: u64,
+
         side: Side,
+
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
+
         reduce_only: bool,
+
+        /// Maximum number of orders from the book to fill.
+        ///
+        /// Use this to limit compute used during order matching.
+        /// When the limit is reached, processing stops and the instruction succeeds.
+        limit: u8,
     },
 }
 
@@ -1466,24 +1494,28 @@ impl MangoInstruction {
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             }
             64 => {
-                let data_arr = array_ref![data, 0, 35];
+                let data_arr = array_ref![data, 0, 44];
                 let (
                     price,
-                    quantity,
+                    max_base_quantity,
+                    max_quote_quantity,
                     client_order_id,
                     expiry_timestamp,
                     side,
                     order_type,
                     reduce_only,
-                ) = array_refs![data_arr, 8, 8, 8, 8, 1, 1, 1];
+                    limit,
+                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 1, 1, 1, 1];
                 MangoInstruction::PlacePerpOrder2 {
                     price: i64::from_le_bytes(*price),
-                    quantity: i64::from_le_bytes(*quantity),
+                    max_base_quantity: i64::from_le_bytes(*max_base_quantity),
+                    max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
                     client_order_id: u64::from_le_bytes(*client_order_id),
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
                     side: Side::try_from_primitive(side[0]).ok()?,
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
-                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
+                    limit: u8::from_le_bytes(*limit),
                 }
             }
             _ => {
@@ -1892,11 +1924,13 @@ pub fn place_perp_order2(
     open_orders_pks: &[Pubkey],
     side: Side,
     price: i64,
-    quantity: i64,
+    max_base_quantity: i64,
+    max_quote_quantity: i64,
     client_order_id: u64,
     order_type: OrderType,
     reduce_only: bool,
     expiry_timestamp: Option<u64>, // Send 0 if you want to ignore time in force
+    limit: u8,                     // maximum number of FillEvents before terminating
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -1915,11 +1949,13 @@ pub fn place_perp_order2(
     let instr = MangoInstruction::PlacePerpOrder2 {
         side,
         price,
-        quantity,
+        max_base_quantity,
+        max_quote_quantity,
         client_order_id,
         order_type,
         reduce_only,
         expiry_timestamp: expiry_timestamp.unwrap_or(0),
+        limit,
     };
     let data = instr.pack();
 

@@ -2446,7 +2446,7 @@ pub struct PerpTriggerOrder {
     pub padding0: [u8; 1],
     pub client_order_id: u64,
     pub price: i64,
-    pub quantity: i64,
+    pub quantity: i64, // base quantity
     pub trigger_price: I80F48,
 
     /// Padding for expansion

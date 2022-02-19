@@ -617,6 +617,26 @@ impl SpotMarketCookie {
     }
 }
 
+pub struct PlacePerpOptions {
+    pub reduce_only: bool,
+    pub max_quote_size: Option<f64>,
+    pub order_type: mango::matching::OrderType,
+    pub limit: u8,
+    pub expiry_timestamp: Option<u64>,
+}
+
+impl Default for PlacePerpOptions {
+    fn default() -> Self {
+        Self {
+            reduce_only: false,
+            max_quote_size: None,
+            order_type: mango::matching::OrderType::Limit,
+            limit: 10,
+            expiry_timestamp: None,
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct PerpMarketCookie {
     pub address: Pubkey,
@@ -642,7 +662,7 @@ impl PerpMarketCookie {
         let perp_market_pk = test.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
         let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
-        let max_num_events = 32;
+        let max_num_events = 256;
         let event_queue_pk = test
             .create_account(
                 size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events,
@@ -708,11 +728,15 @@ impl PerpMarketCookie {
         mango_group_cookie: &mut MangoGroupCookie,
         user_index: usize,
         side: mango::matching::Side,
-        size: f64,
+        base_size: f64,
         price: f64,
-        expiry_timestamp: Option<u64>,
+        options: PlacePerpOptions,
     ) {
-        let order_size = test.base_size_number_to_lots(&self.mint, size);
+        let order_base_size = test.base_size_number_to_lots(&self.mint, base_size);
+        let order_quote_size = options
+            .max_quote_size
+            .map(|s| ((s * test.quote_mint.unit) / self.mint.quote_lot) as u64)
+            .unwrap_or(u64::MAX);
         let order_price = test.price_number_to_lots(&self.mint, price);
 
         test.place_perp_order2(
@@ -720,12 +744,14 @@ impl PerpMarketCookie {
             self,
             user_index,
             side,
-            order_size,
+            order_base_size,
+            order_quote_size,
             order_price,
             mango_group_cookie.current_perp_order_id,
-            mango::matching::OrderType::Limit,
-            false,
-            expiry_timestamp,
+            options.order_type,
+            options.reduce_only,
+            options.expiry_timestamp,
+            options.limit,
         )
         .await;
 
