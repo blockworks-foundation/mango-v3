@@ -1077,7 +1077,7 @@ impl<'a> Book<'a> {
 
             taker_base += match_quantity;
             taker_quote -= match_quote;
-            if match_quantity == max_match_by_quote || match_quantity == rem_base_quantity {
+            if match_quantity == max_match_by_quote || rem_base_quantity == 0 {
                 break;
             }
         }
@@ -1144,7 +1144,7 @@ impl<'a> Book<'a> {
 
             taker_base -= match_quantity;
             taker_quote += match_quote;
-            if match_quantity == max_match_by_quote || match_quantity == rem_base_quantity {
+            if match_quantity == max_match_by_quote || rem_base_quantity == 0 {
                 break;
             }
         }
