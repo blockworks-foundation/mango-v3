@@ -153,7 +153,7 @@ async fn test_match_perp_order() {
 }
 
 #[tokio::test]
-async fn test_match_against_expired_orders() {
+async fn test_place_perp_against_expired_orders() {
     // === Arrange ===
     let config = MangoProgramTestConfig {
         // Use intentionally low CU: this test wants to verify the limit is sufficient
@@ -237,12 +237,12 @@ async fn test_match_against_expired_orders() {
 }
 
 #[tokio::test]
-async fn test_full_book() {
+async fn test_perp_matching_limit() {
     // === Arrange ===
     let config = MangoProgramTestConfig {
         // Use intentionally low CU: this test wants to verify the limit is sufficient
         compute_limit: 100_000,
-        num_users: 9,
+        num_users: 2,
         ..MangoProgramTestConfig::default_two_mints()
     };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -268,7 +268,7 @@ async fn test_full_book() {
     // Step 1: Make deposits
     deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
-    // Step 2: Create a (almost) full bid boook
+    // Step 2: Create a lot of small orders on the bid book
     use mango::matching::Side;
     let mut perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
     for bidder_user_index in 1..config.num_users {
@@ -287,7 +287,7 @@ async fn test_full_book() {
         }
     }
 
-    // Step 3: Place an ask that matches against the orders
+    // Step 3: Place an ask that matches against the orders and would consume them all
     perp_market_cookie
         .place_order(
             &mut test,
@@ -297,7 +297,7 @@ async fn test_full_book() {
             1.0,
             9_950.0,
             PlacePerpOptions {
-                limit: 16, // stays barely below 100k CU
+                limit: 18, // stays barely below 100k CU
                 ..PlacePerpOptions::default()
             },
         )
