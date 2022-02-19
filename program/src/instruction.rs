@@ -977,7 +977,7 @@ pub enum MangoInstruction {
     /// Through a subsequent invocation of ConsumeEvents the FillEvent can be
     /// executed and the perp account balances (base/quote) and fees will be
     /// paid from the quote position. Only at this point the position balance
-    /// is 100% refelecting the trade.
+    /// is 100% reflecting the trade.
     ///
     /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
     /// 0. `[]` mango_group_ai - MangoGroup
@@ -992,17 +992,42 @@ pub enum MangoInstruction {
     ///                 pass in mango_account_ai as duplicate if you don't have a referrer
     /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
     PlacePerpOrder2 {
+        /// Price in quote lots per base lots.
+        ///
+        /// Effect is based on order type, it's usually
+        /// - fill orders on the book up to this price or
+        /// - place an order on the book at this price.
+        ///
+        /// Ignored for Market orders and potentially adjusted for PostOnlySlide orders.
         price: i64,
+
+        /// Max base lots to buy/sell.
         max_base_quantity: i64,
+
+        /// Max quote lots to pay/receive (not taking fees into account).
         max_quote_quantity: i64,
+
+        /// Arbitrary user-controlled order id.
         client_order_id: u64,
-        /// Timestamp of when order will expire; Send 0 if you want the order to never expire
+
+        /// Timestamp of when order expires
+        ///
+        /// Send 0 if you want the order to never expire.
+        /// Timestamps in the past mean the instruction is skipped.
+        /// Timestamps in the future are reduced to now + 255s.
         expiry_timestamp: u64,
+
         side: Side,
+
         /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
+
         reduce_only: bool,
-        /// Maximum number of FillEvent before terminating order execution
+
+        /// Maximum number of orders from the book to fill.
+        ///
+        /// Use this to limit compute used during order matching.
+        /// When the limit is reached, processing stops and the instruction succeeds.
         limit: u8,
     },
 }

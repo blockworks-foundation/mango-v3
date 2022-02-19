@@ -302,37 +302,25 @@ impl AsRef<AnyNode> for LeafNode {
 #[repr(u8)]
 #[serde(into = "u8", try_from = "u8")]
 pub enum OrderType {
-    /// Limit order
-    ///
     /// Take existing orders up to price, max_base_quantity and max_quote_quantity.
     /// If any base_quantity or quote_quantity remains, place an order on the book
     Limit = 0,
 
-    /// Immediate-or-cancel order
-    ///
     /// Take existing orders up to price, max_base_quantity and max_quote_quantity.
     /// Never place an order on the book.
     ImmediateOrCancel = 1,
 
-    /// Post-only order
-    ///
-    /// Never takes any existing order.
-    ///
-    /// If existing orders can match with this order, do nothing. Otherwise place
-    /// an order on the book.
+    /// Never take any existing orders, post the order on the book if possible.
+    /// If existing orders can match with this order, do nothing.
     PostOnly = 2,
 
-    /// Market order
-    ///
     /// Ignore price and take orders up to max_base_quantity and max_quote_quantity.
     /// Never place an order on the book.
     ///
     /// Equivalent to ImmediateOrCancel with price=i64::MAX.
     Market = 3,
 
-    /// Post-only-slide order
-    ///
-    /// If existing orders can match with this order, adjust the price to just barely
+    /// If existing orders match with this order, adjust the price to just barely
     /// not match. Always places an order on the book.
     PostOnlySlide = 4,
 }
