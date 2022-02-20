@@ -1873,8 +1873,7 @@ impl MangoProgramTest {
         let mint_account_key = self.create_token_account(&user.pubkey(), &option_market.option_mint).await;
         let writers_account_key = self.create_token_account(&user.pubkey(), &option_market.writer_token_mint).await;
         let mango_program_id = self.mango_program_id;
-        let load_amount = 2_000_000 * amount;
-        self.perform_deposit(mango_group_cookie, user_index, option_market.underlying_token_index, load_amount.to_num()).await;
+        
         let instructions = vec![
             //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
             //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
