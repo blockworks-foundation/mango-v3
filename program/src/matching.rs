@@ -178,7 +178,7 @@ impl LeafNode {
 
     #[inline(always)]
     pub fn is_valid(&self, now_ts: u64) -> bool {
-        self.time_in_force == 0 || now_ts <= self.timestamp + self.time_in_force as u64
+        self.time_in_force == 0 || now_ts < self.timestamp + self.time_in_force as u64
     }
 }
 
