@@ -528,6 +528,18 @@ impl MangoProgramTest {
         return keypair.pubkey();
     }
 
+    #[allow(dead_code)]
+    pub async fn transfer_tokens(&mut self, owner : &Keypair, from: &Pubkey, to: &Pubkey, amount : u64) {
+        let instructions = [
+            spl_token::instruction::transfer(&spl_token::id(), 
+            from, 
+            to, 
+            &owner.pubkey(), &[], 
+            amount).unwrap(),
+        ];
+        self.process_transaction(&instructions, Some(&[&owner])).await.unwrap();
+    }
+
     pub async fn load_account<T: Loadable>(&mut self, acc_pk: Pubkey) -> T {
         let mut acc = self.context.banks_client.get_account(acc_pk).await.unwrap().unwrap();
         let acc_info: AccountInfo = (&acc_pk, &mut acc).into();
@@ -1899,6 +1911,46 @@ impl MangoProgramTest {
         (mint_account_key, writers_account_key)
     }
 
+    #[allow(dead_code)]
+    pub async fn excersice_option(&mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_market_pda :Pubkey,
+        option_market :OptionMarket,
+        user_index : usize,
+        user_option_account: Pubkey,
+        amount : I80F48,
+    ){
+        let mango_group = mango_group_cookie.mango_group;
+        let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
+        let (nb_key, nb) = self.with_node_bank(&rb,0).await;
+        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, option_market.quote_token_index).await;
+        let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
+        let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
+        let mango_program_id = self.mango_program_id;
+        
+        let instructions = vec![
+            //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
+            //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
+            mango::instruction::excersice_option(
+                &mango_program_id,
+                &mango_group_cookie.address,
+                &mango_group_cookie.mango_accounts[user_index].address,
+                &user.pubkey(),
+                &option_market_pda,
+                &mango_group.mango_cache,
+                &rb_key,
+                &q_rb_key,
+                &nb_key,
+                &q_nb_key,
+                &option_market.option_mint,
+                &option_market.market_mint_authority,
+                &user_option_account,
+                &spl_token::id(),
+                amount,
+        ).unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
 }
 
 fn process_serum_instruction(

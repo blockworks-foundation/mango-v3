@@ -5920,7 +5920,7 @@ impl Processor {
     fn write_option(program_id: &Pubkey,
         accounts: &[AccountInfo],
         amount : I80F48, ) -> MangoResult {
-
+        check!(amount.is_positive(), MangoErrorCode::InvalidParam)?;
         const NUM_FIXED: usize = 13;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
@@ -5959,7 +5959,8 @@ impl Processor {
         check!(&authority_pda == market_mint_authority.key, MangoErrorCode::InvalidAccount)?;
         let authority_seeds = &[b"mango_option_mint_authority", option_market_ai.key.as_ref(), &[auth_bump]];
         
-        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap();
+        let decimal_multiplier =  I80F48::from_num(10u64.pow(option_market.number_of_decimals as u32));
+        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap().checked_div(decimal_multiplier).unwrap();
         
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let root_bank_cache = &mango_cache.root_bank_cache[option_market.underlying_token_index];
@@ -5979,10 +5980,91 @@ impl Processor {
             option_market.underlying_token_index,
             total_underlying_amount)?;
         option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_add(total_underlying_amount).unwrap();
+
+        // mint option tokens to the user
+        mint_to(option_mint, user_option_account, market_mint_authority, token_program, amount.to_num::<u64>(), authority_seeds)?;
+        mint_to(writer_token_mint, user_excerise_account, market_mint_authority, token_program, amount.to_num::<u64>(), authority_seeds)?;
+        Ok(())
+    }
+    #[inline(never)]
+    fn excesice_option(program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount : I80F48, ) -> MangoResult {
+        check!(amount.is_positive(), MangoErrorCode::InvalidParam)?;
+        const NUM_FIXED: usize = 13;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // read
+            mango_account_ai, // mut
+            owner_ai, // read, signer
+            option_market_ai, // mut
+            mango_cache_ai, // read
+            underlying_root_bank_ai, // read
+            quote_root_bank_ai, // read
+            underlying_node_bank_ai, // write
+            quote_node_bank_ai, // write
+            option_mint, // write
+            market_mint_authority, //read
+            user_option_account, // write
+            token_program, // read
+        ] = accounts;
+
+        let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
+        check!(option_mint.key() == option_market.option_mint, MangoErrorCode::InvalidAccount)?;
+        
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        if option_market.option_type == OptionType::American {
+            check!(now_ts < option_market.expiry, MangoErrorCode::OptionExpired )?;
+        } else {
+            // TODO European not yet implement 
+            check!(false, MangoErrorCode::InvalidParam)?;
+        }
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
         let decimal_multiplier =  I80F48::from_num(10u64.pow(option_market.number_of_decimals as u32));
-        let minted_amount = amount.checked_mul(decimal_multiplier).unwrap().checked_to_num::<u64>().unwrap();
-        mint_to(option_mint, user_option_account, market_mint_authority, token_program, minted_amount, authority_seeds)?;
-        mint_to(writer_token_mint, user_excerise_account, market_mint_authority, token_program, minted_amount, authority_seeds)?;
+        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap().checked_div(decimal_multiplier).unwrap();
+        let total_quote_amount = amount.checked_mul(option_market.quote_amount).unwrap().checked_div(decimal_multiplier).unwrap();
+        check!(total_underlying_amount.is_positive(), MangoErrorCode::MathError)?;
+        check!(total_quote_amount.is_positive(), MangoErrorCode::MathError)?;
+        
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let underlying_root_bank_cache = &mango_cache.root_bank_cache[option_market.underlying_token_index];
+        let underlying_root_bank = RootBank::load_checked(underlying_root_bank_ai, program_id)?;
+        check!(underlying_root_bank.node_banks.contains(underlying_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut underlying_node_bank = NodeBank::load_mut_checked(underlying_node_bank_ai, program_id)?;
+
+        checked_add_net(underlying_root_bank_cache, 
+            &mut underlying_node_bank, 
+            &mut mango_account, 
+            option_market.underlying_token_index,
+            total_underlying_amount)?;
+
+        let quote_root_bank_cache = &mango_cache.root_bank_cache[option_market.quote_token_index];
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check!(quote_root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+
+        checked_sub_net(quote_root_bank_cache, 
+            &mut quote_node_bank, 
+            &mut mango_account, 
+            option_market.quote_token_index,
+            total_quote_amount)?;
+        
+        option_market.tokens_in_quote_pool = option_market.tokens_in_quote_pool.checked_add(total_quote_amount).unwrap();
+        option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_sub(total_underlying_amount).unwrap();
+
+        let (authority_pda, auth_bump) = Pubkey::find_program_address( &[b"mango_option_mint_authority", option_market_ai.key.as_ref()], program_id);
+        check!(&authority_pda == market_mint_authority.key, MangoErrorCode::InvalidAccount)?;
+        let authority_seeds = &[b"mango_option_mint_authority", option_market_ai.key.as_ref(), &[auth_bump]];
+        
+        burn(option_mint, user_option_account, market_mint_authority, token_program, amount.to_num::<u64>(), authority_seeds)?;
         Ok(())
     }
 
@@ -6491,6 +6573,12 @@ impl Processor {
             } => {
                 msg!("Mango: Write option");
                 Self::write_option(program_id, accounts, amount)
+            },
+            MangoInstruction::ExcersiceOption {
+                amount
+            } => {
+                msg!("Mango: Excersice option");
+                Self::excesice_option(program_id, accounts, amount)
             }
         }
     }
@@ -7264,6 +7352,32 @@ fn mint_to<'a>( mint: &AccountInfo<'a>,
         &[],
         amount,
     )?;
+    solana_program::program::invoke_signed(
+        &ix,
+        &[
+            mint.clone(),
+            user_account.clone(),
+            mint_authority.clone(),
+            token_program.clone(),
+        ],
+        &[&signer_seeds[..]],
+    )
+}
+
+fn burn<'a>( mint: &AccountInfo<'a>,
+    user_account: &AccountInfo<'a>,
+    mint_authority: &AccountInfo<'a>,
+    token_program: &AccountInfo<'a>,
+    amount : u64,
+    signer_seeds : &[&[u8]]
+) -> ProgramResult {
+    let ix = spl_token::instruction::burn(
+        &spl_token::ID, 
+        user_account.key, 
+        mint.key, 
+        mint_authority.key, 
+        &[], 
+        amount)?;
     solana_program::program::invoke_signed(
         &ix,
         &[
