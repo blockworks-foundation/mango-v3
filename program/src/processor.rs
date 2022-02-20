@@ -5987,7 +5987,7 @@ impl Processor {
         Ok(())
     }
     #[inline(never)]
-    fn excesice_option(program_id: &Pubkey,
+    fn excercise_option(program_id: &Pubkey,
         accounts: &[AccountInfo],
         amount : I80F48, ) -> MangoResult {
         check!(amount.is_positive(), MangoErrorCode::InvalidParam)?;
@@ -6064,7 +6064,7 @@ impl Processor {
         check!(&authority_pda == market_mint_authority.key, MangoErrorCode::InvalidAccount)?;
         let authority_seeds = &[b"mango_option_mint_authority", option_market_ai.key.as_ref(), &[auth_bump]];
         
-        burn(option_mint, user_option_account, market_mint_authority, token_program, amount.to_num::<u64>(), authority_seeds)?;
+        burn(option_mint, user_option_account, owner_ai, token_program, amount.to_num::<u64>(), authority_seeds)?;
         Ok(())
     }
 
@@ -6574,11 +6574,11 @@ impl Processor {
                 msg!("Mango: Write option");
                 Self::write_option(program_id, accounts, amount)
             },
-            MangoInstruction::ExcersiceOption {
+            MangoInstruction::ExcerciseOption {
                 amount
             } => {
-                msg!("Mango: Excersice option");
-                Self::excesice_option(program_id, accounts, amount)
+                msg!("Mango: Excercise option");
+                Self::excercise_option(program_id, accounts, amount)
             }
         }
     }
@@ -7366,7 +7366,7 @@ fn mint_to<'a>( mint: &AccountInfo<'a>,
 
 fn burn<'a>( mint: &AccountInfo<'a>,
     user_account: &AccountInfo<'a>,
-    mint_authority: &AccountInfo<'a>,
+    authority: &AccountInfo<'a>,
     token_program: &AccountInfo<'a>,
     amount : u64,
     signer_seeds : &[&[u8]]
@@ -7375,7 +7375,7 @@ fn burn<'a>( mint: &AccountInfo<'a>,
         &spl_token::ID, 
         user_account.key, 
         mint.key, 
-        mint_authority.key, 
+        authority.key, 
         &[], 
         amount)?;
     solana_program::program::invoke_signed(
@@ -7383,7 +7383,7 @@ fn burn<'a>( mint: &AccountInfo<'a>,
         &[
             mint.clone(),
             user_account.clone(),
-            mint_authority.clone(),
+            authority.clone(),
             token_program.clone(),
         ],
         &[&signer_seeds[..]],
