@@ -6124,6 +6124,7 @@ impl Processor {
             check!(root_bank.node_banks.contains(underlying_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
             // update option market
             option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_sub(total_underlying_amount).unwrap();
+            
             (option_market.underlying_token_index, total_underlying_amount, NodeBank::load_mut_checked(underlying_node_bank_ai, program_id)?)
         } else {
             check!(option_market.tokens_in_quote_pool >= total_quote_amount, MangoErrorCode::NotEnoughQuoteTokens)?;
@@ -6131,6 +6132,7 @@ impl Processor {
             check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
             // update option market
             option_market.tokens_in_quote_pool = option_market.tokens_in_quote_pool.checked_sub(total_quote_amount).unwrap();
+
             (option_market.quote_token_index, total_quote_amount, NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?)
         };
         
@@ -6147,7 +6149,7 @@ impl Processor {
         check!(&authority_pda == market_mint_authority.key, MangoErrorCode::InvalidAccount)?;
         let authority_seeds = &[b"mango_option_mint_authority", option_market_ai.key.as_ref(), &[auth_bump]];
         
-        burn(writers_mint, user_writers_account, owner_ai, token_program, token_amount.to_num::<u64>(), authority_seeds)?;
+        burn(writers_mint, user_writers_account, owner_ai, token_program, amount.to_num::<u64>(), authority_seeds)?;
         Ok(())
     }
 

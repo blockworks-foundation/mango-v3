@@ -2904,7 +2904,7 @@ pub fn exercise_option (
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-pub fn exchange_writers_token (
+pub fn exchange_writers_tokens (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
     mango_account: &Pubkey, // mut

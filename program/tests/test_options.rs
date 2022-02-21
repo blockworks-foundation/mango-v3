@@ -7,6 +7,7 @@ use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
 use solana_sdk::signer::Signer;
+use std::time::Duration;
 use std::{mem::size_of, mem::size_of_val};
 use fixed::types::I80F48;
 use solana_sdk::signature::Keypair;
@@ -22,8 +23,8 @@ async fn test_options() {
         .full_setup(&mut test, num_precreated_mango_users, config.num_mints - 1)
         .await;
     println!("Creating option market");
-    let clock = test.get_clock().await;
-    let expiry = clock.unix_timestamp as u64 + 60 * 60 * 10 * solana_program::clock::DEFAULT_TICKS_PER_SECOND; // after 10 hrs
+    
+    let expiry = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 30 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
     let (om_key, option_market) = test.create_option_market(&mango_group_cookie,
         0,
         15,
@@ -41,6 +42,7 @@ async fn test_options() {
     mango_group_cookie.run_keeper(&mut test).await;
     mango_group_cookie.run_keeper(&mut test).await;
 
+    println!("Write option");
     // deposit some underlying tokens for user0
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
@@ -61,6 +63,7 @@ async fn test_options() {
         assert_eq!(option_market_ck.tokens_in_quote_pool, 0);
     }
 
+    println!("exercise option");
     let user0 = Keypair::from_base58_string(&test.users[0].to_base58_string());;
     let mint_account_key_u1 = test.create_token_account(&test.users[1].pubkey(), &option_market.option_mint).await;
     let load_amount = 10_000_000 * 10;
@@ -80,4 +83,55 @@ async fn test_options() {
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 5);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 5);
     }
+    mango_group_cookie.run_keeper(&mut test).await;
+    println!("sleeping for 1 min");
+    test.advance_clock_past_timestamp(option_market.expiry as i64 + 1).await;
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    println!("exchange writers tokens for quote tokens");
+    {
+        let clock = test.get_clock().await;
+        assert!( (clock.unix_timestamp as u64) > option_market.expiry );
+        let writer_tokens = test.get_token_balance(writer_key_acc_0).await;
+        assert_eq!(writer_tokens, 10_000_000);
+    }
+    let mango_account_u0_key = mango_group_cookie.mango_accounts[0].address;
+    let mut funds_underlying_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.underlying_token_index).await;
+    let mut funds_quote_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
+
+    test.exchange_writers_tokens(&mango_group_cookie, om_key, option_market, 0, writer_key_acc_0, I80F48::from_num(1_000_000), ExchangeFor::ForQuoteTokens).await;
+    {
+        // check exchange
+        let writers_tokens = test.get_token_balance(writer_key_acc_0).await;
+        assert_eq!(writers_tokens, 9_000_000);
+
+        let mut funds_underlying :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.underlying_token_index).await;
+        let mut funds_quote :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
+        assert_eq!(funds_underlying, funds_underlying_old);
+        assert_eq!(funds_quote, 10_199_999); // floating point rounding problem
+
+        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 5);
+        assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 4);
+        funds_underlying_old = funds_underlying;
+        funds_quote_old =  funds_quote;
+    }
+    test.exchange_writers_tokens(&mango_group_cookie, om_key, option_market, 0, writer_key_acc_0, I80F48::from_num(1_000_000), ExchangeFor::ForUnderlyingTokens).await;
+    {
+        // check exchange
+        let writers_tokens = test.get_token_balance(writer_key_acc_0).await;
+        assert_eq!(writers_tokens, 8_000_000);
+
+        let mut funds_underlying :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.underlying_token_index).await;
+        let mut funds_quote :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
+        assert_eq!(funds_underlying, funds_underlying_old + 100_000_000);
+        assert_eq!(funds_quote, 10_199_999); // floating point rounding problem
+
+        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 4);
+        assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 4);
+        funds_underlying_old = funds_underlying;
+        funds_quote_old =  funds_quote;
+    }
+
 }

@@ -1951,6 +1951,49 @@ impl MangoProgramTest {
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }
+
+    #[allow(dead_code)]
+    pub async fn exchange_writers_tokens(&mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_market_pda :Pubkey,
+        option_market :OptionMarket,
+        user_index : usize,
+        user_writers_account: Pubkey,
+        amount : I80F48,
+        exchange_for : ExchangeFor,
+    ){
+        let mango_group = mango_group_cookie.mango_group;
+        let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
+        let (nb_key, nb) = self.with_node_bank(&rb,0).await;
+        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, option_market.quote_token_index).await;
+        let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let mango_program_id = self.mango_program_id;
+        
+        let instructions = vec![
+            //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
+            //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
+            mango::instruction::exchange_writers_tokens(
+                &mango_program_id,
+                &mango_group_cookie.address,
+                &mango_group_cookie.mango_accounts[user_index].address,
+                &user.pubkey(),
+                &option_market_pda,
+                &mango_group.mango_cache,
+                &rb_key,
+                &q_rb_key,
+                &nb_key,
+                &q_nb_key,
+                &option_market.writer_token_mint,
+                &option_market.market_mint_authority,
+                &user_writers_account,
+                &spl_token::id(),
+                amount,
+                exchange_for,
+        ).unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
 }
 
 fn process_serum_instruction(
