@@ -123,7 +123,7 @@ pub enum MangoErrorCode {
     InvalidOraclePrice,
     #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
     MaxAccountsReached,
-    #[error("MangoErrorCode::ExpiryInvalid expiry should be in the future")]
+    #[error("MangoErrorCode::ExpiryInvalid expiry should be in the future")] // 40
     ExpiryInvalid,
     #[error("MangoErrorCode::OptionAlreadyExpired option has already expired")]
     OptionExpired,
@@ -133,7 +133,11 @@ pub enum MangoErrorCode {
     NotEnoughQuoteTokens,
     #[error("MangoErrorCode::OptionNotEnoughQuoteTokens cannot exchange writers tokens because not enough quote tokens / please exhange for underlying tokens instead")]
     OptionNotYetExpired,
-    #[error("MangoErrorCode::Default Check the source code for more info")] // 40
+    #[error("MangoErrorCode::EuropeanOptionsNeedExersiceExpiry European type of option need a limit on exercise")]
+    EuropeanOptionsNeedExersiceExpiry,
+    #[error("MangoErrorCode::ExersiceExpiryBeforeExpiry exercise should be after actual expiry ")]
+    ExersiceExpiryBeforeExpiry,
+    #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }
 

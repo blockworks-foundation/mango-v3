@@ -5823,7 +5823,9 @@ impl Processor {
         option_type : OptionType,
         contract_size: I80F48,
         quote_amount: I80F48,
-        expiry:u64,) -> MangoResult {    
+        expiry:u64,
+        expiry_to_exercise_european : Option<u64> 
+    ) -> MangoResult {    
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
         check!(expiry > now_ts, MangoErrorCode::ExpiryInvalid)?;
@@ -5913,6 +5915,17 @@ impl Processor {
         option_market.tokens_in_quote_pool = I80F48::from_num(0);
         option_market.tokens_in_underlying_pool = I80F48::from_num(0);
         option_market.number_of_decimals = 6;
+
+        option_market.expiry_to_exercise_european = match expiry_to_exercise_european {
+            Some(x) => {
+                check!(x > option_market.expiry, MangoErrorCode::ExersiceExpiryBeforeExpiry)?;
+                x
+            },
+            None => {
+                check!(option_market.option_type != OptionType::European, MangoErrorCode::EuropeanOptionsNeedExersiceExpiry)?;
+                0
+            }
+        };
         Ok(())
     }
 
@@ -6018,8 +6031,8 @@ impl Processor {
         if option_market.option_type == OptionType::American {
             check!(now_ts < option_market.expiry, MangoErrorCode::OptionExpired )?;
         } else {
-            // TODO European not yet implement 
-            check!(false, MangoErrorCode::InvalidParam)?;
+            check!(now_ts > option_market.expiry,  MangoErrorCode::OptionNotYetExpired)?;
+            check!(now_ts < option_market.expiry_to_exercise_european,  MangoErrorCode::OptionExpired)?;
         }
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
@@ -6101,8 +6114,7 @@ impl Processor {
         if option_market.option_type == OptionType::American {
             check!(now_ts > option_market.expiry, MangoErrorCode::OptionNotYetExpired )?;
         } else {
-            // TODO European not yet implement 
-            check!(false, MangoErrorCode::InvalidParam)?;
+            check!(now_ts > option_market.expiry_to_exercise_european,  MangoErrorCode::OptionNotYetExpired)?;
         }
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
@@ -6124,7 +6136,7 @@ impl Processor {
             check!(root_bank.node_banks.contains(underlying_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
             // update option market
             option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_sub(total_underlying_amount).unwrap();
-            
+
             (option_market.underlying_token_index, total_underlying_amount, NodeBank::load_mut_checked(underlying_node_bank_ai, program_id)?)
         } else {
             check!(option_market.tokens_in_quote_pool >= total_quote_amount, MangoErrorCode::NotEnoughQuoteTokens)?;
@@ -6650,9 +6662,10 @@ impl Processor {
                 contract_size,
                 quote_amount,
                 expiry,
+                expiry_to_exercise_european
             } => {
                 msg!("Mango: CreateOptionMarket");
-                Self::create_option_market(program_id, accounts, underlying_token_index, quote_token_index, option_type, contract_size, quote_amount, expiry)
+                Self::create_option_market(program_id, accounts, underlying_token_index, quote_token_index, option_type, contract_size, quote_amount, expiry, expiry_to_exercise_european)
             }
             MangoInstruction::WriteOption {
                 amount

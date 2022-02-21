@@ -2618,6 +2618,7 @@ pub struct OptionMarket {
     pub contract_size: I80F48,
     pub quote_amount: I80F48,
     pub expiry: u64,            // expiry in unix time
+    pub expiry_to_exercise_european : u64, // expiry to exercise for european options
     pub expired: bool,
     pub creator : Pubkey,
     pub tokens_in_underlying_pool : I80F48, // Tokens in the mango underlying pool related to this market

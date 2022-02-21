@@ -147,6 +147,7 @@ fn test_instruction_serialization() {
             quote_amount:I80F48::from_num(10.45645646),
             option_type: OptionType::European,
             expiry: 1000000000,
+            expiry_to_exercise_european: None,
         },
         MangoInstruction::WriteOption {
             amount:I80F48::from_num(100.45645646),

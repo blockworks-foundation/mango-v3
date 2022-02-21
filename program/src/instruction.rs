@@ -988,6 +988,7 @@ pub enum MangoInstruction {
         contract_size:I80F48,
         quote_amount:I80F48,
         expiry:u64,
+        expiry_to_exercise_european: Option<u64>
     },
 
     /// Write an option / by this instruction user can write an option. 
@@ -1542,7 +1543,8 @@ impl MangoInstruction {
                     option_type : OptionType::try_from_primitive(option_type[0]).ok()?,
                     contract_size: I80F48::from_le_bytes(*contract_size),
                     quote_amount: I80F48::from_le_bytes(*quote_amount),
-                    expiry: u64::from_le_bytes(*expiry)
+                    expiry: u64::from_le_bytes(*expiry),
+                    expiry_to_exercise_european : if data.len() == 44 { None } else { unpack_u64_opt(array_ref!(data, 43, 9)) },
                 }
             },
             62 => {
@@ -2799,6 +2801,7 @@ pub fn create_option_market(
     contract_size: I80F48,
     quote_amount: I80F48,
     expiry: u64,
+    expiry_to_exercise_european : Option<u64>,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*market_pda, false),
@@ -2818,6 +2821,7 @@ pub fn create_option_market(
         contract_size,
         quote_amount,
         expiry,
+        expiry_to_exercise_european,
     };
     let data = instr.pack();
 

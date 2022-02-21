@@ -1830,6 +1830,7 @@ impl MangoProgramTest {
         contract_size : I80F48,
         quote_amount : I80F48,
         expiry : u64,
+        expiry_of_european_option : Option<u64>,
     ) -> (Pubkey, OptionMarket) {
         let mango_group = mango_group_cookie.mango_group;
         let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
@@ -1862,6 +1863,7 @@ impl MangoProgramTest {
             contract_size,
             quote_amount,
             expiry,
+            expiry_of_european_option,
         ).unwrap()];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
