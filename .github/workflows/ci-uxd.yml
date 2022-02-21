@@ -25,12 +25,12 @@ jobs:
     steps:
       # Checkout Mango-v3 Repo
       - uses: actions/checkout@v2
-      # Checkout UXDProtocol/UXD-Program v.3.0.0    
+      # Checkout UXDProtocol/UXD-Program 
       - name: Checkout @UXDProtocol/UXD-Program, install dependencies
         uses: actions/checkout@v2
         with:
           repository: UXDProtocol/uxd-program
-          ref: refs/heads/v3.0.0
+#           ref: refs/heads/v3.1.0
           # GitHub's personal access token with access to repository
           token: ${{ secrets.MANGO_CI_UXD }}
           persist-credentials: false
