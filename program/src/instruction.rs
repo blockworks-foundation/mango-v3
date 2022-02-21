@@ -1,7 +1,7 @@
 use crate::matching::{OrderType, Side};
 use crate::state::{AssetType, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
-use crate::state::{OptionType};
+use crate::state::{OptionType, ExchangeFor};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -1008,15 +1008,15 @@ pub enum MangoInstruction {
     /// [writable] writer_token_mint - Writer token mint
     /// market_mint_authority - Mint authority pda for the market
     /// [writable] user_option_account - Acount where user will recieve option tokens
-    /// [writable] user_excerise_account - Accout where user will recieve writers tokens
+    /// [writable] user_writers_account - Accout where user will recieve writers tokens
     /// token_program
     WriteOption {
         amount : I80F48,
     },
 
-    /// Excercise an option / by this instruction user can excercise an option by swapping quote mints for underlying mints. 
+    /// Exercise an option / by this instruction user can exercise an option by swapping quote mints for underlying mints. 
     /// 
-    /// A user can excercise their option by swapping quote tokens for the underlying tokens.
+    /// A user can exercise their option by swapping quote tokens for the underlying tokens.
     /// In this process the option tokens will be burned
     /// 
     /// mango_group_ai - Mango Group
@@ -1024,17 +1024,40 @@ pub enum MangoInstruction {
     /// [signer] owner_ai - Owner
     /// [writable] option_market_ai - Option Market
     /// mango_cache_ai - Mango cache
-    /// root_bank_ai - Root bank
-    /// [writable] node_bank_ai - Node bank
+    /// underlying_root_bank_ai - Root bank for underlying token
+    /// quote_root_bank_ai - Root bank for quote token
+    /// [writable] underlying_node_bank_ai - Node bank for underlying token
+    /// [writable] quote_node_bank_ai - Node bank for quote token
     /// [writable] option_mint - Option mint
-    /// [writable] writer_token_mint - Writer token mint
     /// market_mint_authority - Mint authority pda for the market
     /// [writable] user_option_account - Acount where user will recieve option tokens
-    /// [writable] user_excerise_account - Accout where user will recieve writers tokens
     /// token_program
-    ExcerciseOption {
+    ExerciseOption {
         amount : I80F48,
     },
+
+    /// Exchange writers tokens / by this instruction user can exhange writers tokens recieved when he wrote option
+    ///  for either underlying tokens or quote tokens after the option has expired.
+    /// If enough tokens are not available after then he/she will be forced to take remaining tokens
+    /// Swapping tokens will burn the writers tokens
+    /// 
+    /// mango_group_ai - Mango Group
+    /// [writable] mango_account_ai - Mango Account
+    /// [signer] owner_ai - Owner
+    /// [writable] option_market_ai - Option Market
+    /// mango_cache_ai - Mango cache
+    /// underlying_root_bank_ai - Root bank for underlying token
+    /// quote_root_bank_ai - Root bank for quote token
+    /// [writable] underlying_node_bank_ai - Node bank for underlying token
+    /// [writable] quote_node_bank_ai - Node bank for quote token
+    /// [writable] writers_mint - Option mint
+    /// market_mint_authority - Mint authority pda for the market
+    /// [writable] user_writers_account - Acount where user will recieve option tokens
+    /// token_program
+    ExchangeWritersTokens {
+        amount : I80F48,
+        exchange_for : ExchangeFor,
+    }
 }
 
 impl MangoInstruction {
@@ -1534,8 +1557,17 @@ impl MangoInstruction {
             },
             63 => {
                 let amount = array_ref![data, 0 , 16];
-                MangoInstruction::ExcerciseOption {
+                MangoInstruction::ExerciseOption {
                     amount:  I80F48::from_le_bytes(*amount),
+                }
+            },
+            64 => {
+                let data_arr = array_ref![data, 0 , 17];
+                let ( amount,
+                    exchange_for, ) = array_refs![data_arr, 16, 1];
+                MangoInstruction::ExchangeWritersTokens {
+                    amount:  I80F48::from_le_bytes(*amount),
+                    exchange_for : ExchangeFor::try_from_primitive(exchange_for[0]).ok()?,
                 }
             }, 
 >>>>>>> 66d765b... Implementing excersice option, started to write tests
@@ -2832,7 +2864,7 @@ pub fn write_option (
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-pub fn excercise_option (
+pub fn exercise_option (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
     mango_account: &Pubkey, // mut
@@ -2865,8 +2897,50 @@ pub fn excercise_option (
         AccountMeta::new_readonly(*token_program, false),
     ];
 
-    let instr = MangoInstruction::ExcerciseOption {
+    let instr = MangoInstruction::ExerciseOption {
         amount,
+    };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn exchange_writers_token (
+    program_id: &Pubkey,
+    mango_group: &Pubkey, // read
+    mango_account: &Pubkey, // mut
+    owner: &Pubkey, // read, signer
+    option_market: &Pubkey, // mut
+    mango_cache: &Pubkey, // read
+    underlying_root_bank: &Pubkey, // read
+    quote_root_bank: &Pubkey,   //read
+    underlying_node_bank: &Pubkey, // write
+    quote_node_bank: &Pubkey, //write
+    writers_mint: &Pubkey, // write
+    market_mint_authority: &Pubkey, //read
+    user_writers_account: &Pubkey, // write
+    token_program: &Pubkey, // read
+    amount: I80F48,
+    exchange_for : ExchangeFor,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group, false),
+        AccountMeta::new(*mango_account, false),
+        AccountMeta::new_readonly(*owner, true),
+        AccountMeta::new(*option_market, false),
+        AccountMeta::new_readonly(*mango_cache, false),
+        AccountMeta::new_readonly(*underlying_root_bank, false),
+        AccountMeta::new_readonly(*quote_root_bank, false),
+        AccountMeta::new(*underlying_node_bank, false),
+        AccountMeta::new(*quote_node_bank, false),
+        AccountMeta::new(*writers_mint, false),
+        AccountMeta::new_readonly(*market_mint_authority, false),
+        AccountMeta::new(*user_writers_account, false),
+        AccountMeta::new_readonly(*token_program, false),
+    ];
+
+    let instr = MangoInstruction::ExchangeWritersTokens {
+        amount,
+        exchange_for,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })

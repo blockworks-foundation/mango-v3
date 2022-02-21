@@ -2656,3 +2656,13 @@ impl OptionMarket {
     }
 
 }
+
+// After expiry writer can decide if he/she wants to exhange writers tokens for underlying tokens or quote tokens,
+// If there are not enough tokens he will get an error
+#[derive(Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum ExchangeFor {
+    ForUnderlyingTokens,
+    ForQuoteTokens,
+}

@@ -1912,7 +1912,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn excercise_option(&mut self,
+    pub async fn exercise_option(&mut self,
         mango_group_cookie: &MangoGroupCookie,
         option_market_pda :Pubkey,
         option_market :OptionMarket,
@@ -1931,7 +1931,7 @@ impl MangoProgramTest {
         let instructions = vec![
             //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
             //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
-            mango::instruction::excercise_option(
+            mango::instruction::exercise_option(
                 &mango_program_id,
                 &mango_group_cookie.address,
                 &mango_group_cookie.mango_accounts[user_index].address,

@@ -127,6 +127,12 @@ pub enum MangoErrorCode {
     ExpiryInvalid,
     #[error("MangoErrorCode::OptionAlreadyExpired option has already expired")]
     OptionExpired,
+    #[error("MangoErrorCode::OptionNotYetExpired option has not yet expired")]
+    NotEnoughUnderlyingTokens,
+    #[error("MangoErrorCode::OptionNotEnoughUnderlyingTokens cannot exchange writers tokens because not enough underlying tokens / please exchange for quote tokens instead")]
+    NotEnoughQuoteTokens,
+    #[error("MangoErrorCode::OptionNotEnoughQuoteTokens cannot exchange writers tokens because not enough quote tokens / please exhange for underlying tokens instead")]
+    OptionNotYetExpired,
     #[error("MangoErrorCode::Default Check the source code for more info")] // 40
     Default = u32::MAX_VALUE,
 }

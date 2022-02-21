@@ -66,8 +66,8 @@ async fn test_options() {
     let load_amount = 10_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 1, option_market.quote_token_index, load_amount).await;
     test.transfer_tokens(&user0, &mint_key_acc_0, &mint_account_key_u1, 9_000_000).await;
-    test.excercise_option(&mango_group_cookie, om_key, option_market, 1, mint_account_key_u1, I80F48::from_num(5_000_000)).await;
-    //check excercise
+    test.exercise_option(&mango_group_cookie, om_key, option_market, 1, mint_account_key_u1, I80F48::from_num(5_000_000)).await;
+    //check exercise
     {
         let option_tokens = test.get_token_balance(mint_account_key_u1).await;
         assert_eq!(option_tokens, 4_000_000);
