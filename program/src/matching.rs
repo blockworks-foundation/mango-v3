@@ -436,6 +436,14 @@ impl<'a> Iterator for BookSideIter<'a> {
 }
 
 impl BookSide {
+    #[deprecated(
+        since = "3.4.0",
+        note = "use iter_valid() or iter_all_including_invalid() instead"
+    )]
+    pub fn iter(&self) -> BookSideIter {
+        self.iter_valid(Clock::get().unwrap().unix_timestamp as u64)
+    }
+
     /// Iterate over all entries in the book filtering out invalid orders
     ///
     /// smallest to highest for asks
