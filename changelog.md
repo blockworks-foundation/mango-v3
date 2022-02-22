@@ -1,5 +1,14 @@
 # Mango Program Change Log
 
+## v3.4.0
+1. Breaking change: Orders on the perp orderbook can now expire.
+   Either use the iterator that returns only valid orders or manually filter out invalid orders.
+2. New instruction: PlacePerpOrder2
+   - can set an expiry timestamp
+   - can have a quote quantity limit
+   - limits the depth of orderbook iteration
+3. Reduce heap memory use of event logging: ConsumeEvents limit raised back to 8
+
 ## v3.3.5
 Deployed: Feb 11, 2022 at 17:36:15 UTC | Slot: 120,380,891 
 1. reduce consume_events limit to 4 to prevent memory issues
