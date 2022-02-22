@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: UXDProtocol/uxd-program
-#           ref: refs/heads/v3.1.0
+          ref: refs/heads/v2.3.0
           # GitHub's personal access token with access to repository
           token: ${{ secrets.MANGO_CI_UXD }}
           persist-credentials: false
