@@ -4,7 +4,6 @@ use std::convert::{identity, TryFrom};
 use std::mem::size_of;
 use std::vec;
 
-use anchor_lang::Key;
 use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
@@ -22,7 +21,6 @@ use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
 use spl_token::state::{Account, Mint,};
-use spl_token::instruction::{initialize_mint};
 
 use switchboard_program::FastRoundResultAccountData;
 
@@ -5839,12 +5837,12 @@ impl Processor {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
-        let [option_market_ai,
-             bids_ai,
-             asks_ai,
-             event_queue_ai,
-             payer, 
-             system_program,
+        let [option_market_ai, //write
+             bids_ai, //write
+             asks_ai, //write
+             event_queue_ai, //write
+             payer, // signer
+             system_program, //read
              ] = accounts;
         
         let mango_options_market_seeds: &[&[u8]] = &[b"mango_option_market",
@@ -5867,7 +5865,7 @@ impl Processor {
             mango_options_market_seeds,
             &[],
         )?;
-
+/*
         seed_and_create_pda(
             program_id,
             payer,
@@ -5903,16 +5901,16 @@ impl Processor {
             &[b"mango_option_event_queue", option_market_ai.key.as_ref()],
             &[],
         )?;
-
+*/
         // Initialize the Bids
-        let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent_info)?;
+        //let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent_info)?;
 
         // Initialize the Asks
-        let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent_info)?;
+        //let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent_info)?;
 
         // Initialize the EventQueue
         // TODO: check that the event queue is reasonably large
-        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent_info)?;
+        //let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent_info)?;
 
         // initialize market
         let _option_market = OptionMarket::load_and_init(option_market_ai, 
@@ -5945,7 +5943,7 @@ impl Processor {
         let [
             mango_group_ai, // read
             mango_account_ai, // mut
-            owner_ai, // read, signer
+            owner_ai, // mut, signer
             option_market_ai, // mut
             mango_cache_ai, // read
             root_bank_ai, // read
@@ -5988,6 +5986,7 @@ impl Processor {
             total_underlying_amount)?;
         option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_add(total_underlying_amount).unwrap();
         
+        msg!("A");
         // update user trade data
         if user_data_ai.data_len() == 0 {
             let rent_info = Rent::get()?;
@@ -6003,6 +6002,8 @@ impl Processor {
                 &[],
             )?;
         }
+        
+        msg!("B");
         let mut user_trade_data = UserOptionTradeData::load_and_init_if_needed(
             user_data_ai, program_id, 
             option_market_ai.key, 

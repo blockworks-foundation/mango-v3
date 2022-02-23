@@ -24,7 +24,7 @@ use mango_macro::{Loadable, Pod, TriviallyTransmutable};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
 use crate::ids::mngo_token;
-use crate::matching::{Book, LeafNode, OrderType, Side, BookSide};
+use crate::matching::{Book, LeafNode, OrderType, Side,};
 use crate::queue::{EventQueue, EventType, FillEvent};
 use crate::utils::{invert_side, pow_i80f48, remove_slop_mut, split_open_orders};
 

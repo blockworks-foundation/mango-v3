@@ -1843,22 +1843,20 @@ impl MangoProgramTest {
             &quote_amount.to_le_bytes(), 
             &expiry.to_le_bytes()];
         let (market_pda, _) = Pubkey::find_program_address( mango_options_market_seeds, &self.mango_program_id );
-        let (mint_pda, _) = Pubkey::find_program_address( &[b"mango_option_mint", market_pda.as_ref()], &self.mango_program_id );
-        let (writer_pda, _) = Pubkey::find_program_address( &[b"mango_option_writer_mint", market_pda.as_ref()], &self.mango_program_id );
-        let (authority_pda, _) = Pubkey::find_program_address( &[b"mango_option_mint_authority", market_pda.as_ref()], &self.mango_program_id );
+        let (bids_pda, _) = Pubkey::find_program_address( &[b"mango_option_bids", market_pda.as_ref()], &self.mango_program_id );
+        let (asks_pda, _) = Pubkey::find_program_address( &[b"mango_option_asks", market_pda.as_ref()], &self.mango_program_id );
+        let (event_q_pda, _) = Pubkey::find_program_address( &[b"mango_option_event_queue", market_pda.as_ref()], &self.mango_program_id );
 
         let instructions = vec![mango::instruction::create_option_market(
             &mango_program_id,
             &market_pda,
-            &mint_pda,
-            &writer_pda,
-            &authority_pda,
-            underlying_index,
-            quote_index,
+            &bids_pda,
+            &asks_pda,
+            &event_q_pda,
             &user.pubkey(),
             &solana_sdk::system_program::id(),
-            &spl_token::id(),
-            &solana_program::sysvar::rent::ID,
+            underlying_index,
+            quote_index,
             option_type,
             contract_size,
             quote_amount,
@@ -1879,38 +1877,33 @@ impl MangoProgramTest {
         option_market :OptionMarket,
         user_index : usize,
         amount : I80F48,
-    ) -> (Pubkey, Pubkey){
+    ) -> (Pubkey, UserOptionTradeData){
         let mango_group = mango_group_cookie.mango_group;
         let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
         let (nb_key, nb) = self.with_node_bank(&rb,0).await;
         let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
-        let mint_account_key = self.create_token_account(&user.pubkey(), &option_market.option_mint).await;
-        let writers_account_key = self.create_token_account(&user.pubkey(), &option_market.writer_token_mint).await;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
         let mango_program_id = self.mango_program_id;
         
         let instructions = vec![
-            //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
-            //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
             mango::instruction::write_option(
                 &mango_program_id,
                 &mango_group_cookie.address,
-                &mango_group_cookie.mango_accounts[user_index].address,
+                &mango_account_pk,
                 &user.pubkey(),
                 &option_market_pda,
                 &mango_group.mango_cache,
                 &rb_key,
                 &nb_key,
-                &option_market.option_mint,
-                &option_market.writer_token_mint,
-                &option_market.market_mint_authority,
-                &mint_account_key,
-                &writers_account_key,
-                &spl_token::id(),
+                &user_trade_data_pk,
+                &solana_sdk::system_program::id(),
                 amount,
         ).unwrap()];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
-        (mint_account_key, writers_account_key)
+        let user_trade_data = self.load_account::<UserOptionTradeData>(user_trade_data_pk).await;
+        (user_trade_data_pk, user_trade_data)
     }
 
     #[allow(dead_code)]
@@ -1919,7 +1912,6 @@ impl MangoProgramTest {
         option_market_pda :Pubkey,
         option_market :OptionMarket,
         user_index : usize,
-        user_option_account: Pubkey,
         amount : I80F48,
     ){
         let mango_group = mango_group_cookie.mango_group;
@@ -1929,6 +1921,8 @@ impl MangoProgramTest {
         let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let mango_program_id = self.mango_program_id;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
         
         let instructions = vec![
             //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
@@ -1936,7 +1930,7 @@ impl MangoProgramTest {
             mango::instruction::exercise_option(
                 &mango_program_id,
                 &mango_group_cookie.address,
-                &mango_group_cookie.mango_accounts[user_index].address,
+                &mango_account_pk,
                 &user.pubkey(),
                 &option_market_pda,
                 &mango_group.mango_cache,
@@ -1944,10 +1938,7 @@ impl MangoProgramTest {
                 &q_rb_key,
                 &nb_key,
                 &q_nb_key,
-                &option_market.option_mint,
-                &option_market.market_mint_authority,
-                &user_option_account,
-                &spl_token::id(),
+                &user_trade_data_pk,
                 amount,
         ).unwrap()];
 
@@ -1960,7 +1951,6 @@ impl MangoProgramTest {
         option_market_pda :Pubkey,
         option_market :OptionMarket,
         user_index : usize,
-        user_writers_account: Pubkey,
         amount : I80F48,
         exchange_for : ExchangeFor,
     ){
@@ -1971,6 +1961,9 @@ impl MangoProgramTest {
         let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let mango_program_id = self.mango_program_id;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
+        
         
         let instructions = vec![
             //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
@@ -1986,10 +1979,7 @@ impl MangoProgramTest {
                 &q_rb_key,
                 &nb_key,
                 &q_nb_key,
-                &option_market.writer_token_mint,
-                &option_market.market_mint_authority,
-                &user_writers_account,
-                &spl_token::id(),
+                &user_trade_data_pk,
                 amount,
                 exchange_for,
         ).unwrap()];
