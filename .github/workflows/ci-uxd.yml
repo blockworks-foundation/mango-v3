@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: UXDProtocol/uxd-program
-          tag: v2.3.0 # detached branch in between v2.2.0 and the audited v3.0.0
+          ref: v2.3.0 # detached branch in between v2.2.0 and the audited v3.0.0
           # GitHub's personal access token with access to repository
           token: ${{ secrets.MANGO_CI_UXD }}
           persist-credentials: false
