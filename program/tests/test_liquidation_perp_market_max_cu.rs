@@ -19,7 +19,9 @@ use std::str::FromStr;
 async fn test_liquidation_perp_market_max_cu() {
     let config = MangoProgramTestConfig {
         num_users: 3,
-        compute_limit: 90_000,
+        // other ixs (CreateSpotOpenOrders) take more cu than the liquidate ix in this case,
+        // the liquidate ix 'consumed 83426 of 200000 compute units'
+        compute_limit: 130_000,
         ..MangoProgramTestConfig::default()
     };
     let mut test = MangoProgramTest::start_new(&config).await;
