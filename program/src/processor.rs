@@ -5904,7 +5904,7 @@ impl Processor {
         option_market.option_type = option_type;
         option_market.option_mint = *option_mint.key;
         option_market.writer_token_mint = *writer_token_mint.key;
-        option_market.market_mint_authority = *market_mint_authority.key;
+        option_market.market_authority = *market_mint_authority.key;
         option_market.underlying_token_index = underlying_token_index_usize;
         option_market.quote_token_index = quote_token_index_usize;
         option_market.contract_size = contract_size;

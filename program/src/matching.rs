@@ -23,7 +23,7 @@ use crate::ids::mngo_token;
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
     DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketCache,
-    PerpMarketInfo, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
+    PerpMarketInfo, OptionMarket, UserOptionTradeData, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
 };
 use crate::utils::emit_perp_balances;
 
@@ -91,6 +91,7 @@ pub struct LeafNode {
 
     // Liquidity incentive related parameters
     // Either the best bid or best ask at the time the order was placed
+    // price in case of options
     pub best_initial: i64,
 
     // The time the order was placed
@@ -1107,6 +1108,7 @@ impl<'a> Book<'a> {
                 best_ask_price,
                 match_quantity,
                 best_ask.version,
+                false,
             );
             event_queue.push_back(cast(fill)).unwrap();
 
@@ -1302,6 +1304,7 @@ impl<'a> Book<'a> {
                 best_bid_price,
                 match_quantity,
                 best_bid.version,
+                false,
             );
 
             event_queue.push_back(cast(fill)).unwrap();
@@ -1728,6 +1731,322 @@ impl<'a> Book<'a> {
         }
         Ok(())
     }
+
+
+
+
+
+
+
+
+
+
+
+    // Book impl for options
+    
+    #[inline(never)]
+    pub fn new_order_for_options(
+        &mut self,
+        event_queue: &mut EventQueue,
+        market: &mut OptionMarket,
+        user_trade_data : &mut UserOptionTradeData,
+        user_trade_data_pk : &Pubkey,
+        side: Side,
+        price: i64,
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        order_type: OrderType,
+        client_order_id: u64,
+        now_ts: u64,
+    ) -> MangoResult {
+        match side {
+            Side::Bid => self.new_bid_for_options(
+                event_queue,
+                market,
+                user_trade_data,
+                user_trade_data_pk,
+                price,
+                quantity,
+                order_type,
+                client_order_id,
+                now_ts,
+            ),
+            Side::Ask => self.new_ask_for_options(
+                event_queue,
+                market,
+                user_trade_data,
+                user_trade_data_pk,
+                price,
+                quantity,
+                order_type,
+                client_order_id,
+                now_ts,
+            ),
+        }
+    }
+
+    #[inline(never)]
+    fn new_bid_for_options(
+        &mut self,
+        event_queue: &mut EventQueue,
+        market: &mut OptionMarket,
+        user_trade_data : &mut UserOptionTradeData,
+        user_trade_data_pk : &Pubkey,
+        price: i64,
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check
+        order_type: OrderType,
+        client_order_id: u64,
+        now_ts: u64,
+    ) -> MangoResult {
+        // TODO proper error handling
+        // TODO handle the case where we run out of compute (right now just fails)
+        let (post_only, post_allowed, price) = match order_type {
+            OrderType::Limit => (false, true, price),
+            OrderType::ImmediateOrCancel => (false, false, price),
+            OrderType::PostOnly => (true, true, price),
+            OrderType::Market => (false, false, i64::MAX),
+            OrderType::PostOnlySlide => {
+                let price = if let Some(best_ask_price) = self.get_best_ask_price() {
+                    price.min(best_ask_price.checked_sub(1).ok_or(math_err!())?)
+                } else {
+                    price
+                };
+                (true, true, price)
+            }
+        };
+
+        let order_id = market.gen_order_id(Side::Bid, price);
+        // if post only and price >= best_ask, return
+        // Iterate through book and match against this new bid
+        let mut rem_quantity = quantity; // base lots (aka contracts)
+        while rem_quantity > 0 {
+            let best_ask_h = match self.get_best_ask_handle() {
+                None => break,
+                Some(h) => h,
+            };
+
+            let best_ask = self.asks.get_mut(best_ask_h).unwrap().as_leaf_mut().unwrap();
+            let best_ask_price = best_ask.price();
+
+            if price < best_ask_price {
+                break;
+            } else if post_only {
+                msg!("Order could not be placed due to PostOnly");
+                return Ok(()); // return silently to not fail other instructions in tx
+                               // return Err(throw_err!(MangoErrorCode::PostOnly));
+            }
+
+            let match_quantity = rem_quantity.min(best_ask.quantity);
+            rem_quantity -= match_quantity;
+            best_ask.quantity -= match_quantity;
+
+            let quote_amount = match_quantity.checked_mul(best_ask_price).unwrap().checked_div(10i64.pow(market.number_of_decimals as u32)).unwrap();
+            user_trade_data.add_bids_trade(match_quantity as u64, quote_amount as u64)?;
+
+            let maker_out = best_ask.quantity == 0;
+            let fill = FillEvent::new(
+                Side::Bid,
+                best_ask.owner_slot,
+                maker_out,
+                now_ts,
+                event_queue.header.seq_num,
+                best_ask.owner,
+                best_ask.key,
+                best_ask.client_order_id,
+                ZERO_I80F48,
+                0,
+                best_ask.timestamp,
+                *user_trade_data_pk,
+                order_id,
+                client_order_id,
+                ZERO_I80F48,
+                best_ask_price,
+                match_quantity,
+                best_ask.version,
+                true,
+            );
+            event_queue.push_back(cast(fill)).unwrap();
+
+            // now either best_ask.quantity == 0 or rem_quantity == 0 or both
+            if best_ask.quantity == 0 {
+                // Remove the order from the book
+                let key = best_ask.key;
+                let _removed_node = self.asks.remove_by_key(key).unwrap();
+            }
+        }
+
+        // If there are still quantity unmatched, place on the book
+        if rem_quantity > 0 && post_allowed {
+            if self.bids.is_full() {
+                // If this bid is higher than lowest bid, boot that bid and insert this one
+                let min_bid = self.bids.remove_min().unwrap();
+                check!(price > min_bid.price(), MangoErrorCode::OutOfSpace)?;
+                let event = OutEvent::new(
+                    Side::Bid,
+                    min_bid.owner_slot,
+                    now_ts,
+                    event_queue.header.seq_num,
+                    min_bid.owner,
+                    min_bid.quantity,
+                );
+                event_queue.push_back(cast(event)).unwrap();
+            }
+
+            let owner_slot = user_trade_data
+                .next_order_slot()
+                .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
+            let new_bid = LeafNode::new(
+                market.meta_data.version,
+                owner_slot as u8,
+                order_id,
+                *user_trade_data_pk,
+                rem_quantity,
+                client_order_id,
+                now_ts,
+                0,
+                order_type,
+            );
+            let _result = self.bids.insert_leaf(&new_bid)?;
+
+            // TODO OPT remove if PlacePerpOrder needs more compute
+            msg!("bid on book order_id={} quantity={} price={}", order_id, rem_quantity, price);
+            user_trade_data.add_order( Side::Bid, &new_bid)?;
+        }
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub fn new_ask_for_options(
+        &mut self,
+        event_queue: &mut EventQueue,
+        market: &mut OptionMarket,
+        user_trade_data : &mut UserOptionTradeData,
+        user_trade_data_pk : &Pubkey,
+        price: i64,
+        quantity: i64, // quantity is guaranteed to be greater than zero due to initial check --
+        order_type: OrderType,
+        client_order_id: u64,
+        now_ts: u64,
+    ) -> MangoResult {
+        // TODO proper error handling
+        let (post_only, post_allowed, price) = match order_type {
+            OrderType::Limit => (false, true, price),
+            OrderType::ImmediateOrCancel => (false, false, price),
+            OrderType::PostOnly => (true, true, price),
+            OrderType::Market => (false, false, 0),
+            OrderType::PostOnlySlide => {
+                let price = if let Some(best_bid_price) = self.get_best_bid_price() {
+                    price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
+                } else {
+                    price
+                };
+                (true, true, price)
+            }
+        };
+
+        let order_id = market.gen_order_id(Side::Ask, price);
+
+        // if post only and price >= best_ask, return
+        // Iterate through book and match against this new bid
+        let mut rem_quantity = quantity; // base lots (aka contracts)
+        while rem_quantity > 0 {
+            let best_bid_h = match self.get_best_bid_handle() {
+                None => break,
+                Some(h) => h,
+            };
+
+            let best_bid = self.bids.get_mut(best_bid_h).unwrap().as_leaf_mut().unwrap();
+            let best_bid_price = best_bid.price();
+
+            if price > best_bid_price {
+                break;
+            } else if post_only {
+                msg!("Order could not be placed due to PostOnly");
+                return Ok(()); // return silently to not fail other instructions in tx
+            }
+
+            let match_quantity = rem_quantity.min(best_bid.quantity);
+            rem_quantity -= match_quantity;
+            best_bid.quantity -= match_quantity;
+
+            let quote_amount = match_quantity.checked_mul(best_bid_price).unwrap().checked_div(10i64.pow(market.number_of_decimals as u32)).unwrap();
+            user_trade_data.add_asks_trade(  match_quantity as u64, quote_amount as u64)?;
+            let maker_out = best_bid.quantity == 0;
+
+            let fill = FillEvent::new(
+                Side::Ask,
+                best_bid.owner_slot,
+                maker_out,
+                now_ts,
+                event_queue.header.seq_num,
+                best_bid.owner,
+                best_bid.key,
+                best_bid.client_order_id,
+                ZERO_I80F48,
+                best_bid.best_initial,
+                best_bid.timestamp,
+                *user_trade_data_pk,
+                order_id,
+                client_order_id,
+                ZERO_I80F48,
+                best_bid_price,
+                match_quantity,
+                best_bid.version,
+                true
+            );
+
+            event_queue.push_back(cast(fill)).unwrap();
+
+            // now either best_bid.quantity == 0 or rem_quantity == 0 or both
+            if best_bid.quantity == 0 {
+                // Remove the order from the book
+                let key = best_bid.key;
+                let _removed_node = self.bids.remove_by_key(key).unwrap();
+            }
+        }
+
+        // If there are still quantity unmatched, place on the book
+        if rem_quantity > 0 && post_allowed {
+            if self.asks.is_full() {
+                // If this asks is lower than highest ask, boot that ask and insert this one
+                let max_ask = self.asks.remove_max().unwrap();
+                check!(price < max_ask.price(), MangoErrorCode::OutOfSpace)?;
+                let event = OutEvent::new(
+                    Side::Ask,
+                    max_ask.owner_slot,
+                    now_ts,
+                    event_queue.header.seq_num,
+                    max_ask.owner,
+                    max_ask.quantity,
+                );
+                event_queue.push_back(cast(event)).unwrap();
+            }
+
+            let owner_slot = user_trade_data
+                .next_order_slot()
+                .ok_or(throw_err!(MangoErrorCode::TooManyOpenOrders))?;
+            let new_ask = LeafNode::new(
+                market.meta_data.version,
+                owner_slot as u8,
+                order_id,
+                *user_trade_data_pk,
+                rem_quantity,
+                client_order_id,
+                now_ts,
+                0,
+                order_type,
+            );
+
+            // TODO OPT remove if PlacePerpOrder needs more compute
+            msg!("ask on book order_id={} quantity={} price={}", order_id, rem_quantity, price);
+
+            let _result = self.asks.insert_leaf(&new_ask)?;
+            user_trade_data.add_order( Side::Ask, &new_ask)?;
+        }
+
+        Ok(())
+    }
+
 }
 
 fn determine_ref_vars<'a>(
