@@ -1,6 +1,5 @@
 use crate::*;
 use fixed::types::I80F48;
-use mango::state::*;
 use solana_program::pubkey::Pubkey;
 use std::collections::HashMap;
 

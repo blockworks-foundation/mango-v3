@@ -1670,6 +1670,7 @@ dependencies = [
  "mango-common",
  "mango-logs",
  "mango-macro",
+ "mango-test",
  "num_enum",
  "safe-transmute",
  "serde",
@@ -1718,6 +1719,7 @@ dependencies = [
  "mango-common",
  "mango-logs",
  "mango-macro",
+ "mango-test",
  "num_enum",
  "rand 0.8.5",
  "safe-transmute",
@@ -1761,6 +1763,25 @@ dependencies = [
  "safe-transmute",
  "solana-program",
  "syn",
+]
+
+[[package]]
+name = "mango-test"
+version = "3.0.0"
+dependencies = [
+ "anchor-lang 0.20.1",
+ "bincode",
+ "fixed",
+ "fixed-macro",
+ "mango",
+ "mango-common",
+ "serde",
+ "serum_dex",
+ "solana-logger",
+ "solana-program",
+ "solana-program-test",
+ "solana-sdk",
+ "spl-token",
 ]
 
 [[package]]

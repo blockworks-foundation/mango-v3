@@ -1,8 +1,7 @@
-mod program_test;
 use fixed::types::I80F48;
 use mango::{instruction::*, matching::*, state::*};
-use program_test::cookies::*;
-use program_test::*;
+use mango_test::cookies::*;
+use mango_test::*;
 
 #[test]
 fn test_instruction_serialization() {

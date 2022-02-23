@@ -3,6 +3,9 @@ name = "liquidator"
 version = "3.0.0"
 edition = "2018"
 
+[features]
+test-bpf = []
+
 [dependencies]
 mango = { path = "../program" }
 solana-program = "^1.8.1"
@@ -23,6 +26,7 @@ safe-transmute = "^0.11.1"
 mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
 mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
+mango-test = { path = "../mango-test" }
 switchboard-program = "^0.1.52"
 anchor-lang = "0.19.0"
 

@@ -1,30 +1,22 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use safe_transmute::to_bytes;
+
+use mango::state::AssetType;
+use mango::state::QUOTE_INDEX;
 use safe_transmute::transmute_one_to_bytes;
-use safe_transmute::transmute_to_bytes;
 use solana_program::clock::Epoch;
 use solana_program_test::*;
-use solana_sdk::account::AccountSharedData;
 use solana_sdk::account::WritableAccount;
+use std::str::FromStr;
 
-use crate::tokio::time::sleep;
-use mango::state::{QUOTE_INDEX, ZERO_I80F48};
-use program_test::assertions::*;
-use program_test::cookies::*;
-use program_test::scenarios::*;
-use program_test::*;
-
-mod program_test;
+use mango_test::cookies::*;
+use mango_test::scenarios::*;
+use mango_test::*;
 
 #[tokio::test]
-async fn test_delegate() {
+async fn test_liquidate() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
+    let config = MangoProgramTestConfig::default();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
@@ -51,8 +43,8 @@ async fn test_delegate() {
     liqee_account_override.deposits[btc_index] = I80F48!(1_000_000);
     liqee_account_override.deposits[test.quote_index] = I80F48!(100_000_000_000);
     liqee_account_override.perp_accounts[btc_index].base_position = -20_000;
-    liqee_account_override.perp_accounts[btc_index].quote_position = I80F48!(50_000);
-    liqee_account_override.perp_accounts[eth_index].quote_position = I80F48!(-50_000);
+    liqee_account_override.perp_accounts[btc_index].quote_position = I80F48!(50_000_000_000);
+    liqee_account_override.perp_accounts[eth_index].quote_position = I80F48!(-50_000_000_000);
 
     // === Act ===
     // Step 1: Make deposits
@@ -68,6 +60,20 @@ async fn test_delegate() {
     // AccountSharedData::new_data(10_000_000, &liqee_account_override, &test.mango_program_id);
     test.context.set_account(&mango_group_cookie.mango_accounts[liqee_index].address, &acc);
 
-    // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
+
+    // account net is 100k usdc -1 btc, so guaranteed liq at btc=100k
+    mango_group_cookie.set_oracle(&mut test, btc_index, 100_000.0).await;
+
+    test.perform_liquidate_token_and_perp(
+        &mut mango_group_cookie,
+        liqee_index, // The liqee
+        liqor_index,
+        AssetType::Token,
+        QUOTE_INDEX,
+        AssetType::Perp,
+        btc_index,
+        I80F48::from_str("100000").unwrap(),
+    )
+    .await;
 }

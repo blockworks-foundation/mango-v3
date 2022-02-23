@@ -2,9 +2,10 @@
 members = [
     "common",
     "mango-macro",
-    "program",
     "mango-logs",
-    "liquidator"
+    "mango-test",
+    "liquidator",
+    "program"
 ]
 
 [profile.release]

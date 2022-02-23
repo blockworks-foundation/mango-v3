@@ -26,8 +26,8 @@ spl-token = { version = "^3.0.0", features = ["no-entrypoint"] }
 serum_dex = { version = "0.4.0", git = "https://github.com/blockworks-foundation/serum-dex.git", default-features=false, features = ["no-entrypoint", "program"] }
 static_assertions = "^1.1.0"
 safe-transmute = "^0.11.1"
-mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
+mango-macro = { path = "../mango-macro" }
 mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
 
 # switchboard-program 0.1.59 fails to compile with switchboard-utils 0.1.36
@@ -45,6 +45,7 @@ solana-program-test = "^1.8.1"
 solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
 rand = "0.8.4"
+mango-test = { path = "../mango-test" }
 
 [lib]
 name = "mango"

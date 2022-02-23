@@ -1,7 +1,6 @@
 use anchor_lang::Key;
 use std::borrow::Borrow;
 use std::mem::size_of;
-use std::str::FromStr;
 
 use bincode::deserialize;
 use fixed::types::I80F48;

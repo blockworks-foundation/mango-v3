@@ -1,10 +1,10 @@
-mod program_test;
+
 use fixed::types::I80F48;
 use mango::{matching::*, state::*};
-use program_test::assertions::*;
-use program_test::cookies::*;
-use program_test::scenarios::*;
-use program_test::*;
+use mango_test::assertions::*;
+use mango_test::cookies::*;
+use mango_test::scenarios::*;
+use mango_test::*;
 use solana_program_test::*;
 use std::{mem::size_of, mem::size_of_val};
 

@@ -6,12 +6,12 @@ use solana_program_test::*;
 
 use crate::tokio::time::sleep;
 use mango::state::{QUOTE_INDEX, ZERO_I80F48};
-use program_test::assertions::*;
-use program_test::cookies::*;
-use program_test::scenarios::*;
-use program_test::*;
+use mango_test::assertions::*;
+use mango_test::cookies::*;
+use mango_test::scenarios::*;
+use mango_test::*;
 
-mod program_test;
+
 
 #[tokio::test]
 async fn test_delegate() {

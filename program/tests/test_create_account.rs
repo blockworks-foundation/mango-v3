@@ -3,10 +3,8 @@ use solana_sdk::signature::Signer;
 use solana_sdk::signer::keypair::Keypair;
 
 use mango::state::{MangoAccount, ZERO_I80F48};
-use program_test::cookies::*;
-use program_test::*;
-
-mod program_test;
+use mango_test::cookies::*;
+use mango_test::*;
 
 #[tokio::test]
 async fn test_create_account() {

@@ -1,5 +1,4 @@
 use fixed::types::I80F48;
-use fixed::FixedI128;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
