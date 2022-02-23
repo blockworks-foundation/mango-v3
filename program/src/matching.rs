@@ -1246,8 +1246,8 @@ impl<'a> Book<'a> {
                 break;
             } else if post_only {
                 msg!("Order could not be placed due to PostOnly");
-                return Ok(()); // return silently to not fail other instructions in tx
-                               // return Err(throw_err!(MangoErrorCode::PostOnly));
+                post_allowed = false;
+                break; // return silently to not fail other instructions in tx
             } else if limit == 0 {
                 msg!("Order matching limit reached");
                 post_allowed = false;
@@ -1501,7 +1501,8 @@ impl<'a> Book<'a> {
                 break;
             } else if post_only {
                 msg!("Order could not be placed due to PostOnly");
-                return Ok(()); // return silently to not fail other instructions in tx
+                post_allowed = false;
+                break; // return silently to not fail other instructions in tx
             } else if limit == 0 {
                 msg!("Order matching limit reached");
                 post_allowed = false;
