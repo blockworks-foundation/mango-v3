@@ -1175,7 +1175,7 @@ impl HealthCache {
     }
 }
 
-#[derive(Copy, Clone, Pod, Loadable)]
+#[derive(Copy, Clone, Pod, Loadable, TriviallyTransmutable)]
 #[repr(C)]
 pub struct MangoAccount {
     pub meta_data: MetaData,

@@ -150,7 +150,7 @@ impl MangoProgramTest {
                 decimals: 6,
                 unit: 10u64.pow(6) as f64,
                 base_lot: 1000 as f64,
-                quote_lot: 10 as f64,
+                quote_lot: 100 as f64,
                 pubkey: None,
             }, // symbol: "ETH".to_string()
             MintCookie {
@@ -718,6 +718,7 @@ impl MangoProgramTest {
             &perp_market.bids,
             &perp_market.asks,
             &perp_market.event_queue,
+            None,
             &mango_account.spot_open_orders,
             order_side,
             order_price as i64,

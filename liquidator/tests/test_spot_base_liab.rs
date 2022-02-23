@@ -1,8 +1,16 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
+use safe_transmute::to_bytes;
+use safe_transmute::transmute_one_to_bytes;
+use safe_transmute::transmute_to_bytes;
+use solana_program::clock::Epoch;
 use solana_program_test::*;
+use solana_sdk::account::AccountSharedData;
+use solana_sdk::account::WritableAccount;
 
 use crate::tokio::time::sleep;
 use mango::state::{QUOTE_INDEX, ZERO_I80F48};
@@ -16,7 +24,7 @@ mod program_test;
 #[tokio::test]
 async fn test_delegate() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 3, num_mints: 2 };
+    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 2, num_mints: 16 };
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
@@ -25,36 +33,41 @@ async fn test_delegate() {
     // General parameters
     let liqor_index: usize = 0;
     let liqee_index: usize = 1;
-    let mm_index: usize = 2;
-    let mint_index: usize = 0;
-    let base_price: f64 = 10_000.0;
-    let base_size: f64 = 1.0;
-    let quote_mint = test.quote_mint;
+    let btc_index = 2;
+    let eth_index = 3;
 
     // Set oracles
-    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+    mango_group_cookie.set_oracle(&mut test, btc_index, 50_000.0).await;
+    mango_group_cookie.set_oracle(&mut test, eth_index, 2_500.0).await;
 
     // Deposit amounts
-    let user_deposits = vec![
-        (liqor_index, test.quote_index, 100.0),
-        (liqee_index, mint_index, 0.001),
-        (mm_index, test.quote_index, 1000.0),
+    let liqor_deposits = vec![
+        (liqor_index, btc_index, 10.0),
+        (liqor_index, eth_index, 100.0),
+        (liqor_index, test.quote_index, 1_000_000.0),
     ];
 
-    // Matched Spot Orders
-    let matched_spot_orders = vec![vec![
-        (liqee_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price),
-        (mm_index, mint_index, serum_dex::matching::Side::Ask, base_size, base_price),
-    ]];
+    let mut liqee_account_override = mango_group_cookie.mango_accounts[liqee_index].mango_account;
+    liqee_account_override.deposits[btc_index] = I80F48!(1_000_000);
+    liqee_account_override.deposits[test.quote_index] = I80F48!(100_000_000_000);
+    liqee_account_override.perp_accounts[btc_index].base_position = -20_000;
+    liqee_account_override.perp_accounts[btc_index].quote_position = I80F48!(50_000);
+    liqee_account_override.perp_accounts[eth_index].quote_position = I80F48!(-50_000);
 
     // === Act ===
     // Step 1: Make deposits
-    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+    deposit_scenario(&mut test, &mut mango_group_cookie, &liqor_deposits).await;
 
-    // Step 2: Place and match an order for 1 BTC @ 15_000
-    match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
+    let acc = WritableAccount::create(
+        10_000_000,
+        transmute_one_to_bytes(&liqee_account_override).to_vec(),
+        test.mango_program_id,
+        bool::default(),
+        Epoch::default(),
+    );
+    // AccountSharedData::new_data(10_000_000, &liqee_account_override, &test.mango_program_id);
+    test.context.set_account(&mango_group_cookie.mango_accounts[liqee_index].address, &acc);
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
-    // TODO
 }
