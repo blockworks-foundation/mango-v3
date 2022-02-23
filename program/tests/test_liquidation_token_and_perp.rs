@@ -137,7 +137,6 @@ async fn test_liquidation_token_and_perp_basic() {
     // Step 6: Perform a couple of liquidations
     for _ in 0..6 {
         mango_group_cookie.run_keeper(&mut test).await;
-        // fixme not working
         test.perform_liquidate_token_and_perp(
             &mut mango_group_cookie,
             bidder_user_index, // The liqee
