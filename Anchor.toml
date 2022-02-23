@@ -5,7 +5,8 @@ members = [
     "common",
     "mango-macro",
     "program",
-    "mango-logs"
+    "mango-logs",
+    "liquidator"
 ]
 
 [provider]
