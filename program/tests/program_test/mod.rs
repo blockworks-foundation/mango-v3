@@ -26,7 +26,7 @@ use solana_sdk::{
 };
 use spl_token::{state::*, *};
 
-use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*};
+use mango::{entrypoint::*, ids::*, instruction::*, matching::*, oracle::*, state::*, utils::*, queue::*};
 
 use serum_dex::instruction::NewOrderInstructionV3;
 use solana_program::entrypoint::ProgramResult;
@@ -470,8 +470,22 @@ impl MangoProgramTest {
         )];
 
         self.process_transaction(&instructions, Some(&[&keypair])).await.unwrap();
-
         return keypair.pubkey();
+    }
+
+    #[allow(dead_code)]
+    pub async fn create_account_for_address(&mut self, size: usize, owner: &Pubkey, address: &Pubkey) {
+        let rent = self.rent.minimum_balance(size);
+
+        let instructions = [system_instruction::create_account(
+            &self.context.payer.pubkey(),
+            address,
+            rent as u64,
+            size as u64,
+            owner,
+        )];
+
+        self.process_transaction(&instructions, None).await.unwrap();
     }
 
     #[allow(dead_code)]
@@ -1843,16 +1857,19 @@ impl MangoProgramTest {
             &quote_amount.to_le_bytes(), 
             &expiry.to_le_bytes()];
         let (market_pda, _) = Pubkey::find_program_address( mango_options_market_seeds, &self.mango_program_id );
-        let (bids_pda, _) = Pubkey::find_program_address( &[b"mango_option_bids", market_pda.as_ref()], &self.mango_program_id );
-        let (asks_pda, _) = Pubkey::find_program_address( &[b"mango_option_asks", market_pda.as_ref()], &self.mango_program_id );
-        let (event_q_pda, _) = Pubkey::find_program_address( &[b"mango_option_event_queue", market_pda.as_ref()], &self.mango_program_id );
+        // let (bids_pda, _) = Pubkey::find_program_address( &[b"mango_option_bids", market_pda.as_ref()], &self.mango_program_id );
+        // let (asks_pda, _) = Pubkey::find_program_address( &[b"mango_option_asks", market_pda.as_ref()], &self.mango_program_id );
+        // let (event_q_pda, _) = Pubkey::find_program_address( &[b"mango_option_event_queue", market_pda.as_ref()], &self.mango_program_id );
+        let bids_key = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
+        let asks_key = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
+        let event_q_key = self.create_account(size_of::<EventQueue>(), &mango_program_id).await;
 
         let instructions = vec![mango::instruction::create_option_market(
             &mango_program_id,
             &market_pda,
-            &bids_pda,
-            &asks_pda,
-            &event_q_pda,
+            &bids_key,
+            &asks_key,
+            &event_q_key,
             &user.pubkey(),
             &solana_sdk::system_program::id(),
             underlying_index,

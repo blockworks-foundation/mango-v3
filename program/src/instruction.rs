@@ -972,9 +972,9 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction (9)
     /// 
     /// 0. [writable] Option Market a pda account which will store all the information related to the option market [b"mango_option_market", [underlying_index, quote_index], [optiontype],contract_size.le, quote_amount.le, expiry.le]]
-    /// 1. [writable] bids create a PDA for authority mint with following keys [b"mango_option_bids", option_market.key]
-    /// 2. [writable] asks create a PDA for authority mint with following keys [b"mango_option_asks", option_market.key]
-    /// 3. [writable] event_queue create a PDA for authority mint with following keys [b"mango_option_event_queue", option_market.key]
+    /// 1. [writable] bids
+    /// 2. [writable] asks
+    /// 3. [writable] event_queue
     /// 4. [writable, signer] payer
     /// 5. system program
     CreateOptionMarket {

@@ -5865,52 +5865,15 @@ impl Processor {
             mango_options_market_seeds,
             &[],
         )?;
-/*
-        seed_and_create_pda(
-            program_id,
-            payer,
-            &rent_info,
-            size_of::<BookSide>(),
-            program_id,
-            system_program,
-            bids_ai,
-            &[b"mango_option_bids", option_market_ai.key.as_ref()],
-            &[],
-        )?;
 
-        seed_and_create_pda(
-            program_id,
-            payer,
-            &rent_info,
-            size_of::<BookSide>(),
-            program_id,
-            system_program,
-            asks_ai,
-            &[b"mango_option_asks", option_market_ai.key.as_ref()],
-            &[],
-        )?;
-
-        seed_and_create_pda(
-            program_id,
-            payer,
-            &rent_info,
-            size_of::<EventQueue>(),
-            program_id,
-            system_program,
-            event_queue_ai,
-            &[b"mango_option_event_queue", option_market_ai.key.as_ref()],
-            &[],
-        )?;
-*/
         // Initialize the Bids
-        //let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent_info)?;
+        let _bids = BookSide::load_and_init(bids_ai, program_id, DataType::Bids, &rent_info)?;
 
         // Initialize the Asks
-        //let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent_info)?;
+        let _asks = BookSide::load_and_init(asks_ai, program_id, DataType::Asks, &rent_info)?;
 
         // Initialize the EventQueue
-        // TODO: check that the event queue is reasonably large
-        //let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent_info)?;
+        let _event_queue = EventQueue::load_and_init(event_queue_ai, program_id, &rent_info)?;
 
         // initialize market
         let _option_market = OptionMarket::load_and_init(option_market_ai, 
