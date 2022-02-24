@@ -40,8 +40,8 @@ async fn test_liquidate() {
     ];
 
     let mut liqee_account_override = mango_group_cookie.mango_accounts[liqee_index].mango_account;
-    liqee_account_override.deposits[btc_index] = I80F48!(1_000_000);
-    liqee_account_override.deposits[test.quote_index] = I80F48!(100_000_000_000);
+    liqee_account_override.deposits[btc_index] = I80F48!(1);
+    liqee_account_override.deposits[test.quote_index] = I80F48!(100_000);
     liqee_account_override.perp_accounts[btc_index].base_position = -20_000;
     liqee_account_override.perp_accounts[btc_index].quote_position = I80F48!(50_000_000_000);
     liqee_account_override.perp_accounts[eth_index].quote_position = I80F48!(-50_000_000_000);
@@ -60,20 +60,41 @@ async fn test_liquidate() {
     // AccountSharedData::new_data(10_000_000, &liqee_account_override, &test.mango_program_id);
     test.context.set_account(&mango_group_cookie.mango_accounts[liqee_index].address, &acc);
 
-    mango_group_cookie.run_keeper(&mut test).await;
-
     // account net is 100k usdc -1 btc, so guaranteed liq at btc=100k
     mango_group_cookie.set_oracle(&mut test, btc_index, 100_000.0).await;
 
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    test.perform_liquidate_perp_market(
+        &mut mango_group_cookie,
+        btc_index,
+        liqee_index,
+        liqor_index,
+        -100000,
+    )
+    .await;
+
     test.perform_liquidate_token_and_perp(
         &mut mango_group_cookie,
-        liqee_index, // The liqee
+        liqee_index,
         liqor_index,
         AssetType::Token,
-        QUOTE_INDEX,
+        btc_index,
         AssetType::Perp,
         btc_index,
-        I80F48::from_str("100000").unwrap(),
+        I80F48!(1_000_000_000_000),
+    )
+    .await;
+
+    test.perform_liquidate_token_and_perp(
+        &mut mango_group_cookie,
+        liqee_index,
+        liqor_index,
+        AssetType::Token,
+        test.quote_index,
+        AssetType::Perp,
+        eth_index,
+        I80F48!(1_000_000_000_000),
     )
     .await;
 }
