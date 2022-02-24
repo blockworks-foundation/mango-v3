@@ -13,6 +13,28 @@ use mango_test::cookies::*;
 use mango_test::scenarios::*;
 use mango_test::*;
 
+fn get_deposit_for_user(
+    mango_group_cookie: &MangoGroupCookie,
+    user_index: usize,
+    mint_index: usize,
+) -> I80F48 {
+    mango_group_cookie.mango_accounts[user_index]
+        .mango_account
+        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
+        .unwrap()
+}
+
+fn get_borrow_for_user(
+    mango_group_cookie: &MangoGroupCookie,
+    user_index: usize,
+    mint_index: usize,
+) -> I80F48 {
+    mango_group_cookie.mango_accounts[user_index]
+        .mango_account
+        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
+        .unwrap()
+}
+
 #[tokio::test]
 async fn test_liquidate() {
     // === Arrange ===
@@ -97,4 +119,37 @@ async fn test_liquidate() {
         I80F48!(1_000_000_000_000),
     )
     .await;
+
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    let liqee_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqee_index, btc_index);
+    dbg!(liqee_btc_deposit);
+    let liqee_quote_deposit =
+        get_deposit_for_user(&mango_group_cookie, liqee_index, test.quote_index);
+    dbg!(liqee_quote_deposit);
+
+    let liqee_btc_perp =
+        mango_group_cookie.mango_accounts[liqee_index].mango_account.perp_accounts[btc_index];
+    dbg!(liqee_btc_perp.base_position);
+    dbg!(liqee_btc_perp.quote_position);
+
+    let liqee_eth_perp =
+        mango_group_cookie.mango_accounts[liqee_index].mango_account.perp_accounts[eth_index];
+    dbg!(liqee_eth_perp.base_position);
+    dbg!(liqee_eth_perp.quote_position);
+
+    let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_index, btc_index);
+    dbg!(liqor_btc_deposit);
+    let liqor_quote_deposit =
+        get_deposit_for_user(&mango_group_cookie, liqor_index, test.quote_index);
+    dbg!(liqor_quote_deposit);
+
+    let liqor_btc_perp =
+        mango_group_cookie.mango_accounts[liqor_index].mango_account.perp_accounts[btc_index];
+    dbg!(liqor_btc_perp.base_position);
+    dbg!(liqor_btc_perp.quote_position);
+    let liqor_eth_perp =
+        mango_group_cookie.mango_accounts[liqor_index].mango_account.perp_accounts[eth_index];
+    dbg!(liqor_eth_perp.base_position);
+    dbg!(liqor_eth_perp.quote_position);
 }
