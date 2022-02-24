@@ -6135,6 +6135,115 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    fn create_options_order(program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount : i64,
+        price : i64,
+        side : Side, 
+        client_order_id: u64,
+    ) -> MangoResult {
+
+        check!(amount.is_positive(), MangoErrorCode::InvalidParam)?;
+        check!(price.is_positive(), MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 11;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // read
+            mango_account_ai, // mut
+            owner_ai, // read, signer
+            user_data_ai, // mut
+            option_market_ai, // read
+            mango_cache_ai, // read
+            bids_ai, // mut
+            asks_ai, // mut
+            event_queue_ai, // mut
+            quote_root_bank_ai, // read
+            quote_node_bank_ai, // write
+        ] = accounts;
+
+        let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        check!(now_ts > option_market.expiry, MangoErrorCode::OptionExpired )?;
+        check!(*bids_ai.key == option_market.bids, MangoErrorCode::InvalidAccount )?;
+        check!(*asks_ai.key == option_market.asks, MangoErrorCode::InvalidAccount )?;
+        check!(*event_queue_ai.key == option_market.event_queue, MangoErrorCode::InvalidAccount )?;
+        // load user data
+        let mut user_trade_data = UserOptionTradeData::load_mut_checked(
+            user_data_ai, 
+            program_id, 
+            option_market_ai.key, 
+            mango_account_ai.key)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        // mango tokens are traded in USDC / Mango group quote token
+        check!(mango_group.tokens[QUOTE_INDEX].root_bank == *quote_root_bank_ai.key, MangoErrorCode::InvalidAccount)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut book = Book::load_checked_for_options(program_id, bids_ai, asks_ai, &option_market)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked_for_options(event_queue_ai, program_id, &option_market)?;
+        let current_usdc_locked = user_trade_data.number_of_usdc_locked;
+
+        if side == Side::Bid {
+            let decimal_multiplier =  10i64.pow(option_market.number_of_decimals as u32);
+            let total_price = amount.checked_mul(price).unwrap().checked_div(decimal_multiplier).unwrap();
+            // lock the total price in the user trade data
+            user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_add( total_price as u64 ).unwrap();
+
+            let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+            let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+            let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+            check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+            let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+            // deduct USDC from client account
+            checked_sub_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                QUOTE_INDEX,
+                I80F48::from_num(total_price))?;
+        }
+
+        book.new_order_for_options(&mut event_queue, 
+            &mut option_market, 
+            &mut user_trade_data, 
+            user_data_ai.key, 
+            side, 
+            price, 
+            amount, 
+            OrderType::Limit, 
+            client_order_id, 
+            now_ts)?;
+
+        // transfer usdc of already matched asked orders
+        if side == Side::Ask && user_trade_data.number_of_usdc_locked > current_usdc_locked {
+            
+            let usdc_diff = user_trade_data.number_of_usdc_locked.checked_sub(current_usdc_locked).unwrap();
+            user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_sub(usdc_diff).unwrap();
+
+            let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+            let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+            let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+            check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+            let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+            // deduct USDC from client account
+            checked_add_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                QUOTE_INDEX,
+                I80F48::from_num(usdc_diff))?;
+        }
+        Ok(())
+    }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
@@ -6655,7 +6764,16 @@ impl Processor {
             } => {
                 msg!("Mango: Burn writer's tokens");
                 Self::exchange_writers_token(program_id, accounts, amount, exchange_for)
-            }
+            },
+            MangoInstruction::CreateOptionsOrder {
+                amount,
+                price,
+                side, 
+                client_order_id,
+            } => {
+                msg!("Mango: Create option order");
+                Self::create_options_order(program_id, accounts, amount, price, side, client_order_id)
+            },
         }
     }
 }

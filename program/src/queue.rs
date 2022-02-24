@@ -1,6 +1,6 @@
 use crate::error::{check_assert, MangoErrorCode, MangoResult, SourceFileId};
 use crate::matching::Side;
-use crate::state::{DataType, MetaData, PerpMarket};
+use crate::state::{DataType, MetaData, PerpMarket, OptionMarket};
 use crate::utils::strip_header_mut;
 
 use fixed::types::I80F48;
@@ -180,6 +180,16 @@ impl<'a> EventQueue<'a> {
     ) -> MangoResult<Self> {
         check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
         check_eq!(&perp_market.event_queue, account.key, MangoErrorCode::InvalidAccount)?;
+        Self::load_mut(account)
+    }
+
+    pub fn load_mut_checked_for_options(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        option_market: &OptionMarket,
+    ) -> MangoResult<Self> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        check_eq!(&option_market.event_queue, account.key, MangoErrorCode::InvalidAccount)?;
         Self::load_mut(account)
     }
 

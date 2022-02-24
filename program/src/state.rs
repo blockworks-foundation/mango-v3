@@ -2758,7 +2758,7 @@ pub struct UserOptionTradeData {
     pub client_order_ids: [u64; MAX_OPTIONS_OPEN_ORDERS],
 
     //nb of usdc locked in trading
-    number_of_usdc_locked : u64,
+    pub number_of_usdc_locked : u64,
     bids_quantity : i64,
     asks_quantity: i64,
 }

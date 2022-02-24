@@ -362,6 +362,25 @@ impl BookSide {
         Ok(state)
     }
 
+    pub fn load_mut_checked_of_options<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        option_market: &OptionMarket,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        let state = Self::load_mut(account)?;
+        check!(state.meta_data.is_initialized, MangoErrorCode::Default)?;
+
+        match DataType::try_from(state.meta_data.data_type).unwrap() {
+            DataType::Bids => check!(account.key == &option_market.bids, MangoErrorCode::Default)?,
+            DataType::Asks => check!(account.key == &option_market.asks, MangoErrorCode::Default)?,
+            _ => return Err(throw!()),
+        }
+
+        Ok(state)
+    }
+
+
     pub fn load_and_init<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -1732,18 +1751,22 @@ impl<'a> Book<'a> {
         Ok(())
     }
 
-
-
-
-
-
-
-
-
-
-
     // Book impl for options
     
+    pub fn load_checked_for_options(
+        program_id: &Pubkey,
+        bids_ai: &'a AccountInfo,
+        asks_ai: &'a AccountInfo,
+        option_market: &OptionMarket,
+    ) -> MangoResult<Self> {
+        check!(bids_ai.key == &option_market.bids, MangoErrorCode::InvalidAccount)?;
+        check!(asks_ai.key == &option_market.asks, MangoErrorCode::InvalidAccount)?;
+        Ok(Self {
+            bids: BookSide::load_mut_checked_of_options(bids_ai, program_id, option_market)?,
+            asks: BookSide::load_mut_checked_of_options(asks_ai, program_id, option_market)?,
+        })
+    }
+
     #[inline(never)]
     pub fn new_order_for_options(
         &mut self,
