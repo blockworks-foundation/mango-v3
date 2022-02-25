@@ -1862,7 +1862,11 @@ impl MangoProgramTest {
         // let (event_q_pda, _) = Pubkey::find_program_address( &[b"mango_option_event_queue", market_pda.as_ref()], &self.mango_program_id );
         let bids_key = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
         let asks_key = self.create_account(size_of::<BookSide>(), &mango_program_id).await;
-        let event_q_key = self.create_account(size_of::<EventQueue>(), &mango_program_id).await;
+        let max_num_events = 32;
+        let event_q_key = self.create_account(
+                size_of::<EventQueue>() + size_of::<AnyEvent>() * max_num_events,
+                &mango_program_id,
+            ).await;
 
         let instructions = vec![mango::instruction::create_option_market(
             &mango_program_id,
@@ -2033,6 +2037,7 @@ impl MangoProgramTest {
                 &option_market.event_queue,
                 &q_rb_key,
                 &q_nb_key,
+                &solana_sdk::system_program::id(),
                 amount,
                 price,
                 side,

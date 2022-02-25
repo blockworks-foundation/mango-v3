@@ -1863,7 +1863,9 @@ impl<'a> Book<'a> {
             best_ask.quantity -= match_quantity;
 
             let quote_amount = match_quantity.checked_mul(best_ask_price).unwrap().checked_div(10i64.pow(market.number_of_decimals as u32)).unwrap();
-            user_trade_data.add_bids_trade(match_quantity as u64, quote_amount as u64)?;
+            let quote_amount_locked = match_quantity.checked_mul(price).unwrap().checked_div(10i64.pow(market.number_of_decimals as u32)).unwrap();
+            check!(quote_amount < quote_amount_locked, MangoErrorCode::MathError)?;
+            user_trade_data.add_bids_trade(match_quantity as u64, quote_amount as u64, (quote_amount_locked - quote_amount) as u64)?;
 
             let maker_out = best_ask.quantity == 0;
             let fill = FillEvent::new(

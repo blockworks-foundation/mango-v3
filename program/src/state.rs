@@ -2759,6 +2759,8 @@ pub struct UserOptionTradeData {
 
     //nb of usdc locked in trading
     pub number_of_usdc_locked : u64,
+    pub number_of_usdc_to_settle : u64,
+    pub number_of_locked_options_tokens : u64,
     bids_quantity : i64,
     asks_quantity: i64,
 }
@@ -2843,17 +2845,20 @@ impl UserOptionTradeData {
         Ok(trade_data)
     }
 
-    pub fn add_bids_trade(&mut self, match_quantity: u64, quote_amount:u64 ) -> MangoResult {
+    pub fn add_bids_trade(&mut self, match_quantity: u64, quote_amount:u64, remaining_amount:u64 ) -> MangoResult {
         check!(self.number_of_usdc_locked >= quote_amount, MangoErrorCode::InsufficientFunds)?;
         self.number_of_option_tokens = self.number_of_option_tokens.checked_add(match_quantity).unwrap();
         self.number_of_usdc_locked = self.number_of_usdc_locked.checked_sub(quote_amount).unwrap();
+        // move difference from locked to settled
+        self.number_of_usdc_locked = self.number_of_usdc_locked.checked_sub(remaining_amount).unwrap();
+        self.number_of_usdc_to_settle = self.number_of_usdc_to_settle.checked_add(remaining_amount).unwrap();
         Ok(())
     }
 
     pub fn add_asks_trade(&mut self, match_quantity: u64, quote_amount:u64 ) -> MangoResult {
-        check!(self.number_of_option_tokens >= match_quantity, MangoErrorCode::InsufficientFunds)?;
-        self.number_of_option_tokens = self.number_of_option_tokens.checked_sub(match_quantity).unwrap();
-        self.number_of_usdc_locked = self.number_of_usdc_locked.checked_add(quote_amount).unwrap();
+        check!(self.number_of_locked_options_tokens >= match_quantity, MangoErrorCode::InsufficientFunds)?;
+        self.number_of_locked_options_tokens = self.number_of_locked_options_tokens.checked_sub(match_quantity).unwrap();
+        self.number_of_usdc_to_settle = self.number_of_usdc_to_settle.checked_add(quote_amount).unwrap();
         Ok(())
     }
     

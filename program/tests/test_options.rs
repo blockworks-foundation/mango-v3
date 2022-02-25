@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::{mem::size_of, mem::size_of_val};
 use fixed::types::I80F48;
 use solana_sdk::signature::Keypair;
+use solana_program::pubkey::Pubkey;
 
 #[tokio::test]
 async fn test_american_options() {
@@ -310,13 +311,51 @@ async fn test_placing_orders_for_options() {
     // deposit some underlying tokens for user0
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
+    test.perform_deposit(&mango_group_cookie, 1, QUOTE_INDEX, 100_000_000).await;
     // write option with user0
     let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, option_market_pk, &option_market, 0, I80F48::from_num(10_000_000)).await;
-
+    println!("User0 places ask of 1 option @0.5 USDC");
     // place trades with user0
     // place ask of 50 cents USDC for 1 option contract
     test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, 500_000, Side::Ask, 0).await;
     {
         // check order in the asks
+        let asks = test.load_account::<BookSide>(option_market.asks).await;
+        let mut iter = BookSideIter::new(&asks);
+        let leaf = iter.next().unwrap();
+        assert_eq!(leaf.order_type, OrderType::Limit);
+        assert_eq!(leaf.price(), 500_000);
+        assert_eq!(leaf.quantity, 1_000_000);
+        assert_eq!(leaf.client_order_id, 0);
+        assert_eq!(leaf.owner, u0_trade_data_pk);
+
+        let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 9_000_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 10_000_000);
+        assert_eq!(trade_data.order_market[0], true);
+        assert_eq!(trade_data.order_side[0], Side::Ask);
+        assert_eq!(trade_data.client_order_ids[0], 0);
+        assert_eq!(trade_data.number_of_usdc_locked, 0 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 1_000_000 );
+    }
+    println!("User1 places ask of 0.5 option @0.6 USDC");
+    // user 1 places order for bid
+    let mango_account_u1 = mango_group_cookie.mango_accounts[1].address;
+    let (u1_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pk.as_ref(), mango_account_u1.as_ref()], &test.mango_program_id );
+        
+    let usdc_with_u1 :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
+    test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 1, 500_000, 600_000, Side::Bid, 0).await;
+    {
+        // Should be executed at 0.5 USDC
+        let trade_data = test.load_account::<UserOptionTradeData>(u1_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 500_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 0);
+        assert_eq!(trade_data.number_of_usdc_locked, 0 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
+
+        let usdc_with_u1_after :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
+        assert_eq!(usdc_with_u1 - usdc_with_u1_after, 250_000);
     }
 }

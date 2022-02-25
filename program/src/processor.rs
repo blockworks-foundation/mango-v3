@@ -5949,7 +5949,6 @@ impl Processor {
             total_underlying_amount)?;
         option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_add(total_underlying_amount).unwrap();
         
-        msg!("A");
         // update user trade data
         if user_data_ai.data_len() == 0 {
             let rent_info = Rent::get()?;
@@ -5966,7 +5965,6 @@ impl Processor {
             )?;
         }
         
-        msg!("B");
         let mut user_trade_data = UserOptionTradeData::load_and_init_if_needed(
             user_data_ai, program_id, 
             option_market_ai.key, 
@@ -6086,6 +6084,9 @@ impl Processor {
         } else {
             check!(now_ts > option_market.expiry_to_exercise_european,  MangoErrorCode::OptionNotYetExpired)?;
         }
+        let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
+        check!( user_trade_data.number_of_writers_tokens >= amount, MangoErrorCode::InsufficientFunds )?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
@@ -6128,8 +6129,6 @@ impl Processor {
             token_amount)?;
         
         // update user trade data
-        let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
-        check!( user_trade_data.number_of_writers_tokens >= amount, MangoErrorCode::InsufficientFunds )?;
         user_trade_data.number_of_writers_tokens = user_trade_data.number_of_writers_tokens.checked_sub(amount.to_num::<u64>()).unwrap();
         
         Ok(())
@@ -6147,13 +6146,13 @@ impl Processor {
         check!(amount.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(price.is_positive(), MangoErrorCode::InvalidParam)?;
 
-        const NUM_FIXED: usize = 11;
+        const NUM_FIXED: usize = 12;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
             mango_group_ai, // read
             mango_account_ai, // mut
-            owner_ai, // read, signer
+            owner_ai, // mut, signer
             user_data_ai, // mut
             option_market_ai, // write
             mango_cache_ai, // read
@@ -6161,7 +6160,8 @@ impl Processor {
             asks_ai, // mut
             event_queue_ai, // mut
             quote_root_bank_ai, // read
-            quote_node_bank_ai, // write
+            quote_node_bank_ai, // write,
+            system_program, // read
         ] = accounts;
 
         let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
@@ -6173,11 +6173,27 @@ impl Processor {
         check!(*asks_ai.key == option_market.asks, MangoErrorCode::InvalidAccount )?;
         check!(*event_queue_ai.key == option_market.event_queue, MangoErrorCode::InvalidAccount )?;
         // load user data
-        let mut user_trade_data = UserOptionTradeData::load_mut_checked(
+        // update user trade data
+        if user_data_ai.data_len() == 0 {
+            let rent_info = Rent::get()?;
+            seed_and_create_pda(
+                program_id,
+                owner_ai,
+                &rent_info,
+                size_of::<UserOptionTradeData>(),
+                program_id,
+                system_program,
+                user_data_ai,
+                &[b"mango_option_user_data", option_market_ai.key.as_ref(), mango_account_ai.key.as_ref()], 
+                &[],
+            )?;
+        }
+        let mut user_trade_data = UserOptionTradeData::load_and_init_if_needed(
             user_data_ai, 
             program_id, 
             option_market_ai.key, 
-            mango_account_ai.key)?;
+            mango_account_ai.key, 
+            option_market.number_of_decimals)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         // mango tokens are traded in USDC / Mango group quote token
@@ -6192,27 +6208,33 @@ impl Processor {
         let mut book = Book::load_checked_for_options(program_id, bids_ai, asks_ai, &option_market)?;
         let mut event_queue =
             EventQueue::load_mut_checked_for_options(event_queue_ai, program_id, &option_market)?;
-        let current_usdc_locked = user_trade_data.number_of_usdc_locked;
+        
+        match side {
+            Side::Bid => {
+                let decimal_multiplier =  10i64.pow(option_market.number_of_decimals as u32);
+                let total_price = amount.checked_mul(price).unwrap().checked_div(decimal_multiplier).unwrap();
+                // lock the total price in the user trade data
+                user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_add( total_price as u64 ).unwrap();
 
-        if side == Side::Bid {
-            let decimal_multiplier =  10i64.pow(option_market.number_of_decimals as u32);
-            let total_price = amount.checked_mul(price).unwrap().checked_div(decimal_multiplier).unwrap();
-            // lock the total price in the user trade data
-            user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_add( total_price as u64 ).unwrap();
-
-            let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-            let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
-            let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-            check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
-            let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-            // deduct USDC from client account
-            checked_sub_net(root_bank_cache, 
-                &mut node_bank, 
-                &mut mango_account, 
-                QUOTE_INDEX,
-                I80F48::from_num(total_price))?;
+                let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+                let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+                let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+                check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+                let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+                // deduct USDC from client account
+                checked_sub_net(root_bank_cache, 
+                    &mut node_bank, 
+                    &mut mango_account, 
+                    QUOTE_INDEX,
+                    I80F48::from_num(total_price))?;
+            },
+            Side::Ask => {
+                check!((amount as u64) <= user_trade_data.number_of_option_tokens, MangoErrorCode::InsufficientFunds)?;
+                user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_sub(amount as u64).unwrap();
+                user_trade_data.number_of_locked_options_tokens = user_trade_data.number_of_locked_options_tokens.checked_add(amount as u64).unwrap();
+            }
         }
-
+        
         book.new_order_for_options(&mut event_queue, 
             &mut option_market, 
             &mut user_trade_data, 
@@ -6225,22 +6247,20 @@ impl Processor {
             now_ts)?;
 
         // transfer usdc of already matched asked orders
-        if side == Side::Ask && user_trade_data.number_of_usdc_locked > current_usdc_locked {
+        if user_trade_data.number_of_usdc_to_settle > 0 {
             
-            let usdc_diff = user_trade_data.number_of_usdc_locked.checked_sub(current_usdc_locked).unwrap();
-            user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_sub(usdc_diff).unwrap();
-
             let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
             let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
             let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
             check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
             let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-            // deduct USDC from client account
+            // add unsettled USDC to client account
             checked_add_net(root_bank_cache, 
                 &mut node_bank, 
                 &mut mango_account, 
                 QUOTE_INDEX,
-                I80F48::from_num(usdc_diff))?;
+                I80F48::from_num(user_trade_data.number_of_usdc_to_settle))?;
+            user_trade_data.number_of_usdc_to_settle = 0;
         }
         Ok(())
     }
