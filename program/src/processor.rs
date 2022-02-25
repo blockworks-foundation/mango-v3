@@ -6136,7 +6136,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn create_options_order(program_id: &Pubkey,
+    fn place_options_order(program_id: &Pubkey,
         accounts: &[AccountInfo],
         amount : i64,
         price : i64,
@@ -6155,7 +6155,7 @@ impl Processor {
             mango_account_ai, // mut
             owner_ai, // read, signer
             user_data_ai, // mut
-            option_market_ai, // read
+            option_market_ai, // write
             mango_cache_ai, // read
             bids_ai, // mut
             asks_ai, // mut
@@ -6168,7 +6168,7 @@ impl Processor {
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
-        check!(now_ts > option_market.expiry, MangoErrorCode::OptionExpired )?;
+        check!(now_ts < option_market.expiry, MangoErrorCode::OptionExpired )?;
         check!(*bids_ai.key == option_market.bids, MangoErrorCode::InvalidAccount )?;
         check!(*asks_ai.key == option_market.asks, MangoErrorCode::InvalidAccount )?;
         check!(*event_queue_ai.key == option_market.event_queue, MangoErrorCode::InvalidAccount )?;
@@ -6762,17 +6762,17 @@ impl Processor {
                 amount,
                 exchange_for,
             } => {
-                msg!("Mango: Burn writer's tokens");
+                msg!("Mango: Exchange writer's tokens");
                 Self::exchange_writers_token(program_id, accounts, amount, exchange_for)
             },
-            MangoInstruction::CreateOptionsOrder {
+            MangoInstruction::PlaceOptionsOrder {
                 amount,
                 price,
                 side, 
                 client_order_id,
             } => {
                 msg!("Mango: Create option order");
-                Self::create_options_order(program_id, accounts, amount, price, side, client_order_id)
+                Self::place_options_order(program_id, accounts, amount, price, side, client_order_id)
             },
         }
     }

@@ -1891,7 +1891,7 @@ impl MangoProgramTest {
     pub async fn write_option(&mut self,
         mango_group_cookie: &MangoGroupCookie,
         option_market_pda :Pubkey,
-        option_market :OptionMarket,
+        option_market : &OptionMarket,
         user_index : usize,
         amount : I80F48,
     ) -> (Pubkey, UserOptionTradeData){
@@ -1927,7 +1927,7 @@ impl MangoProgramTest {
     pub async fn exercise_option(&mut self,
         mango_group_cookie: &MangoGroupCookie,
         option_market_pda :Pubkey,
-        option_market :OptionMarket,
+        option_market : &OptionMarket,
         user_index : usize,
         amount : I80F48,
     ){
@@ -1942,8 +1942,6 @@ impl MangoProgramTest {
         let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
         
         let instructions = vec![
-            //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
-            //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
             mango::instruction::exercise_option(
                 &mango_program_id,
                 &mango_group_cookie.address,
@@ -1966,7 +1964,7 @@ impl MangoProgramTest {
     pub async fn exchange_writers_tokens(&mut self,
         mango_group_cookie: &MangoGroupCookie,
         option_market_pda :Pubkey,
-        option_market :OptionMarket,
+        option_market : &OptionMarket,
         user_index : usize,
         amount : I80F48,
         exchange_for : ExchangeFor,
@@ -1983,8 +1981,6 @@ impl MangoProgramTest {
         
         
         let instructions = vec![
-            //create_account_for_mint(spl_token::id(), &mint_account_key, &option_market.option_mint, &user.pubkey()),
-            //create_account_for_mint(spl_token::id(), &writers_account_key, &option_market.writer_token_mint, &user.pubkey()),
             mango::instruction::exchange_writers_tokens(
                 &mango_program_id,
                 &mango_group_cookie.address,
@@ -1999,6 +1995,48 @@ impl MangoProgramTest {
                 &user_trade_data_pk,
                 amount,
                 exchange_for,
+        ).unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn place_options_order(&mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_market_pda :Pubkey,
+        option_market : &OptionMarket,
+        user_index : usize,
+        amount : i64,
+        price : i64,
+        side : Side, 
+        client_order_id: u64,
+    ){
+        let mango_group = mango_group_cookie.mango_group;
+        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, option_market.quote_token_index).await;
+        let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let mango_program_id = self.mango_program_id;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
+  
+        let instructions = vec![
+            mango::instruction::place_options_order(
+                &mango_program_id,
+                &mango_group_cookie.address,
+                &mango_account_pk,
+                &user.pubkey(),
+                &user_trade_data_pk,
+                &option_market_pda,
+                &mango_group.mango_cache,
+                &option_market.bids,
+                &option_market.asks,
+                &option_market.event_queue,
+                &q_rb_key,
+                &q_nb_key,
+                amount,
+                price,
+                side,
+                client_order_id,
         ).unwrap()];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
