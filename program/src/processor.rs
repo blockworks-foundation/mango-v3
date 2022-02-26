@@ -6264,6 +6264,126 @@ impl Processor {
         }
         Ok(())
     }
+    #[inline(never)]
+    /// similar to serum dex, but also need to do some extra magic with funding
+    fn consume_events_for_options(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        limit: usize,
+    ) -> MangoResult<()> {
+        // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
+        let limit = min(limit, 10);
+
+        const NUM_FIXED: usize = 6;
+        let (fixed_ais, mango_accounts_and_data_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,     // read
+            mango_cache_ai,     // read
+            options_market_ai,   // read
+            event_queue_ai,     // write
+            usdc_root_bank_ai,  // read
+            usdc_node_bank_ai, // write
+        ] = fixed_ais;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let option_market =
+            OptionMarket::load_checked(options_market_ai, program_id)?;
+        let mut event_queue: EventQueue =
+            EventQueue::load_mut_checked_for_options(event_queue_ai, program_id, &option_market)?;
+
+        let divisor = 10i64.pow(option_market.number_of_decimals as u32);
+        let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+        let root_bank = RootBank::load_checked(usdc_root_bank_ai, program_id)?;
+        check!(root_bank.node_banks.contains(usdc_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+        let mut node_bank = NodeBank::load_mut_checked(usdc_node_bank_ai, program_id)?;
+        
+        for _ in 0..limit {
+            let event = match event_queue.peek_front() {
+                None => break,
+                Some(e) => e,
+            };
+
+            match EventType::try_from(event.event_type).map_err(|_| throw!())? {
+                EventType::Fill => {
+                    let fill: &FillEvent = cast_ref(event);
+                    // get trade data and mango account
+                    let (mut trade_data_info,mut mango_account) = match mango_accounts_and_data_ais.iter().find(|ai| ai.key == &fill.maker) 
+                    {
+                        None => {
+                            msg!("Unable to find account {}", fill.maker.to_string());
+                            return Ok(());
+                        }
+                        Some(account_info) => {
+                            let tmp = UserOptionTradeData::load_mut(account_info)?;
+                            check!(tmp.option_market == *options_market_ai.key, MangoErrorCode::InvalidAccount)?;
+                            check!(account_info.owner == program_id, MangoErrorCode::InvalidOwner)?;
+                            let (pda, _) = Pubkey::find_program_address(
+                                &[b"mango_option_user_data", options_market_ai.key.as_ref(), tmp.mango_account.as_ref()], 
+                                program_id);
+                            check!(pda == *account_info.key, MangoErrorCode::InvalidAccount)?;
+                            match mango_accounts_and_data_ais.iter().find(|ai| ai.key == &tmp.mango_account) {
+                                None => {
+                                    msg!("Unable to find account {}", fill.maker.to_string());
+                                    return Ok(());
+                                }
+                                Some(acc) => (tmp, MangoAccount::load_mut_checked(acc, program_id, mango_group_ai.key)?)
+                            } 
+                        }
+                    };
+                    
+                    let quote_amount = fill.quantity.checked_mul(fill.price).unwrap().checked_div(divisor).unwrap();
+
+                    match fill.taker_side {
+                        Side::Ask => {
+                            trade_data_info.add_bids_trade(fill.quantity as u64, quote_amount as u64, 0)?;
+                        }
+                        Side::Bid => {
+                            trade_data_info.add_asks_trade(fill.quantity as u64, quote_amount as u64)?;
+                            if trade_data_info.number_of_usdc_to_settle > 0 {
+                                checked_add_net(root_bank_cache, 
+                                    &mut node_bank, 
+                                    &mut mango_account, 
+                                    QUOTE_INDEX,
+                                    I80F48::from_num(trade_data_info.number_of_usdc_to_settle))?;
+                                trade_data_info.number_of_usdc_to_settle = 0;
+                            }
+                        }
+                    }
+                }
+                EventType::Out => {
+                    let out: &OutEvent = cast_ref(event);
+
+                    let mut trade_data_info = match mango_accounts_and_data_ais.iter().find(|ai| ai.key == &out.owner) 
+                    {
+                        None => {
+                            msg!("Unable to find account {}", out.owner.to_string());
+                            return Ok(());
+                        }
+                        Some(account_info) => {
+                            let tmp = UserOptionTradeData::load_mut(account_info)?;
+                            check!(tmp.option_market == *options_market_ai.key, MangoErrorCode::InvalidAccount)?;
+                            check!(account_info.owner == program_id, MangoErrorCode::InvalidOwner)?;
+                            let (pda, _) = Pubkey::find_program_address(
+                                &[b"mango_option_user_data", options_market_ai.key.as_ref(), tmp.mango_account.as_ref()], 
+                                program_id);
+                            check!(pda == *account_info.key, MangoErrorCode::InvalidAccount)?;
+                            tmp
+                        }
+                    };
+
+                    trade_data_info.remove_order(out.slot as usize, out.quantity)?;
+                }
+                EventType::Liquidate => {
+                    // Nothin to do here
+                }
+            }
+
+            // consume this event
+            event_queue.pop_front().map_err(|_| throw!())?;
+        }
+        Ok(())
+    }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
@@ -6794,6 +6914,12 @@ impl Processor {
                 msg!("Mango: Create option order");
                 Self::place_options_order(program_id, accounts, amount, price, side, client_order_id)
             },
+            MangoInstruction::ConsumeEventsForOptions {
+                limit
+            } => {
+                msg!("Mango: Consume Events for options");
+                Self::consume_events_for_options(program_id, accounts, limit as usize)
+            }
         }
     }
 }

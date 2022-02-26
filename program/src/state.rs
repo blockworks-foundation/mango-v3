@@ -2822,6 +2822,7 @@ impl UserOptionTradeData {
 
         Ok(trade_data)
     }
+
     pub fn load_checked<'a>(
         account: &'a AccountInfo,
         program_id: &Pubkey,
@@ -2884,6 +2885,24 @@ impl UserOptionTradeData {
         self.order_side[slot] = side;
         self.orders[slot] = order.key;
         self.client_order_ids[slot] = order.client_order_id;
+        Ok(())
+    }
+
+    pub fn remove_order(&mut self, slot: usize, quantity: i64) -> MangoResult<()> {
+        check!(self.order_market[slot] == true, MangoErrorCode::Default)?;
+        // accounting
+        match self.order_side[slot] {
+            Side::Bid => {
+               self.bids_quantity = self.bids_quantity.checked_sub(quantity).unwrap();
+            }
+            Side::Ask => {
+               self.asks_quantity = self.asks_quantity.checked_sub(quantity).unwrap();
+            }
+        }
+        self.order_market[slot] = false;
+        self.order_side[slot] = Side::Bid;
+        self.orders[slot] = 0i128;
+        self.client_order_ids[slot] = 0u64;
         Ok(())
     }
 }

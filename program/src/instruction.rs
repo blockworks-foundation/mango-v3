@@ -1048,12 +1048,30 @@ pub enum MangoInstruction {
 
     /// Create Options orders on mango dex / by this instruction we create order to buy or sell options token in mango native orderbook
     /// 
-    /// requires 11 accounts
+    /// requires 12 accounts
+    /// 0. mango_group_ai
+    /// 1. [writable] mango_account_ai
+    /// 2. [writable,signer] owner_ai
+    /// 3. [writable] user_data_ai
+    /// 4. [writable] option_market_ai
+    /// 5. mango_cache_ai
+    /// 6. [writable] bids_ai
+    /// 7. [writable] asks_ai
+    /// 8. [writable] event_queue_ai
+    /// 9. quote_root_bank_ai
+    /// 10. [writable] quote_node_bank_ai
+    /// 11. system_program
     PlaceOptionsOrder {
         amount : i64,
         price : i64,
         side : Side, 
         client_order_id: u64,
+    },
+
+    /// Consume Events for options / same as consume_events just for option event queue.
+    /// 
+    ConsumeEventsForOptions {
+        limit: u8,
     },
 }
 
@@ -1586,7 +1604,16 @@ impl MangoInstruction {
                     client_order_id : u64::from_le_bytes(*client_order_id),
                 }
             }
+<<<<<<< HEAD
 >>>>>>> abbe4fe... implementing create new order for options
+=======
+            66 => {
+                let limit = array_ref![data, 0 , 1];
+                MangoInstruction::ConsumeEventsForOptions {
+                    limit : limit[0]
+                }
+            }
+>>>>>>> 53b080f... implementing consume event queue for options
             _ => {
                 return None;
             }
@@ -2841,9 +2868,9 @@ pub fn create_option_market(
 pub fn write_option (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
-    mango_account: &Pubkey, // mut
+    mango_account: &Pubkey, // write
     owner: &Pubkey, // read, signer
-    option_market: &Pubkey, // mut
+    option_market: &Pubkey, // write
     mango_cache: &Pubkey, // read
     root_bank: &Pubkey, // read
     node_bank: &Pubkey, // write
@@ -2873,9 +2900,9 @@ pub fn write_option (
 pub fn exercise_option (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
-    mango_account: &Pubkey, // mut
+    mango_account: &Pubkey, // write
     owner: &Pubkey, // read, signer
-    option_market: &Pubkey, // mut
+    option_market: &Pubkey, // write
     mango_cache: &Pubkey, // read
     underlying_root_bank: &Pubkey, // read
     quote_root_bank: &Pubkey,   //read
@@ -2907,9 +2934,9 @@ pub fn exercise_option (
 pub fn exchange_writers_tokens (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
-    mango_account: &Pubkey, // mut
+    mango_account: &Pubkey, // write
     owner: &Pubkey, // read, signer
-    option_market: &Pubkey, // mut
+    option_market: &Pubkey, // write
     mango_cache: &Pubkey, // read
     underlying_root_bank: &Pubkey, // read
     quote_root_bank: &Pubkey,   //read
@@ -2943,14 +2970,14 @@ pub fn exchange_writers_tokens (
 pub fn place_options_order (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
-    mango_account: &Pubkey, // mut
+    mango_account: &Pubkey, // write
     owner: &Pubkey, // read, signer
-    user_trade_data: &Pubkey, // mut
+    user_trade_data: &Pubkey, // write
     option_market: &Pubkey, // read
     mango_cache: &Pubkey, // read
-    bids: &Pubkey, // mut
-    asks: &Pubkey, // mut
-    event_queue: &Pubkey, // mut
+    bids: &Pubkey, // write
+    asks: &Pubkey, // write
+    event_queue: &Pubkey, // write
     quote_root_bank: &Pubkey,   //read
     quote_node_bank: &Pubkey, //write
     system_program: &Pubkey, //read
@@ -2979,6 +3006,37 @@ pub fn place_options_order (
         price,
         side,
         client_order_id,
+    };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn consume_events_for_options (
+    program_id: &Pubkey,
+    mango_group: &Pubkey, // read
+    mango_cache: &Pubkey, // read
+    options_market: &Pubkey, // read
+    event_queue: &Pubkey, // write
+    usdc_root_bank: &Pubkey, // read
+    usdc_node_bank: &Pubkey, // write
+    mango_accounts: &[Pubkey],
+    user_trade_datas: &[Pubkey],
+    limit: u8,
+) -> Result<Instruction, ProgramError> {
+    let fixed_accounts = vec![
+        AccountMeta::new_readonly(*mango_group, false),
+        AccountMeta::new_readonly(*mango_cache, false),
+        AccountMeta::new_readonly(*options_market, false),
+        AccountMeta::new(*event_queue, false),
+        AccountMeta::new_readonly(*usdc_root_bank, false),
+        AccountMeta::new(*usdc_node_bank, false),
+    ];
+    let mango_accounts_metas = mango_accounts.into_iter().map(|pk| AccountMeta::new(*pk, false));
+    let user_trade_datas_metas = user_trade_datas.into_iter().map(|pk| AccountMeta::new(*pk, false));
+    let accounts = fixed_accounts.into_iter().chain(user_trade_datas_metas).chain(mango_accounts_metas).collect();
+
+    let instr = MangoInstruction::ConsumeEventsForOptions {
+        limit
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
