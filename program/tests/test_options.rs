@@ -295,13 +295,13 @@ async fn test_placing_orders_for_options() {
     
     let expiry = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 30 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
     let expiry_to_exercise = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 60 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
-//     
+    // MNGO/USDC put option     
     let (option_market_pk, option_market) = test.create_option_market(&mango_group_cookie,
-        0, // MNGO
-        15,    // USDC
-         OptionType::European,
-         I80F48::from_num(100_000_000), //100 MNGO FOR
-         I80F48::from_num(20_000_000),  //20 USDC 
+        15, // USDC
+        0,    // MNGO
+         OptionType::American,
+         I80F48::from_num(10_000_000), //10 USDC FOR
+         I80F48::from_num(100_000_000),  //100 MNGO 
          expiry,
         Some(expiry_to_exercise)).await;
 
@@ -309,8 +309,9 @@ async fn test_placing_orders_for_options() {
 
     println!("Write option");
     // deposit some underlying tokens for user0
-    let load_amount = 120_000_000 * 10;
-    test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
+    let load_amount = 100_000_000 * 2;
+    test.perform_deposit(&mango_group_cookie, 1, option_market.quote_token_index, load_amount).await;
+    test.perform_deposit(&mango_group_cookie, 0, QUOTE_INDEX, 100_000_000).await;
     test.perform_deposit(&mango_group_cookie, 1, QUOTE_INDEX, 100_000_000).await;
     // write option with user0
     let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, option_market_pk, &option_market, 0, I80F48::from_num(10_000_000)).await;
@@ -379,7 +380,7 @@ async fn test_placing_orders_for_options() {
         assert_eq!(usdc_with_u0 + 250_000, usdc_with_u0_after); // user0 recieved 250_000 USDC 25 cents
         usdc_with_u0 = usdc_with_u0_after;
     }
-    test.advance_clock_by_slots(20);
+    test.advance_clock_by_slots(20).await;
 
     println!("User1 places bid of 2 option @1 USDC");
     test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 1, 2_000_000, 1_000_000, Side::Bid, 0).await;
@@ -398,10 +399,10 @@ async fn test_placing_orders_for_options() {
         assert_eq!(usdc_with_u1 - usdc_with_u1_after, 1_750_000); // 500_000 matched at 500_000
         usdc_with_u1 = usdc_with_u1_after;
     }
-    test.advance_clock();
+    test.advance_clock().await;
     println!("Consume Event will update User0 trade data and deposit USDC recieved from User1");
     // comsume events to update user0
-    test.consume_events_for_options(&mango_group_cookie, option_market_pk, &option_market, Vec::from([1,0])).await;
+    test.consume_events_for_options(&mango_group_cookie, option_market_pk, &option_market, Vec::from([0,1])).await;
     {
         // Should be executed at 0.5 USDC
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -415,5 +416,59 @@ async fn test_placing_orders_for_options() {
         let usdc_with_u0_after :u64 = test.with_mango_account_deposit(&mango_account_u0, QUOTE_INDEX).await;
         assert_eq!(usdc_with_u0 + 250_000, usdc_with_u0_after); // user0 recieved 250_000 USDC 25 cents
         usdc_with_u0 = usdc_with_u0_after;
+    }
+
+    test.advance_clock_by_slots(20).await;
+
+    println!("User0 places ask of 0.5 option @0.9 USDC");
+    test.place_options_order(&mango_group_cookie, option_market_pk, &option_market,0, 900_000, 900_000, Side::Ask, 0).await;
+    {
+        let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 8_100_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 10_000_000);
+        assert_eq!(trade_data.order_market[0], false);
+        assert_eq!(trade_data.number_of_usdc_locked, 0 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
+
+        let usdc_with_u0_after :u64 = test.with_mango_account_deposit(&mango_account_u0, QUOTE_INDEX).await;
+        assert_eq!(usdc_with_u0_after - usdc_with_u0, 899_999); // 900_000 matched at 1_000_000, float rounding error
+        usdc_with_u0 = usdc_with_u0_after;
+    }
+    test.advance_clock().await;
+    println!("Consume Event will update User1 trade data and deposit Opion tokens recieved from User0");
+    // comsume events to update user0
+    test.consume_events_for_options(&mango_group_cookie, option_market_pk, &option_market, Vec::from([1,0])).await;
+    {
+        // Should be executed at 0.5 USDC
+        let trade_data = test.load_account::<UserOptionTradeData>(u1_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 1_900_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 0);
+        assert_eq!(trade_data.number_of_usdc_locked, 600_000 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
+        assert_eq!(trade_data.order_market[0], true);
+
+        let usdc_with_u1_after :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
+        assert_eq!(usdc_with_u1, usdc_with_u1_after); // no usdc transfered
+        usdc_with_u1 = usdc_with_u1_after;
+    }
+    // user1 excesices the option
+    let funds_underlying_u1 :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.underlying_token_index).await;
+    let funds_quote_u1 :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.quote_token_index).await;
+    {
+        test.exercise_option(&mango_group_cookie, option_market_pk, &option_market, 1, I80F48::from_num(1_000_000)).await;
+        let funds_underlying_u1_a :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.underlying_token_index).await;
+        let funds_quote_u1_a :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.quote_token_index).await;
+        assert_eq!( funds_underlying_u1_a - funds_underlying_u1, 10_000_000 );
+        assert_eq!( funds_quote_u1 - funds_quote_u1_a, 100_000_000 );
+
+        let trade_data = test.load_account::<UserOptionTradeData>(u1_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 900_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 0);
+        assert_eq!(trade_data.number_of_usdc_locked, 600_000 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
+        assert_eq!(trade_data.order_market[0], true);
     }
 }

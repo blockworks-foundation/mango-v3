@@ -128,11 +128,11 @@ pub enum MangoErrorCode {
     #[error("MangoErrorCode::OptionAlreadyExpired option has already expired")]
     OptionExpired,
     #[error("MangoErrorCode::OptionNotYetExpired option has not yet expired")]
-    NotEnoughUnderlyingTokens,
-    #[error("MangoErrorCode::OptionNotEnoughUnderlyingTokens cannot exchange writers tokens because not enough underlying tokens / please exchange for quote tokens instead")]
-    NotEnoughQuoteTokens,
-    #[error("MangoErrorCode::OptionNotEnoughQuoteTokens cannot exchange writers tokens because not enough quote tokens / please exhange for underlying tokens instead")]
     OptionNotYetExpired,
+    #[error("MangoErrorCode::OptionNotEnoughUnderlyingTokens cannot exchange writers tokens because not enough underlying tokens / please exchange for quote tokens instead")]
+    NotEnoughUnderlyingTokens,
+    #[error("MangoErrorCode::OptionNotEnoughQuoteTokens cannot exchange writers tokens because not enough quote tokens / please exhange for underlying tokens instead")]
+    NotEnoughQuoteTokens,
     #[error("MangoErrorCode::EuropeanOptionsNeedExersiceExpiry European type of option need a limit on exercise")]
     EuropeanOptionsNeedExersiceExpiry,
     #[error("MangoErrorCode::ExersiceExpiryBeforeExpiry exercise should be after actual expiry ")]
