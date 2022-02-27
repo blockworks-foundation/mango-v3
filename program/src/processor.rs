@@ -6303,7 +6303,6 @@ impl Processor {
                 None => break,
                 Some(e) => e,
             };
-
             match EventType::try_from(event.event_type).map_err(|_| throw!())? {
                 EventType::Fill => {
                     let fill: &FillEvent = cast_ref(event);
@@ -6349,6 +6348,10 @@ impl Processor {
                                 trade_data_info.number_of_usdc_to_settle = 0;
                             }
                         }
+                    }
+                    
+                    if fill.maker_out {
+                        trade_data_info.remove_order(fill.maker_slot as usize, fill.quantity)?;
                     }
                 }
                 EventType::Out => {

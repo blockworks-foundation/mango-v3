@@ -2016,7 +2016,7 @@ impl MangoProgramTest {
         client_order_id: u64,
     ){
         let mango_group = mango_group_cookie.mango_group;
-        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, option_market.quote_token_index).await;
+        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, QUOTE_INDEX).await;
         let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
         let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let mango_program_id = self.mango_program_id;
@@ -2045,6 +2045,41 @@ impl MangoProgramTest {
         ).unwrap()];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    fn get_user_trade_data_address(&self, option_market_pk: &Pubkey, mango_account_pk : &Pubkey ) -> Pubkey
+    {
+        let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pk.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
+        user_trade_data_pk
+    }
+
+    #[allow(dead_code)]
+    pub async fn consume_events_for_options(&mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_market_pda :Pubkey,
+        option_market : &OptionMarket,
+        user_indices : Vec<usize>,
+    ){
+        let mango_group = mango_group_cookie.mango_group;
+        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, QUOTE_INDEX).await;
+        let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
+        let mango_program_id = self.mango_program_id;
+        let mango_accounts  = user_indices.iter().map(|x| mango_group_cookie.mango_accounts[*x].address).collect::<Vec<Pubkey>>();
+        let user_trade_datas = user_indices.iter().map(|x| self.get_user_trade_data_address(&option_market_pda, &mango_group_cookie.mango_accounts[*x].address)).collect::<Vec<Pubkey>>();
+        let instructions = vec![
+            mango::instruction::consume_events_for_options(
+                &self.mango_program_id,
+                &mango_group_cookie.address,
+                &mango_group.mango_cache,
+                &option_market_pda,
+                &option_market.event_queue,
+                &q_rb_key,
+                &q_nb_key,
+                &mango_accounts[..],
+                &user_trade_datas[..],
+                3,
+        ).unwrap()];
+        self.process_transaction(&instructions, None).await.unwrap();
     }
 }
 
