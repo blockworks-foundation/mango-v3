@@ -6349,7 +6349,6 @@ impl Processor {
                             }
                         }
                     }
-                    
                     if fill.maker_out {
                         trade_data_info.remove_order(fill.maker_slot as usize, fill.quantity)?;
                     }
@@ -6385,6 +6384,79 @@ impl Processor {
             // consume this event
             event_queue.pop_front().map_err(|_| throw!())?;
         }
+        Ok(())
+    }
+
+    
+    #[inline(never)]
+    fn cancel_option_order_by_client_order_id(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        client_order_id: u64,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 10;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            mango_cache_ai,     // read
+            mango_account_ai,   // write
+            owner_ai,           // read, signer
+            option_market_ai,   // read
+            user_trade_data_ai, // write
+            bids_ai,            // write
+            asks_ai,            // write
+            usdc_root_bank_ai,  // read
+            usdc_node_bank_ai,  // write
+        ] = accounts;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+
+        let option_market =
+            OptionMarket::load_checked(option_market_ai, program_id)?;
+
+        let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_trade_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
+        let (order_id, side) = user_trade_data
+            .find_order_with_client_id( client_order_id)
+            .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
+
+        let mut book = Book::load_checked_for_options(program_id, bids_ai, asks_ai, &option_market)?;
+
+        let order = book.cancel_order(order_id, side)?;
+        check_eq!(&order.owner, user_trade_data_ai.key, MangoErrorCode::InvalidOrderId)?;
+        
+        match side {
+            Side::Ask => {
+                user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_add(order.quantity as u64).unwrap();
+                user_trade_data.number_of_locked_options_tokens = user_trade_data.number_of_locked_options_tokens.checked_sub(order.quantity as u64).unwrap(); 
+            },
+            Side::Bid => {
+                let decimal_multiplier =  10i64.pow(option_market.number_of_decimals as u32);
+                let locked_usdc = order.quantity.checked_mul(order.price()).unwrap().checked_div(decimal_multiplier).unwrap();
+                user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_sub(locked_usdc as u64).unwrap();
+                // reimburse locked usdc to the user
+                let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+                let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+                let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+                let root_bank = RootBank::load_checked(usdc_root_bank_ai, program_id)?;
+                check!(root_bank.node_banks.contains(usdc_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+                let mut node_bank = NodeBank::load_mut_checked(usdc_node_bank_ai, program_id)?;
+                // add unsettled USDC to client account
+                checked_add_net(root_bank_cache, 
+                    &mut node_bank, 
+                    &mut mango_account, 
+                    QUOTE_INDEX,
+                    I80F48::from_num(locked_usdc))?;
+
+            }
+        }
+        user_trade_data.remove_order(order.owner_slot as usize, order.quantity)?;
         Ok(())
     }
 
@@ -6922,6 +6994,12 @@ impl Processor {
             } => {
                 msg!("Mango: Consume Events for options");
                 Self::consume_events_for_options(program_id, accounts, limit as usize)
+            },
+            MangoInstruction::CancelOptionOrderByClientOrderId {
+                client_order_id
+            } => {
+                msg!("Mango: Cancel option order by client id");
+                Self::cancel_option_order_by_client_order_id(program_id, accounts, client_order_id)
             }
         }
     }

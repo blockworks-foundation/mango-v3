@@ -1070,9 +1070,31 @@ pub enum MangoInstruction {
 
     /// Consume Events for options / same as consume_events just for option event queue.
     /// 
+    /// 0. mango_group_ai
+    /// 1. mango_cache_ai
+    /// 2. options_market_ai
+    /// 3. [writable] event_queue_ai
+    /// 4. mango_quote_root_bank_ai
+    /// 5. [writable] mango_quote_node_bank_ai
     ConsumeEventsForOptions {
         limit: u8,
     },
+
+    /// Cancel Order by client id
+    /// 
+    /// 0. mango_group_ai,     // read
+    /// 1. mango_cache_ai
+    /// 2. [writable] mango_account_ai,
+    /// 3. [signer] owner_ai,
+    /// 4. option_market_ai,
+    /// 5. [writable] user_trade_data_ai,
+    /// 6. [writable] bids_ai,
+    /// 7. [writable] asks_ai
+    /// 8. mango_quote_root_bank_ai
+    /// 9. [writable] mango_quote_node_bank_ai 
+    CancelOptionOrderByClientOrderId {
+        client_order_id : u64,
+    }
 }
 
 impl MangoInstruction {
@@ -1611,6 +1633,12 @@ impl MangoInstruction {
                 let limit = array_ref![data, 0 , 1];
                 MangoInstruction::ConsumeEventsForOptions {
                     limit : limit[0]
+                }
+            },
+            67 => {
+                let client_order_id = array_ref![data, 0, 8];
+                MangoInstruction::CancelOptionOrderByClientOrderId {
+                    client_order_id: u64::from_le_bytes(*client_order_id),
                 }
             }
 >>>>>>> 53b080f... implementing consume event queue for options
@@ -3037,6 +3065,39 @@ pub fn consume_events_for_options (
 
     let instr = MangoInstruction::ConsumeEventsForOptions {
         limit
+    };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cancel_option_order_by_client_order_id (
+    program_id: &Pubkey,
+    mango_group: &Pubkey, // read
+    mango_cache: &Pubkey, // read
+    mango_account: &Pubkey, // read
+    owner_ai: &Pubkey, // read
+    options_market: &Pubkey, // read
+    user_trade_data: &Pubkey, // write
+    bids_ai: &Pubkey, // write
+    asks_ai: &Pubkey, // write
+    usdc_root_bank: &Pubkey, // read
+    usdc_node_bank: &Pubkey, // write
+    client_order_id : u64,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group, false),
+        AccountMeta::new_readonly(*mango_cache, false),
+        AccountMeta::new(*mango_account, false),
+        AccountMeta::new_readonly(*owner_ai, true),
+        AccountMeta::new_readonly(*options_market, false),
+        AccountMeta::new(*user_trade_data, false),
+        AccountMeta::new(*bids_ai, false),
+        AccountMeta::new(*asks_ai, false),
+        AccountMeta::new_readonly(*usdc_root_bank, false),
+        AccountMeta::new(*usdc_node_bank, false),
+    ];
+    let instr = MangoInstruction::CancelOptionOrderByClientOrderId {
+        client_order_id
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })

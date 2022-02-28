@@ -333,13 +333,17 @@ async fn test_placing_orders_for_options() {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
         assert_eq!(trade_data.number_of_option_tokens, 9_000_000);
         assert_eq!(trade_data.number_of_writers_tokens, 10_000_000);
-        assert_eq!(trade_data.order_market[0], true);
+        assert_eq!(trade_data.order_filled[0], true);
         assert_eq!(trade_data.order_side[0], Side::Ask);
         assert_eq!(trade_data.client_order_ids[0], 0);
         assert_eq!(trade_data.number_of_usdc_locked, 0 );
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 1_000_000 );
     }
+    println!("User0 places ask of 1 option @0.1 USDC by mistake");
+    test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, 100_000, Side::Ask, 1).await;
+    println!("User0 cancels last order");
+    test.cancel_option_order_by_client_order_id(&mango_group_cookie, option_market_pk, &option_market, 0, 1).await;
     println!("User1 places bid of 0.5 option @0.6 USDC");
     // user 1 places order for bid
     let mango_account_u0 = mango_group_cookie.mango_accounts[0].address;
@@ -371,7 +375,7 @@ async fn test_placing_orders_for_options() {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
         assert_eq!(trade_data.number_of_option_tokens, 9_000_000);
         assert_eq!(trade_data.number_of_writers_tokens, 10_000_000);
-        assert_eq!(trade_data.order_market[0], true); // all order not yet matched
+        assert_eq!(trade_data.order_filled[0], true); // all order not yet matched
         assert_eq!(trade_data.number_of_usdc_locked, 0 );
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 500_000 );
@@ -388,7 +392,8 @@ async fn test_placing_orders_for_options() {
         let trade_data = test.load_account::<UserOptionTradeData>(u1_trade_data_pk).await;
         assert_eq!(trade_data.number_of_option_tokens, 1_000_000);
         assert_eq!(trade_data.number_of_writers_tokens, 0);
-        assert_eq!(trade_data.order_market[0], true);
+        assert_eq!(trade_data.order_filled[0], true);
+        assert_eq!(trade_data.order_filled[1], false);
         assert_eq!(trade_data.order_side[0], Side::Bid);
         assert_eq!(trade_data.client_order_ids[0], 0);
         assert_eq!(trade_data.number_of_usdc_locked, 1_500_000 );
@@ -400,6 +405,7 @@ async fn test_placing_orders_for_options() {
         usdc_with_u1 = usdc_with_u1_after;
     }
     test.advance_clock().await;
+
     println!("Consume Event will update User0 trade data and deposit USDC recieved from User1");
     // comsume events to update user0
     test.consume_events_for_options(&mango_group_cookie, option_market_pk, &option_market, Vec::from([0,1])).await;
@@ -411,7 +417,7 @@ async fn test_placing_orders_for_options() {
         assert_eq!(trade_data.number_of_usdc_locked, 0 );
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
-        assert_eq!(trade_data.order_market[0], false); // all order are matched and no order is pending
+        assert_eq!(trade_data.order_filled[0], false); // all order are matched and no order is pending
 
         let usdc_with_u0_after :u64 = test.with_mango_account_deposit(&mango_account_u0, QUOTE_INDEX).await;
         assert_eq!(usdc_with_u0 + 250_000, usdc_with_u0_after); // user0 recieved 250_000 USDC 25 cents
@@ -420,13 +426,46 @@ async fn test_placing_orders_for_options() {
 
     test.advance_clock_by_slots(20).await;
 
+    println!("User1 places bid of 2 option @0.9 USDC");
+    usdc_with_u1 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
+    test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 1, 2_000_000, 900_000, Side::Bid, 1).await;
+    {
+        let trade_data = test.load_account::<UserOptionTradeData>(u1_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 1_000_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 0);
+        assert_eq!(trade_data.order_filled[1], true);
+        assert_eq!(trade_data.order_side[1], Side::Bid);
+        assert_eq!(trade_data.client_order_ids[1], 1);
+        assert_eq!(trade_data.number_of_usdc_locked, 3_300_000 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
+    }
+    test.advance_clock().await;
+    println!("User1 cancels bid of 2 option @0.9 USDC");
+    test.cancel_option_order_by_client_order_id(&mango_group_cookie, option_market_pk, &option_market, 1, 1).await;
+    {
+        // data remains unchanged
+        let trade_data = test.load_account::<UserOptionTradeData>(u1_trade_data_pk).await;
+        assert_eq!(trade_data.number_of_option_tokens, 1_000_000);
+        assert_eq!(trade_data.number_of_writers_tokens, 0);
+        assert_eq!(trade_data.order_filled[0], true);
+        assert_eq!(trade_data.order_side[0], Side::Bid);
+        assert_eq!(trade_data.client_order_ids[0], 0);
+        assert_eq!(trade_data.number_of_usdc_locked, 1_500_000 );
+        assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
+        assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
+
+        let usdc_with_u1_after :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
+        assert_eq!(usdc_with_u1, usdc_with_u1_after);
+    }
+
     println!("User0 places ask of 0.5 option @0.9 USDC");
     test.place_options_order(&mango_group_cookie, option_market_pk, &option_market,0, 900_000, 900_000, Side::Ask, 0).await;
     {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
         assert_eq!(trade_data.number_of_option_tokens, 8_100_000);
         assert_eq!(trade_data.number_of_writers_tokens, 10_000_000);
-        assert_eq!(trade_data.order_market[0], false);
+        assert_eq!(trade_data.order_filled[0], false);
         assert_eq!(trade_data.number_of_usdc_locked, 0 );
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
@@ -447,7 +486,7 @@ async fn test_placing_orders_for_options() {
         assert_eq!(trade_data.number_of_usdc_locked, 600_000 );
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
-        assert_eq!(trade_data.order_market[0], true);
+        assert_eq!(trade_data.order_filled[0], true);
 
         let usdc_with_u1_after :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
         assert_eq!(usdc_with_u1, usdc_with_u1_after); // no usdc transfered
@@ -469,6 +508,6 @@ async fn test_placing_orders_for_options() {
         assert_eq!(trade_data.number_of_usdc_locked, 600_000 );
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
-        assert_eq!(trade_data.order_market[0], true);
+        assert_eq!(trade_data.order_filled[0], true);
     }
 }

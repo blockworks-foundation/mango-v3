@@ -2081,6 +2081,39 @@ impl MangoProgramTest {
         ).unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
     }
+
+    #[allow(dead_code)]
+    pub async fn cancel_option_order_by_client_order_id(&mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        option_market_pda :Pubkey,
+        option_market : &OptionMarket,
+        user_index : usize,
+        client_order_id : u64,)
+    {
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        
+        let mango_group = mango_group_cookie.mango_group;
+        let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, QUOTE_INDEX).await;
+        let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
+
+        let instructions = vec![
+            mango::instruction::cancel_option_order_by_client_order_id(
+                &self.mango_program_id,
+                &mango_group_cookie.address,
+                &mango_group.mango_cache,
+                &mango_account_pk,
+                &user.pubkey(),
+                &option_market_pda,
+                &self.get_user_trade_data_address(&option_market_pda, &mango_account_pk),
+                &option_market.bids,
+                &option_market.asks,
+                &q_rb_key,
+                &q_nb_key,
+                client_order_id,
+        ).unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
 }
 
 fn process_serum_instruction(

@@ -2752,7 +2752,7 @@ pub struct UserOptionTradeData {
     pub number_of_option_tokens : u64,
     pub number_of_writers_tokens : u64,
 
-    pub order_market: [bool; MAX_OPTIONS_OPEN_ORDERS],
+    pub order_filled: [bool; MAX_OPTIONS_OPEN_ORDERS],
     pub order_side: [Side; MAX_OPTIONS_OPEN_ORDERS],
     pub orders: [i128; MAX_OPTIONS_OPEN_ORDERS],
     pub client_order_ids: [u64; MAX_OPTIONS_OPEN_ORDERS],
@@ -2794,7 +2794,7 @@ impl UserOptionTradeData {
             trade_data.bids_quantity = 0;
             trade_data.asks_quantity = 0;
 
-            trade_data.order_market = [false; MAX_OPTIONS_OPEN_ORDERS];
+            trade_data.order_filled = [false; MAX_OPTIONS_OPEN_ORDERS];
         }
         Ok(trade_data)
     }
@@ -2864,7 +2864,7 @@ impl UserOptionTradeData {
     }
     
     pub fn next_order_slot(&self) -> Option<usize> {
-        self.order_market.iter().position(|&i| i == false)
+        self.order_filled.iter().position(|&i| i == false)
     }
 
     pub fn add_order(&mut self, side: Side, order: &LeafNode) -> MangoResult {
@@ -2881,7 +2881,7 @@ impl UserOptionTradeData {
             }
         };
         let slot = order.owner_slot as usize;
-        self.order_market[slot] = true;
+        self.order_filled[slot] = true;
         self.order_side[slot] = side;
         self.orders[slot] = order.key;
         self.client_order_ids[slot] = order.client_order_id;
@@ -2889,7 +2889,7 @@ impl UserOptionTradeData {
     }
 
     pub fn remove_order(&mut self, slot: usize, quantity: i64) -> MangoResult<()> {
-        check!(self.order_market[slot] == true, MangoErrorCode::Default)?;
+        check!(self.order_filled[slot] == true, MangoErrorCode::Default)?;
         // accounting
         match self.order_side[slot] {
             Side::Bid => {
@@ -2899,10 +2899,22 @@ impl UserOptionTradeData {
                self.asks_quantity = self.asks_quantity.checked_sub(quantity).unwrap();
             }
         }
-        self.order_market[slot] = false;
+        self.order_filled[slot] = false;
         self.order_side[slot] = Side::Bid;
         self.orders[slot] = 0i128;
         self.client_order_ids[slot] = 0u64;
         Ok(())
+    }
+
+    pub fn find_order_with_client_id(
+        &self,
+        client_id: u64,
+    ) -> Option<(i128, Side)> {
+        for i in 0..MAX_OPTIONS_OPEN_ORDERS {
+            if self.order_filled[i] == true && self.client_order_ids[i] == client_id {
+                return Some((self.orders[i], self.order_side[i]));
+            }
+        }
+        None
     }
 }
