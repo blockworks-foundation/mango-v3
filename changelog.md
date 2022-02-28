@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.4.1
+Deployed: Feb 28, 2022 at 15:43:29 UTC | Slot: 122,878,778
+1. Fix div by zero bug in market order sells
+
 ## v3.4.0
 Deployed: Feb 28, 2022 at 13:57:00 UTC | Slot: 122,868,568
 1. Breaking change: Orders on the perp orderbook can now expire.
