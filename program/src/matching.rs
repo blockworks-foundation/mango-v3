@@ -1113,7 +1113,7 @@ impl<'a> Book<'a> {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
             OrderType::PostOnly => (true, true, price),
-            OrderType::Market => (false, false, 0),
+            OrderType::Market => (false, false, 1),
             OrderType::PostOnlySlide => {
                 let price = if let Some(best_bid_price) = self.get_best_bid_price(now_ts) {
                     price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
@@ -1448,7 +1448,7 @@ impl<'a> Book<'a> {
             OrderType::Limit => (false, true, price),
             OrderType::ImmediateOrCancel => (false, false, price),
             OrderType::PostOnly => (true, true, price),
-            OrderType::Market => (false, false, 0),
+            OrderType::Market => (false, false, 1),
             OrderType::PostOnlySlide => {
                 let price = if let Some(best_bid_price) = self.get_best_bid_price(now_ts) {
                     price.max(best_bid_price.checked_add(1).ok_or(math_err!())?)
