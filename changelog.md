@@ -1,6 +1,7 @@
 # Mango Program Change Log
 
 ## v3.4.0
+Deployed: Feb 28, 2022 at 13:57:00 UTC | Slot: 122,868,568
 1. Breaking change: Orders on the perp orderbook can now expire.
    Either use the iterator that returns only valid orders or manually filter out invalid orders.
 2. New instruction: PlacePerpOrder2
