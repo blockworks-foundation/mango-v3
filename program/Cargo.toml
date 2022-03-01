@@ -37,7 +37,6 @@ solana-sdk = "^1.8.1"
 solana-program-test = "^1.8.1"
 solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
-solana-banks-client = "1.9.6"
 
 [lib]
 name = "mango"

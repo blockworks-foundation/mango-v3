@@ -91,7 +91,6 @@ pub struct LeafNode {
 
     // Liquidity incentive related parameters
     // Either the best bid or best ask at the time the order was placed
-    // price in case of options
     pub best_initial: i64,
 
     // The time the order was placed

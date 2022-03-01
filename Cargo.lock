@@ -1530,7 +1530,6 @@ dependencies = [
  "safe-transmute",
  "serde",
  "serum_dex",
- "solana-banks-client",
  "solana-logger",
  "solana-program",
  "solana-program-test",

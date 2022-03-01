@@ -20,7 +20,7 @@ use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
-use spl_token::state::{Account, Mint,};
+use spl_token::state::{Account, Mint};
 
 use switchboard_program::FastRoundResultAccountData;
 
