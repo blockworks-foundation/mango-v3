@@ -2819,7 +2819,6 @@ dependencies = [
  "bincode",
  "blake3",
  "bv",
- "bytemuck",
  "byteorder",
  "bzip2",
  "crossbeam-channel",

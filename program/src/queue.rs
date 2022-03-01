@@ -240,8 +240,8 @@ pub struct FillEvent {
     pub maker_out: bool, // true if maker order quantity == 0
     pub version: u8,
     pub market_fees_applied: bool,
-    pub is_option: u8,
-    pub padding: [u8; 2],
+    pub is_option: bool,
+    pub padding: [u8; 1],
     pub timestamp: u64,
     pub seq_num: usize, // note: usize same as u64
 
@@ -289,7 +289,6 @@ impl FillEvent {
         version: u8,
         is_option: bool,
     ) -> FillEvent {
-        let is_opt :u8 = if is_option {1} else {0};
         Self {
             event_type: EventType::Fill as u8,
             taker_side,
@@ -297,8 +296,8 @@ impl FillEvent {
             maker_out,
             version,
             market_fees_applied: true, // Since mango v3.3.5, market fees are adjusted at matching time
-            is_option:is_opt,
-            padding: [0u8; 2],
+            is_option:is_option,
+            padding: [0u8; 1],
             timestamp,
             seq_num,
             maker,

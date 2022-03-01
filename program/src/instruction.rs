@@ -967,6 +967,8 @@ pub enum MangoInstruction {
     /// 4. `[]` system_prog_ai - System program
     RegisterReferrerId {
         referrer_id: [u8; INFO_LEN],
+    },
+
     /// Create an Option market / this will initialize a state called MarketOption
     /// 
     /// Accounts expected by this instruction (9)
@@ -1544,8 +1546,6 @@ impl MangoInstruction {
             }
             60 => MangoInstruction::CreateSpotOpenOrders,
             61 => {
-<<<<<<< HEAD
-<<<<<<< HEAD
                 let data = array_ref![data, 0, 16];
                 let (ref_surcharge_centibps, ref_share_centibps, ref_mngo_required) =
                     array_refs![data, 4, 4, 8];
@@ -1559,16 +1559,12 @@ impl MangoInstruction {
             63 => {
                 let referrer_id = array_ref![data, 0, INFO_LEN];
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
-            }
-=======
-                let data_arr = array_ref![data, 0 , 25];
-                let ( option_type,
-=======
+            },
+            64 => {
                 let data_arr = array_ref![data, 0 , 43];
                 let ( underlying_token_index,
                     quote_token_index,
                     option_type,
->>>>>>> 63a245d... using token indexes instead of mint addresses, changing from u64 to I80F48
                     contract_size,
                     quote_amount,
                     expiry,
@@ -1583,23 +1579,19 @@ impl MangoInstruction {
                     expiry_to_exercise_european : if data.len() == 44 { None } else { unpack_u64_opt(array_ref!(data, 43, 9)) },
                 }
             },
-            62 => {
+            65 => {
                 let amount = array_ref![data, 0 , 16];
                 MangoInstruction::WriteOption {
                     amount:  I80F48::from_le_bytes(*amount),
                 }
-<<<<<<< HEAD
-            }
->>>>>>> 3d67043... Impl serialize deserializing of instruction, Adding tests for options.
-=======
             },
-            63 => {
+            66 => {
                 let amount = array_ref![data, 0 , 16];
                 MangoInstruction::ExerciseOption {
                     amount:  I80F48::from_le_bytes(*amount),
                 }
             },
-            64 => {
+            67 => {
                 let data_arr = array_ref![data, 0 , 17];
                 let ( amount,
                     exchange_for, ) = array_refs![data_arr, 16, 1];
@@ -1607,12 +1599,8 @@ impl MangoInstruction {
                     amount:  I80F48::from_le_bytes(*amount),
                     exchange_for : ExchangeFor::try_from_primitive(exchange_for[0]).ok()?,
                 }
-<<<<<<< HEAD
-            }, 
->>>>>>> 66d765b... Implementing excersice option, started to write tests
-=======
             },
-            65 => {
+            68 => {
                 let data_arr = array_ref![data, 0 , 25];
                 let (amount,
                 price,
@@ -1626,22 +1614,18 @@ impl MangoInstruction {
                     client_order_id : u64::from_le_bytes(*client_order_id),
                 }
             }
-<<<<<<< HEAD
->>>>>>> abbe4fe... implementing create new order for options
-=======
-            66 => {
+            69 => {
                 let limit = array_ref![data, 0 , 1];
                 MangoInstruction::ConsumeEventsForOptions {
                     limit : limit[0]
                 }
             },
-            67 => {
+            70 => {
                 let client_order_id = array_ref![data, 0, 8];
                 MangoInstruction::CancelOptionOrderByClientOrderId {
                     client_order_id: u64::from_le_bytes(*client_order_id),
                 }
             }
->>>>>>> 53b080f... implementing consume event queue for options
             _ => {
                 return None;
             }

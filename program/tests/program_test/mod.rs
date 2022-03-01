@@ -1836,6 +1836,8 @@ impl MangoProgramTest {
 
         mango_group_cookie.mango_accounts[liqor_index].mango_account =
             self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
+    }
+    
     pub async fn create_option_market( &mut self,
         mango_group_cookie: &MangoGroupCookie,
         underlying_index: u8,

@@ -5975,6 +5975,7 @@ impl Processor {
         user_trade_data.number_of_writers_tokens = user_trade_data.number_of_writers_tokens.checked_add(amount.to_num::<u64>()).unwrap();
         Ok(())
     }
+
     #[inline(never)]
     fn exercise_option(program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -6264,6 +6265,7 @@ impl Processor {
         }
         Ok(())
     }
+
     #[inline(never)]
     /// similar to serum dex, but also need to do some extra magic with funding
     fn consume_events_for_options(
@@ -6949,6 +6951,7 @@ impl Processor {
             MangoInstruction::RegisterReferrerId { referrer_id } => {
                 msg!("Mango: RegisterReferrerId");
                 Self::register_referrer_id(program_id, accounts, referrer_id)
+            }
             MangoInstruction::CreateOptionMarket{
                 underlying_token_index,
                 quote_token_index,
