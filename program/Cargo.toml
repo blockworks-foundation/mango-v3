@@ -31,6 +31,7 @@ mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
 mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
 switchboard-program = "^0.2.0"
+switchboard-utils = "^0.1.36"
 anchor-lang = "0.20.1"
 
 [dev-dependencies]
