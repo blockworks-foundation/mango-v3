@@ -108,11 +108,11 @@ async fn test_liquidation_perp_market_max_cu() {
         ];
         deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
-        let matched_spot_orders = vec![vec![
+        let placed_spot_orders = vec![
             (bidder_user_index, market_index, serum_dex::matching::Side::Bid, base_size, 0.9),
             (asker_user_index, market_index, serum_dex::matching::Side::Ask, base_size, 1.1),
-        ]];
-        match_spot_order_scenario(&mut test, &mut mango_group_cookie, &matched_spot_orders).await;
+        ];
+        place_spot_order_scenario(&mut test, &mut mango_group_cookie, &placed_spot_orders).await;
 
         let matched_perp_orders = vec![vec![
             (asker_user_index, market_index, mango::matching::Side::Ask, base_size, 1.),
