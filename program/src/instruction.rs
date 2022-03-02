@@ -217,7 +217,7 @@ pub enum MangoInstruction {
     /// paid from the quote position. Only at this point the position balance
     /// is 100% refelecting the trade.
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (8 + `MAX_PAIRS` + (optional 1)):
     /// 0. `[]` mango_group_ai - MangoGroup
     /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
     /// 2. `[signer]` owner_ai - owner of MangoAccount
@@ -226,12 +226,14 @@ pub enum MangoInstruction {
     /// 5. `[writable]` bids_ai - bids account for this PerpMarket
     /// 6. `[writable]` asks_ai - asks account for this PerpMarket
     /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8..23 `[]` open_orders_ais - array of open orders accounts on this MangoAccount
+    /// 23. `[writable]` referrer_mango_account_ai - optional, mango account of referrer
     PlacePerpOrder {
         price: i64,
         quantity: i64,
         client_order_id: u64,
         side: Side,
-        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
         order_type: OrderType,
         /// Optional to be backward compatible; default false
         reduce_only: bool,
@@ -836,12 +838,13 @@ pub enum MangoInstruction {
 
     /// Create a PDA mango account for a user
     ///
-    /// Accounts expected by this instruction (4):
+    /// Accounts expected by this instruction (5):
     ///
     /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account data
     /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
     /// 3. `[]` system_prog_ai - System program
+    /// 4. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateMangoAccount {
         account_num: u64,
     },
@@ -912,7 +915,7 @@ pub enum MangoInstruction {
 
     /// Create an OpenOrders PDA and initialize it with InitOpenOrders call to serum dex
     ///
-    /// Accounts expected by this instruction (8):
+    /// Accounts expected by this instruction (9):
     ///
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - MangoAccount
@@ -922,7 +925,111 @@ pub enum MangoInstruction {
     /// 5. `[]` spot_market_ai - dex MarketState account
     /// 6. `[]` signer_ai - Group Signer Account
     /// 7. `[]` system_prog_ai - System program
+    /// 8. `[signer, writable]` payer_ai - pays for the PDA creation
     CreateSpotOpenOrders, // instruction 60
+
+    /// Set the `ref_surcharge_centibps`, `ref_share_centibps` and `ref_mngo_required` on `MangoGroup`
+    ///
+    /// Accounts expected by this instruction (2):
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[signer]` admin_ai - mango_group.admin
+    ChangeReferralFeeParams {
+        ref_surcharge_centibps: u32,
+        ref_share_centibps: u32,
+        ref_mngo_required: u64,
+    },
+    /// Store the referrer's MangoAccount pubkey on the Referrer account
+    /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
+    /// This is primarily useful for the UI; the referrer address stored here is not necessarily
+    /// who earns the ref fees.
+    ///
+    /// Accounts expected by this instruction (7):
+    ///
+    /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[]` mango_account_ai - MangoAccount of the referred
+    /// 2. `[signer]` owner_ai - MangoAccount owner or delegate
+    /// 3. `[writable]` referrer_memory_ai - ReferrerMemory struct; will be initialized if required
+    /// 4. `[]` referrer_mango_account_ai - referrer's MangoAccount
+    /// 5. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 6. `[]` system_prog_ai - System program
+    SetReferrerMemory,
+
+    /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// in a ref link. This is primarily useful for the UI.
+    /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
+    ///
+    /// Accounts expected by this instruction (5):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[]` referrer_mango_account_ai - MangoAccount
+    /// 2. `[writable]` referrer_id_record_ai - The PDA to store the record on
+    /// 3. `[signer, writable]` payer_ai - payer for PDA; can be same as owner
+    /// 4. `[]` system_prog_ai - System program
+    RegisterReferrerId {
+        referrer_id: [u8; INFO_LEN],
+    },
+
+    /// Place an order on a perp market
+    ///
+    /// In case this order is matched, the corresponding order structs on both
+    /// PerpAccounts (taker & maker) will be adjusted, and the position size
+    /// will be adjusted w/o accounting for fees.
+    /// In addition a FillEvent will be placed on the event queue.
+    /// Through a subsequent invocation of ConsumeEvents the FillEvent can be
+    /// executed and the perp account balances (base/quote) and fees will be
+    /// paid from the quote position. Only at this point the position balance
+    /// is 100% reflecting the trade.
+    ///
+    /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[signer]` owner_ai - owner of MangoAccount
+    /// 3. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 4. `[writable]` perp_market_ai
+    /// 5. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 6. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8. `[writable]` referrer_mango_account_ai - referrer's mango account;
+    ///                 pass in mango_account_ai as duplicate if you don't have a referrer
+    /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
+    PlacePerpOrder2 {
+        /// Price in quote lots per base lots.
+        ///
+        /// Effect is based on order type, it's usually
+        /// - fill orders on the book up to this price or
+        /// - place an order on the book at this price.
+        ///
+        /// Ignored for Market orders and potentially adjusted for PostOnlySlide orders.
+        price: i64,
+
+        /// Max base lots to buy/sell.
+        max_base_quantity: i64,
+
+        /// Max quote lots to pay/receive (not taking fees into account).
+        max_quote_quantity: i64,
+
+        /// Arbitrary user-controlled order id.
+        client_order_id: u64,
+
+        /// Timestamp of when order expires
+        ///
+        /// Send 0 if you want the order to never expire.
+        /// Timestamps in the past mean the instruction is skipped.
+        /// Timestamps in the future are reduced to now + 255s.
+        expiry_timestamp: u64,
+
+        side: Side,
+
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
+        order_type: OrderType,
+
+        reduce_only: bool,
+
+        /// Maximum number of orders from the book to fill.
+        ///
+        /// Use this to limit compute used during order matching.
+        /// When the limit is reached, processing stops and the instruction succeeds.
+        limit: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -1371,6 +1478,46 @@ impl MangoInstruction {
                 }
             }
             60 => MangoInstruction::CreateSpotOpenOrders,
+            61 => {
+                let data = array_ref![data, 0, 16];
+                let (ref_surcharge_centibps, ref_share_centibps, ref_mngo_required) =
+                    array_refs![data, 4, 4, 8];
+                MangoInstruction::ChangeReferralFeeParams {
+                    ref_surcharge_centibps: u32::from_le_bytes(*ref_surcharge_centibps),
+                    ref_share_centibps: u32::from_le_bytes(*ref_share_centibps),
+                    ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
+                }
+            }
+            62 => MangoInstruction::SetReferrerMemory,
+            63 => {
+                let referrer_id = array_ref![data, 0, INFO_LEN];
+                MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
+            }
+            64 => {
+                let data_arr = array_ref![data, 0, 44];
+                let (
+                    price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    client_order_id,
+                    expiry_timestamp,
+                    side,
+                    order_type,
+                    reduce_only,
+                    limit,
+                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 1, 1, 1, 1];
+                MangoInstruction::PlacePerpOrder2 {
+                    price: i64::from_le_bytes(*price),
+                    max_base_quantity: i64::from_le_bytes(*max_base_quantity),
+                    max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only: reduce_only[0] != 0,
+                    limit: u8::from_le_bytes(*limit),
+                }
+            }
             _ => {
                 return None;
             }
@@ -1539,13 +1686,15 @@ pub fn create_mango_account(
     mango_account_pk: &Pubkey,
     owner_pk: &Pubkey,
     system_prog_pk: &Pubkey,
+    payer_pk: &Pubkey,
     account_num: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
-        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*owner_pk, true),
         AccountMeta::new_readonly(*system_prog_pk, false),
+        AccountMeta::new(*payer_pk, true),
     ];
 
     let instr = MangoInstruction::CreateMangoAccount { account_num };
@@ -1724,6 +1873,7 @@ pub fn place_perp_order(
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
     event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
     open_orders_pks: &[Pubkey; MAX_PAIRS],
     side: Side,
     price: i64,
@@ -1743,6 +1893,9 @@ pub fn place_perp_order(
         AccountMeta::new(*event_queue_pk, false),
     ];
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    if let Some(referrer_mango_account_pk) = referrer_mango_account_pk {
+        accounts.push(AccountMeta::new(*referrer_mango_account_pk, false));
+    }
 
     let instr = MangoInstruction::PlacePerpOrder {
         side,
@@ -1751,6 +1904,58 @@ pub fn place_perp_order(
         client_order_id,
         order_type,
         reduce_only,
+    };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn place_perp_order2(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
+    open_orders_pks: &[Pubkey],
+    side: Side,
+    price: i64,
+    max_base_quantity: i64,
+    max_quote_quantity: i64,
+    client_order_id: u64,
+    order_type: OrderType,
+    reduce_only: bool,
+    expiry_timestamp: Option<u64>, // Send 0 if you want to ignore time in force
+    limit: u8,                     // maximum number of FillEvents before terminating
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*referrer_mango_account_pk.unwrap_or(mango_account_pk), false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::PlacePerpOrder2 {
+        side,
+        price,
+        max_base_quantity,
+        max_quote_quantity,
+        client_order_id,
+        order_type,
+        reduce_only,
+        expiry_timestamp: expiry_timestamp.unwrap_or(0),
+        limit,
     };
     let data = instr.pack();
 
@@ -2221,16 +2426,18 @@ pub fn create_spot_open_orders(
     open_orders_pk: &Pubkey,
     spot_market_pk: &Pubkey,
     signer_pk: &Pubkey,
+    payer_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
-        AccountMeta::new(*owner_pk, true),
+        AccountMeta::new_readonly(*owner_pk, true),
         AccountMeta::new_readonly(*dex_prog_pk, false),
         AccountMeta::new(*open_orders_pk, false),
         AccountMeta::new_readonly(*spot_market_pk, false),
         AccountMeta::new_readonly(*signer_pk, false),
         AccountMeta::new_readonly(solana_program::system_program::ID, false),
+        AccountMeta::new(*payer_pk, true),
     ];
 
     let instr = MangoInstruction::CreateSpotOpenOrders;
@@ -2465,6 +2672,78 @@ pub fn liquidate_token_and_token(
     accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::LiquidateTokenAndToken { max_liab_transfer };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn liquidate_token_and_perp(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    liqee_mango_account_pk: &Pubkey,
+    liqor_mango_account_pk: &Pubkey,
+    liqor_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+    liqee_open_orders_pks: &[Pubkey],
+    liqor_open_orders_pks: &[Pubkey],
+    asset_type: AssetType,
+    asset_index: usize,
+    liab_type: AssetType,
+    liab_index: usize,
+    max_liab_transfer: I80F48,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*liqee_mango_account_pk, false),
+        AccountMeta::new(*liqor_mango_account_pk, false),
+        AccountMeta::new_readonly(*liqor_pk, true),
+        AccountMeta::new_readonly(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+    ];
+
+    accounts.extend(liqee_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::LiquidateTokenAndPerp {
+        asset_type,
+        asset_index,
+        liab_type,
+        liab_index,
+        max_liab_transfer,
+    };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn liquidate_perp_market(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    liqee_mango_account_pk: &Pubkey,
+    liqor_mango_account_pk: &Pubkey,
+    liqor_pk: &Pubkey,
+    liqee_open_orders_pks: &[Pubkey],
+    liqor_open_orders_pks: &[Pubkey],
+    base_transfer_request: i64,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*liqee_mango_account_pk, false),
+        AccountMeta::new(*liqor_mango_account_pk, false),
+        AccountMeta::new_readonly(*liqor_pk, true),
+    ];
+
+    accounts.extend(liqee_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::LiquidatePerpMarket { base_transfer_request };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

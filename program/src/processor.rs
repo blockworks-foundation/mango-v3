@@ -25,16 +25,15 @@ use switchboard_program::FastRoundResultAccountData;
 
 use mango_common::Loadable;
 use mango_logs::{
-    mango_emit, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog, CancelAllPerpOrdersLog,
-    DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog,
-    MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog,
-    SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog,
-    WithdrawLog,
+    mango_emit_heap, mango_emit_stack, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog,
+    CancelAllPerpOrdersLog, DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog,
+    LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog,
+    RedeemMngoLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
+    UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::msrm_token;
-use crate::ids::srm_token;
+use crate::ids::{msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 #[cfg(not(feature = "devnet"))]
@@ -45,14 +44,15 @@ use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
-    AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache, HealthType, MangoAccount,
-    MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo,
-    PerpTriggerOrder, PriceCache, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
-    MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
-    NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
+    load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
+    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
+    PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, ReferrerIdRecord,
+    ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
+    UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
+    MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
+    QUOTE_INDEX, ZERO_I80F48,
 };
-use crate::utils::{gen_signer_key, gen_signer_seeds};
+use crate::utils::{emit_perp_balances, gen_signer_key, gen_signer_seeds};
 
 declare_check_assert_macros!(SourceFileId::Processor);
 
@@ -367,12 +367,13 @@ impl Processor {
 
             // Make sure DustAccount satisfies health check only when it has taken on more borrows
             let mut health_cache = HealthCache::new(active_assets);
-            let open_orders_ais = vec![None; MAX_PAIRS];
+            let open_orders_accounts: Vec<Option<&serum_dex::state::OpenOrders>> =
+                vec![None; MAX_PAIRS];
             health_cache.init_vals_with_orders_vec(
                 &mango_group,
                 &mango_cache,
                 &dust_account,
-                &open_orders_ais,
+                &open_orders_accounts,
             )?;
             let health = health_cache.get_health(&mango_group, HealthType::Init);
             check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -575,7 +576,7 @@ impl Processor {
     }
 
     #[inline(never)]
-    /// *** DEPRECATED Initialize perp market including orderbooks and queues
+    /// DEPRECATED Initialize perp market including orderbooks and queues
     fn add_perp_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -736,7 +737,7 @@ impl Processor {
             event_queue_ai, // write
             bids_ai,        // write
             asks_ai,        // write
-            mngo_mint_ai,   // read 
+            mngo_mint_ai,   // read
             mngo_vault_ai,  // write
             admin_ai,       // signer (write if admin has SOL and no data)
             signer_ai,      // write  (if admin has data and is owned by governance)
@@ -931,7 +932,7 @@ impl Processor {
             deposit,
         )?;
 
-        mango_emit!(DepositLog {
+        mango_emit_heap!(DepositLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             owner: *owner_ai.key,
@@ -1152,7 +1153,7 @@ impl Processor {
             }
         }
 
-        mango_emit!(CachePricesLog {
+        mango_emit_heap!(CachePricesLog {
             mango_group: *mango_group_ai.key,
             oracle_indexes,
             oracle_prices
@@ -1193,7 +1194,7 @@ impl Processor {
             deposit_indexes.push(root_bank.deposit_index.to_bits());
             borrow_indexes.push(root_bank.borrow_index.to_bits())
         }
-        mango_emit!(CacheRootBanksLog {
+        mango_emit_heap!(CacheRootBanksLog {
             mango_group: *mango_group_ai.key,
             token_indexes,
             deposit_indexes,
@@ -1236,7 +1237,7 @@ impl Processor {
             long_fundings.push(perp_market.long_funding.to_bits());
             short_fundings.push(perp_market.short_funding.to_bits());
         }
-        mango_emit!(CachePerpMarketsLog {
+        mango_emit_heap!(CachePerpMarketsLog {
             mango_group: *mango_group_ai.key,
             market_indexes,
             long_fundings,
@@ -1343,7 +1344,7 @@ impl Processor {
         // If health is above Init then being liquidated should be false anyway
         mango_account.being_liquidated = false;
 
-        mango_emit!(WithdrawLog {
+        mango_emit_heap!(WithdrawLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             owner: *owner_ai.key,
@@ -1420,17 +1421,22 @@ impl Processor {
     /// Call the init_open_orders instruction in serum dex and add this OpenOrders account to margin account
     fn create_spot_open_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 8;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let fixed_accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
-            owner_ai,               // read
+            owner_ai,               // read (write if no payer passed) & signer
             dex_prog_ai,            // read
             open_orders_ai,         // write
             spot_market_ai,         // read
             signer_ai,              // read
             system_prog_ai,         // read
-        ] = accounts;
+        ] = fixed_accounts;
+        let payer_ai = if accounts.len() > NUM_FIXED {
+            &accounts[NUM_FIXED] // write & signer
+        } else {
+            owner_ai
+        };
         check!(
             system_prog_ai.key == &solana_program::system_program::id(),
             MangoErrorCode::InvalidProgramId
@@ -1451,13 +1457,14 @@ impl Processor {
             MangoErrorCode::InvalidOwner
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(payer_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         let open_orders_seeds: &[&[u8]] =
             &[&mango_account_ai.key.as_ref(), &market_index.to_le_bytes(), b"OpenOrders"];
         seed_and_create_pda(
             program_id,
-            owner_ai,
+            payer_ai,
             &Rent::get()?,
             size_of::<serum_dex::state::OpenOrders>() + 12,
             dex_prog_ai.key,
@@ -1819,7 +1826,7 @@ impl Processor {
             MangoErrorCode::InsufficientFunds
         )?;
 
-        mango_emit!(OpenOrdersBalanceLog {
+        mango_emit_heap!(OpenOrdersBalanceLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -1923,6 +1930,7 @@ impl Processor {
 
         let mut open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
         for i in 0..mango_group.num_oracles {
@@ -1951,7 +1959,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais,
+            &open_orders_accounts,
         )?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
@@ -2109,7 +2117,7 @@ impl Processor {
             MangoErrorCode::InsufficientFunds
         )?;
 
-        mango_emit!(OpenOrdersBalanceLog {
+        mango_emit_heap!(OpenOrdersBalanceLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -2181,7 +2189,7 @@ impl Processor {
         )?;
 
         let open_orders = load_open_orders(open_orders_ai)?;
-        mango_emit!(OpenOrdersBalanceLog {
+        mango_emit_heap!(OpenOrdersBalanceLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -2303,7 +2311,7 @@ impl Processor {
             let open_orders = load_open_orders(open_orders_ai)?;
             // remove from margin basket if it's empty
             mango_account.update_basket(market_index, &open_orders)?;
-            mango_emit!(OpenOrdersBalanceLog {
+            mango_emit_stack::<_, 256>(OpenOrdersBalanceLog {
                 mango_group: *mango_group_ai.key,
                 mango_account: *mango_account_ai.key,
                 market_index: market_index as u64,
@@ -2311,7 +2319,7 @@ impl Processor {
                 base_free: open_orders.native_coin_free,
                 quote_total: open_orders.native_pc_total,
                 quote_free: open_orders.native_pc_free,
-                referrer_rebates_accrued: open_orders.referrer_rebates_accrued
+                referrer_rebates_accrued: open_orders.referrer_rebates_accrued,
             });
 
             (
@@ -2361,13 +2369,13 @@ impl Processor {
         client_order_id: u64,
         order_type: OrderType,
         reduce_only: bool,
-    ) -> MangoResult<()> {
+    ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(quantity > 0, MangoErrorCode::InvalidParam)?;
 
         const NUM_FIXED: usize = 8;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let (fixed_ais, open_orders_ais, opt_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS; ..;];
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write
@@ -2378,6 +2386,9 @@ impl Processor {
             asks_ai,            // write
             event_queue_ai,     // write
         ] = fixed_ais;
+
+        let referrer_mango_account_ai = opt_ais.first();
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
         let mut mango_account =
@@ -2450,9 +2461,12 @@ impl Processor {
         }
 
         book.new_order(
+            program_id,
+            &mango_group,
+            mango_group_ai.key,
+            &mango_cache,
             &mut event_queue,
             &mut perp_market,
-            &mango_group.perp_markets[market_index],
             mango_cache.get_price(market_index),
             &mut mango_account,
             mango_account_ai.key,
@@ -2460,9 +2474,173 @@ impl Processor {
             side,
             price,
             quantity,
+            i64::MAX, // no limit on quote quantity
             order_type,
+            0,
             client_order_id,
             now_ts,
+            referrer_mango_account_ai,
+            u8::MAX,
+        )?;
+
+        health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
+        let post_health = health_cache.get_health(&mango_group, HealthType::Init);
+        check!(
+            post_health >= ZERO_I80F48 || (health_up_only && post_health >= pre_health),
+            MangoErrorCode::InsufficientFunds
+        )
+    }
+
+    #[inline(never)]
+    fn place_perp_order2(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        side: Side,
+        price: i64,
+        max_base_quantity: i64,
+        max_quote_quantity: i64,
+        client_order_id: u64,
+        order_type: OrderType,
+        reduce_only: bool,
+        expiry_timestamp: u64,
+        limit: u8,
+    ) -> MangoResult {
+        check!(price > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_base_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(max_quote_quantity > 0, MangoErrorCode::InvalidParam)?;
+        check!(limit > 0, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 9;
+        let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,             // read
+            mango_account_ai,           // write
+            owner_ai,                   // read, signer
+            mango_cache_ai,             // read
+            perp_market_ai,             // write
+            bids_ai,                    // write
+            asks_ai,                    // write
+            event_queue_ai,             // write
+            referrer_mango_account_ai,  // write
+        ] = fixed_ais;
+
+        // If referrer same as user, assume no referrer
+        let referrer_mango_account_ai = if referrer_mango_account_ai.key == mango_account_ai.key {
+            None
+        } else {
+            Some(referrer_mango_account_ai)
+        };
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+
+        let open_orders_ais =
+            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let time_in_force = if expiry_timestamp != 0 {
+            // If expiry is far in the future, clamp to 255 seconds
+            let tif = expiry_timestamp.saturating_sub(now_ts).min(255);
+            if tif == 0 {
+                // If expiry is in the past, ignore the order
+                msg!("Order is already expired");
+                return Ok(());
+            }
+            tif as u8
+        } else {
+            0 // never expire
+        };
+
+        let mut perp_market =
+            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+        let market_index = mango_group
+            .find_perp_market_index(perp_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        let active_assets = UserActiveAssets::new(
+            &mango_group,
+            &mango_account,
+            vec![(AssetType::Perp, market_index)],
+        );
+
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+
+        let mut health_cache = HealthCache::new(active_assets);
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &mango_account,
+            &open_orders_accounts,
+        )?;
+        let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
+
+        // update the being_liquidated flag
+        if mango_account.being_liquidated {
+            if pre_health >= ZERO_I80F48 {
+                mango_account.being_liquidated = false;
+            } else {
+                return Err(throw_err!(MangoErrorCode::BeingLiquidated));
+            }
+        }
+
+        // This means health must only go up
+        let health_up_only = pre_health < ZERO_I80F48;
+
+        let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+        let mut event_queue =
+            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+
+        // If reduce_only, position must only go down
+        let max_base_quantity = if reduce_only {
+            let base_pos = mango_account.get_complete_base_pos(
+                market_index,
+                &event_queue,
+                mango_account_ai.key,
+            )?;
+
+            if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
+                0
+            } else {
+                base_pos.abs().min(max_base_quantity)
+            }
+        } else {
+            max_base_quantity
+        };
+        if max_base_quantity == 0 {
+            return Ok(());
+        }
+
+        book.new_order(
+            program_id,
+            &mango_group,
+            mango_group_ai.key,
+            &mango_cache,
+            &mut event_queue,
+            &mut perp_market,
+            mango_cache.get_price(market_index),
+            &mut mango_account,
+            mango_account_ai.key,
+            market_index,
+            side,
+            price,
+            max_base_quantity,
+            max_quote_quantity,
+            order_type,
+            time_in_force,
+            client_order_id,
+            now_ts,
+            referrer_mango_account_ai,
+            limit,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2506,6 +2684,7 @@ impl Processor {
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
+        let now_ts = Clock::get()?.unix_timestamp as u64;
         let (order_id, side) = mango_account
             .find_order_with_client_id(market_index, client_order_id)
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
@@ -2513,14 +2692,14 @@ impl Processor {
         let mut book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
         let best_final = if perp_market.meta_data.version == 0 {
             match side {
-                Side::Bid => book.get_best_bid_price().unwrap(),
-                Side::Ask => book.get_best_ask_price().unwrap(),
+                Side::Bid => book.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => book.get_best_ask_price(now_ts).unwrap(),
             }
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
-                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth, now_ts),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth, now_ts),
             }
         };
 
@@ -2529,7 +2708,8 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         // If order version doesn't match the perp market version, no incentives
-        if order.version != perp_market.meta_data.version {
+        // time in force invalid orders don't get rewards
+        if order.version != perp_market.meta_data.version || !order.is_valid(now_ts) {
             return Ok(());
         }
 
@@ -2542,7 +2722,7 @@ impl Processor {
                 order.best_initial,
                 best_final,
                 order.timestamp,
-                Clock::get()?.unix_timestamp as u64,
+                now_ts,
                 order.quantity,
             )?;
         } else {
@@ -2556,7 +2736,7 @@ impl Processor {
             )?;
         }
 
-        mango_emit!(MngoAccrualLog {
+        mango_emit_heap!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -2601,6 +2781,9 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+
         let side = mango_account
             .find_order_side(market_index, order_id)
             .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
@@ -2608,14 +2791,14 @@ impl Processor {
 
         let best_final = if perp_market.meta_data.version == 0 {
             match side {
-                Side::Bid => book.get_best_bid_price().unwrap(),
-                Side::Ask => book.get_best_ask_price().unwrap(),
+                Side::Bid => book.get_best_bid_price(now_ts).unwrap(),
+                Side::Ask => book.get_best_ask_price(now_ts).unwrap(),
             }
         } else {
             let max_depth: i64 = perp_market.liquidity_mining_info.max_depth_bps.to_num();
             match side {
-                Side::Bid => book.get_bids_size_above_order(order_id, max_depth),
-                Side::Ask => book.get_asks_size_below_order(order_id, max_depth),
+                Side::Bid => book.get_bids_size_above_order(order_id, max_depth, now_ts),
+                Side::Ask => book.get_asks_size_below_order(order_id, max_depth, now_ts),
             }
         };
 
@@ -2624,7 +2807,8 @@ impl Processor {
         mango_account.remove_order(order.owner_slot as usize, order.quantity)?;
 
         // If order version doesn't match the perp market version, no incentives
-        if order.version != perp_market.meta_data.version {
+        // time in force invalid orders don't get rewards
+        if order.version != perp_market.meta_data.version || !order.is_valid(now_ts) {
             return Ok(());
         }
 
@@ -2637,7 +2821,7 @@ impl Processor {
                 order.best_initial,
                 best_final,
                 order.timestamp,
-                Clock::get()?.unix_timestamp as u64,
+                now_ts,
                 order.quantity,
             )?;
         } else {
@@ -2651,7 +2835,7 @@ impl Processor {
             )?;
         }
 
-        mango_emit!(MngoAccrualLog {
+        mango_emit_heap!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -2711,7 +2895,7 @@ impl Processor {
                 market_index,
                 limit,
             )?;
-            mango_emit!(CancelAllPerpOrdersLog {
+            mango_emit_heap!(CancelAllPerpOrdersLog {
                 mango_group: *mango_group_ai.key,
                 mango_account: *mango_account_ai.key,
                 market_index: market_index as u64,
@@ -2720,7 +2904,7 @@ impl Processor {
             });
         }
 
-        mango_emit!(MngoAccrualLog {
+        mango_emit_heap!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -2816,13 +3000,27 @@ impl Processor {
             a_settle,
         )?;
 
-        mango_emit!(SettlePnlLog {
+        mango_emit_heap!(SettlePnlLog {
             mango_group: *mango_group_ai.key,
             mango_account_a: *mango_account_a_ai.key,
             mango_account_b: *mango_account_b_ai.key,
             market_index: market_index as u64,
             settlement: a_settle.to_bits(), // Will be positive if a has positive pnl and settling with b
         });
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_a_ai.key,
+            market_index as u64,
+            &mango_account_a.perp_accounts[market_index],
+            perp_market_cache,
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_b_ai.key,
+            market_index as u64,
+            &mango_account_b.perp_accounts[market_index],
+            perp_market_cache,
+        );
 
         Ok(())
     }
@@ -2914,12 +3112,20 @@ impl Processor {
             -settlement,
         )?;
 
-        mango_emit!(SettleFeesLog {
+        mango_emit_heap!(SettleFeesLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
             settlement: settlement.to_bits()
         });
+
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_ai.key,
+            market_index as u64,
+            &mango_account.perp_accounts[market_index],
+            perp_market_cache,
+        );
 
         Ok(())
     }
@@ -3074,7 +3280,7 @@ impl Processor {
         let (post_base, post_quote) = {
             let open_orders = load_open_orders(open_orders_ai)?;
             liqee_ma.update_basket(market_index, &open_orders)?;
-            mango_emit!(OpenOrdersBalanceLog {
+            mango_emit_stack::<_, 256>(OpenOrdersBalanceLog {
                 mango_group: *mango_group_ai.key,
                 mango_account: *liqee_mango_account_ai.key,
                 market_index: market_index as u64,
@@ -3082,7 +3288,7 @@ impl Processor {
                 base_free: open_orders.native_coin_free,
                 quote_total: open_orders.native_pc_total,
                 quote_free: open_orders.native_pc_free,
-                referrer_rebates_accrued: open_orders.referrer_rebates_accrued
+                referrer_rebates_accrued: open_orders.referrer_rebates_accrued,
             });
 
             (
@@ -3393,7 +3599,7 @@ impl Processor {
             liqee_ma.being_liquidated = liqee_init_health < NEG_ONE_I80F48;
         }
 
-        mango_emit!(LiquidateTokenAndTokenLog {
+        mango_emit_heap!(LiquidateTokenAndTokenLog {
             mango_group: *mango_group_ai.key,
             liqee: *liqee_mango_account_ai.key,
             liqor: *liqor_mango_account_ai.key,
@@ -3671,7 +3877,7 @@ impl Processor {
             liqee_ma.being_liquidated = liqee_init_health < NEG_ONE_I80F48;
         }
 
-        mango_emit!(LiquidateTokenAndPerpLog {
+        mango_emit_heap!(LiquidateTokenAndPerpLog {
             mango_group: *mango_group_ai.key,
             liqee: *liqee_mango_account_ai.key,
             liqor: *liqor_mango_account_ai.key,
@@ -3685,6 +3891,27 @@ impl Processor {
             liab_price: liab_price.to_bits(),
             bankruptcy: liqee_ma.is_bankrupt,
         });
+
+        let perp_market_index: usize;
+        if asset_type == AssetType::Token {
+            perp_market_index = liab_index;
+        } else {
+            perp_market_index = asset_index;
+        }
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqee_mango_account_ai.key,
+            perp_market_index as u64,
+            &liqee_ma.perp_accounts[perp_market_index],
+            &mango_cache.perp_market_cache[perp_market_index],
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqor_mango_account_ai.key,
+            perp_market_index as u64,
+            &liqor_ma.perp_accounts[perp_market_index],
+            &mango_cache.perp_market_cache[perp_market_index],
+        );
 
         Ok(())
     }
@@ -3881,7 +4108,7 @@ impl Processor {
             liqee_ma.being_liquidated = liqee_init_health < NEG_ONE_I80F48;
         }
 
-        mango_emit!(LiquidatePerpMarketLog {
+        mango_emit_heap!(LiquidatePerpMarketLog {
             mango_group: *mango_group_ai.key,
             liqee: *liqee_mango_account_ai.key,
             liqor: *liqor_mango_account_ai.key,
@@ -3891,6 +4118,20 @@ impl Processor {
             quote_transfer: quote_transfer.to_bits(),
             bankruptcy: liqee_ma.is_bankrupt
         });
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqee_mango_account_ai.key,
+            market_index as u64,
+            &liqee_ma.perp_accounts[market_index],
+            &mango_cache.perp_market_cache[market_index],
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqor_mango_account_ai.key,
+            market_index as u64,
+            &liqor_ma.perp_accounts[market_index],
+            &mango_cache.perp_market_cache[market_index],
+        );
 
         Ok(())
     }
@@ -4047,7 +4288,7 @@ impl Processor {
 
         liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
 
-        mango_emit!(PerpBankruptcyLog {
+        mango_emit_heap!(PerpBankruptcyLog {
             mango_group: *mango_group_ai.key,
             liqee: *liqee_mango_account_ai.key,
             liqor: *liqor_mango_account_ai.key,
@@ -4057,6 +4298,20 @@ impl Processor {
             cache_long_funding: mango_cache.perp_market_cache[liab_index].long_funding.to_bits(),
             cache_short_funding: mango_cache.perp_market_cache[liab_index].short_funding.to_bits()
         });
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqee_mango_account_ai.key,
+            liab_index as u64,
+            &liqee_ma.perp_accounts[liab_index],
+            &mango_cache.perp_market_cache[liab_index],
+        );
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *liqor_mango_account_ai.key,
+            liab_index as u64,
+            &liqor_ma.perp_accounts[liab_index],
+            &mango_cache.perp_market_cache[liab_index],
+        );
 
         Ok(())
     }
@@ -4264,7 +4519,7 @@ impl Processor {
 
         liqee_ma.is_bankrupt = !liqee_ma.check_exit_bankruptcy(&mango_group);
 
-        mango_emit!(TokenBankruptcyLog {
+        mango_emit_heap!(TokenBankruptcyLog {
             mango_group: *mango_group_ai.key,
             liqee: *liqee_mango_account_ai.key,
             liqor: *liqor_mango_account_ai.key,
@@ -4317,7 +4572,7 @@ impl Processor {
             last_update: now_ts,
         };
 
-        mango_emit!(UpdateRootBankLog {
+        mango_emit_heap!(UpdateRootBankLog {
             mango_group: *mango_group_ai.key,
             token_index: index as u64,
             deposit_index: mango_cache.root_bank_cache[index].deposit_index.to_bits(),
@@ -4334,8 +4589,8 @@ impl Processor {
         accounts: &[AccountInfo],
         limit: usize,
     ) -> MangoResult<()> {
-        // Limit may be max 10 because of compute limits from logging. Increase if compute goes up
-        let limit = min(limit, 10);
+        // Limit may be max 8 because of compute and memory limits from logging. Increase if compute/mem goes up
+        let limit = min(limit, 8);
 
         const NUM_FIXED: usize = 4;
         let (fixed_ais, mango_account_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -4358,8 +4613,6 @@ impl Processor {
         let perp_market_cache = &mango_cache.perp_market_cache[market_index];
 
         perp_market_cache.check_valid(&mango_group, now_ts)?;
-
-        let info = &mango_group.perp_markets[market_index];
 
         for _ in 0..limit {
             let event = match event_queue.peek_front() {
@@ -4386,26 +4639,21 @@ impl Processor {
                             )?,
                         };
                         let pre_mngo = ma.perp_accounts[market_index].mngo_accrued;
-                        ma.execute_maker(
-                            market_index,
-                            &mut perp_market,
-                            info,
-                            perp_market_cache,
-                            fill,
-                        )?;
-                        ma.execute_taker(
-                            market_index,
-                            &mut perp_market,
-                            info,
-                            perp_market_cache,
-                            fill,
-                        )?;
-                        mango_emit!(MngoAccrualLog {
+                        ma.execute_maker(market_index, &mut perp_market, perp_market_cache, fill)?;
+                        ma.execute_taker(market_index, &mut perp_market, perp_market_cache, fill)?;
+                        mango_emit_stack::<_, 512>(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
                             market_index: market_index as u64,
-                            mngo_accrual: ma.perp_accounts[market_index].mngo_accrued - pre_mngo
+                            mngo_accrual: ma.perp_accounts[market_index].mngo_accrued - pre_mngo,
                         });
+                        emit_perp_balances(
+                            *mango_group_ai.key,
+                            fill.maker,
+                            market_index as u64,
+                            &ma.perp_accounts[market_index],
+                            &mango_cache.perp_market_cache[market_index],
+                        );
                     } else {
                         let mut maker =
                             match mango_account_ais.iter().find(|ai| ai.key == &fill.maker) {
@@ -4436,25 +4684,37 @@ impl Processor {
                         maker.execute_maker(
                             market_index,
                             &mut perp_market,
-                            info,
                             perp_market_cache,
                             fill,
                         )?;
                         taker.execute_taker(
                             market_index,
                             &mut perp_market,
-                            info,
                             perp_market_cache,
                             fill,
                         )?;
-                        mango_emit!(MngoAccrualLog {
+                        mango_emit_stack::<_, 512>(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
                             mango_account: fill.maker,
                             market_index: market_index as u64,
-                            mngo_accrual: maker.perp_accounts[market_index].mngo_accrued - pre_mngo
+                            mngo_accrual: maker.perp_accounts[market_index].mngo_accrued - pre_mngo,
                         });
+                        emit_perp_balances(
+                            *mango_group_ai.key,
+                            fill.maker,
+                            market_index as u64,
+                            &maker.perp_accounts[market_index],
+                            &mango_cache.perp_market_cache[market_index],
+                        );
+                        emit_perp_balances(
+                            *mango_group_ai.key,
+                            fill.taker,
+                            market_index as u64,
+                            &taker.perp_accounts[market_index],
+                            &mango_cache.perp_market_cache[market_index],
+                        );
                     }
-                    mango_emit!(fill.to_fill_log(*mango_group_ai.key, market_index));
+                    mango_emit_stack::<_, 512>(fill.to_fill_log(*mango_group_ai.key, market_index));
                 }
                 EventType::Out => {
                     let out: &OutEvent = cast_ref(event);
@@ -4521,7 +4781,7 @@ impl Processor {
         };
 
         // only need to use UpdateFundingLog; don't worry about CachePerpMarket log
-        mango_emit!(UpdateFundingLog {
+        mango_emit_heap!(UpdateFundingLog {
             mango_group: *mango_group_ai.key,
             market_index: market_index as u64,
             long_funding: perp_market.long_funding.to_bits(),
@@ -4615,7 +4875,7 @@ impl Processor {
             redeemed_mngo,
         )?;
 
-        mango_emit!(RedeemMngoLog {
+        mango_emit_heap!(RedeemMngoLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -4889,6 +5149,7 @@ impl Processor {
         )?;
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let market_index = mango_group
             .find_perp_market_index(perp_market_ai.key)
@@ -4911,7 +5172,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais,
+            &open_orders_accounts,
         )?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
@@ -5035,6 +5296,7 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         let open_orders_ais =
             mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+        let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
@@ -5088,7 +5350,7 @@ impl Processor {
             &mango_group,
             &mango_cache,
             &mango_account,
-            &open_orders_ais,
+            &open_orders_accounts,
         )?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
@@ -5140,7 +5402,9 @@ impl Processor {
                     mango_cache.get_price(market_index),
                     order.price,
                     quantity,
+                    i64::MAX,
                     order.order_type,
+                    now_ts,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,
@@ -5148,7 +5412,9 @@ impl Processor {
                     mango_cache.get_price(market_index),
                     order.price,
                     quantity,
+                    i64::MAX,
                     order.order_type,
+                    now_ts,
                 )?,
             };
 
@@ -5177,9 +5443,12 @@ impl Processor {
                 };
 
                 book.new_order(
+                    program_id,
+                    &mango_group,
+                    mango_group_ai.key,
+                    &mango_cache,
                     &mut event_queue,
                     &mut perp_market,
-                    &mango_group.perp_markets[market_index],
                     mango_cache.get_price(market_index),
                     &mut mango_account,
                     mango_account_ai.key,
@@ -5187,9 +5456,13 @@ impl Processor {
                     order.side,
                     order.price,
                     quantity,
+                    i64::MAX, // no limit on quote quantity
                     order.order_type,
+                    0,
                     order.client_order_id,
                     now_ts,
+                    None,
+                    u8::MAX,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
@@ -5219,7 +5492,7 @@ impl Processor {
         program_transfer_lamports(advanced_orders_ai, agent_ai, ADVANCED_ORDER_FEE)
     }
 
-    /// *** Create a MangoAccount PDA and initialize it
+    /// Create a MangoAccount PDA and initialize it
     #[inline(never)]
     fn create_mango_account(
         program_id: &Pubkey,
@@ -5227,18 +5500,24 @@ impl Processor {
         account_num: u64,
     ) -> MangoResult {
         const NUM_FIXED: usize = 4;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let fixed_accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // write
             mango_account_ai,       // write
-            owner_ai,               // write & signer
+            owner_ai,               // read (write if no payer passed) & signer
             system_prog_ai,         // read
-        ] = accounts;
+        ] = fixed_accounts;
+        let payer_ai = if accounts.len() > NUM_FIXED {
+            &accounts[NUM_FIXED] // write & signer
+        } else {
+            owner_ai
+        };
         check!(
             system_prog_ai.key == &solana_program::system_program::id(),
             MangoErrorCode::InvalidProgramId
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(payer_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check!(
@@ -5249,10 +5528,9 @@ impl Processor {
 
         let mango_account_seeds: &[&[u8]] =
             &[&mango_group_ai.key.as_ref(), &owner_ai.key.as_ref(), &account_num.to_le_bytes()];
-        // TODO - test passing in MangoAccount that already has some data in it
         seed_and_create_pda(
             program_id,
-            owner_ai,
+            payer_ai,
             &rent,
             size_of::<MangoAccount>(),
             program_id,
@@ -5332,7 +5610,7 @@ impl Processor {
         Ok(())
     }
 
-    /// *** Create a DustAccount PDA and initialize it
+    /// Create a DustAccount PDA and initialize it
     #[inline(never)]
     fn create_dust_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 4;
@@ -5455,7 +5733,7 @@ impl Processor {
                 side,
                 limit,
             )?;
-            mango_emit!(CancelAllPerpOrdersLog {
+            mango_emit_heap!(CancelAllPerpOrdersLog {
                 mango_group: *mango_group_ai.key,
                 mango_account: *mango_account_ai.key,
                 market_index: market_index as u64,
@@ -5464,7 +5742,7 @@ impl Processor {
             });
         }
 
-        mango_emit!(MngoAccrualLog {
+        mango_emit_heap!(MngoAccrualLog {
             mango_group: *mango_group_ai.key,
             mango_account: *mango_account_ai.key,
             market_index: market_index as u64,
@@ -5568,6 +5846,147 @@ impl Processor {
         Ok(())
     }
 
+    /// Set the `ref_surcharge_centibps`, `ref_share_centibps` and `ref_mngo_required` on `MangoGroup`
+    #[inline(never)]
+    fn change_referral_fee_params(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        ref_surcharge_centibps: u32,
+        ref_share_centibps: u32,
+        ref_mngo_required: u64,
+    ) -> MangoResult {
+        check!(ref_surcharge_centibps >= ref_share_centibps, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        msg!("old referral fee params: ref_surcharge_centibps: {} ref_share_centibps: {} ref_mngo_required: {}", mango_group.ref_surcharge_centibps, mango_group.ref_share_centibps, mango_group.ref_mngo_required);
+
+        // TODO - when this goes out, if there are any events on the EventQueue fee logging will be messed up
+
+        mango_group.ref_surcharge_centibps = ref_surcharge_centibps;
+        mango_group.ref_share_centibps = ref_share_centibps;
+        mango_group.ref_mngo_required = ref_mngo_required;
+
+        msg!("new referral fee params: ref_surcharge_centibps: {} ref_share_centibps: {} ref_mngo_required: {}", ref_surcharge_centibps, ref_share_centibps, ref_mngo_required);
+        Ok(())
+    }
+
+    #[inline(never)]
+    /// Store the referrer's MangoAccount pubkey on the Referrer account
+    /// It will create the Referrer account as a PDA of user's MangoAccount if it doesn't exist
+    /// This is primarily useful for the UI; the referrer address stored here is not necessarily
+    /// who earns the ref fees.
+    fn set_referrer_memory(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 7;
+        let [
+            mango_group_ai,             // read
+            mango_account_ai,           // read
+            owner_ai,                   // signer
+            referrer_memory_ai,         // write
+            referrer_mango_account_ai,  // read
+            payer_ai,                   // write, signer
+            system_prog_ai,             // read
+        ] = array_ref![accounts, 0, NUM_FIXED];
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let _ = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_account =
+            MangoAccount::load_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
+        let _ =
+            MangoAccount::load_checked(referrer_mango_account_ai, program_id, mango_group_ai.key)?;
+
+        if referrer_memory_ai.data_is_empty() {
+            // initialize it if it's not initialized yet
+            let referrer_seeds: &[&[u8]] = &[&mango_account_ai.key.as_ref(), b"ReferrerMemory"];
+            seed_and_create_pda(
+                program_id,
+                payer_ai,
+                &Rent::get()?,
+                size_of::<ReferrerMemory>(),
+                program_id,
+                system_prog_ai,
+                referrer_memory_ai,
+                referrer_seeds,
+                &[],
+            )?;
+            ReferrerMemory::init(referrer_memory_ai, program_id, referrer_mango_account_ai)
+        } else {
+            // otherwise just set referrer pubkey
+            let mut referrer_memory =
+                ReferrerMemory::load_mut_checked(referrer_memory_ai, program_id)?;
+            referrer_memory.referrer_mango_account = *referrer_mango_account_ai.key;
+            Ok(())
+        }
+    }
+
+    /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
+    /// in a ref link
+    /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
+    #[inline(never)]
+    fn register_referrer_id(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        referrer_id: [u8; INFO_LEN],
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 5;
+        let [
+            mango_group_ai,             // read
+            referrer_mango_account_ai,  // read
+            referrer_id_record_ai,      // write
+            payer_ai,                   // write, signer
+            system_prog_ai,             // read
+        ] = array_ref![accounts, 0, NUM_FIXED];
+        check!(
+            system_prog_ai.key == &solana_program::system_program::id(),
+            MangoErrorCode::InvalidProgramId
+        )?;
+
+        let _ = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+        let _ =
+            MangoAccount::load_checked(referrer_mango_account_ai, program_id, mango_group_ai.key)?;
+
+        // referrer_id_record must be empty; cannot be transferred
+        check!(referrer_id_record_ai.data_is_empty(), MangoErrorCode::InvalidAccount)?;
+        let referrer_record_seeds: &[&[u8]] =
+            &[&mango_group_ai.key.as_ref(), b"ReferrerIdRecord", &referrer_id];
+        seed_and_create_pda(
+            program_id,
+            payer_ai,
+            &Rent::get()?,
+            size_of::<ReferrerIdRecord>(),
+            program_id,
+            system_prog_ai,
+            referrer_id_record_ai,
+            referrer_record_seeds,
+            &[],
+        )?;
+
+        ReferrerIdRecord::init(
+            referrer_id_record_ai,
+            program_id,
+            referrer_mango_account_ai,
+            referrer_id,
+        )
+    }
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -6036,6 +6455,54 @@ impl Processor {
                 msg!("Mango: CreateSpotOpenOrders");
                 Self::create_spot_open_orders(program_id, accounts)
             }
+            MangoInstruction::ChangeReferralFeeParams {
+                ref_surcharge_centibps,
+                ref_share_centibps,
+                ref_mngo_required,
+            } => {
+                msg!("Mango: ChangeReferralFeeParams");
+                Self::change_referral_fee_params(
+                    program_id,
+                    accounts,
+                    ref_surcharge_centibps,
+                    ref_share_centibps,
+                    ref_mngo_required,
+                )
+            }
+            MangoInstruction::SetReferrerMemory => {
+                msg!("Mango: SetReferrerMemory");
+                Self::set_referrer_memory(program_id, accounts)
+            }
+            MangoInstruction::RegisterReferrerId { referrer_id } => {
+                msg!("Mango: RegisterReferrerId");
+                Self::register_referrer_id(program_id, accounts, referrer_id)
+            }
+            MangoInstruction::PlacePerpOrder2 {
+                side,
+                price,
+                max_base_quantity,
+                max_quote_quantity,
+                client_order_id,
+                expiry_timestamp,
+                order_type,
+                reduce_only,
+                limit,
+            } => {
+                msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
+                Self::place_perp_order2(
+                    program_id,
+                    accounts,
+                    side,
+                    price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    client_order_id,
+                    order_type,
+                    reduce_only,
+                    expiry_timestamp,
+                    limit,
+                )
+            }
         }
     }
 }
@@ -6294,7 +6761,7 @@ fn checked_change_net(
     } else if native_quantity.is_positive() {
         checked_add_net(root_bank_cache, node_bank, mango_account, token_index, native_quantity)?;
     }
-    mango_emit!(TokenBalanceLog {
+    mango_emit_heap!(TokenBalanceLog {
         mango_group: mango_account.mango_group,
         mango_account: *mango_account_pk,
         token_index: token_index as u64,
@@ -6681,7 +7148,7 @@ fn seed_and_create_pda<'a>(
     pda_account: &AccountInfo<'a>,
     seeds: &[&[u8]],
     funder_seeds: &[&[u8]],
-) -> ProgramResult {
+) -> MangoResult {
     let (pda_address, bump) = Pubkey::find_program_address(seeds, program_id);
     check!(&pda_address == pda_account.key, MangoErrorCode::InvalidAccount)?;
     create_pda_account(
@@ -6693,7 +7160,8 @@ fn seed_and_create_pda<'a>(
         pda_account,
         &[seeds, &[&[bump]]].concat(),
         funder_seeds,
-    )
+    )?;
+    Ok(())
 }
 fn create_pda_account<'a>(
     funder: &AccountInfo<'a>,

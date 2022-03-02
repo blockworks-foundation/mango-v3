@@ -1,6 +1,6 @@
 [package]
 name = "mango"
-version = "3.3.1"
+version = "3.4.1"
 authors = ["blockworks"]
 edition = "2018"
 
@@ -8,6 +8,8 @@ edition = "2018"
 no-entrypoint = []
 test-bpf = []
 devnet = []
+client = ["no-entrypoint"]
+cpi = ["no-entrypoint"]
 
 [dependencies]
 solana-program = "^1.8.1"
@@ -36,7 +38,7 @@ solana-sdk = "^1.8.1"
 solana-program-test = "^1.8.1"
 solana-logger = "^1.8.1"
 tarpc = { version = "^0.26.2", features = ["full"] }
-
+rand = "0.8.4"
 
 [lib]
 name = "mango"

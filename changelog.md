@@ -1,5 +1,41 @@
 # Mango Program Change Log
 
+## v3.4.1
+Deployed: Feb 28, 2022 at 15:43:29 UTC | Slot: 122,878,778
+1. Fix div by zero bug in market order sells
+
+## v3.4.0
+Deployed: Feb 28, 2022 at 13:57:00 UTC | Slot: 122,868,568
+1. Breaking change: Orders on the perp orderbook can now expire.
+   Either use the iterator that returns only valid orders or manually filter out invalid orders.
+2. New instruction: PlacePerpOrder2
+   - can set an expiry timestamp
+   - can have a quote quantity limit
+   - limits the depth of orderbook iteration
+3. Reduce heap memory use of event logging: ConsumeEvents limit raised back to 8
+
+## v3.3.5
+Deployed: Feb 11, 2022 at 17:36:15 UTC | Slot: 120,380,891 
+1. reduce consume_events limit to 4 to prevent memory issues
+2. record maker fees on PerpMarket at time of trade to prevent it later going negative
+3. fix typo in emit_perp_balances to print correct short_funding
+
+## v3.3.4
+Deployed: Feb 11, 2022 at 01:55:57 UTC | Slot: 120,283,217
+1. Added three instructions (ChangeReferralFeeParams, SetReferrerMemory, RegisterReferrerId) to help with referral program
+2. Assess taker fees at the time of the taker trade
+3. Add back Pyth status checks
+
+## v3.3.3
+Deployed: Feb 4, 2022 at 01:47:33 UTC | Slot: 119,226,876
+1. Pyth status check temporarily removed to let people use accounts with COPE
+
+## v3.3.2
+Deployed: Jan 28, 2022 at 20:38:57 UTC | Slot: 118,276,295
+1. Fix the bug in cancel_all where some orders weren't canceled
+2. Add optional payer account to CreateMangoAccount and CreateSpotOpenOrders for better composability
+3. Clean up iteration code and add better documentation
+
 ## v3.3.1
 Deployed: Jan 18, 2022 at 21:06:57 UTC | Slot: 116,847,318
 1. Check quote token vault inside resolve_token_bankruptcy

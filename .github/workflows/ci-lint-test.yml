@@ -39,7 +39,7 @@ jobs:
         run: cargo clippy -- --deny=warnings --allow=clippy::style --allow=clippy::complexity
 
   tests:
-    name: Run tests and Soteria
+    name: Run tests
     runs-on: ubuntu-latest
 
     steps:
@@ -78,29 +78,3 @@ jobs:
         run: cargo build-bpf
       - name: Run tests
         run: cargo test-bpf
-
-      # Create a cache for Soteria
-      - name: Cache Soteria
-        id: cache-soteria
-        uses: actions/cache@v2
-        with:
-          path: ~/.cache/soteria
-          key: ${{ runner.os }}-soteria
-          
-      # Install Soteria
-      - name: Install Soteria
-        run: |
-          echo "Downloading Soteria..."
-          sh -c "$(curl -k https://supercompiler.xyz/install)"
-          export PATH=$PWD/soteria-linux-develop/bin/:$PATH
-          echo "$PWD/soteria-linux-develop/bin" >> $GITHUB_PATH
-          echo "Updating Rust..."
-          rustup update
-          echo "Soteria ready!"
-          
-      # Run Soteria tests against Cargo.toml for this repo (root folder)
-      - name: Run Soteria
-        run: |
-          echo "Running Soteria..."
-          soteria -analyzeAll .
-          echo "Soteria finished!"

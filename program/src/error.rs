@@ -41,7 +41,7 @@ pub enum MangoError {
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq, IntoPrimitive)]
 #[repr(u32)]
 pub enum MangoErrorCode {
-    #[error("MangoErrorCode::InvalidCache")]
+    #[error("MangoErrorCode::InvalidCache")] // 0
     InvalidCache,
     #[error("MangoErrorCode::InvalidOwner")]
     InvalidOwner,
@@ -61,7 +61,7 @@ pub enum MangoErrorCode {
     InvalidToken,
     #[error("MangoErrorCode::InvalidMarket")]
     InvalidMarket,
-    #[error("MangoErrorCode::InvalidProgramId")]
+    #[error("MangoErrorCode::InvalidProgramId")] // 10
     InvalidProgramId,
     #[error("MangoErrorCode::GroupNotRentExempt")]
     GroupNotRentExempt,
@@ -83,7 +83,7 @@ pub enum MangoErrorCode {
     MarginBasketFull,
     #[error("MangoErrorCode::NotLiquidatable")]
     NotLiquidatable,
-    #[error("MangoErrorCode::Unimplemented")]
+    #[error("MangoErrorCode::Unimplemented")] // 20
     Unimplemented,
     #[error("MangoErrorCode::PostOnly")]
     PostOnly,
@@ -103,7 +103,7 @@ pub enum MangoErrorCode {
     InsufficientLiquidity,
     #[error("MangoErrorCode::InvalidOrderId")]
     InvalidOrderId,
-    #[error("MangoErrorCode::InvalidOpenOrdersAccount")]
+    #[error("MangoErrorCode::InvalidOpenOrdersAccount")] // 30
     InvalidOpenOrdersAccount,
     #[error("MangoErrorCode::BeingLiquidated Invalid instruction while being liquidated")]
     BeingLiquidated,
@@ -124,7 +124,7 @@ pub enum MangoErrorCode {
     #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
     MaxAccountsReached,
 
-    #[error("MangoErrorCode::Default Check the source code for more info")]
+    #[error("MangoErrorCode::Default Check the source code for more info")] // 40
     Default = u32::MAX_VALUE,
 }
 

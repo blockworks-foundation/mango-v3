@@ -7,7 +7,8 @@ use solana_program_test::*;
 #[tokio::test]
 async fn test_add_all_markets_to_mango_group() {
     // === Arrange ===
-    let config = MangoProgramTestConfig { compute_limit: 200_000, num_users: 1, num_mints: 16 };
+    let config = MangoProgramTestConfig { num_users: 1, ..MangoProgramTestConfig::default() };
+
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;

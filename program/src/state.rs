@@ -2,6 +2,7 @@ use std::cell::{Ref, RefMut};
 use std::cmp::{max, min};
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
+use std::ops::Deref;
 
 use bytemuck::{cast_ref, from_bytes, from_bytes_mut, try_from_bytes_mut};
 use enumflags2::BitFlags;
@@ -46,6 +47,7 @@ pub const FREE_ORDER_SLOT: u8 = u8::MAX;
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
+pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -77,6 +79,8 @@ pub enum DataType {
     MangoCache,
     EventQueue,
     AdvancedOrders,
+    ReferrerMemory,
+    ReferrerIdRecord,
 }
 
 const NUM_HEALTHS: usize = 2;
@@ -203,7 +207,10 @@ pub struct MangoGroup {
     pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
     pub num_mango_accounts: u32, // number of MangoAccounts.v1
 
-    pub padding: [u8; 24], // padding used for future expansions
+    pub ref_surcharge_centibps: u32, // 100
+    pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
+    pub ref_mngo_required: u64,
+    pub padding: [u8; 8], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -246,6 +253,9 @@ impl MangoGroup {
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
         // TODO profile and optimize
         self.tokens.iter().position(|token_info| &token_info.root_bank == root_bank_pk)
+    }
+    pub fn find_token_index(&self, mint_pk: &Pubkey) -> Option<usize> {
+        self.tokens.iter().position(|token_info| &token_info.mint == mint_pk)
     }
     pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
         self.spot_markets
@@ -796,10 +806,10 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    if *open_orders_ais[i].key == Pubkey::default() {
+                    &if *open_orders_ais[i].key == Pubkey::default() {
                         None
                     } else {
-                        Some(&open_orders_ais[i])
+                        Some(load_open_orders(&open_orders_ais[i])?)
                     },
                 )?;
             }
@@ -814,12 +824,14 @@ impl HealthCache {
         }
         Ok(())
     }
-    pub fn init_vals_with_orders_vec(
+
+    // Accept T = &OpenOrders as well as Ref<OpenOrders>
+    pub fn init_vals_with_orders_vec<T: Deref<Target = serum_dex::state::OpenOrders>>(
         &mut self,
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
-        open_orders_ais: &Vec<Option<&AccountInfo>>,
+        open_orders: &[Option<T>],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
@@ -828,7 +840,7 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    open_orders_ais[i],
+                    &open_orders[i],
                 )?;
             }
 
@@ -895,6 +907,69 @@ impl HealthCache {
         }
     }
 
+    #[cfg(feature = "client")]
+    pub fn get_health_components(
+        &mut self,
+        mango_group: &MangoGroup,
+        health_type: HealthType,
+    ) -> (I80F48, I80F48) {
+        let (mut assets, mut liabilities) = if self.quote.is_negative() {
+            (ZERO_I80F48, -self.quote)
+        } else {
+            (self.quote, ZERO_I80F48)
+        };
+        for i in 0..mango_group.num_oracles {
+            let spot_market_info = &mango_group.spot_markets[i];
+            let perp_market_info = &mango_group.perp_markets[i];
+
+            let (spot_asset_weight, spot_liab_weight, perp_asset_weight, perp_liab_weight) =
+                match health_type {
+                    HealthType::Maint => (
+                        spot_market_info.maint_asset_weight,
+                        spot_market_info.maint_liab_weight,
+                        perp_market_info.maint_asset_weight,
+                        perp_market_info.maint_liab_weight,
+                    ),
+                    HealthType::Init => (
+                        spot_market_info.init_asset_weight,
+                        spot_market_info.init_liab_weight,
+                        perp_market_info.init_asset_weight,
+                        perp_market_info.init_liab_weight,
+                    ),
+                };
+
+            if self.active_assets.spot[i] {
+                let (base, quote) = self.spot[i];
+                if quote.is_negative() {
+                    liabilities -= quote;
+                } else {
+                    assets += quote;
+                }
+                if base.is_negative() {
+                    liabilities -= base * spot_liab_weight;
+                } else {
+                    assets += base * spot_asset_weight;
+                }
+            }
+
+            if self.active_assets.perps[i] {
+                let (base, quote) = self.perp[i];
+                if quote.is_negative() {
+                    liabilities -= quote;
+                } else {
+                    assets += quote;
+                }
+                if base.is_negative() {
+                    liabilities -= base * perp_liab_weight;
+                } else {
+                    assets += base * perp_asset_weight;
+                }
+            }
+        }
+
+        (assets, liabilities)
+    }
+
     pub fn update_quote(&mut self, mango_cache: &MangoCache, mango_account: &MangoAccount) {
         let quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..NUM_HEALTHS {
@@ -918,7 +993,11 @@ impl HealthCache {
             &mango_cache.root_bank_cache[market_index],
             mango_cache.price_cache[market_index].price,
             market_index,
-            if *open_orders_ai.key == Pubkey::default() { None } else { Some(open_orders_ai) },
+            &if *open_orders_ai.key == Pubkey::default() {
+                None
+            } else {
+                Some(load_open_orders(open_orders_ai)?)
+            },
         )?;
 
         let (prev_base, prev_quote) = self.spot[market_index];
@@ -991,8 +1070,9 @@ impl HealthCache {
         bids_quantity: i64,
         asks_quantity: i64,
     ) -> MangoResult<I80F48> {
+        let info = &mango_group.perp_markets[market_index];
         let (base, quote) = mango_account.perp_accounts[market_index].sim_get_val(
-            &mango_group.perp_markets[market_index],
+            info,
             &mango_cache.perp_market_cache[market_index],
             mango_cache.price_cache[market_index].price,
             taker_base,
@@ -1023,7 +1103,27 @@ impl HealthCache {
         };
 
         let h = self.health[health_type as usize].ok_or(throw!())?;
-        Ok(h + curr_perp_health - prev_perp_health)
+
+        // Apply taker fees; Assume no referrer
+        let taker_fees = if taker_quote != 0 {
+            let taker_quote_native =
+                I80F48::from_num(info.quote_lot_size.checked_mul(taker_quote.abs()).unwrap());
+            let mut market_fees = info.taker_fee * taker_quote_native;
+            if let Some(mngo_index) = mango_group.find_token_index(&mngo_token::id()) {
+                let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
+                let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
+                let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
+                if mngo_deposits < ref_mngo_req {
+                    market_fees += (I80F48::from_num(mango_group.ref_surcharge_centibps)
+                        / CENTIBPS_PER_UNIT)
+                        * taker_quote_native;
+                }
+            }
+            market_fees
+        } else {
+            ZERO_I80F48
+        };
+        Ok(h + curr_perp_health - prev_perp_health - taker_fees)
     }
 
     /// Update perp val and then update the healths
@@ -1231,20 +1331,19 @@ impl MangoAccount {
     /// Return the token value and quote token value for this market taking into account open order
     /// but not doing asset weighting
     #[inline(always)]
-    fn get_spot_val(
+    fn get_spot_val<T: Deref<Target = serum_dex::state::OpenOrders>>(
         &self,
         bank_cache: &RootBankCache,
         price: I80F48,
         market_index: usize,
-        open_orders_ai: Option<&AccountInfo>,
+        open_orders: &Option<T>,
     ) -> MangoResult<(I80F48, I80F48)> {
         let base_net = self.get_net(bank_cache, market_index);
-        if !self.in_margin_basket[market_index] || open_orders_ai.is_none() {
+        if !self.in_margin_basket[market_index] || open_orders.is_none() {
             Ok((base_net * price, ZERO_I80F48))
         } else {
-            let open_orders = load_open_orders(open_orders_ai.unwrap())?;
             let (quote_free, quote_locked, base_free, base_locked) =
-                split_open_orders(&open_orders);
+                split_open_orders(open_orders.as_ref().unwrap().deref());
 
             // Two "worst-case" scenarios are considered:
             // 1. All bids are executed at current price, producing a base amount of bids_base_net
@@ -1492,7 +1591,6 @@ impl MangoAccount {
         &mut self,
         market_index: usize,
         perp_market: &mut PerpMarket,
-        info: &PerpMarketInfo,
         cache: &PerpMarketCache,
         fill: &FillEvent,
     ) -> MangoResult<()> {
@@ -1502,9 +1600,10 @@ impl MangoAccount {
         pa.remove_taker_trade(base_change, quote_change);
         pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size * quote_change);
-        let fees = quote.abs() * info.taker_fee;
-        perp_market.fees_accrued += fees;
-        pa.quote_position += quote - fees;
+
+        // fees are assessed at time of trade; no need to assess fees here
+
+        pa.quote_position += quote;
         Ok(())
     }
 
@@ -1512,7 +1611,6 @@ impl MangoAccount {
         &mut self,
         market_index: usize,
         perp_market: &mut PerpMarket,
-        info: &PerpMarketInfo,
         cache: &PerpMarketCache,
         fill: &FillEvent,
     ) -> MangoResult<()> {
@@ -1523,8 +1621,10 @@ impl MangoAccount {
         let (base_change, quote_change) = fill.base_quote_change(side);
         pa.change_base_position(perp_market, base_change);
         let quote = I80F48::from_num(perp_market.quote_lot_size.checked_mul(quote_change).unwrap());
-        let fees = quote.abs() * info.maker_fee;
-        perp_market.fees_accrued += fees;
+        let fees = quote.abs() * fill.maker_fee;
+        if !fill.market_fees_applied {
+            perp_market.fees_accrued += fees;
+        }
         pa.quote_position = pa.quote_position.checked_add(quote - fees).unwrap();
 
         // if versions don't match, no LM
@@ -2102,8 +2202,8 @@ impl PerpMarket {
         const IMPACT_QUANTITY: i64 = 100;
 
         // Get current book price & compare it to index price
-        let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY);
-        let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY);
+        let bid = book.get_impact_price(Side::Bid, IMPACT_QUANTITY, now_ts);
+        let ask = book.get_impact_price(Side::Ask, IMPACT_QUANTITY, now_ts);
 
         const MAX_FUNDING: I80F48 = I80F48!(0.05);
         const MIN_FUNDING: I80F48 = I80F48!(-0.05);
@@ -2208,6 +2308,13 @@ pub fn load_open_orders<'a>(
     acc: &'a AccountInfo,
 ) -> Result<Ref<'a, serum_dex::state::OpenOrders>, ProgramError> {
     Ok(Ref::map(strip_dex_padding(acc)?, from_bytes))
+}
+pub fn load_open_orders_accounts<'a>(
+    accs: &Vec<Option<&'a AccountInfo>>,
+) -> Result<Vec<Option<Ref<'a, serum_dex::state::OpenOrders>>>, ProgramError> {
+    accs.iter()
+        .map(|ai_opt| Ok(if let Some(ai) = ai_opt { Some(load_open_orders(ai)?) } else { None }))
+        .collect::<Result<Vec<_>, _>>()
 }
 
 pub fn check_open_orders(
@@ -2339,7 +2446,7 @@ pub struct PerpTriggerOrder {
     pub padding0: [u8; 1],
     pub client_order_id: u64,
     pub price: i64,
-    pub quantity: i64,
+    pub quantity: i64, // base quantity
     pub trigger_price: I80F48,
 
     /// Padding for expansion
@@ -2415,5 +2522,75 @@ impl AdvancedOrders {
         )?;
         check!(&mango_account.advanced_orders_key == account.key, MangoErrorCode::InvalidAccount)?;
         Ok(state)
+    }
+}
+
+/// Store the referrer's mango account
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct ReferrerMemory {
+    pub meta_data: MetaData,
+    pub referrer_mango_account: Pubkey,
+}
+
+impl ReferrerMemory {
+    pub fn init(
+        account: &AccountInfo,
+        program_id: &Pubkey,
+        referrer_mango_account_ai: &AccountInfo,
+    ) -> MangoResult {
+        let mut state: RefMut<Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        state.meta_data = MetaData::new(DataType::ReferrerMemory, 0, true);
+        state.referrer_mango_account = *referrer_mango_account_ai.key;
+
+        Ok(())
+    }
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+    ) -> MangoResult<RefMut<'a, Self>> {
+        // not really necessary because this is a PDA
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+
+        let state: RefMut<'a, Self> = Self::load_mut(account)?;
+
+        check!(state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+        check!(
+            state.meta_data.data_type == DataType::ReferrerMemory as u8,
+            MangoErrorCode::InvalidAccountState
+        )?;
+
+        Ok(state)
+    }
+}
+
+/// Register the referrer's id to be used in the URL
+#[derive(Copy, Clone, Pod, Loadable)]
+#[repr(C)]
+pub struct ReferrerIdRecord {
+    pub meta_data: MetaData,
+    pub referrer_mango_account: Pubkey,
+    pub id: [u8; INFO_LEN], // this id is one of the seeds
+}
+
+impl ReferrerIdRecord {
+    pub fn init(
+        account: &AccountInfo,
+        program_id: &Pubkey,
+        referrer_mango_account_ai: &AccountInfo,
+        referrer_id: [u8; INFO_LEN],
+    ) -> MangoResult {
+        let mut state: RefMut<Self> = Self::load_mut(account)?;
+        check!(account.owner == program_id, MangoErrorCode::InvalidOwner)?;
+        check!(!state.meta_data.is_initialized, MangoErrorCode::InvalidAccountState)?;
+
+        state.meta_data = MetaData::new(DataType::ReferrerIdRecord, 0, true);
+        state.referrer_mango_account = *referrer_mango_account_ai.key;
+        state.id = referrer_id;
+
+        Ok(())
     }
 }
