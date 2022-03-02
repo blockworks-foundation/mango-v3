@@ -435,3 +435,174 @@ async fn test_perp_order_max_quote() {
     assert_eq!(top_order.price(), test.price_number_to_lots(&mint, 10_150.0) as i64);
     assert_eq!(top_order.quantity, test.base_size_number_to_lots(&mint, 0.7) as i64);
 }
+
+#[tokio::test]
+async fn test_perp_order_types() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig {
+        compute_limit: 100_000,
+        num_users: 2,
+        num_mints: 3,
+        ..MangoProgramTestConfig::default()
+    };
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let book_user_index: usize = 0;
+    let test_user_index: usize = 1;
+    let mint_index0: usize = 0;
+    let mint_index1: usize = 1;
+    let base_price: f64 = 10_000.0;
+    let to_lots: i64 = 10000;
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index0, base_price).await;
+    mango_group_cookie.set_oracle(&mut test, mint_index1, base_price).await;
+
+    // Deposit amounts
+    let user_deposits = vec![
+        (test_user_index, test.quote_index, 1000.0 * base_price),
+        (book_user_index, test.quote_index, 1000000.0),
+    ];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+    for side in [Side::Bid, Side::Ask] {
+        let (side_direction, mint) =
+            if side == Side::Bid { (-1.0, mint_index0) } else { (1.0, mint_index1) };
+
+        // Step 2: Place a bid and ask on the order book
+        use mango::matching::Side;
+        let mut perp_market_cookie = mango_group_cookie.perp_markets[mint];
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                book_user_index,
+                Side::Bid,
+                10.0,
+                base_price - 100.0,
+                PlacePerpOptions::default(),
+            )
+            .await;
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                book_user_index,
+                Side::Ask,
+                10.0,
+                base_price + 100.0,
+                PlacePerpOptions::default(),
+            )
+            .await;
+
+        // Step 3: Place bids and asks of all order types
+        // Ideally there'd be more detailed checks of the results.
+        // For now there's just a basic sanity check.
+
+        // fully executes against existing order on book
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                test_user_index,
+                side,
+                1.0,
+                base_price - side_direction * 150.0,
+                PlacePerpOptions {
+                    order_type: OrderType::ImmediateOrCancel,
+                    ..PlacePerpOptions::default()
+                },
+            )
+            .await;
+        assert_eq!(
+            mango_group_cookie.mango_accounts[test_user_index].mango_account.perp_accounts[mint]
+                .taker_base,
+            1 * to_lots * (-side_direction as i64)
+        );
+
+        // fully executes against existing order on book
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                test_user_index,
+                side,
+                1.0,
+                base_price + side_direction * 50.0,
+                PlacePerpOptions { order_type: OrderType::Market, ..PlacePerpOptions::default() },
+            )
+            .await;
+        assert_eq!(
+            mango_group_cookie.mango_accounts[test_user_index].mango_account.perp_accounts[mint]
+                .taker_base,
+            2 * to_lots * (-side_direction as i64)
+        );
+
+        // places on book
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                test_user_index,
+                side,
+                1.0,
+                base_price + side_direction * 75.0,
+                PlacePerpOptions { order_type: OrderType::PostOnly, ..PlacePerpOptions::default() },
+            )
+            .await;
+        // nothing got taken
+        assert_eq!(
+            mango_group_cookie.mango_accounts[test_user_index].mango_account.perp_accounts[mint]
+                .taker_base,
+            2 * to_lots * (-side_direction as i64)
+        );
+
+        // places on book, as close to the opposing side as possible
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                test_user_index,
+                side,
+                1.0,
+                base_price - side_direction * 500.0,
+                PlacePerpOptions {
+                    order_type: OrderType::PostOnlySlide,
+                    ..PlacePerpOptions::default()
+                },
+            )
+            .await;
+        // nothing got taken
+        assert_eq!(
+            mango_group_cookie.mango_accounts[test_user_index].mango_account.perp_accounts[mint]
+                .taker_base,
+            2 * to_lots * (-side_direction as i64)
+        );
+
+        // places deep in the book
+        perp_market_cookie
+            .place_order(
+                &mut test,
+                &mut mango_group_cookie,
+                test_user_index,
+                side,
+                1.0,
+                base_price + side_direction * 125.0,
+                PlacePerpOptions { order_type: OrderType::Limit, ..PlacePerpOptions::default() },
+            )
+            .await;
+        // nothing got taken
+        assert_eq!(
+            mango_group_cookie.mango_accounts[test_user_index].mango_account.perp_accounts[mint]
+                .taker_base,
+            2 * to_lots * (-side_direction as i64)
+        );
+    }
+}
