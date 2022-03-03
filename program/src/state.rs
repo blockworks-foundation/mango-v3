@@ -83,12 +83,13 @@ pub enum DataType {
     ReferrerIdRecord,
 }
 
-const NUM_HEALTHS: usize = 2;
+const NUM_HEALTHS: usize = 3;
 #[repr(usize)]
 #[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
 pub enum HealthType {
     Maint,
     Init,
+    Equity,
 }
 
 #[derive(
@@ -274,6 +275,7 @@ impl MangoGroup {
             match health_type {
                 HealthType::Maint => self.spot_markets[token_index].maint_asset_weight,
                 HealthType::Init => self.spot_markets[token_index].init_asset_weight,
+                HealthType::Equity => ONE_I80F48,
             }
         }
     }
@@ -778,7 +780,7 @@ pub struct HealthCache {
     quote: I80F48,
 
     /// This will be zero until update_health is called for the first time
-    health: [Option<I80F48>; 2],
+    health: [Option<I80F48>; 3],
 }
 
 impl HealthCache {
@@ -879,6 +881,7 @@ impl HealthCache {
                                 perp_market_info.init_asset_weight,
                                 perp_market_info.init_liab_weight,
                             ),
+                            HealthType::Equity => (ONE_I80F48, ONE_I80F48, ONE_I80F48, ONE_I80F48),
                         };
 
                     if self.active_assets.spot[i] {
@@ -936,6 +939,7 @@ impl HealthCache {
                         perp_market_info.init_asset_weight,
                         perp_market_info.init_liab_weight,
                     ),
+                    HealthType::Equity => (),
                 };
 
             if self.active_assets.spot[i] {
@@ -1010,6 +1014,7 @@ impl HealthCache {
                 let (asset_weight, liab_weight) = match health_type {
                     HealthType::Maint => (smi.maint_asset_weight, smi.maint_liab_weight),
                     HealthType::Init => (smi.init_asset_weight, smi.init_liab_weight),
+                    HealthType::Equity => (ONE_I80F48, ONE_I80F48),
                 };
 
                 // Get health from val
@@ -1087,6 +1092,7 @@ impl HealthCache {
         let (asset_weight, liab_weight) = match health_type {
             HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
             HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+            HealthType::Equity => (ONE_I80F48, ONE_I80F48),
         };
 
         // Get health from val
@@ -1150,6 +1156,7 @@ impl HealthCache {
                 let (asset_weight, liab_weight) = match health_type {
                     HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
                     HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+                    HealthType::Equity => (ONE_I80F48, ONE_I80F48),
                 };
 
                 // Get health from val
