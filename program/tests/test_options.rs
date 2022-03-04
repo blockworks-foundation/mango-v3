@@ -30,18 +30,18 @@ async fn test_american_options() {
         0,
         15,
          OptionType::American,
-         I80F48::from_num(100_000_000), 
-         I80F48::from_num(10_200_000), 
+         100_000_000, 
+         10_200_000, 
          expiry,
         None).await;
 
     assert_eq!(option_market.meta_data.data_type, DataType::OptionMarket as u8);
     assert_eq!(option_market.option_type, OptionType::American);
-    assert_eq!(option_market.contract_size, I80F48::from_num(100_000_000));
-    assert_eq!(option_market.quote_amount, I80F48::from_num(10_200_000));
+    assert_eq!(option_market.contract_size, 100_000_000);
+    assert_eq!(option_market.quote_amount, 10_200_000);
     assert_eq!(option_market.expiry, expiry);
-    assert_eq!(option_market.tokens_in_underlying_pool,  I80F48::from_num(0));
-    assert_eq!(option_market.tokens_in_quote_pool,  I80F48::from_num(0));
+    assert_eq!(option_market.tokens_in_underlying_pool,  0);
+    assert_eq!(option_market.tokens_in_quote_pool, 0);
     mango_group_cookie.run_keeper(&mut test).await;
     mango_group_cookie.run_keeper(&mut test).await;
 
@@ -50,7 +50,7 @@ async fn test_american_options() {
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
     // write option with user0
-    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(10_000_000)).await;
+    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, om_key, &option_market, 0, 10_000_000).await;
     //check write option
     {
         let option_tokens = option_trade_data.number_of_option_tokens;
@@ -74,7 +74,7 @@ async fn test_american_options() {
     test.perform_deposit(&mango_group_cookie, 0, option_market.quote_token_index, load_amount).await;
     let mut funds_quote_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
 
-    test.exercise_option(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(5_000_000)).await;
+    test.exercise_option(&mango_group_cookie, om_key, &option_market, 0, 5_000_000).await;
     //check exercise
     {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -105,7 +105,7 @@ async fn test_american_options() {
         assert_eq!(writer_tokens, 10_000_000);
     }
     
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(1_000_000), ExchangeFor::ForQuoteTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForQuoteTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -123,7 +123,7 @@ async fn test_american_options() {
         funds_underlying_old = funds_underlying;
         funds_quote_old =  funds_quote;
     }
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(1_000_000), ExchangeFor::ForUnderlyingTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForUnderlyingTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -164,18 +164,19 @@ async fn test_european_options() {
         0,
         15,
          OptionType::European,
-         I80F48::from_num(100_000_000), 
-         I80F48::from_num(10_200_000), 
+         100_000_000, 
+         10_200_000, 
          expiry,
         Some(expiry_to_exercise)).await;
 
     assert_eq!(option_market.meta_data.data_type, DataType::OptionMarket as u8);
     assert_eq!(option_market.option_type, OptionType::European);
-    assert_eq!(option_market.contract_size, I80F48::from_num(100_000_000));
-    assert_eq!(option_market.quote_amount, I80F48::from_num(10_200_000));
+    assert_eq!(option_market.contract_size, 100_000_000);
+    assert_eq!(option_market.quote_amount, 10_200_000);
     assert_eq!(option_market.expiry, expiry);
-    assert_eq!(option_market.tokens_in_underlying_pool,  I80F48::from_num(0));
-    assert_eq!(option_market.tokens_in_quote_pool,  I80F48::from_num(0));
+    assert_eq!(option_market.expiry_to_exercise_european, expiry_to_exercise);
+    assert_eq!(option_market.tokens_in_underlying_pool,  0);
+    assert_eq!(option_market.tokens_in_quote_pool,  0);
     mango_group_cookie.run_keeper(&mut test).await;
     mango_group_cookie.run_keeper(&mut test).await;
 
@@ -184,7 +185,7 @@ async fn test_european_options() {
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
     // write option with user0
-    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(10_000_000)).await;
+    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, om_key, &option_market, 0, 10_000_000).await;
     //check write option
     {
         let option_tokens = option_trade_data.number_of_option_tokens;
@@ -209,7 +210,7 @@ async fn test_european_options() {
     let mut funds_quote_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
     test.advance_clock_past_timestamp(option_market.expiry as i64 + 1).await;
 
-    test.exercise_option(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(5_000_000)).await;
+    test.exercise_option(&mango_group_cookie, om_key, &option_market, 0, 5_000_000).await;
     //check exercise
     {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -240,7 +241,7 @@ async fn test_european_options() {
         assert_eq!(writer_tokens, 10_000_000);
     }
     
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(1_000_000), ExchangeFor::ForQuoteTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForQuoteTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -258,7 +259,7 @@ async fn test_european_options() {
         funds_underlying_old = funds_underlying;
         funds_quote_old =  funds_quote;
     }
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, I80F48::from_num(1_000_000), ExchangeFor::ForUnderlyingTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForUnderlyingTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -300,8 +301,8 @@ async fn test_placing_orders_for_options() {
         15, // USDC
         0,    // MNGO
          OptionType::American,
-         I80F48::from_num(10_000_000), //10 USDC FOR
-         I80F48::from_num(100_000_000),  //100 MNGO 
+         10_000_000, //10 USDC FOR
+         100_000_000,  //100 MNGO 
          expiry,
         Some(expiry_to_exercise)).await;
 
@@ -314,7 +315,7 @@ async fn test_placing_orders_for_options() {
     test.perform_deposit(&mango_group_cookie, 0, QUOTE_INDEX, 100_000_000).await;
     test.perform_deposit(&mango_group_cookie, 1, QUOTE_INDEX, 100_000_000).await;
     // write option with user0
-    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, option_market_pk, &option_market, 0, I80F48::from_num(10_000_000)).await;
+    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, option_market_pk, &option_market, 0, 10_000_000).await;
     println!("User0 places ask of 1 option @0.5 USDC");
     // place trades with user0
     // place ask of 50 cents USDC for 1 option contract
@@ -496,7 +497,7 @@ async fn test_placing_orders_for_options() {
     let funds_underlying_u1 :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.underlying_token_index).await;
     let funds_quote_u1 :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.quote_token_index).await;
     {
-        test.exercise_option(&mango_group_cookie, option_market_pk, &option_market, 1, I80F48::from_num(1_000_000)).await;
+        test.exercise_option(&mango_group_cookie, option_market_pk, &option_market, 1, 1_000_000).await;
         let funds_underlying_u1_a :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.underlying_token_index).await;
         let funds_quote_u1_a :u64 = test.with_mango_account_deposit(&mango_account_u1, option_market.quote_token_index).await;
         assert_eq!( funds_underlying_u1_a - funds_underlying_u1, 10_000_000 );

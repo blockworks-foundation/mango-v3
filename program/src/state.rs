@@ -2616,14 +2616,14 @@ pub struct OptionMarket {
     pub writer_token_mint: Pubkey,
     pub underlying_token_index: usize,
     pub quote_token_index: usize,
-    pub contract_size: I80F48,
-    pub quote_amount: I80F48,
+    pub contract_size: u64,
+    pub quote_amount: u64,
     pub expiry: u64,            // expiry in unix time
     pub expiry_to_exercise_european : u64, // expiry to exercise for european options
     pub expired: bool,
     pub creator : Pubkey,
-    pub tokens_in_underlying_pool : I80F48, // Tokens in the mango underlying pool related to this market
-    pub tokens_in_quote_pool : I80F48, // Tokens in the mango quote pool related to this market
+    pub tokens_in_underlying_pool : u64, // Tokens in the mango underlying pool related to this market
+    pub tokens_in_quote_pool : u64, // Tokens in the mango quote pool related to this market
     pub number_of_decimals: u8, // 6 by default
 
     // order book and market related data
@@ -2640,8 +2640,8 @@ impl OptionMarket {
         underlying_token_index: usize,
         quote_token_index: usize,
         option_type : OptionType,
-        contract_size: I80F48,
-        quote_amount: I80F48,
+        contract_size: u64,
+        quote_amount: u64,
         expiry:u64,
         expiry_to_exercise_european : Option<u64>,
         payer: &Pubkey,
@@ -2667,8 +2667,8 @@ impl OptionMarket {
         option_market.expiry = expiry;
         option_market.creator = *payer;
         option_market.expired = false;
-        option_market.tokens_in_quote_pool = ZERO_I80F48;
-        option_market.tokens_in_underlying_pool = ZERO_I80F48;
+        option_market.tokens_in_quote_pool = 0;
+        option_market.tokens_in_underlying_pool = 0;
         option_market.number_of_decimals = 6;
         option_market.seq_num = 0;
         option_market.bids = *bids;

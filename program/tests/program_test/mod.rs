@@ -1843,8 +1843,8 @@ impl MangoProgramTest {
         underlying_index: u8,
         quote_index: u8,
         option_type: mango::state::OptionType,
-        contract_size : I80F48,
-        quote_amount : I80F48,
+        contract_size : u64,
+        quote_amount : u64,
         expiry : u64,
         expiry_of_european_option : Option<u64>,
     ) -> (Pubkey, OptionMarket) {
@@ -1899,7 +1899,7 @@ impl MangoProgramTest {
         option_market_pda :Pubkey,
         option_market : &OptionMarket,
         user_index : usize,
-        amount : I80F48,
+        amount : u64,
     ) -> (Pubkey, UserOptionTradeData){
         let mango_group = mango_group_cookie.mango_group;
         let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
@@ -1935,7 +1935,7 @@ impl MangoProgramTest {
         option_market_pda :Pubkey,
         option_market : &OptionMarket,
         user_index : usize,
-        amount : I80F48,
+        amount : u64,
     ){
         let mango_group = mango_group_cookie.mango_group;
         let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
@@ -1972,7 +1972,7 @@ impl MangoProgramTest {
         option_market_pda :Pubkey,
         option_market : &OptionMarket,
         user_index : usize,
-        amount : I80F48,
+        amount : u64,
         exchange_for : ExchangeFor,
     ){
         let mango_group = mango_group_cookie.mango_group;

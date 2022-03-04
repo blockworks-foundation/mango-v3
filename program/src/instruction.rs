@@ -985,8 +985,8 @@ pub enum MangoInstruction {
         underlying_token_index:u8,
         quote_token_index:u8,
         option_type:OptionType,
-        contract_size:I80F48,
-        quote_amount:I80F48,
+        contract_size:u64,
+        quote_amount:u64,
         expiry:u64,
         expiry_to_exercise_european: Option<u64>
     },
@@ -1008,7 +1008,7 @@ pub enum MangoInstruction {
     /// 7. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
     /// 8. system_program
     WriteOption {
-        amount : I80F48,
+        amount : u64,
     },
 
     /// Exercise an option / by this instruction user can exercise an option by swapping quote mints for underlying mints. 
@@ -1027,7 +1027,7 @@ pub enum MangoInstruction {
     /// 8. [writable] quote_node_bank_ai - Node bank for quote token
     /// 9. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
     ExerciseOption {
-        amount : I80F48,
+        amount : u64,
     },
 
     /// Exchange writers tokens / by this instruction user can exhange writers tokens recieved when he wrote option
@@ -1046,7 +1046,7 @@ pub enum MangoInstruction {
     /// 8. [writable] quote_node_bank_ai - Node bank for quote token
     /// 9. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
     ExchangeWritersTokens {
-        amount : I80F48,
+        amount : u64,
         exchange_for : ExchangeFor,
     },
 
@@ -1575,42 +1575,42 @@ impl MangoInstruction {
                 MangoInstruction::RegisterReferrerId { referrer_id: *referrer_id }
             },
             64 => {
-                let data_arr = array_ref![data, 0 , 43];
+                let data_arr = array_ref![data, 0 , 27];
                 let ( underlying_token_index,
                     quote_token_index,
                     option_type,
                     contract_size,
                     quote_amount,
                     expiry,
-                ) = array_refs![data_arr, 1, 1, 1, 16, 16, 8];
+                ) = array_refs![data_arr, 1, 1, 1, 8, 8, 8];
                 MangoInstruction::CreateOptionMarket {
                     underlying_token_index : underlying_token_index[0],
                     quote_token_index: quote_token_index[0],
                     option_type : OptionType::try_from_primitive(option_type[0]).ok()?,
-                    contract_size: I80F48::from_le_bytes(*contract_size),
-                    quote_amount: I80F48::from_le_bytes(*quote_amount),
+                    contract_size: u64::from_le_bytes(*contract_size),
+                    quote_amount: u64::from_le_bytes(*quote_amount),
                     expiry: u64::from_le_bytes(*expiry),
-                    expiry_to_exercise_european : if data.len() == 44 { None } else { unpack_u64_opt(array_ref!(data, 43, 9)) },
+                    expiry_to_exercise_european : if data.len() == 28 { None } else { unpack_u64_opt(array_ref!(data, 27, 9)) },
                 }
             },
             65 => {
-                let amount = array_ref![data, 0 , 16];
+                let amount = array_ref![data, 0 , 8];
                 MangoInstruction::WriteOption {
-                    amount:  I80F48::from_le_bytes(*amount),
+                    amount:  u64::from_le_bytes(*amount),
                 }
             },
             66 => {
-                let amount = array_ref![data, 0 , 16];
+                let amount = array_ref![data, 0 , 8];
                 MangoInstruction::ExerciseOption {
-                    amount:  I80F48::from_le_bytes(*amount),
+                    amount:  u64::from_le_bytes(*amount),
                 }
             },
             67 => {
-                let data_arr = array_ref![data, 0 , 17];
+                let data_arr = array_ref![data, 0 , 9];
                 let ( amount,
-                    exchange_for, ) = array_refs![data_arr, 16, 1];
+                    exchange_for, ) = array_refs![data_arr, 8, 1];
                 MangoInstruction::ExchangeWritersTokens {
-                    amount:  I80F48::from_le_bytes(*amount),
+                    amount:  u64::from_le_bytes(*amount),
                     exchange_for : ExchangeFor::try_from_primitive(exchange_for[0]).ok()?,
                 }
             },
@@ -2872,8 +2872,8 @@ pub fn create_option_market(
     underlying_token_index: u8,
     quote_token_index: u8,
     option_type: OptionType,
-    contract_size: I80F48,
-    quote_amount: I80F48,
+    contract_size: u64,
+    quote_amount: u64,
     expiry: u64,
     expiry_to_exercise_european : Option<u64>,
 ) -> Result<Instruction, ProgramError> {
@@ -2911,7 +2911,7 @@ pub fn write_option (
     node_bank: &Pubkey, // write
     user_trade_data: &Pubkey,
     system_program: &Pubkey, // read
-    amount: I80F48,
+    amount: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
@@ -2944,7 +2944,7 @@ pub fn exercise_option (
     underlying_node_bank: &Pubkey, // write
     quote_node_bank: &Pubkey, //write
     user_trade_data: &Pubkey,
-    amount: I80F48,
+    amount: u64,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
@@ -2978,7 +2978,7 @@ pub fn exchange_writers_tokens (
     underlying_node_bank: &Pubkey, // write
     quote_node_bank: &Pubkey, //write
     user_trade_data: &Pubkey,
-    amount: I80F48,
+    amount: u64,
     exchange_for : ExchangeFor,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
