@@ -2677,11 +2677,11 @@ impl OptionMarket {
 
         option_market.expiry_to_exercise_european = match expiry_to_exercise_european {
             Some(x) => {
-                check!(x > option_market.expiry, MangoErrorCode::ExersiceExpiryBeforeExpiry)?;
+                check!(x > option_market.expiry, MangoErrorCode::ExerciseExpiryBeforeExpiry)?;
                 x
             },
             None => {
-                check!(option_market.option_type != OptionType::European, MangoErrorCode::EuropeanOptionsNeedExersiceExpiry)?;
+                check!(option_market.option_type != OptionType::European, MangoErrorCode::EuropeanOptionsNeedExerciseExpiry)?;
                 0
             }
         };

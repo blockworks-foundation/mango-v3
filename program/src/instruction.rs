@@ -970,6 +970,8 @@ pub enum MangoInstruction {
     },
 
     /// Create an Option market / this will initialize a state called MarketOption
+    /// To create a CALL option underlying token is non USDC token like (BTC, ETH) and quote token is USDC
+    /// To create a PUT option underlying token is USDC and quote token is non USDC token.
     /// 
     /// Accounts expected by this instruction (9)
     /// 
@@ -1096,7 +1098,19 @@ pub enum MangoInstruction {
     /// 9. [writable] mango_quote_node_bank_ai 
     CancelOptionOrderByClientOrderId {
         client_order_id : u64,
-    }
+    },
+
+    /// Exercise option for profit.
+    /// User can exercise the option tokens to get difference in quote token only if it is positive.
+    /// user does not need quote tokens to exercise the option.
+    /// Instruction will temporarily grant user the underlying tokens then it will try to sell these underlying tokens in the market.
+    /// If the operation is successfull and user is in profit then we will succesfully exercise the option.
+    ///
+    /// Uses all instruction like PlaceSpotOrder2 + option_market_ai and user_trade_data_ai as writables.
+    ExerciseOptionForProfit {
+        amount: u64,
+        client_order_id: u64,
+    } 
 }
 
 impl MangoInstruction {
@@ -1624,6 +1638,15 @@ impl MangoInstruction {
                 let client_order_id = array_ref![data, 0, 8];
                 MangoInstruction::CancelOptionOrderByClientOrderId {
                     client_order_id: u64::from_le_bytes(*client_order_id),
+                }
+            }
+            71 => {
+                let data_arr = array_ref![data, 0 , 16];
+                let ( amount,
+                    client_order_id, ) = array_refs![data_arr, 8, 8];
+                MangoInstruction::ExerciseOptionForProfit {
+                    amount : u64::from_le_bytes(*amount),
+                    client_order_id : u64::from_le_bytes(*client_order_id),
                 }
             }
             _ => {
@@ -3084,6 +3107,76 @@ pub fn cancel_option_order_by_client_order_id (
         client_order_id
     };
     let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn exercise_option_for_profit(
+    program_id: &Pubkey,
+    option_market_pk :&Pubkey,
+    user_trade_data_pk: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    dex_request_queue_pk: &Pubkey,
+    dex_event_queue_pk: &Pubkey,
+    dex_base_pk: &Pubkey,
+    dex_quote_pk: &Pubkey,
+    base_root_bank_pk: &Pubkey,
+    base_node_bank_pk: &Pubkey,
+    base_vault_pk: &Pubkey,
+    quote_root_bank_pk: &Pubkey,
+    quote_node_bank_pk: &Pubkey,
+    quote_vault_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    dex_signer_pk: &Pubkey,
+    msrm_or_srm_vault_pk: &Pubkey,
+    open_orders_pks: &[Pubkey],
+    market_index : usize, // should give token other than quote token.
+    amount : u64,
+    client_order_id : u64
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new(*option_market_pk, false),
+        AccountMeta::new(*user_trade_data_pk, false),
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*dex_request_queue_pk, false),
+        AccountMeta::new(*dex_event_queue_pk, false),
+        AccountMeta::new(*dex_base_pk, false),
+        AccountMeta::new(*dex_quote_pk, false),
+        AccountMeta::new_readonly(*base_root_bank_pk, false),
+        AccountMeta::new(*base_node_bank_pk, false),
+        AccountMeta::new(*base_vault_pk, false),
+        AccountMeta::new_readonly(*quote_root_bank_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_vault_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(*dex_signer_pk, false),
+        AccountMeta::new_readonly(*msrm_or_srm_vault_pk, false),
+    ];
+    accounts.extend(open_orders_pks.iter().enumerate().map(|(i, pk)| {
+        if i == market_index {
+            AccountMeta::new(*pk, false)
+        } else {
+            AccountMeta::new_readonly(*pk, false)
+        }
+    }));
+
+    let instr = MangoInstruction::ExerciseOptionForProfit { amount, client_order_id };
+    let data = instr.pack();
+
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 

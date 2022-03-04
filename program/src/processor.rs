@@ -2,6 +2,7 @@ use std::cell::RefMut;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
+use std::num::NonZeroU64;
 use std::vec;
 
 use anchor_lang::prelude::emit;
@@ -6007,12 +6008,16 @@ impl Processor {
             check!(now_ts > option_market.expiry,  MangoErrorCode::OptionNotYetExpired)?;
             check!(now_ts < option_market.expiry_to_exercise_european,  MangoErrorCode::OptionExpired)?;
         }
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+
+        let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
+        check!( user_trade_data.number_of_option_tokens >= amount, MangoErrorCode::InsufficientFunds )?;
 
         let decimal_multiplier =  I80F48::from_num(10u64.pow(option_market.number_of_decimals as u32));
         let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap().checked_div(decimal_multiplier).unwrap();
@@ -6046,10 +6051,7 @@ impl Processor {
         option_market.tokens_in_quote_pool = option_market.tokens_in_quote_pool.checked_add(total_quote_amount).unwrap();
         option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_sub(total_underlying_amount).unwrap();
 
-        
         // update user trade data
-        let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
-        check!( user_trade_data.number_of_option_tokens >= amount, MangoErrorCode::InsufficientFunds )?;
         user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_sub(amount.to_num::<u64>()).unwrap();
         Ok(())
     }
@@ -6427,6 +6429,11 @@ impl Processor {
         let (order_id, side) = user_trade_data
             .find_order_with_client_id( client_order_id)
             .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
+        
+        // option tokens are useless anyways as they cannot be anylonger exerciesed
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        check!(now_ts < if option_market.option_type == OptionType::European { option_market.expiry_to_exercise_european } else { option_market.expiry }, MangoErrorCode::OptionExpired )?;
 
         let mut book = Book::load_checked_for_options(program_id, bids_ai, asks_ai, &option_market)?;
 
@@ -6459,6 +6466,164 @@ impl Processor {
             }
         }
         user_trade_data.remove_order(order.owner_slot as usize, order.quantity)?;
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn exercise_option_for_profit(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        amount: u64,
+        client_order_id: u64,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 22;
+        let (fixed_ais, _) = array_refs![accounts, NUM_FIXED; ..;];
+
+        let [
+            option_market_ai,       // write
+            user_trade_data_ai,     // write
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read & signer
+            mango_cache_ai,         // read
+            _dex_prog_ai,            // read
+            spot_market_ai,         // write
+            _bids_ai,                // write
+            _asks_ai,                // write
+            _dex_request_queue_ai,   // write
+            _dex_event_queue_ai,     // write
+            _dex_base_ai,            // write
+            _dex_quote_ai,           // write
+            base_root_bank_ai,      // read
+            base_node_bank_ai,      // write
+            base_vault_ai,          // write
+            _quote_root_bank_ai,     // read
+            quote_node_bank_ai,     // write
+            quote_vault_ai,         // write
+            _token_prog_ai,          // read
+            signer_ai,              // read
+        ] = fixed_ais;
+
+        let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
+        check!(option_market.underlying_token_index == QUOTE_INDEX || option_market.quote_token_index == QUOTE_INDEX, MangoErrorCode::NotSuitableForExerciseProfit)?;
+
+        let total_underlying_amount = amount.checked_mul(option_market.contract_size.to_num())
+                                               .unwrap()
+                                               .checked_div(10u64.pow(option_market.number_of_decimals as u32))
+                                               .unwrap();
+
+        let total_quote_amount = amount.checked_mul(option_market.quote_amount.to_num())
+                                            .unwrap()
+                                            .checked_div(10u64.pow(option_market.number_of_decimals as u32))
+                                            .unwrap();
+        
+        let other_token_index = if option_market.underlying_token_index == QUOTE_INDEX { option_market.quote_token_index } else { option_market.underlying_token_index };
+        let is_put_option = option_market.underlying_token_index == QUOTE_INDEX;
+
+        let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_trade_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
+        check!( user_trade_data.number_of_option_tokens >= amount, MangoErrorCode::InsufficientFunds )?;
+
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        if option_market.option_type == OptionType::American {
+            check!(now_ts < option_market.expiry, MangoErrorCode::OptionExpired )?;
+        } else {
+            check!(now_ts > option_market.expiry,  MangoErrorCode::OptionNotYetExpired)?;
+            check!(now_ts < option_market.expiry_to_exercise_european,  MangoErrorCode::OptionExpired)?;
+        }
+        // get the balance before transaction
+        let (pre_base, pre_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )};
+
+        // limiting context for mango_group and mango_account so that it can be again borrowed in place_spot_order2
+        {
+            let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+            // check if the spot market is correct wrt options market
+            check!(mango_group.spot_markets[other_token_index].spot_market == *spot_market_ai.key, MangoErrorCode::InvalidAccount)?;
+            check!(mango_group.tokens[other_token_index].root_bank == *base_root_bank_ai.key, MangoErrorCode::InvalidAccount)?;
+
+            check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+            let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+            check!(
+                &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+                MangoErrorCode::InvalidOwner
+            )?;
+            
+            // give underlying tokens to the user so that he can sell them
+            let mut node_bank = NodeBank::load_mut_checked(if is_put_option { quote_node_bank_ai } else { base_node_bank_ai }, program_id)?;
+            let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+            let root_bank_cache = &mango_cache.root_bank_cache[option_market.underlying_token_index];
+
+            checked_add_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                option_market.underlying_token_index,
+                I80F48::from(total_underlying_amount))?;
+        }
+        
+        // sell the added underlying tokens in the spot market.
+        let order = serum_dex::instruction::NewOrderInstructionV3 {
+            side : if is_put_option {serum_dex::matching::Side::Bid} else {serum_dex::matching::Side::Ask},
+            limit_price : if is_put_option {NonZeroU64::new(u64::MAX).unwrap()} else {NonZeroU64::new(1).unwrap()}, // Market price
+            max_coin_qty : NonZeroU64::new(u64::MAX).unwrap(),
+            max_native_pc_qty_including_fees : if is_put_option { NonZeroU64::new(total_underlying_amount).unwrap() } else { NonZeroU64::new(total_quote_amount).unwrap() },
+            self_trade_behavior : serum_dex::instruction::SelfTradeBehavior::DecrementTake,
+            order_type : serum_dex::matching::OrderType::ImmediateOrCancel,
+            client_order_id : client_order_id,
+            limit : u16::MAX,
+        };
+        let market_accounts = &fixed_ais[2..];
+        Self::place_spot_order2(program_id, market_accounts, order)?;
+
+        let (post_base, post_quote) = {
+            (
+                Account::unpack(&base_vault_ai.try_borrow_data()?)?.amount,
+                Account::unpack(&quote_vault_ai.try_borrow_data()?)?.amount,
+            )
+        };
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mut mango_account = MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+
+        if is_put_option { 
+            // check number of tokens that were sold add up
+            check!( (pre_quote - post_base) == total_underlying_amount, MangoErrorCode::MarketTransactionFailed )?;
+            // we are in profit?
+            check!( (post_base - pre_base) > total_quote_amount, MangoErrorCode::TransactionResultInLoss )?;
+            let mut node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+            let root_bank_cache = &mango_cache.root_bank_cache[option_market.quote_token_index];
+            // remove the quote tokens amount from users account
+            checked_sub_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                option_market.quote_token_index,
+                I80F48::from(total_quote_amount),
+                )?;
+        } else { 
+            // check number of tokens that were sold add up
+            check!( (pre_base - post_base) == total_underlying_amount, MangoErrorCode::MarketTransactionFailed )?;
+            // we are in profit?
+            check!( (post_quote - pre_quote) > total_quote_amount, MangoErrorCode::TransactionResultInLoss )?;
+            let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+            let root_bank_cache = &mango_cache.root_bank_cache[option_market.quote_token_index];
+            // remove the quote tokens amount from users account
+            checked_sub_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                option_market.quote_token_index,
+                I80F48::from(total_quote_amount),
+                )?;
+        }
+        // update user trade data and option market
+        option_market.tokens_in_quote_pool = option_market.tokens_in_quote_pool.checked_add(I80F48::from(total_quote_amount)).unwrap();
+        option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_sub(I80F48::from(total_underlying_amount)).unwrap();
+        user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_sub(amount).unwrap();
+        
         Ok(())
     }
 
@@ -7003,6 +7168,13 @@ impl Processor {
             } => {
                 msg!("Mango: Cancel option order by client id");
                 Self::cancel_option_order_by_client_order_id(program_id, accounts, client_order_id)
+            },
+            MangoInstruction::ExerciseOptionForProfit {
+                amount,
+                client_order_id,
+            } => {
+                msg!("Mango: Exercise option for profit");
+                Self::exercise_option_for_profit(program_id, accounts, amount, client_order_id)
             }
         }
     }

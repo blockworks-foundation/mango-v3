@@ -134,9 +134,15 @@ pub enum MangoErrorCode {
     #[error("MangoErrorCode::OptionNotEnoughQuoteTokens cannot exchange writers tokens because not enough quote tokens / please exhange for underlying tokens instead")]
     NotEnoughQuoteTokens,
     #[error("MangoErrorCode::EuropeanOptionsNeedExersiceExpiry European type of option need a limit on exercise")]
-    EuropeanOptionsNeedExersiceExpiry,
+    EuropeanOptionsNeedExerciseExpiry,
     #[error("MangoErrorCode::ExersiceExpiryBeforeExpiry exercise should be after actual expiry ")]
-    ExersiceExpiryBeforeExpiry,
+    ExerciseExpiryBeforeExpiry,
+    #[error("MangoErrorCode::NotSuitableForExerciseProfit This option market is not suitable for exercise profit")]
+    NotSuitableForExerciseProfit,
+    #[error("MangoErrorCode::MarketTransactionFailed Could not effectively exchange the tokens in the market")]
+    MarketTransactionFailed,
+    #[error("MangoErrorCode::TransactionResultInLoss The transaction resulted in loss")]
+    TransactionResultInLoss,
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }
