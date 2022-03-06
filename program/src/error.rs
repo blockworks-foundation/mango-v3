@@ -143,6 +143,8 @@ pub enum MangoErrorCode {
     MarketTransactionFailed,
     #[error("MangoErrorCode::TransactionResultInLoss The transaction resulted in loss")]
     TransactionResultInLoss,
+    #[error("MangoErrorCode::MaximumOptionTradeLimitReached Cannot trade any new types of option")] // 50
+    MaximumOptionTradeLimitReached,
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

@@ -49,7 +49,7 @@ pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
 pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
-
+pub const MAX_OPTIONS_USER_CAN_HOLD: usize = 256;
 declare_check_assert_macros!(SourceFileId::State);
 
 // NOTE: I80F48 multiplication ops are very expensive. Avoid when possible
@@ -84,6 +84,7 @@ pub enum DataType {
     ReferrerIdRecord,
     OptionMarket,
     UserOptionTradeData,
+    OptionHealthCache,
 }
 
 const NUM_HEALTHS: usize = 2;
@@ -2617,7 +2618,7 @@ pub struct OptionMarket {
     pub underlying_token_index: usize,
     pub quote_token_index: usize,
     pub contract_size: u64,
-    pub quote_amount: u64,
+    pub strike_price: u64,
     pub expiry: u64,            // expiry in unix time
     pub expiry_to_exercise_european : u64, // expiry to exercise for european options
     pub expired: bool,
@@ -2641,7 +2642,7 @@ impl OptionMarket {
         quote_token_index: usize,
         option_type : OptionType,
         contract_size: u64,
-        quote_amount: u64,
+        strike_price: u64,
         expiry:u64,
         expiry_to_exercise_european : Option<u64>,
         payer: &Pubkey,
@@ -2663,7 +2664,7 @@ impl OptionMarket {
         option_market.underlying_token_index = underlying_token_index;
         option_market.quote_token_index = quote_token_index;
         option_market.contract_size = contract_size;
-        option_market.quote_amount = quote_amount;
+        option_market.strike_price = strike_price;
         option_market.expiry = expiry;
         option_market.creator = *payer;
         option_market.expired = false;
@@ -2729,6 +2730,18 @@ impl OptionMarket {
             Side::Bid => upper | (!self.seq_num as i128),
             Side::Ask => upper | (self.seq_num as i128),
         }
+    }
+
+    pub fn compute_token_count( amount : u64, contract_size : u64, decimal : u8 ) -> u64 {
+        amount.checked_mul(contract_size).unwrap().checked_div(10u64.pow(decimal as u32)).unwrap()
+    }
+
+    pub fn get_number_of_underlying_tokens (&self, for_amount : u64) -> u64 {
+        OptionMarket::compute_token_count(for_amount, self.contract_size, self.number_of_decimals)
+    }
+
+    pub fn get_number_of_quote_tokens (&self, for_amount : u64) -> u64 {
+        OptionMarket::compute_token_count(for_amount, self.strike_price, self.number_of_decimals)
     }
 }
 
@@ -2919,4 +2932,143 @@ impl UserOptionTradeData {
         }
         None
     }
+}
+
+#[derive(Copy, Clone, Pod)]
+struct OptionAsset {
+    pub option_market_pk : Pubkey,
+    pub underlying_token_index : usize,
+    pub quote_token_index : usize,
+    pub underlying_tokens_count : u64, // how much undelying tokens will used get if user exercises all the options
+    pub quote_tokens_count : u64, // how much quote tokens will have to pay to exercise all the options
+    pub w_underlying_tokens_count : u64, // underlying tokens locked
+    pub w_quote_tokens_count : u64, // corresponding quote tokens wrt to writers tokens
+    pub expiry : u64, // expiry in case for american, expiry_to_exercise_european for european
+}
+
+/// This structure is associated with each mango account
+/// It will store essential data to calculate the health of the user
+#[derive(Copy, Clone, Pod, Loadable)]
+struct OptionHealthCache {
+    pub meta_data : MetaData,
+    pub mango_account : Pubkey,
+    pub option_assets_used : [bool; MAX_OPTIONS_USER_CAN_HOLD],
+    pub option_assets : [OptionAsset; MAX_OPTIONS_USER_CAN_HOLD],
+}
+
+impl OptionHealthCache {
+    const ACCOUNT_SEEDS : &'static [u8] = b"mango_option_user_health_cache";
+
+    pub fn load_and_init_if_needed<'a>( 
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_account_pk: &Pubkey, 
+    ) -> MangoResult<RefMut<'a, Self>> {
+        let (cache_pda, _user_bump) = Pubkey::find_program_address( 
+            &[ Self::ACCOUNT_SEEDS, mango_account_pk.as_ref()], 
+            program_id);
+        check!(cache_pda == *account.key, MangoErrorCode::InvalidAccount)?;
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+
+        let mut health_cache: RefMut<'a, Self> = Self::load_mut(account)?;
+        if health_cache.meta_data.is_initialized {
+            check!(health_cache.meta_data.data_type == DataType::OptionHealthCache as u8, MangoErrorCode::InvalidAccountState)?;
+        } else {
+            health_cache.meta_data = MetaData::new(DataType::OptionHealthCache, 0, true);
+            health_cache.option_assets_used = [false; MAX_OPTIONS_USER_CAN_HOLD];
+            health_cache.mango_account = *mango_account_pk;
+        }
+        Ok(health_cache)
+    }
+
+    pub fn load_mut_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_account_pk: &Pubkey, 
+    ) -> MangoResult<RefMut<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+
+        let (cache_pda, _user_bump) = Pubkey::find_program_address( 
+            &[Self::ACCOUNT_SEEDS, mango_account_pk.as_ref()], 
+            program_id);
+        check!(cache_pda == *account.key, MangoErrorCode::InvalidAccount)?;
+
+        let health_cache: RefMut<'a, Self> = Self::load_mut(account)?;
+        check!(health_cache.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
+        check_eq!(health_cache.mango_account, *mango_account_pk, MangoErrorCode::InvalidAccount)?;
+        check_eq!(
+            health_cache.meta_data.data_type,
+            DataType::OptionHealthCache as u8,
+            MangoErrorCode::InvalidAccount
+        )?;
+
+        Ok(health_cache)
+    }
+
+    pub fn load_checked<'a>(
+        account: &'a AccountInfo,
+        program_id: &Pubkey,
+        mango_account_pk: &Pubkey, 
+    ) -> MangoResult<Ref<'a, Self>> {
+        check_eq!(account.owner, program_id, MangoErrorCode::InvalidOwner)?;
+        let (cache_pda, _user_bump) = Pubkey::find_program_address( 
+            &[Self::ACCOUNT_SEEDS, mango_account_pk.as_ref()], 
+            program_id);
+        check!(cache_pda == *account.key, MangoErrorCode::InvalidAccount)?;
+
+        let health_cache: Ref<'a, Self> = Self::load(account)?;
+        check!(health_cache.meta_data.is_initialized, MangoErrorCode::InvalidAccount)?;
+        check_eq!(
+            health_cache.meta_data.data_type,
+            DataType::OptionHealthCache as u8,
+            MangoErrorCode::InvalidAccount
+        )?;
+
+        Ok(health_cache)
+    }
+
+    fn update_option_tokens_for_index(&mut self, 
+        option_market: &OptionMarket,
+        option_market_pk : &Pubkey,
+        user_option_trade_data : &UserOptionTradeData,
+        index : usize,
+    ) {
+        self.option_assets_used[index] = true;
+        let asset = &mut self.option_assets[index];
+        asset.option_market_pk = *option_market_pk;
+        asset.expiry = option_market.expiry;
+        asset.underlying_token_index = option_market.underlying_token_index;
+        asset.quote_token_index = option_market.quote_token_index;
+        asset.underlying_tokens_count = option_market.get_number_of_underlying_tokens(user_option_trade_data.number_of_option_tokens);
+        asset.quote_tokens_count = option_market.get_number_of_quote_tokens(user_option_trade_data.number_of_option_tokens);
+        asset.w_underlying_tokens_count = option_market.get_number_of_underlying_tokens(user_option_trade_data.number_of_writers_tokens);
+        asset.w_quote_tokens_count = option_market.get_number_of_quote_tokens(user_option_trade_data.number_of_writers_tokens);
+    }
+
+    pub fn update_option_tokens(
+        &mut self, 
+        option_market: &OptionMarket, 
+        option_market_pk : &Pubkey,
+        user_option_trade_data : &UserOptionTradeData,
+    ) -> MangoResult {
+        let market_index = self.option_assets.iter().position(|x| x.option_market_pk == *option_market_pk);
+
+        match market_index {
+            Some(x) => {
+                self.update_option_tokens_for_index(option_market, option_market_pk, user_option_trade_data, x);
+            }
+            None => {
+                let empty_position = self.option_assets_used.iter().position(|x| *x==false);
+                match empty_position {
+                    Some(y) => {
+                        self.update_option_tokens_for_index(option_market, option_market_pk, user_option_trade_data, y)
+                    }
+                    None => {
+                        check!(false, MangoErrorCode::MaximumOptionTradeLimitReached)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+     }
 }

@@ -5925,8 +5925,7 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let decimal_multiplier =  10u64.pow(option_market.number_of_decimals as u32);
-        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap().checked_div(decimal_multiplier).unwrap();
+        let total_underlying_amount = option_market.get_number_of_underlying_tokens(amount);
         
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let root_bank_cache = &mango_cache.root_bank_cache[option_market.underlying_token_index];
@@ -6010,9 +6009,8 @@ impl Processor {
         let mut user_trade_data = UserOptionTradeData::load_mut_checked(user_data_ai, program_id, option_market_ai.key, mango_account_ai.key)?;
         check!( user_trade_data.number_of_option_tokens >= amount, MangoErrorCode::InsufficientFunds )?;
 
-        let decimal_multiplier =  10u64.pow(option_market.number_of_decimals as u32);
-        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap().checked_div(decimal_multiplier).unwrap();
-        let total_quote_amount = amount.checked_mul(option_market.quote_amount).unwrap().checked_div(decimal_multiplier).unwrap();
+        let total_underlying_amount = option_market.get_number_of_underlying_tokens(amount);
+        let total_quote_amount = option_market.get_number_of_quote_tokens(amount);
         
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         let underlying_root_bank_cache = &mango_cache.root_bank_cache[option_market.underlying_token_index];
@@ -6086,9 +6084,8 @@ impl Processor {
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        let decimal_multiplier =  10u64.pow(option_market.number_of_decimals as u32);
-        let total_underlying_amount = amount.checked_mul( option_market.contract_size ).unwrap().checked_div(decimal_multiplier).unwrap();
-        let total_quote_amount = amount.checked_mul(option_market.quote_amount).unwrap().checked_div(decimal_multiplier).unwrap();
+        let total_underlying_amount = option_market.get_number_of_underlying_tokens(amount);
+        let total_quote_amount = option_market.get_number_of_quote_tokens(amount);
 
         // switch according to exchange for param
         let (token_index, token_amount, mut node_bank) = if exchange_for == ExchangeFor::ForUnderlyingTokens {
@@ -6201,10 +6198,9 @@ impl Processor {
         
         match side {
             Side::Bid => {
-                let decimal_multiplier =  10i64.pow(option_market.number_of_decimals as u32);
-                let total_price = amount.checked_mul(price).unwrap().checked_div(decimal_multiplier).unwrap();
+                let total_price = OptionMarket::compute_token_count(amount as u64, price as u64, option_market.number_of_decimals);
                 // lock the total price in the user trade data
-                user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_add( total_price as u64 ).unwrap();
+                user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_add( total_price ).unwrap();
 
                 let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
                 let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
@@ -6283,7 +6279,6 @@ impl Processor {
         let mut event_queue: EventQueue =
             EventQueue::load_mut_checked_for_options(event_queue_ai, program_id, &option_market)?;
 
-        let divisor = 10i64.pow(option_market.number_of_decimals as u32);
         let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
         let root_bank = RootBank::load_checked(usdc_root_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(usdc_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
@@ -6321,15 +6316,14 @@ impl Processor {
                             } 
                         }
                     };
-                    
-                    let quote_amount = fill.quantity.checked_mul(fill.price).unwrap().checked_div(divisor).unwrap();
+                    let quote_amount = OptionMarket::compute_token_count(fill.quantity as u64, fill.price as u64, option_market.number_of_decimals);
 
                     match fill.taker_side {
                         Side::Ask => {
-                            trade_data_info.add_bids_trade(fill.quantity as u64, quote_amount as u64, 0)?;
+                            trade_data_info.add_bids_trade(fill.quantity as u64, quote_amount, 0)?;
                         }
                         Side::Bid => {
-                            trade_data_info.add_asks_trade(fill.quantity as u64, quote_amount as u64)?;
+                            trade_data_info.add_asks_trade(fill.quantity as u64, quote_amount)?;
                             if trade_data_info.number_of_usdc_to_settle > 0 {
                                 checked_add_net(root_bank_cache, 
                                     &mut node_bank, 
@@ -6433,8 +6427,7 @@ impl Processor {
                 user_trade_data.number_of_locked_options_tokens = user_trade_data.number_of_locked_options_tokens.checked_sub(order.quantity as u64).unwrap(); 
             },
             Side::Bid => {
-                let decimal_multiplier =  10i64.pow(option_market.number_of_decimals as u32);
-                let locked_usdc = order.quantity.checked_mul(order.price()).unwrap().checked_div(decimal_multiplier).unwrap();
+                let locked_usdc = OptionMarket::compute_token_count(order.quantity as u64, order.price() as u64, option_market.number_of_decimals);
                 user_trade_data.number_of_usdc_locked = user_trade_data.number_of_usdc_locked.checked_sub(locked_usdc as u64).unwrap();
                 // reimburse locked usdc to the user
                 let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -6456,6 +6449,7 @@ impl Processor {
         Ok(())
     }
 
+    /// This code is experimental TODO write tests.
     /// Understanding this method is quite confusing because there are 2 types of quote tokens,
     /// 1 quote token which corresponds to option market that can be any other but typically USDC for call option and non USDC for put option
     /// 2 quote token which corresponds to mango which is always USDC.
@@ -6498,15 +6492,8 @@ impl Processor {
         let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
         check!(option_market.underlying_token_index == QUOTE_INDEX || option_market.quote_token_index == QUOTE_INDEX, MangoErrorCode::NotSuitableForExerciseProfit)?;
 
-        let total_underlying_amount = amount.checked_mul(option_market.contract_size)
-                                               .unwrap()
-                                               .checked_div(10u64.pow(option_market.number_of_decimals as u32))
-                                               .unwrap();
-
-        let total_quote_amount = amount.checked_mul(option_market.quote_amount)
-                                            .unwrap()
-                                            .checked_div(10u64.pow(option_market.number_of_decimals as u32))
-                                            .unwrap();
+        let total_underlying_amount = option_market.get_number_of_underlying_tokens(amount);
+        let total_quote_amount = option_market.get_number_of_quote_tokens(amount);
         
         let other_token_index = if option_market.underlying_token_index == QUOTE_INDEX { option_market.quote_token_index } else { option_market.underlying_token_index };
         let is_put_option = option_market.underlying_token_index == QUOTE_INDEX;

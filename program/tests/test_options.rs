@@ -26,7 +26,7 @@ async fn test_american_options() {
     println!("Creating option market");
     
     let expiry = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 30 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
-    let (om_key, option_market) = test.create_option_market(&mango_group_cookie,
+    let (option_market_pk, option_market) = test.create_option_market(&mango_group_cookie,
         0,
         15,
          OptionType::American,
@@ -38,7 +38,7 @@ async fn test_american_options() {
     assert_eq!(option_market.meta_data.data_type, DataType::OptionMarket as u8);
     assert_eq!(option_market.option_type, OptionType::American);
     assert_eq!(option_market.contract_size, 100_000_000);
-    assert_eq!(option_market.quote_amount, 10_200_000);
+    assert_eq!(option_market.strike_price, 10_200_000);
     assert_eq!(option_market.expiry, expiry);
     assert_eq!(option_market.tokens_in_underlying_pool,  0);
     assert_eq!(option_market.tokens_in_quote_pool, 0);
@@ -50,7 +50,7 @@ async fn test_american_options() {
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
     // write option with user0
-    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, om_key, &option_market, 0, 10_000_000).await;
+    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, option_market_pk, &option_market, 0, 10_000_000).await;
     //check write option
     {
         let option_tokens = option_trade_data.number_of_option_tokens;
@@ -60,8 +60,8 @@ async fn test_american_options() {
         let mango_account_key = mango_group_cookie.mango_accounts[0].address;
         let funds :u64 = test.with_mango_account_deposit(&mango_account_key, option_market.underlying_token_index).await;
         assert_eq!(load_amount - 1_000_000_000, funds );
-    
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        // check balances in account
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 10);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 0);
     }
@@ -74,7 +74,7 @@ async fn test_american_options() {
     test.perform_deposit(&mango_group_cookie, 0, option_market.quote_token_index, load_amount).await;
     let mut funds_quote_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
 
-    test.exercise_option(&mango_group_cookie, om_key, &option_market, 0, 5_000_000).await;
+    test.exercise_option(&mango_group_cookie, option_market_pk, &option_market, 0, 5_000_000).await;
     //check exercise
     {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -85,7 +85,7 @@ async fn test_american_options() {
         let funds_quote :u64 = test.with_mango_account_deposit(&mango_account_key, option_market.quote_token_index).await;
         assert_eq!(funds_underlying, funds_underlying_old + 100_000_000 * 5);
         assert_eq!(funds_quote, funds_quote_old -  10_200_000 * 5);
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 5);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 5);
         funds_underlying_old= funds_underlying;
@@ -105,7 +105,7 @@ async fn test_american_options() {
         assert_eq!(writer_tokens, 10_000_000);
     }
     
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForQuoteTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, ExchangeFor::ForQuoteTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -117,13 +117,13 @@ async fn test_american_options() {
         assert_eq!(funds_underlying, funds_underlying_old);
         assert_eq!(funds_quote, funds_quote_old + 10_199_999); // floating point rounding problem
 
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 5);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 4);
         funds_underlying_old = funds_underlying;
         funds_quote_old =  funds_quote;
     }
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForUnderlyingTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, ExchangeFor::ForUnderlyingTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -135,7 +135,7 @@ async fn test_american_options() {
         assert_eq!(funds_underlying, funds_underlying_old + 100_000_000);
         assert_eq!(funds_quote, funds_quote_old); // floating point rounding problem
 
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 4);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 4);
         funds_underlying_old = funds_underlying;
@@ -159,8 +159,8 @@ async fn test_european_options() {
     
     let expiry = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 30 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
     let expiry_to_exercise = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 60 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
-//     
-    let (om_key, option_market) = test.create_option_market(&mango_group_cookie,
+    // create a european option     
+    let (option_market_pk, option_market) = test.create_option_market(&mango_group_cookie,
         0,
         15,
          OptionType::European,
@@ -172,7 +172,7 @@ async fn test_european_options() {
     assert_eq!(option_market.meta_data.data_type, DataType::OptionMarket as u8);
     assert_eq!(option_market.option_type, OptionType::European);
     assert_eq!(option_market.contract_size, 100_000_000);
-    assert_eq!(option_market.quote_amount, 10_200_000);
+    assert_eq!(option_market.strike_price, 10_200_000);
     assert_eq!(option_market.expiry, expiry);
     assert_eq!(option_market.expiry_to_exercise_european, expiry_to_exercise);
     assert_eq!(option_market.tokens_in_underlying_pool,  0);
@@ -185,7 +185,7 @@ async fn test_european_options() {
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
     // write option with user0
-    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, om_key, &option_market, 0, 10_000_000).await;
+    let (u0_trade_data_pk, option_trade_data) = test.write_option(&mango_group_cookie, option_market_pk, &option_market, 0, 10_000_000).await;
     //check write option
     {
         let option_tokens = option_trade_data.number_of_option_tokens;
@@ -196,7 +196,7 @@ async fn test_european_options() {
         let funds :u64 = test.with_mango_account_deposit(&mango_account_key, option_market.underlying_token_index).await;
         assert_eq!(load_amount - 1_000_000_000, funds );
     
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 10);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 0);
     }
@@ -210,7 +210,7 @@ async fn test_european_options() {
     let mut funds_quote_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
     test.advance_clock_past_timestamp(option_market.expiry as i64 + 1).await;
 
-    test.exercise_option(&mango_group_cookie, om_key, &option_market, 0, 5_000_000).await;
+    test.exercise_option(&mango_group_cookie, option_market_pk, &option_market, 0, 5_000_000).await;
     //check exercise
     {
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -221,7 +221,7 @@ async fn test_european_options() {
         let funds_quote :u64 = test.with_mango_account_deposit(&mango_account_key, option_market.quote_token_index).await;
         assert_eq!(funds_underlying, funds_underlying_old + 100_000_000 * 5);
         assert_eq!(funds_quote, funds_quote_old -  10_200_000 * 5);
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 5);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 5);
         funds_underlying_old= funds_underlying;
@@ -241,7 +241,7 @@ async fn test_european_options() {
         assert_eq!(writer_tokens, 10_000_000);
     }
     
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForQuoteTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, ExchangeFor::ForQuoteTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -253,13 +253,13 @@ async fn test_european_options() {
         assert_eq!(funds_underlying, funds_underlying_old);
         assert_eq!(funds_quote, funds_quote_old + 10_199_999); // floating point rounding problem
 
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 5);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 4);
         funds_underlying_old = funds_underlying;
         funds_quote_old =  funds_quote;
     }
-    test.exchange_writers_tokens(&mango_group_cookie, om_key, &option_market, 0, 1_000_000, ExchangeFor::ForUnderlyingTokens).await;
+    test.exchange_writers_tokens(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, ExchangeFor::ForUnderlyingTokens).await;
     {
         // check exchange
         let trade_data = test.load_account::<UserOptionTradeData>(u0_trade_data_pk).await;
@@ -271,7 +271,7 @@ async fn test_european_options() {
         assert_eq!(funds_underlying, funds_underlying_old + 100_000_000);
         assert_eq!(funds_quote, funds_quote_old); // floating point rounding problem
 
-        let option_market_ck = test.load_account::<OptionMarket>(om_key).await;
+        let option_market_ck = test.load_account::<OptionMarket>(option_market_pk).await;
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 4);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 10_200_000 * 4);
         funds_underlying_old = funds_underlying;
@@ -488,7 +488,7 @@ async fn test_placing_orders_for_options() {
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
         assert_eq!(trade_data.order_filled[0], true);
-
+        // check the account balance
         let usdc_with_u1_after :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
         assert_eq!(usdc_with_u1, usdc_with_u1_after); // no usdc transfered
         usdc_with_u1 = usdc_with_u1_after;
