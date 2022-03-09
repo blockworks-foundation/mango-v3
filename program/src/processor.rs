@@ -4639,7 +4639,13 @@ impl Processor {
                             )?,
                         };
                         let pre_mngo = ma.perp_accounts[market_index].mngo_accrued;
-                        ma.execute_maker(market_index, &mut perp_market, perp_market_cache, fill)?;
+                        ma.execute_maker(
+                            market_index,
+                            &mut perp_market,
+                            perp_market_cache,
+                            fill,
+                            0,
+                        )?;
                         ma.execute_taker(market_index, &mut perp_market, perp_market_cache, fill)?;
                         mango_emit_stack::<_, 512>(MngoAccrualLog {
                             mango_group: *mango_group_ai.key,
@@ -4686,6 +4692,7 @@ impl Processor {
                             &mut perp_market,
                             perp_market_cache,
                             fill,
+                            mango_group.lm_fill_qty_shift,
                         )?;
                         taker.execute_taker(
                             market_index,
@@ -5937,6 +5944,28 @@ impl Processor {
         }
     }
 
+    #[inline(never)]
+    /// Change the maximum number of MangoAccounts.v1 allowed
+    fn change_fill_incentive_scaling(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        lm_fill_qty_shift: u8,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai, // write
+            admin_ai        // read, signer
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+
+        mango_group.lm_fill_qty_shift = lm_fill_qty_shift;
+        Ok(())
+    }
+
     /// Associate the referrer's MangoAccount with a human readable `referrer_id` which can be used
     /// in a ref link
     /// Create the `ReferrerIdRecord` PDA; if it already exists throw error
@@ -6502,6 +6531,10 @@ impl Processor {
                     expiry_timestamp,
                     limit,
                 )
+            }
+            MangoInstruction::ChangeFillIncentiveScaling { lm_fill_qty_shift } => {
+                msg!("Mango: ChangeFillIncentiveScaling lm_fill_qty_shift={}", lm_fill_qty_shift);
+                Self::change_fill_incentive_scaling(program_id, accounts, lm_fill_qty_shift)
             }
         }
     }

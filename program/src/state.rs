@@ -210,7 +210,8 @@ pub struct MangoGroup {
     pub ref_surcharge_centibps: u32, // 100
     pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
     pub ref_mngo_required: u64,
-    pub padding: [u8; 8], // padding used for future expansions
+    pub lm_fill_qty_shift: u8,
+    pub padding: [u8; 7], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -1613,6 +1614,7 @@ impl MangoAccount {
         perp_market: &mut PerpMarket,
         cache: &PerpMarketCache,
         fill: &FillEvent,
+        lm_qty_shift: u8,
     ) -> MangoResult<()> {
         let pa = &mut self.perp_accounts[market_index];
         pa.settle_funding(cache);
@@ -1647,7 +1649,7 @@ impl MangoAccount {
                     0,
                     fill.maker_timestamp,
                     fill.timestamp,
-                    fill.quantity,
+                    fill.quantity.checked_shl(lm_qty_shift as u32).unwrap(),
                 )?;
             }
         }

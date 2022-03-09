@@ -1030,6 +1030,16 @@ pub enum MangoInstruction {
         /// When the limit is reached, processing stops and the instruction succeeds.
         limit: u8,
     },
+
+    /// Change the amount of scaling applied to liq incentives
+    ///
+    /// Accounts expected by this instruction (2):
+    ///
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[signer]` admin_ai - Admin
+    ChangeFillIncentiveScaling {
+        lm_fill_qty_shift: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -1517,6 +1527,10 @@ impl MangoInstruction {
                     reduce_only: reduce_only[0] != 0,
                     limit: u8::from_le_bytes(*limit),
                 }
+            }
+            65 => {
+                let data_arr = array_ref![data, 0, 1];
+                MangoInstruction::ChangeFillIncentiveScaling { lm_fill_qty_shift: data_arr[0] }
             }
             _ => {
                 return None;
