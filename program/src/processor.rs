@@ -6652,7 +6652,7 @@ fn invoke_transfer<'a>(
 }
 
 #[inline(never)]
-fn read_oracle(
+pub fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
