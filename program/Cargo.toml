@@ -9,7 +9,6 @@ no-entrypoint = []
 test-bpf = []
 devnet = []
 client = ["no-entrypoint"]
-cpi = ["no-entrypoint"]
 
 [dependencies]
 solana-program = "^1.8.1"
