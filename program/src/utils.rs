@@ -110,6 +110,7 @@ pub fn emit_perp_balances(
 }
 
 /// returns the current interest rate in APR for a given RootBank
+#[inline(always)]
 pub fn compute_interest_rate(
     root_bank: &RootBank,
     utilization: I80F48
@@ -124,6 +125,7 @@ pub fn compute_interest_rate(
 
 /// returns a tuple of (deposit_rate, interest_rate) for a given RootBank
 /// values are in APR
+#[inline(always)]
 pub fn compute_deposit_rate(
     root_bank: &RootBank,
     utilization: I80F48
@@ -138,6 +140,7 @@ pub fn compute_deposit_rate(
 
 /// calcualtor function that can be used to compute an interest
 /// rate based on the given parameters
+#[inline(always)]
 pub fn interest_rate_curve_calculator(
     utilization: I80F48,
     optimal_util: I80F48,
