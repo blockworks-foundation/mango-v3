@@ -942,7 +942,7 @@ impl HealthCache {
                         perp_market_info.init_asset_weight,
                         perp_market_info.init_liab_weight,
                     ),
-                    HealthType::Equity => (),
+                    HealthType::Equity => (ONE_I80F48, ONE_I80F48, ONE_I80F48, ONE_I80F48),
                 };
 
             if self.active_assets.spot[i] {
