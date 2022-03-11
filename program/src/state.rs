@@ -600,7 +600,7 @@ pub struct PriceCache {
 impl PriceCache {
     pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
         check!(
-            self.last_update >= now_ts - mango_group.valid_interval,
+            self.last_update >= now_ts - (2 * mango_group.valid_interval),
             MangoErrorCode::InvalidPriceCache
         )
     }
@@ -634,7 +634,7 @@ pub struct PerpMarketCache {
 impl PerpMarketCache {
     pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
         check!(
-            self.last_update >= now_ts - mango_group.valid_interval,
+            self.last_update >= now_ts - (2 * mango_group.valid_interval),
             MangoErrorCode::InvalidPerpMarketCache
         )
     }
