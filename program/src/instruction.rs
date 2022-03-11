@@ -2295,7 +2295,7 @@ pub fn withdraw(
     allow_borrow: bool,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
-        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
         AccountMeta::new_readonly(*mango_cache_pk, false),
