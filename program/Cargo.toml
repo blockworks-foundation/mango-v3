@@ -30,14 +30,10 @@ mango-macro = { path = "../mango-macro" }
 mango-common = { path = "../common" }
 mango-logs = { path = "../mango-logs", features=["no-entrypoint"] }
 
-# switchboard-program 0.1.59 fails to compile with switchboard-utils 0.1.36
-# so fix both dependencies to precise versions for now
-#
-# Consider upgrading to switchboard-program >=0.2, which probably works with utils >=0.1.36
-switchboard-program = "=0.1.59"
-switchboard-utils = "=0.1.32"
+switchboard-program = ">=0.2.0"
+switchboard-utils = ">=0.1.36"
 
-anchor-lang = "0.20.1"
+anchor-lang = "0.22.1"
 
 [dev-dependencies]
 solana-sdk = "^1.8.1"
