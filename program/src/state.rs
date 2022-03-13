@@ -87,8 +87,13 @@ const NUM_HEALTHS: usize = 3;
 #[repr(usize)]
 #[derive(Copy, Clone, IntoPrimitive, TryFromPrimitive)]
 pub enum HealthType {
+    /// Maintenance health. If this health falls below 0 you get liquidated
     Maint,
+
+    /// Initial health. If this falls below 0 you cannot open more positions
     Init,
+
+    /// This is just the account equity i.e. unweighted sum of value of assets minus liabilities
     Equity,
 }
 
@@ -783,7 +788,7 @@ pub struct HealthCache {
     quote: I80F48,
 
     /// This will be zero until update_health is called for the first time
-    health: [Option<I80F48>; 3],
+    health: [Option<I80F48>; NUM_HEALTHS],
 }
 
 impl HealthCache {
