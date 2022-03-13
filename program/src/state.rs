@@ -2,7 +2,7 @@ use std::cell::{Ref, RefMut};
 use std::cmp::{max, min};
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
-use std::ops::Deref;
+use std::ops::{Deref, Mul};
 
 use bytemuck::{cast_ref, from_bytes, from_bytes_mut, try_from_bytes_mut};
 use enumflags2::BitFlags;
@@ -49,7 +49,7 @@ pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
 pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
-pub const MAX_OPTIONS_USER_CAN_HOLD: usize = 256;
+pub const MAX_NUMBER_OF_OPTION_MARKETS: usize = 32;
 declare_check_assert_macros!(SourceFileId::State);
 
 // NOTE: I80F48 multiplication ops are very expensive. Avoid when possible
@@ -802,6 +802,7 @@ impl HealthCache {
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
+        option_cache : Option<Ref<OptionHealthCache>>,
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
@@ -825,6 +826,69 @@ impl HealthCache {
                     mango_cache.price_cache[i].price,
                 )?;
             }
+
+            self.update_from_option_cache(&option_cache, mango_cache, i)?;
+        }
+        Ok(())
+    }
+
+    fn update_from_option_cache(&mut self, 
+                option_cache : &Option<Ref<OptionHealthCache>>,
+                mango_cache: &MangoCache,
+                i : usize, // token index
+            ) -> MangoResult<()> {
+        // options will be treated and update the spot tokens. As option tokens can be imagined as spot tokens with following cases:
+        // we assume that the user will exercise the option when user meets strike condition.
+        // for user having option tokens we add underlying tokens and subtract quote tokens only if the price of underlying tokens > quote tokens
+        // for user having writers tokens we add quote tokens and subtract underlying tokens if the option is striked.
+        // for put option underlying token is usdc (i.e quote) so the treatment is reversed
+        
+        let clock = Clock::get()?;
+        let now = clock.unix_timestamp;
+        match option_cache {
+            Some(x) => {
+                let price = mango_cache.price_cache[i].price;
+                for j in 0..MAX_NUMBER_OF_OPTION_MARKETS {
+                    if x.option_assets_used[j] {
+                        let option_asset = &x.option_assets[j];
+                        let underlying_tokens_count = I80F48::from(option_asset.underlying_tokens_count);
+                        let quote_tokens_count = I80F48::from(option_asset.quote_tokens_count);
+                        let w_underlying_tokens_count = I80F48::from(option_asset.w_underlying_tokens_count);
+                        let w_quote_tokens_count = I80F48::from(option_asset.w_quote_tokens_count);
+                        if option_asset.expiry > (now as u64) {
+                            // option has been expired / TODO error exchange writer tokens first
+                        }
+                        else {
+                            // for call options underlying index is spot.
+                            if option_asset.underlying_token_index == i && option_asset.quote_token_index == QUOTE_INDEX{
+                                if price.mul(underlying_tokens_count) > quote_tokens_count {
+                                    self.quote = self.quote - quote_tokens_count;
+                                    self.spot[i].0 = self.spot[i].0 + underlying_tokens_count;
+                                } 
+                                // if user has writers tokens then we assume that the option is exerciesed then the worst case user is left with quote tokens / TODO quote -= weight * price of the option (where weight > 1)
+                                if price.mul(w_underlying_tokens_count) > w_quote_tokens_count {
+                                    self.spot[i].0 = self.spot[i].0 - w_underlying_tokens_count;
+                                    self.quote = self.quote + w_quote_tokens_count;
+                                }
+                            }
+                            // for put options quote index is spot, and underlying is quote(usdc)
+                            else if option_asset.quote_token_index == i && option_asset.underlying_token_index == QUOTE_INDEX{
+                                if price.mul(quote_tokens_count) < underlying_tokens_count  {
+                                    self.spot[i].0 = self.spot[i].0 - quote_tokens_count;
+                                    self.quote = self.quote + underlying_tokens_count;
+                                }
+                                // similar to abouve / TODO quote -= weight * price of the option (where weight > 1)
+                                if price.mul(w_quote_tokens_count) < w_underlying_tokens_count {
+                                    self.spot[i].0 = self.spot[i].0 + w_quote_tokens_count;
+                                    self.quote = self.quote - w_underlying_tokens_count;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+            }
+            None => {}
         }
         Ok(())
     }
@@ -835,6 +899,7 @@ impl HealthCache {
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
+        option_cache : Option<Ref<OptionHealthCache>>,
         open_orders: &[Option<T>],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
@@ -855,6 +920,8 @@ impl HealthCache {
                     mango_cache.price_cache[i].price,
                 )?;
             }
+
+            self.update_from_option_cache(&option_cache, mango_cache, i)?;
         }
         Ok(())
     }
@@ -2626,12 +2693,14 @@ pub struct OptionMarket {
     pub tokens_in_underlying_pool : u64, // Tokens in the mango underlying pool related to this market
     pub tokens_in_quote_pool : u64, // Tokens in the mango quote pool related to this market
     pub number_of_decimals: u8, // 6 by default
+    pub number_of_tokens_minted : u64,
 
     // order book and market related data
     seq_num : u64,
     pub bids: Pubkey,
     pub asks: Pubkey,
     pub event_queue: Pubkey,
+    pub last_price : u64,
 }
 
 impl OptionMarket {
@@ -2861,20 +2930,20 @@ impl UserOptionTradeData {
         Ok(trade_data)
     }
 
-    pub fn add_bids_trade(&mut self, match_quantity: u64, quote_amount:u64, remaining_amount:u64 ) -> MangoResult {
-        check!(self.number_of_usdc_locked >= quote_amount, MangoErrorCode::InsufficientFunds)?;
+    pub fn add_bids_trade(&mut self, match_quantity: u64, strike_price:u64, remaining_amount:u64 ) -> MangoResult {
+        check!(self.number_of_usdc_locked >= strike_price, MangoErrorCode::InsufficientFunds)?;
         self.number_of_option_tokens = self.number_of_option_tokens.checked_add(match_quantity).unwrap();
-        self.number_of_usdc_locked = self.number_of_usdc_locked.checked_sub(quote_amount).unwrap();
+        self.number_of_usdc_locked = self.number_of_usdc_locked.checked_sub(strike_price).unwrap();
         // move difference from locked to settled
         self.number_of_usdc_locked = self.number_of_usdc_locked.checked_sub(remaining_amount).unwrap();
         self.number_of_usdc_to_settle = self.number_of_usdc_to_settle.checked_add(remaining_amount).unwrap();
         Ok(())
     }
 
-    pub fn add_asks_trade(&mut self, match_quantity: u64, quote_amount:u64 ) -> MangoResult {
+    pub fn add_asks_trade(&mut self, match_quantity: u64, strike_price:u64 ) -> MangoResult {
         check!(self.number_of_locked_options_tokens >= match_quantity, MangoErrorCode::InsufficientFunds)?;
         self.number_of_locked_options_tokens = self.number_of_locked_options_tokens.checked_sub(match_quantity).unwrap();
-        self.number_of_usdc_to_settle = self.number_of_usdc_to_settle.checked_add(quote_amount).unwrap();
+        self.number_of_usdc_to_settle = self.number_of_usdc_to_settle.checked_add(strike_price).unwrap();
         Ok(())
     }
     
@@ -2935,7 +3004,7 @@ impl UserOptionTradeData {
 }
 
 #[derive(Copy, Clone, Pod)]
-struct OptionAsset {
+pub struct OptionAsset {
     pub option_market_pk : Pubkey,
     pub underlying_token_index : usize,
     pub quote_token_index : usize,
@@ -2944,16 +3013,18 @@ struct OptionAsset {
     pub w_underlying_tokens_count : u64, // underlying tokens locked
     pub w_quote_tokens_count : u64, // corresponding quote tokens wrt to writers tokens
     pub expiry : u64, // expiry in case for american, expiry_to_exercise_european for european
+    pub tokens_locked_in_trade : u64,
+    pub usdc_locked_in_trade : u64,
 }
 
 /// This structure is associated with each mango account
 /// It will store essential data to calculate the health of the user
 #[derive(Copy, Clone, Pod, Loadable)]
-struct OptionHealthCache {
+pub struct OptionHealthCache {
     pub meta_data : MetaData,
     pub mango_account : Pubkey,
-    pub option_assets_used : [bool; MAX_OPTIONS_USER_CAN_HOLD],
-    pub option_assets : [OptionAsset; MAX_OPTIONS_USER_CAN_HOLD],
+    pub option_assets_used : [bool; MAX_NUMBER_OF_OPTION_MARKETS],
+    pub option_assets : [OptionAsset; MAX_NUMBER_OF_OPTION_MARKETS],
 }
 
 impl OptionHealthCache {
@@ -2975,7 +3046,7 @@ impl OptionHealthCache {
             check!(health_cache.meta_data.data_type == DataType::OptionHealthCache as u8, MangoErrorCode::InvalidAccountState)?;
         } else {
             health_cache.meta_data = MetaData::new(DataType::OptionHealthCache, 0, true);
-            health_cache.option_assets_used = [false; MAX_OPTIONS_USER_CAN_HOLD];
+            health_cache.option_assets_used = [false; MAX_NUMBER_OF_OPTION_MARKETS];
             health_cache.mango_account = *mango_account_pk;
         }
         Ok(health_cache)
@@ -3027,6 +3098,13 @@ impl OptionHealthCache {
         Ok(health_cache)
     }
 
+    pub fn get_account_pos<'a>(program_id: &Pubkey, mango_account_pk: &Pubkey, accounts : &[AccountInfo]) -> Option<usize>{
+        let (cache_pda, _user_bump) = Pubkey::find_program_address( 
+            &[ Self::ACCOUNT_SEEDS, mango_account_pk.as_ref()], 
+            program_id);
+        accounts.iter().position(|x| *x.key == cache_pda)
+    }
+
     fn update_option_tokens_for_index(&mut self, 
         option_market: &OptionMarket,
         option_market_pk : &Pubkey,
@@ -3039,6 +3117,8 @@ impl OptionHealthCache {
         asset.expiry = option_market.expiry;
         asset.underlying_token_index = option_market.underlying_token_index;
         asset.quote_token_index = option_market.quote_token_index;
+        asset.tokens_locked_in_trade = user_option_trade_data.number_of_locked_options_tokens;
+        asset.usdc_locked_in_trade = user_option_trade_data.number_of_usdc_locked;
         asset.underlying_tokens_count = option_market.get_number_of_underlying_tokens(user_option_trade_data.number_of_option_tokens);
         asset.quote_tokens_count = option_market.get_number_of_quote_tokens(user_option_trade_data.number_of_option_tokens);
         asset.w_underlying_tokens_count = option_market.get_number_of_underlying_tokens(user_option_trade_data.number_of_writers_tokens);

@@ -50,7 +50,8 @@ use crate::state::{
     HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, ReferrerIdRecord,
     ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
-    UserActiveAssets, OptionType, OptionMarket, ExchangeFor, UserOptionTradeData, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
+    UserActiveAssets, OptionType, OptionMarket, ExchangeFor, UserOptionTradeData, OptionHealthCache,
+    ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
     QUOTE_INDEX, ZERO_I80F48,
 };
@@ -298,6 +299,8 @@ impl Processor {
             mango_cache_ai      // read
         ] = accounts;
 
+        let option_health_cache_ai = accounts.get(NUM_FIXED); // if there is optional option related health cache data
+ 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
@@ -367,6 +370,11 @@ impl Processor {
             // We know DustAccount doesn't have any open orders; but check it just in case
             check!(dust_account.num_in_margin_basket == 0, MangoErrorCode::InvalidAccountState)?;
 
+            let option_health_cache = match option_health_cache_ai {
+                Some(x) => Some(OptionHealthCache::load_checked(x, program_id, mango_account_ai.key)?),
+                None => None
+            };
+
             // Make sure DustAccount satisfies health check only when it has taken on more borrows
             let mut health_cache = HealthCache::new(active_assets);
             let open_orders_accounts: Vec<Option<&serum_dex::state::OpenOrders>> =
@@ -375,6 +383,7 @@ impl Processor {
                 &mango_group,
                 &mango_cache,
                 &dust_account,
+                option_health_cache,
                 &open_orders_accounts,
             )?;
             let health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -1259,7 +1268,9 @@ impl Processor {
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let (fixed_ais, open_orders_ais,) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        
+        let option_health_cache_ai = accounts.get(NUM_FIXED + MAX_PAIRS); // if there is optional option related health cache data
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write
@@ -1336,9 +1347,13 @@ impl Processor {
             &[&signers_seeds],
             quantity,
         )?;
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some( OptionHealthCache::load_checked(x, program_id, mango_account_ai.key)?),
+            None => None
+        };
 
         let mut health_cache = HealthCache::new(active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais, option_health_cache)?;
         let health = health_cache.get_health(&mango_group, HealthType::Init);
 
         check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -1573,8 +1588,8 @@ impl Processor {
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 23;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
-
+        let (fixed_ais, open_orders_ais,) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let option_health_cache_ai = accounts.get(NUM_FIXED + MAX_PAIRS);
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
@@ -1672,8 +1687,13 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, mango_account_ai.key)?),
+            None => None
+        };
+
         let mut health_cache = HealthCache::new(active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais, option_health_cache)?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
         // update the being_liquidated flag
@@ -1882,6 +1902,12 @@ impl Processor {
         // only send in open orders pubkeys we need +38 bytes (done)
         // shrink size of order instruction +10 bytes
 
+        let pos = OptionHealthCache::get_account_pos(program_id, mango_account_ai.key, packed_open_orders_ais);
+        let option_health_cache_ai = match pos {
+            Some(x) => Some(&packed_open_orders_ais[x]),
+            None => None,
+        };
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
@@ -1957,10 +1983,16 @@ impl Processor {
         mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
         let mut health_cache = HealthCache::new(active_assets);
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, mango_account_ai.key)?),
+            None => None
+        };
+
         health_cache.init_vals_with_orders_vec(
             &mango_group,
             &mango_cache,
             &mango_account,
+            option_health_cache,
             &open_orders_accounts,
         )?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -2389,6 +2421,12 @@ impl Processor {
             event_queue_ai,     // write
         ] = fixed_ais;
 
+        let pos = OptionHealthCache::get_account_pos(program_id, mango_account_ai.key, opt_ais);
+        let option_health_cache_ai = match pos {
+            Some(x) => Some(&opt_ais[x]),
+            None => None,
+        };
+
         let referrer_mango_account_ai = opt_ais.first();
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -2422,7 +2460,12 @@ impl Processor {
         mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
         let mut health_cache = HealthCache::new(active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, mango_account_ai.key)?),
+            None => None
+        };
+
+        health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais, option_health_cache)?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
 
         // update the being_liquidated flag
@@ -2972,6 +3015,7 @@ impl Processor {
         const NUM_FIXED: usize = 19;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let option_health_cache_ai = accounts.get(NUM_FIXED + MAX_PAIRS); // if there is optional option related health cache data
 
         let [
             mango_group_ai,         // read
@@ -3047,7 +3091,12 @@ impl Processor {
         mango_cache.check_valid(&mango_group, &liqee_active_assets, now_ts)?;
 
         let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqee_mango_account_ai.key)?),
+            None => None
+        };
+
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais, option_health_cache)?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
@@ -3164,6 +3213,7 @@ impl Processor {
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let option_health_cache_ai = accounts.get(NUM_FIXED + MAX_PAIRS); // if there is optional option related health cache data
 
         let [
             mango_group_ai,         // read
@@ -3192,9 +3242,13 @@ impl Processor {
         let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
 
         mango_cache.check_valid(&mango_group, &liqee_active_assets, now_ts)?;
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqee_mango_account_ai.key)?),
+            None => None
+        };
 
         let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais, option_health_cache)?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
@@ -3235,7 +3289,8 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
             array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
-
+        let liquee_option_health_cache_ai = accounts.get(NUM_FIXED + 2 * MAX_PAIRS); // if there is optional option related health cache data
+        let liquor_option_health_cache_ai =  accounts.get(NUM_FIXED + 2 * MAX_PAIRS + 1);
         let [
             mango_group_ai,         // read
             mango_cache_ai,         // read
@@ -3301,7 +3356,17 @@ impl Processor {
         }
 
         let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let liquee_option_health_cache = match liquee_option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqee_mango_account_ai.key)?),
+            None => None
+        };
+
+        let liquor_option_health_cache = match liquor_option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqor_mango_account_ai.key)?),
+            None => None
+        };
+
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais, liquee_option_health_cache)?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
@@ -3406,6 +3471,7 @@ impl Processor {
             &mango_cache,
             &liqor_ma,
             liqor_open_orders_ais,
+            liquor_option_health_cache,
         )?;
         let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -3466,6 +3532,9 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
             array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+    
+        let liquee_option_health_cache_ai = accounts.get(NUM_FIXED + 2 * MAX_PAIRS); // if there is optional option related health cache data
+        let liquor_option_health_cache_ai =  accounts.get(NUM_FIXED + 2 * MAX_PAIRS + 1);
 
         let [
             mango_group_ai,         // read
@@ -3517,9 +3586,13 @@ impl Processor {
                 check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
         }
+        let liquee_option_health_cache = match liquee_option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqee_mango_account_ai.key)?),
+            None => None
+        };
 
         let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais, liquee_option_health_cache)?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
@@ -3688,6 +3761,10 @@ impl Processor {
 
             health_cache.update_perp_val(&mango_group, &mango_cache, &liqee_ma, asset_index)?;
         }
+        let liquor_option_health_cache = match liquor_option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqor_mango_account_ai.key)?),
+            None => None
+        };
 
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
         liqor_health_cache.init_vals(
@@ -3695,6 +3772,7 @@ impl Processor {
             &mango_cache,
             &liqor_ma,
             liqor_open_orders_ais,
+            liquor_option_health_cache,
         )?;
         let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -3783,6 +3861,8 @@ impl Processor {
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
             array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
 
+        let liquee_option_health_cache_ai = accounts.get(NUM_FIXED + 2 * MAX_PAIRS); // if there is optional option related health cache data
+        let liquor_option_health_cache_ai = accounts.get(NUM_FIXED + 2 * MAX_PAIRS + 1);
         let [
             mango_group_ai,         // read
             mango_cache_ai,         // read
@@ -3843,7 +3923,12 @@ impl Processor {
         }
 
         let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let liquee_option_health_cache = match liquee_option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqee_mango_account_ai.key)?),
+            None => None
+        };
+
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais, liquee_option_health_cache)?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
@@ -3920,11 +4005,17 @@ impl Processor {
 
         // Calculate the health of liqor and see if liqor is still valid
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+        let liquor_option_health_cache = match liquor_option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqor_mango_account_ai.key)?),
+            None => None
+        };
+
         liqor_health_cache.init_vals(
             &mango_group,
             &mango_cache,
             &liqor_ma,
             liqor_open_orders_ais,
+            liquor_option_health_cache,
         )?;
         let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -3992,6 +4083,7 @@ impl Processor {
         const NUM_FIXED: usize = 12;
         let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
         let (fixed_ais, liqor_open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let liquor_option_health_cache_ai = accounts.get(NUM_FIXED + MAX_PAIRS); // if there is optional option related health cache data
 
         let [
             mango_group_ai,         // read
@@ -4087,11 +4179,17 @@ impl Processor {
 
             // Make sure liqor is above init cond.
             let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+            let liqor_option_health_cache = match liquor_option_health_cache_ai {
+                Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqor_mango_account_ai.key)?),
+                None => None
+            };
+
             liqor_health_cache.init_vals(
                 &mango_group,
                 &mango_cache,
                 &liqor_ma,
                 liqor_open_orders_ais,
+                liqor_option_health_cache,
             )?;
 
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
@@ -4169,6 +4267,8 @@ impl Processor {
             liqor_open_orders_ais, // read
             liab_node_bank_ais,    // write
         ) = array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_NODE_BANKS];
+
+        let liquor_option_health_cache_ai = accounts.get(NUM_FIXED + MAX_PAIRS + MAX_NODE_BANKS); // if there is optional option related health cache data
 
         let [
             mango_group_ai,         // read
@@ -4325,11 +4425,17 @@ impl Processor {
 
             // Make sure liqor is above init health
             let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+            let liqor_option_health_cache = match liquor_option_health_cache_ai {
+                Some(x) => Some(OptionHealthCache::load_checked(x, program_id, liqor_mango_account_ai.key)?),
+                None => None
+            };
+
             liqor_health_cache.init_vals(
                 &mango_group,
                 &mango_cache,
                 &liqor_ma,
                 liqor_open_orders_ais,
+                liqor_option_health_cache,
             )?;
             let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
             check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -4956,7 +5062,7 @@ impl Processor {
         check!(trigger_price.is_positive(), MangoErrorCode::InvalidParam)?; // Is this necessary?
 
         const NUM_FIXED: usize = 7;
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let (fixed_ais, opt_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // read
@@ -4981,7 +5087,7 @@ impl Processor {
             MangoErrorCode::InvalidOwner
         )?;
         let open_orders_ais =
-            mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+            mango_account.checked_unpack_open_orders(&mango_group, opt_ais)?;
         let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let market_index = mango_group
@@ -5000,11 +5106,22 @@ impl Processor {
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
         mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
 
+        let pos = OptionHealthCache::get_account_pos(program_id, mango_account_ai.key, opt_ais);
+        let option_health_cache_ai = match pos {
+            Some(x) => Some(&opt_ais[x]),
+            None => None,
+        };
+
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(&x, program_id, mango_account_ai.key)?),
+            None => None
+        };
         let mut health_cache = HealthCache::new(active_assets);
         health_cache.init_vals_with_orders_vec(
             &mango_group,
             &mango_cache,
             &mango_account,
+            option_health_cache,
             &open_orders_accounts,
         )?;
         let init_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -5110,7 +5227,7 @@ impl Processor {
         let order_index = order_index as usize;
         check!(order_index < MAX_ADVANCED_ORDERS, MangoErrorCode::InvalidParam)?;
         const NUM_FIXED: usize = 9;
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let (fixed_ais, opt_ais) = array_refs![accounts, NUM_FIXED; ..;];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
@@ -5128,7 +5245,7 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         let open_orders_ais =
-            mango_account.checked_unpack_open_orders(&mango_group, open_orders_ais)?;
+            mango_account.checked_unpack_open_orders(&mango_group, opt_ais)?;
         let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let mut advanced_orders =
@@ -5179,10 +5296,23 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let mut health_cache = HealthCache::new(active_assets);
+        
+        let pos = OptionHealthCache::get_account_pos(program_id, mango_account_ai.key, opt_ais);
+        let option_health_cache_ai = match pos {
+            Some(x) => Some(&opt_ais[x]),
+            None => None,
+        };
+
+        let option_health_cache = match option_health_cache_ai {
+            Some(x) => Some(OptionHealthCache::load_checked(&x, program_id, mango_account_ai.key)?),
+            None => None
+        };
+
         health_cache.init_vals_with_orders_vec(
             &mango_group,
             &mango_cache,
             &mango_account,
+            option_health_cache,
             &open_orders_accounts,
         )?;
         let pre_health = health_cache.get_health(&mango_group, HealthType::Init);
@@ -5965,6 +6095,7 @@ impl Processor {
 
         user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_add(amount).unwrap();
         user_trade_data.number_of_writers_tokens = user_trade_data.number_of_writers_tokens.checked_add(amount).unwrap();
+        option_market.number_of_tokens_minted += amount;
         Ok(())
     }
 
