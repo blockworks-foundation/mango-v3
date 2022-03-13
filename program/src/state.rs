@@ -599,6 +599,9 @@ pub struct PriceCache {
 
 impl PriceCache {
     pub fn check_valid(&self, mango_group: &MangoGroup, now_ts: u64) -> MangoResult<()> {
+        // Hack: explicitly double valid_interval as a quick fix to make Mango
+        // less likely to become unusable when solana reliability goes bad.
+        // There's currently no instruction to change the valid_interval.
         check!(
             self.last_update >= now_ts - (2 * mango_group.valid_interval),
             MangoErrorCode::InvalidPriceCache
