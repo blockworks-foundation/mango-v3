@@ -1,4 +1,4 @@
-anchor_version = "0.20.1"
+anchor_version = "0.22.1"
 
 [workspace]
 members = [
