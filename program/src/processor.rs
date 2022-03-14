@@ -50,7 +50,7 @@ use crate::state::{
     HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, ReferrerIdRecord,
     ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
-    UserActiveAssets, OptionType, OptionMarket, ExchangeFor, UserOptionTradeData, OptionHealthCache,
+    UserActiveAssets, OptionType, OptionMarket, UserOptionTradeData, OptionHealthCache,
     ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
     QUOTE_INDEX, ZERO_I80F48,
@@ -6177,16 +6177,14 @@ impl Processor {
     #[inline(never)]
     fn exchange_writers_token(program_id: &Pubkey,
         accounts: &[AccountInfo],
-        amount : u64, 
-        exchange_for : ExchangeFor, ) -> MangoResult {
+        amount : u64, ) -> MangoResult {
 
-        const NUM_FIXED: usize = 10;
+        const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
             mango_group_ai, // read
             mango_account_ai, // mut
-            owner_ai, // read, signer
             option_market_ai, // mut
             mango_cache_ai, // read
             underlying_root_bank_ai, // read
@@ -6211,41 +6209,57 @@ impl Processor {
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
-
-        let total_underlying_amount = option_market.get_number_of_underlying_tokens(amount);
-        let total_quote_amount = option_market.get_number_of_quote_tokens(amount);
-
-        // switch according to exchange for param
-        let (token_index, token_amount, mut node_bank) = if exchange_for == ExchangeFor::ForUnderlyingTokens {
+        // calculate what is distribution of tokens in the pool. The underlying and quote tokens will be distibuted equally between all the users
+        let distibution = if option_market.tokens_in_underlying_pool == 0 {
+            ZERO_I80F48
+        } else if option_market.tokens_in_quote_pool == 0 {
+            ONE_I80F48
+        } else 
+        {
+            let disb_underlying = I80F48::from(option_market.tokens_in_underlying_pool) / I80F48::from(option_market.contract_size);
+            let disb_quote = I80F48::from(option_market.tokens_in_quote_pool) / I80F48::from(option_market.strike_price);
+            disb_underlying / (disb_underlying + disb_quote)
+        };
+        let amount_flt = I80F48::from(amount);
+        let total_underlying_amount = option_market.get_number_of_underlying_tokens((amount_flt * distibution).to_num());
+        let total_quote_amount = option_market.get_number_of_quote_tokens((amount_flt * (ONE_I80F48-distibution)).to_num());
+        
+        
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        // exchange for part of underlying tokens
+        if total_underlying_amount > 0 {
             check!(option_market.tokens_in_underlying_pool >= total_underlying_amount, MangoErrorCode::NotEnoughUnderlyingTokens)?;
             let root_bank = RootBank::load_checked(underlying_root_bank_ai, program_id)?;
             check!(root_bank.node_banks.contains(underlying_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
             // update option market
             option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_sub(total_underlying_amount).unwrap();
+            let root_bank_cache = &mango_cache.root_bank_cache[option_market.underlying_token_index];
+            let mut node_bank = NodeBank::load_mut_checked(underlying_node_bank_ai, program_id)?;
 
-            (option_market.underlying_token_index, total_underlying_amount, NodeBank::load_mut_checked(underlying_node_bank_ai, program_id)?)
-        } else {
+            checked_add_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                option_market.underlying_token_index,
+                I80F48::from(total_underlying_amount))?;
+        }
+        
+        // exchange for part of quote tokens
+        if total_quote_amount > 0 {
             check!(option_market.tokens_in_quote_pool >= total_quote_amount, MangoErrorCode::NotEnoughQuoteTokens)?;
             let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
             check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
             // update option market
             option_market.tokens_in_quote_pool = option_market.tokens_in_quote_pool.checked_sub(total_quote_amount).unwrap();
+            let root_bank_cache = &mango_cache.root_bank_cache[option_market.quote_token_index];
+            let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
 
-            (option_market.quote_token_index, total_quote_amount, NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?)
+            checked_add_net(root_bank_cache, 
+                &mut node_bank, 
+                &mut mango_account, 
+                option_market.quote_token_index,
+                I80F48::from(total_quote_amount))?;
         };
-        
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let root_bank_cache = &mango_cache.root_bank_cache[token_index];
 
-        checked_add_net(root_bank_cache, 
-            &mut node_bank, 
-            &mut mango_account, 
-            token_index,
-            I80F48::from(token_amount))?;
-        
         // update user trade data
         user_trade_data.number_of_writers_tokens = user_trade_data.number_of_writers_tokens.checked_sub(amount).unwrap();
         
@@ -7252,10 +7266,9 @@ impl Processor {
             },
             MangoInstruction::ExchangeWritersTokens {
                 amount,
-                exchange_for,
             } => {
                 msg!("Mango: Exchange writer's tokens");
-                Self::exchange_writers_token(program_id, accounts, amount, exchange_for)
+                Self::exchange_writers_token(program_id, accounts, amount)
             },
             MangoInstruction::PlaceOptionsOrder {
                 amount,

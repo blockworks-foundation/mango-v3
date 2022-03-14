@@ -1,7 +1,7 @@
 use crate::matching::{OrderType, Side};
 use crate::state::{AssetType, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
-use crate::state::{OptionType, ExchangeFor};
+use crate::state::{OptionType};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
 use num_enum::TryFromPrimitive;
@@ -1030,24 +1030,22 @@ pub enum MangoInstruction {
         amount : u64,
     },
 
-    /// Exchange writers tokens / by this instruction user can exhange writers tokens recieved when he wrote option
-    ///  for either underlying tokens or quote tokens after the option has expired.
+    /// Exchange writers tokens / this instruction should be executed for each writer
+    /// The underlying and quote tokens will be distributed for each writer
     /// If enough tokens are not available after then he/she will be forced to take remaining tokens
     /// Swapping tokens will burn the writers tokens
     /// 
     /// 0. mango_group_ai - Mango Group
     /// 1. [writable] mango_account_ai - Mango Account
-    /// 2. [signer] owner_ai - Owner
-    /// 3. [writable] option_market_ai - Option Market
-    /// 4. mango_cache_ai - Mango cache
-    /// 5. underlying_root_bank_ai - Root bank for underlying token
-    /// 6. quote_root_bank_ai - Root bank for quote token
-    /// 7. [writable] underlying_node_bank_ai - Node bank for underlying token
-    /// 8. [writable] quote_node_bank_ai - Node bank for quote token
-    /// 9. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
+    /// 2. [writable] option_market_ai - Option Market
+    /// 3. mango_cache_ai - Mango cache
+    /// 4. underlying_root_bank_ai - Root bank for underlying token
+    /// 5. quote_root_bank_ai - Root bank for quote token
+    /// 6. [writable] underlying_node_bank_ai - Node bank for underlying token
+    /// 7. [writable] quote_node_bank_ai - Node bank for quote token
+    /// 8. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
     ExchangeWritersTokens {
         amount : u64,
-        exchange_for : ExchangeFor,
     },
 
     /// Create Options orders on mango dex / by this instruction we create order to buy or sell options token in mango native orderbook
@@ -1606,12 +1604,9 @@ impl MangoInstruction {
                 }
             },
             67 => {
-                let data_arr = array_ref![data, 0 , 9];
-                let ( amount,
-                    exchange_for, ) = array_refs![data_arr, 8, 1];
+                let amount = array_ref![data, 0 , 8];
                 MangoInstruction::ExchangeWritersTokens {
                     amount:  u64::from_le_bytes(*amount),
-                    exchange_for : ExchangeFor::try_from_primitive(exchange_for[0]).ok()?,
                 }
             },
             68 => {
@@ -2970,7 +2965,6 @@ pub fn exchange_writers_tokens (
     program_id: &Pubkey,
     mango_group: &Pubkey, // read
     mango_account: &Pubkey, // write
-    owner: &Pubkey, // read, signer
     option_market: &Pubkey, // write
     mango_cache: &Pubkey, // read
     underlying_root_bank: &Pubkey, // read
@@ -2979,12 +2973,10 @@ pub fn exchange_writers_tokens (
     quote_node_bank: &Pubkey, //write
     user_trade_data: &Pubkey,
     amount: u64,
-    exchange_for : ExchangeFor,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
         AccountMeta::new(*mango_account, false),
-        AccountMeta::new_readonly(*owner, true),
         AccountMeta::new(*option_market, false),
         AccountMeta::new_readonly(*mango_cache, false),
         AccountMeta::new_readonly(*underlying_root_bank, false),
@@ -2996,7 +2988,6 @@ pub fn exchange_writers_tokens (
 
     let instr = MangoInstruction::ExchangeWritersTokens {
         amount,
-        exchange_for,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })

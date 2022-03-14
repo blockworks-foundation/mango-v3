@@ -1973,14 +1973,12 @@ impl MangoProgramTest {
         option_market : &OptionMarket,
         user_index : usize,
         amount : u64,
-        exchange_for : ExchangeFor,
     ){
         let mango_group = mango_group_cookie.mango_group;
         let (rb_key, rb) = self.with_root_bank(&mango_group, option_market.underlying_token_index).await;
         let (nb_key, nb) = self.with_node_bank(&rb,0).await;
         let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, option_market.quote_token_index).await;
         let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
-        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
         let mango_program_id = self.mango_program_id;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
@@ -1991,7 +1989,6 @@ impl MangoProgramTest {
                 &mango_program_id,
                 &mango_group_cookie.address,
                 &mango_group_cookie.mango_accounts[user_index].address,
-                &user.pubkey(),
                 &option_market_pda,
                 &mango_group.mango_cache,
                 &rb_key,
@@ -2000,10 +1997,9 @@ impl MangoProgramTest {
                 &q_nb_key,
                 &user_trade_data_pk,
                 amount,
-                exchange_for,
         ).unwrap()];
 
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, None).await.unwrap();
     }
 
     #[allow(dead_code)]
