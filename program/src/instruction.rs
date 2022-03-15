@@ -1006,7 +1006,9 @@ pub enum MangoInstruction {
     /// 5. root_bank_ai - Root bank
     /// 6. [writable] node_bank_ai - Node bank
     /// 7. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
-    /// 8. system_program
+    /// 8. [writable] user option health cache [b"mango_option_user_health_cache", mango_accout.key]
+    /// 9. system_program
+    /// 10. open_orders of mango user
     WriteOption {
         amount : u64,
     },
@@ -2905,10 +2907,12 @@ pub fn write_option (
     root_bank: &Pubkey, // read
     node_bank: &Pubkey, // write
     user_trade_data: &Pubkey,
+    option_health_cache : &Pubkey,
     system_program: &Pubkey, // read
+    open_orders_pks: &[Pubkey],
     amount: u64,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
         AccountMeta::new(*mango_account, false),
         AccountMeta::new(*owner, true),
@@ -2917,8 +2921,11 @@ pub fn write_option (
         AccountMeta::new_readonly(*root_bank, false),
         AccountMeta::new(*node_bank, false),
         AccountMeta::new(*user_trade_data, false),
+        AccountMeta::new(*option_health_cache, false),
         AccountMeta::new_readonly(*system_program, false),
     ];
+    
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::WriteOption {
         amount,

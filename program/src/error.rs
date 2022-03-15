@@ -145,6 +145,8 @@ pub enum MangoErrorCode {
     TransactionResultInLoss,
     #[error("MangoErrorCode::MaximumOptionTradeLimitReached Cannot trade any new types of option")] // 50
     MaximumOptionTradeLimitReached,
+    #[error("MangoAccountOptionHealth mango account also has option health related data that should be passed")]
+    OptionHealthDataMissing,
     #[error("MangoErrorCode::Default Check the source code for more info")]
     Default = u32::MAX_VALUE,
 }

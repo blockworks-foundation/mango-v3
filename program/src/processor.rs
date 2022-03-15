@@ -308,6 +308,7 @@ impl Processor {
             &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
@@ -1293,6 +1294,7 @@ impl Processor {
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -1636,6 +1638,8 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
@@ -1921,6 +1925,7 @@ impl Processor {
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
@@ -2439,6 +2444,8 @@ impl Processor {
             &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
+
         mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let clock = Clock::get()?;
@@ -3051,6 +3058,8 @@ impl Processor {
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        
+        check!(!liqee_ma.has_invested_in_options || (liqee_ma.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
         liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
 
         let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
@@ -3231,6 +3240,8 @@ impl Processor {
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
+        
+        check!(!liqee_ma.has_invested_in_options || (liqee_ma.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
@@ -3319,6 +3330,9 @@ impl Processor {
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
+
+        check!(!liqee_ma.has_invested_in_options || (liqee_ma.has_invested_in_options && !liquee_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
+        check!(!liqor_ma.has_invested_in_options || (liqor_ma.has_invested_in_options && !liquor_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let asset_root_bank = RootBank::load_checked(asset_root_bank_ai, program_id)?;
         let asset_index = mango_group.find_root_bank_index(asset_root_bank_ai.key).unwrap();
@@ -3561,6 +3575,9 @@ impl Processor {
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
+        
+        check!(!liqee_ma.has_invested_in_options || (liqee_ma.has_invested_in_options && !liquee_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
+        check!(!liqor_ma.has_invested_in_options || (liqor_ma.has_invested_in_options && !liquor_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
@@ -3890,6 +3907,9 @@ impl Processor {
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
+        
+        check!(!liqee_ma.has_invested_in_options || (liqee_ma.has_invested_in_options && !liquee_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
+        check!(!liqor_ma.has_invested_in_options || (liqor_ma.has_invested_in_options && !liquor_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
@@ -4118,6 +4138,8 @@ impl Processor {
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(!liqor_ma.has_invested_in_options || (liqor_ma.has_invested_in_options && !liquor_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
+
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
 
         let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
@@ -4307,6 +4329,8 @@ impl Processor {
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        check!(!liqor_ma.has_invested_in_options || (liqor_ma.has_invested_in_options && !liquor_option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
+
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
 
         // Load the bank for liab token
@@ -5111,6 +5135,7 @@ impl Processor {
             Some(x) => Some(&opt_ais[x]),
             None => None,
         };
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let option_health_cache = match option_health_cache_ai {
             Some(x) => Some(OptionHealthCache::load_checked(&x, program_id, mango_account_ai.key)?),
@@ -5302,6 +5327,7 @@ impl Processor {
             Some(x) => Some(&opt_ais[x]),
             None => None,
         };
+        check!(!mango_account.has_invested_in_options || (mango_account.has_invested_in_options && !option_health_cache_ai.is_none()), MangoErrorCode::OptionHealthDataMissing )?;
 
         let option_health_cache = match option_health_cache_ai {
             Some(x) => Some(OptionHealthCache::load_checked(&x, program_id, mango_account_ai.key)?),
@@ -5962,6 +5988,7 @@ impl Processor {
         let quote_token_index_usize = quote_token_index as usize;
         check!(underlying_token_index_usize < MAX_TOKENS, MangoErrorCode::InvalidToken)?;
         check!(quote_token_index_usize < MAX_TOKENS,  MangoErrorCode::InvalidToken)?;
+        check!(underlying_token_index as usize == QUOTE_INDEX || quote_token_index as usize == QUOTE_INDEX, MangoErrorCode::InvalidParam)?;// Atleast one should be quote_token i.e USDC
 
         const NUM_FIXED: usize = 6;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -6028,9 +6055,10 @@ impl Processor {
     fn write_option(program_id: &Pubkey,
         accounts: &[AccountInfo],
         amount : u64, ) -> MangoResult {
-        const NUM_FIXED: usize = 9;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-
+        const NUM_FIXED: usize = 10;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais,) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        
         let [
             mango_group_ai, // read
             mango_account_ai, // mut
@@ -6040,8 +6068,9 @@ impl Processor {
             root_bank_ai, // read
             node_bank_ai, // write
             user_data_ai, // write
+            user_option_health_cache_ai, // write
             system_program, // read
-        ] = accounts;
+        ] = fixed_ais;
 
         let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
         let clock = Clock::get()?;
@@ -6054,6 +6083,7 @@ impl Processor {
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        mango_account.check_open_orders(&mango_group, open_orders_ais)?;
 
         let total_underlying_amount = option_market.get_number_of_underlying_tokens(amount);
         
@@ -6071,9 +6101,9 @@ impl Processor {
             I80F48::from(total_underlying_amount))?;
         option_market.tokens_in_underlying_pool = option_market.tokens_in_underlying_pool.checked_add(total_underlying_amount).unwrap();
         
+        let rent_info = Rent::get()?;
         // update user trade data
         if user_data_ai.data_len() == 0 {
-            let rent_info = Rent::get()?;
             seed_and_create_pda(
                 program_id,
                 owner_ai,
@@ -6096,6 +6126,46 @@ impl Processor {
         user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_add(amount).unwrap();
         user_trade_data.number_of_writers_tokens = user_trade_data.number_of_writers_tokens.checked_add(amount).unwrap();
         option_market.number_of_tokens_minted += amount;
+
+        // update users health
+        if user_option_health_cache_ai.data_len() == 0 {
+            seed_and_create_pda(
+                program_id,
+                owner_ai,
+                &rent_info,
+                size_of::<OptionHealthCache>(),
+                program_id,
+                system_program,
+                user_option_health_cache_ai,
+                &[OptionHealthCache::ACCOUNT_SEEDS, mango_account_ai.key.as_ref()], 
+                &[],
+            )?;
+        }
+
+        {
+            let mut user_option_health_cache = OptionHealthCache::load_and_init_if_needed(
+                user_option_health_cache_ai, 
+                program_id, 
+                mango_account_ai.key,
+                &mut mango_account)?;
+
+            user_option_health_cache.update_option_tokens(&option_market, option_market_ai.key, &user_trade_data)?;
+        }
+        {
+            // because no way to convert from RefMut to Ref
+            let token_index = if (option_market.underlying_token_index as usize) != QUOTE_INDEX {option_market.underlying_token_index} else {option_market.quote_token_index};
+            let active_assets = UserActiveAssets::new(
+                &mango_group,
+                &mango_account,
+                vec![(AssetType::Token, token_index)],
+            );
+            mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+            let mut health_cache = HealthCache::new(active_assets);
+            let user_option_health_cache = OptionHealthCache::load_checked(user_option_health_cache_ai, program_id, mango_account_ai.key)?;
+            health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais, Some(user_option_health_cache))?;
+            let health = health_cache.get_health(&mango_group, HealthType::Init);
+            check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        }
         Ok(())
     }
 

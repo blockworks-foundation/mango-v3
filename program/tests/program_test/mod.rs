@@ -1906,7 +1906,9 @@ impl MangoProgramTest {
         let (nb_key, nb) = self.with_node_bank(&rb,0).await;
         let user = Keypair::from_base58_string(&self.users[0].to_base58_string());
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
         let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
+        let (user_option_health_cache, _) = Pubkey::find_program_address( &[b"mango_option_user_health_cache", mango_account_pk.as_ref()], &self.mango_program_id );
         let mango_program_id = self.mango_program_id;
         
         let instructions = vec![
@@ -1920,7 +1922,9 @@ impl MangoProgramTest {
                 &rb_key,
                 &nb_key,
                 &user_trade_data_pk,
+                &user_option_health_cache,
                 &solana_sdk::system_program::id(),
+                &mango_account.spot_open_orders,
                 amount,
         ).unwrap()];
 

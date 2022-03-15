@@ -851,36 +851,59 @@ impl HealthCache {
                 for j in 0..MAX_NUMBER_OF_OPTION_MARKETS {
                     if x.option_assets_used[j] {
                         let option_asset = &x.option_assets[j];
-                        let underlying_tokens_count = I80F48::from(option_asset.underlying_tokens_count);
-                        let quote_tokens_count = I80F48::from(option_asset.quote_tokens_count);
+                        if option_asset.underlying_token_index != i && option_asset.quote_token_index != i {
+                            continue;
+                        }
+                        
+                        let mut underlying_tokens_count = I80F48::from(option_asset.underlying_tokens_count);
+                        let mut quote_tokens_count = I80F48::from(option_asset.quote_tokens_count);
                         let w_underlying_tokens_count = I80F48::from(option_asset.w_underlying_tokens_count);
                         let w_quote_tokens_count = I80F48::from(option_asset.w_quote_tokens_count);
                         if option_asset.expiry > (now as u64) {
-                            // option has been expired / TODO error exchange writer tokens first
+                            // option has been expired / Option token worthless / TODO error exchange writer tokens first
                         }
                         else {
-                            // for call options underlying index is spot.
-                            if option_asset.underlying_token_index == i && option_asset.quote_token_index == QUOTE_INDEX{
-                                if price.mul(underlying_tokens_count) > quote_tokens_count {
-                                    self.quote = self.quote - quote_tokens_count;
-                                    self.spot[i].0 = self.spot[i].0 + underlying_tokens_count;
-                                } 
-                                // if user has writers tokens then we assume that the option is exerciesed then the worst case user is left with quote tokens / TODO quote -= weight * price of the option (where weight > 1)
-                                if price.mul(w_underlying_tokens_count) > w_quote_tokens_count {
-                                    self.spot[i].0 = self.spot[i].0 - w_underlying_tokens_count;
-                                    self.quote = self.quote + w_quote_tokens_count;
+                            // we have to remove writers tokens from the margin calculation.
+                            if w_underlying_tokens_count >= underlying_tokens_count {
+                                // we can liquidate the writer by burning both underlying and option tokens
+                                // So we can directly add the underlying assets into writers margin
+                                if option_asset.quote_token_index == QUOTE_INDEX {
+                                    self.spot[i].0 += underlying_tokens_count;
                                 }
+                                else if option_asset.underlying_token_index == QUOTE_INDEX {
+                                    self.quote += underlying_tokens_count;
+                                }
+                                continue;
+                            }
+                            else if w_underlying_tokens_count > 0 { // number of writers tokens < numbe of options tokens
+                                // remove min (writer, options) tokens as they can be converted directly to underlying tokens
+                                let min_u_tokens = min(underlying_tokens_count, w_underlying_tokens_count);
+                                let min_q_tokens = min(quote_tokens_count, w_quote_tokens_count);
+                                // similarly as abouve
+                                if option_asset.quote_token_index == QUOTE_INDEX {
+                                    self.spot[i].0 += min_u_tokens;
+                                }
+                                else if option_asset.underlying_token_index == QUOTE_INDEX {
+                                    self.quote += min_u_tokens;
+                                }
+                                underlying_tokens_count -= min_u_tokens;
+                                quote_tokens_count -= min_q_tokens;
+                            }
+
+                            // for call options underlying index is spot.
+                            if option_asset.quote_token_index == QUOTE_INDEX {
+                                // If option can be exercised update the margins
+                                if price.mul(underlying_tokens_count) > quote_tokens_count {
+                                    self.quote -= quote_tokens_count;
+                                    self.spot[i].0 += underlying_tokens_count;
+                                } 
                             }
                             // for put options quote index is spot, and underlying is quote(usdc)
-                            else if option_asset.quote_token_index == i && option_asset.underlying_token_index == QUOTE_INDEX{
+                            else if option_asset.underlying_token_index == QUOTE_INDEX {
+
                                 if price.mul(quote_tokens_count) < underlying_tokens_count  {
-                                    self.spot[i].0 = self.spot[i].0 - quote_tokens_count;
-                                    self.quote = self.quote + underlying_tokens_count;
-                                }
-                                // similar to abouve / TODO quote -= weight * price of the option (where weight > 1)
-                                if price.mul(w_quote_tokens_count) < w_underlying_tokens_count {
-                                    self.spot[i].0 = self.spot[i].0 + w_quote_tokens_count;
-                                    self.quote = self.quote - w_underlying_tokens_count;
+                                    self.spot[i].0 -= quote_tokens_count;
+                                    self.quote += underlying_tokens_count;
                                 }
                             }
                         }
@@ -1284,6 +1307,7 @@ pub struct MangoAccount {
 
     /// Can this account be upgraded to v1 so it can be closed
     pub not_upgradable: bool,
+    pub has_invested_in_options: bool,
 
     // Alternative authority/signer of transactions for a mango account
     pub delegate: Pubkey,
@@ -3018,12 +3042,13 @@ pub struct OptionHealthCache {
 }
 
 impl OptionHealthCache {
-    const ACCOUNT_SEEDS : &'static [u8] = b"mango_option_user_health_cache";
+    pub const ACCOUNT_SEEDS : &'static [u8] = b"mango_option_user_health_cache";
 
     pub fn load_and_init_if_needed<'a>( 
         account: &'a AccountInfo,
         program_id: &Pubkey,
-        mango_account_pk: &Pubkey, 
+        mango_account_pk: &Pubkey,
+        mango_account: &mut MangoAccount, 
     ) -> MangoResult<RefMut<'a, Self>> {
         let (cache_pda, _user_bump) = Pubkey::find_program_address( 
             &[ Self::ACCOUNT_SEEDS, mango_account_pk.as_ref()], 
@@ -3034,10 +3059,12 @@ impl OptionHealthCache {
         let mut health_cache: RefMut<'a, Self> = Self::load_mut(account)?;
         if health_cache.meta_data.is_initialized {
             check!(health_cache.meta_data.data_type == DataType::OptionHealthCache as u8, MangoErrorCode::InvalidAccountState)?;
+            check!(mango_account.has_invested_in_options == true,  MangoErrorCode::InvalidAccountState)?;
         } else {
             health_cache.meta_data = MetaData::new(DataType::OptionHealthCache, 0, true);
             health_cache.option_assets_used = [false; MAX_NUMBER_OF_OPTION_MARKETS];
             health_cache.mango_account = *mango_account_pk;
+            mango_account.has_invested_in_options = true;
         }
         Ok(health_cache)
     }
