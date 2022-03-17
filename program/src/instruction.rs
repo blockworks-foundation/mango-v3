@@ -1028,6 +1028,7 @@ pub enum MangoInstruction {
     /// 7. [writable] underlying_node_bank_ai - Node bank for underlying token
     /// 8. [writable] quote_node_bank_ai - Node bank for quote token
     /// 9. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
+    /// 10. [writable] user option health cache [b"mango_option_user_health_cache", mango_accout.key]
     ExerciseOption {
         amount : u64,
     },
@@ -1046,6 +1047,7 @@ pub enum MangoInstruction {
     /// 6. [writable] underlying_node_bank_ai - Node bank for underlying token
     /// 7. [writable] quote_node_bank_ai - Node bank for quote token
     /// 8. [writable] user_trade_data a PDA created with following seed which [b"mango_option_user_data", option_market.key, mango_accout.key]
+    /// 9. [writable] user option health cache [b"mango_option_user_health_cache", mango_accout.key]
     ExchangeWritersTokens {
         amount : u64,
     },
@@ -1057,14 +1059,15 @@ pub enum MangoInstruction {
     /// 1. [writable] mango_account_ai
     /// 2. [writable,signer] owner_ai
     /// 3. [writable] user_data_ai
-    /// 4. [writable] option_market_ai
-    /// 5. mango_cache_ai
-    /// 6. [writable] bids_ai
-    /// 7. [writable] asks_ai
-    /// 8. [writable] event_queue_ai
-    /// 9. quote_root_bank_ai
-    /// 10. [writable] quote_node_bank_ai
-    /// 11. system_program
+    /// 4. [writable] user option health cache [b"mango_option_user_health_cache", mango_accout.key]
+    /// 5. [writable] option_market_ai
+    /// 6. mango_cache_ai
+    /// 7. [writable] bids_ai
+    /// 8. [writable] asks_ai
+    /// 9. [writable] event_queue_ai
+    /// 10. quote_root_bank_ai
+    /// 11. [writable] quote_node_bank_ai
+    /// 12. system_program
     PlaceOptionsOrder {
         amount : i64,
         price : i64,
@@ -1092,10 +1095,11 @@ pub enum MangoInstruction {
     /// 3. [signer] owner_ai,
     /// 4. option_market_ai,
     /// 5. [writable] user_trade_data_ai,
-    /// 6. [writable] bids_ai,
-    /// 7. [writable] asks_ai
-    /// 8. mango_quote_root_bank_ai
-    /// 9. [writable] mango_quote_node_bank_ai 
+    /// 6. [writable] user option health cache [b"mango_option_user_health_cache", mango_accout.key]
+    /// 7. [writable] bids_ai,
+    /// 8. [writable] asks_ai
+    /// 9. mango_quote_root_bank_ai
+    /// 10. [writable] mango_quote_node_bank_ai 
     CancelOptionOrderByClientOrderId {
         client_order_id : u64,
     },
@@ -2946,9 +2950,11 @@ pub fn exercise_option (
     underlying_node_bank: &Pubkey, // write
     quote_node_bank: &Pubkey, //write
     user_trade_data: &Pubkey,
+    option_health_cache : &Pubkey,
+    open_orders_pks: &[Pubkey],
     amount: u64,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
         AccountMeta::new(*mango_account, false),
         AccountMeta::new_readonly(*owner, true),
@@ -2959,7 +2965,10 @@ pub fn exercise_option (
         AccountMeta::new(*underlying_node_bank, false),
         AccountMeta::new(*quote_node_bank, false),
         AccountMeta::new(*user_trade_data, false),
+        AccountMeta::new(*option_health_cache, false),
     ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::ExerciseOption {
         amount,
@@ -2978,10 +2987,12 @@ pub fn exchange_writers_tokens (
     quote_root_bank: &Pubkey,   //read
     underlying_node_bank: &Pubkey, // write
     quote_node_bank: &Pubkey, //write
-    user_trade_data: &Pubkey,
+    user_trade_data: &Pubkey, //write
+    option_health_cache : &Pubkey, //write
+    open_orders_pks: &[Pubkey], //read
     amount: u64,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
         AccountMeta::new(*mango_account, false),
         AccountMeta::new(*option_market, false),
@@ -2991,7 +3002,10 @@ pub fn exchange_writers_tokens (
         AccountMeta::new(*underlying_node_bank, false),
         AccountMeta::new(*quote_node_bank, false),
         AccountMeta::new(*user_trade_data, false),
+        AccountMeta::new(*option_health_cache, false),
     ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::ExchangeWritersTokens {
         amount,
@@ -3006,6 +3020,7 @@ pub fn place_options_order (
     mango_account: &Pubkey, // write
     owner: &Pubkey, // read, signer
     user_trade_data: &Pubkey, // write
+    option_health_cache : &Pubkey, //write
     option_market: &Pubkey, // read
     mango_cache: &Pubkey, // read
     bids: &Pubkey, // write
@@ -3014,16 +3029,18 @@ pub fn place_options_order (
     quote_root_bank: &Pubkey,   //read
     quote_node_bank: &Pubkey, //write
     system_program: &Pubkey, //read
+    open_orders_pks: &[Pubkey], //read
     amount : i64,
     price : i64,
     side : Side, 
     client_order_id: u64,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group, false),
         AccountMeta::new(*mango_account, false),
         AccountMeta::new(*owner, true),
         AccountMeta::new(*user_trade_data, false),
+        AccountMeta::new(*option_health_cache, false),
         AccountMeta::new(*option_market, false),
         AccountMeta::new_readonly(*mango_cache, false),
         AccountMeta::new(*bids, false),
@@ -3033,6 +3050,8 @@ pub fn place_options_order (
         AccountMeta::new(*quote_node_bank, false),
         AccountMeta::new_readonly(*system_program, false),
     ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::PlaceOptionsOrder {
         amount,
@@ -3054,6 +3073,7 @@ pub fn consume_events_for_options (
     usdc_node_bank: &Pubkey, // write
     mango_accounts: &[Pubkey],
     user_trade_datas: &[Pubkey],
+    user_option_health_caches: &[Pubkey],
     limit: u8,
 ) -> Result<Instruction, ProgramError> {
     let fixed_accounts = vec![
@@ -3066,7 +3086,8 @@ pub fn consume_events_for_options (
     ];
     let mango_accounts_metas = mango_accounts.into_iter().map(|pk| AccountMeta::new(*pk, false));
     let user_trade_datas_metas = user_trade_datas.into_iter().map(|pk| AccountMeta::new(*pk, false));
-    let accounts = fixed_accounts.into_iter().chain(user_trade_datas_metas).chain(mango_accounts_metas).collect();
+    let option_health_cache_metas = user_option_health_caches.into_iter().map(|pk| AccountMeta::new(*pk, false));
+    let accounts = fixed_accounts.into_iter().chain(user_trade_datas_metas).chain(mango_accounts_metas).chain(option_health_cache_metas).collect();
 
     let instr = MangoInstruction::ConsumeEventsForOptions {
         limit
@@ -3083,6 +3104,7 @@ pub fn cancel_option_order_by_client_order_id (
     owner_ai: &Pubkey, // read
     options_market: &Pubkey, // read
     user_trade_data: &Pubkey, // write
+    option_health_cache : &Pubkey, //write
     bids_ai: &Pubkey, // write
     asks_ai: &Pubkey, // write
     usdc_root_bank: &Pubkey, // read
@@ -3096,6 +3118,7 @@ pub fn cancel_option_order_by_client_order_id (
         AccountMeta::new_readonly(*owner_ai, true),
         AccountMeta::new_readonly(*options_market, false),
         AccountMeta::new(*user_trade_data, false),
+        AccountMeta::new(*option_health_cache, false),
         AccountMeta::new(*bids_ai, false),
         AccountMeta::new(*asks_ai, false),
         AccountMeta::new_readonly(*usdc_root_bank, false),

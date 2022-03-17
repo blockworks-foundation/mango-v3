@@ -1950,6 +1950,8 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let (user_option_health_cache, _) = Pubkey::find_program_address( &[b"mango_option_user_health_cache", mango_account_pk.as_ref()], &self.mango_program_id );
         
         let instructions = vec![
             mango::instruction::exercise_option(
@@ -1964,6 +1966,8 @@ impl MangoProgramTest {
                 &nb_key,
                 &q_nb_key,
                 &user_trade_data_pk,
+                &user_option_health_cache,
+                &mango_account.spot_open_orders,
                 amount,
         ).unwrap()];
 
@@ -1986,7 +1990,8 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
-        
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let (user_option_health_cache, _) = Pubkey::find_program_address( &[b"mango_option_user_health_cache", mango_account_pk.as_ref()], &self.mango_program_id );
         
         let instructions = vec![
             mango::instruction::exchange_writers_tokens(
@@ -2000,6 +2005,8 @@ impl MangoProgramTest {
                 &nb_key,
                 &q_nb_key,
                 &user_trade_data_pk,
+                &user_option_health_cache,
+                &mango_account.spot_open_orders,
                 amount,
         ).unwrap()];
 
@@ -2024,7 +2031,9 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
         let (user_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pda.as_ref(), mango_account_pk.as_ref()], &self.mango_program_id );
-  
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let (user_option_health_cache, _) = Pubkey::find_program_address( &[b"mango_option_user_health_cache", mango_account_pk.as_ref()], &self.mango_program_id );
+        
         let instructions = vec![
             mango::instruction::place_options_order(
                 &mango_program_id,
@@ -2032,6 +2041,7 @@ impl MangoProgramTest {
                 &mango_account_pk,
                 &user.pubkey(),
                 &user_trade_data_pk,
+                &user_option_health_cache,
                 &option_market_pda,
                 &mango_group.mango_cache,
                 &option_market.bids,
@@ -2040,6 +2050,7 @@ impl MangoProgramTest {
                 &q_rb_key,
                 &q_nb_key,
                 &solana_sdk::system_program::id(),
+                &mango_account.spot_open_orders,
                 amount,
                 price,
                 side,
@@ -2055,6 +2066,11 @@ impl MangoProgramTest {
         user_trade_data_pk
     }
 
+    fn get_option_heath_cache_address(&self, mango_account_pk : &Pubkey) -> Pubkey {
+        let (user_option_health_cache, _) = Pubkey::find_program_address( &[b"mango_option_user_health_cache", mango_account_pk.as_ref()], &self.mango_program_id );
+        user_option_health_cache
+    }
+
     #[allow(dead_code)]
     pub async fn consume_events_for_options(&mut self,
         mango_group_cookie: &MangoGroupCookie,
@@ -2068,6 +2084,8 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_accounts  = user_indices.iter().map(|x| mango_group_cookie.mango_accounts[*x].address).collect::<Vec<Pubkey>>();
         let user_trade_datas = user_indices.iter().map(|x| self.get_user_trade_data_address(&option_market_pda, &mango_group_cookie.mango_accounts[*x].address)).collect::<Vec<Pubkey>>();
+        let option_health_caches = user_indices.iter().map(|x| self.get_option_heath_cache_address( &mango_group_cookie.mango_accounts[*x].address)).collect::<Vec<Pubkey>>();
+
         let instructions = vec![
             mango::instruction::consume_events_for_options(
                 &self.mango_program_id,
@@ -2079,6 +2097,7 @@ impl MangoProgramTest {
                 &q_nb_key,
                 &mango_accounts[..],
                 &user_trade_datas[..],
+                &option_health_caches[..],
                 3,
         ).unwrap()];
         self.process_transaction(&instructions, None).await.unwrap();
@@ -2098,6 +2117,7 @@ impl MangoProgramTest {
         let mango_group = mango_group_cookie.mango_group;
         let (q_rb_key, q_rb) = self.with_root_bank(&mango_group, QUOTE_INDEX).await;
         let (q_nb_key, q_nb) = self.with_node_bank(&q_rb,0).await;
+        let (user_option_health_cache, _) = Pubkey::find_program_address( &[b"mango_option_user_health_cache", mango_account_pk.as_ref()], &self.mango_program_id );
 
         let instructions = vec![
             mango::instruction::cancel_option_order_by_client_order_id(
@@ -2108,6 +2128,7 @@ impl MangoProgramTest {
                 &user.pubkey(),
                 &option_market_pda,
                 &self.get_user_trade_data_address(&option_market_pda, &mango_account_pk),
+                &user_option_health_cache,
                 &option_market.bids,
                 &option_market.asks,
                 &q_rb_key,

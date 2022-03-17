@@ -6173,8 +6173,9 @@ impl Processor {
     fn exercise_option(program_id: &Pubkey,
         accounts: &[AccountInfo],
         amount : u64, ) -> MangoResult {
-        const NUM_FIXED: usize = 10;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        const NUM_FIXED: usize = 11;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais,) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
         let [
             mango_group_ai, // read
@@ -6187,7 +6188,8 @@ impl Processor {
             underlying_node_bank_ai, // write
             quote_node_bank_ai, // write
             user_data_ai, // write
-        ] = accounts;
+            user_option_health_cache_ai,
+        ] = fixed_ais;
 
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
@@ -6241,6 +6243,31 @@ impl Processor {
 
         // update user trade data
         user_trade_data.number_of_option_tokens = user_trade_data.number_of_option_tokens.checked_sub(amount).unwrap();
+
+        {
+            let mut user_option_health_cache = OptionHealthCache::load_mut_checked(
+                user_option_health_cache_ai, 
+                program_id, 
+                mango_account_ai.key,)?;
+
+            user_option_health_cache.update_option_tokens(&option_market, option_market_ai.key, &user_trade_data)?;
+        }
+        {
+            // because no way to convert from RefMut to Ref
+            let token_index = if (option_market.underlying_token_index as usize) != QUOTE_INDEX {option_market.underlying_token_index} else {option_market.quote_token_index};
+            let active_assets = UserActiveAssets::new(
+                &mango_group,
+                &mango_account,
+                vec![(AssetType::Token, token_index)],
+            );
+            mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+            let mut health_cache = HealthCache::new(active_assets);
+            mango_account.check_open_orders(&mango_group, open_orders_ais)?;
+            let user_option_health_cache = OptionHealthCache::load_checked(user_option_health_cache_ai, program_id, mango_account_ai.key)?;
+            health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais, Some(user_option_health_cache))?;
+            let health = health_cache.get_health(&mango_group, HealthType::Init);
+            check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        }
         Ok(())
     }
 
@@ -6249,7 +6276,7 @@ impl Processor {
         accounts: &[AccountInfo],
         amount : u64, ) -> MangoResult {
 
-        const NUM_FIXED: usize = 9;
+        const NUM_FIXED: usize = 10;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
 
         let [
@@ -6262,6 +6289,7 @@ impl Processor {
             underlying_node_bank_ai, // write
             quote_node_bank_ai, // write
             user_data_ai,
+            user_option_health_cache_ai,
         ] = accounts;
 
         let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
@@ -6333,6 +6361,14 @@ impl Processor {
         // update user trade data
         user_trade_data.number_of_writers_tokens = user_trade_data.number_of_writers_tokens.checked_sub(amount).unwrap();
         
+        {
+            let mut user_option_health_cache = OptionHealthCache::load_mut_checked(
+                user_option_health_cache_ai, 
+                program_id, 
+                mango_account_ai.key,)?;
+
+            user_option_health_cache.update_option_tokens(&option_market, option_market_ai.key, &user_trade_data)?;
+        }
         Ok(())
     }
 
@@ -6348,23 +6384,25 @@ impl Processor {
         check!(amount.is_positive(), MangoErrorCode::InvalidParam)?;
         check!(price.is_positive(), MangoErrorCode::InvalidParam)?;
 
-        const NUM_FIXED: usize = 12;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        const NUM_FIXED: usize = 13;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais,) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
 
         let [
             mango_group_ai, // read
             mango_account_ai, // mut
             owner_ai, // mut, signer
             user_data_ai, // mut
+            user_option_health_cache_ai, //mut
             option_market_ai, // write
             mango_cache_ai, // read
             bids_ai, // mut
             asks_ai, // mut
             event_queue_ai, // mut
-            quote_root_bank_ai, // read
-            quote_node_bank_ai, // write,
+            mango_quote_root_bank_ai, // read
+            mango_quote_node_bank_ai, // write,
             system_program, // read
-        ] = accounts;
+        ] = fixed_ais;
 
         let mut option_market = OptionMarket::load_mut_checked(option_market_ai, program_id)?;
 
@@ -6376,8 +6414,9 @@ impl Processor {
         check!(*event_queue_ai.key == option_market.event_queue, MangoErrorCode::InvalidAccount )?;
         // load user data
         // update user trade data
+        
+        let rent_info = Rent::get()?;
         if user_data_ai.data_len() == 0 {
-            let rent_info = Rent::get()?;
             seed_and_create_pda(
                 program_id,
                 owner_ai,
@@ -6399,13 +6438,15 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         // mango tokens are traded in USDC / Mango group quote token
-        check!(mango_group.tokens[QUOTE_INDEX].root_bank == *quote_root_bank_ai.key, MangoErrorCode::InvalidAccount)?;
+        check!(mango_group.tokens[QUOTE_INDEX].root_bank == *mango_quote_root_bank_ai.key, MangoErrorCode::InvalidAccount)?;
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        msg!("A");
         check!(&mango_account.owner == owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        msg!("B");
 
         let mut book = Book::load_checked_for_options(program_id, bids_ai, asks_ai, &option_market)?;
         let mut event_queue =
@@ -6419,9 +6460,9 @@ impl Processor {
 
                 let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
                 let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
-                let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-                check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
-                let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+                let root_bank = RootBank::load_checked(mango_quote_root_bank_ai, program_id)?;
+                check!(root_bank.node_banks.contains(mango_quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+                let mut node_bank = NodeBank::load_mut_checked(mango_quote_node_bank_ai, program_id)?;
                 // deduct USDC from client account
                 checked_sub_net(root_bank_cache, 
                     &mut node_bank, 
@@ -6452,9 +6493,9 @@ impl Processor {
             
             let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
             let root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
-            let root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-            check!(root_bank.node_banks.contains(quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
-            let mut node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+            let root_bank = RootBank::load_checked(mango_quote_root_bank_ai, program_id)?;
+            check!(root_bank.node_banks.contains(mango_quote_node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+            let mut node_bank = NodeBank::load_mut_checked(mango_quote_node_bank_ai, program_id)?;
             // add unsettled USDC to client account
             checked_add_net(root_bank_cache, 
                 &mut node_bank, 
@@ -6462,6 +6503,48 @@ impl Processor {
                 QUOTE_INDEX,
                 I80F48::from_num(user_trade_data.number_of_usdc_to_settle))?;
             user_trade_data.number_of_usdc_to_settle = 0;
+        }
+
+        // create a options health cache for the user if they have never traded options
+        if user_option_health_cache_ai.data_len() == 0 {
+            seed_and_create_pda(
+                program_id,
+                owner_ai,
+                &rent_info,
+                size_of::<OptionHealthCache>(),
+                program_id,
+                system_program,
+                user_option_health_cache_ai,
+                &[OptionHealthCache::ACCOUNT_SEEDS, mango_account_ai.key.as_ref()], 
+                &[],
+            )?;
+        }
+
+        {
+            let mut user_option_health_cache = OptionHealthCache::load_and_init_if_needed(
+                user_option_health_cache_ai, 
+                program_id, 
+                mango_account_ai.key,
+                &mut mango_account)?;
+
+            user_option_health_cache.update_option_tokens(&option_market, option_market_ai.key, &user_trade_data)?;
+        }
+        {
+            // because no way to convert from RefMut to Ref
+            let token_index = if (option_market.underlying_token_index as usize) != QUOTE_INDEX {option_market.underlying_token_index} else {option_market.quote_token_index};
+            let active_assets = UserActiveAssets::new(
+                &mango_group,
+                &mango_account,
+                vec![(AssetType::Token, token_index)],
+            );
+            let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+            mango_cache.check_valid(&mango_group, &active_assets, now_ts)?;
+            let mut health_cache = HealthCache::new(active_assets);
+            mango_account.check_open_orders(&mango_group, open_orders_ais)?;
+            let user_option_health_cache = OptionHealthCache::load_checked(user_option_health_cache_ai, program_id, mango_account_ai.key)?;
+            health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais, Some(user_option_health_cache))?;
+            let health = health_cache.get_health(&mango_group, HealthType::Init);
+            check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
         }
         Ok(())
     }
@@ -6508,7 +6591,7 @@ impl Processor {
                 EventType::Fill => {
                     let fill: &FillEvent = cast_ref(event);
                     // get trade data and mango account
-                    let (mut trade_data_info,mut mango_account) = match mango_accounts_and_data_ais.iter().find(|ai| ai.key == &fill.maker) 
+                    let (mut trade_data_info,mut mango_account, mango_account_pk) = match mango_accounts_and_data_ais.iter().find(|ai| ai.key == &fill.maker) 
                     {
                         None => {
                             msg!("Unable to find account {}", fill.maker.to_string());
@@ -6527,7 +6610,7 @@ impl Processor {
                                     msg!("Unable to find account {}", fill.maker.to_string());
                                     return Ok(());
                                 }
-                                Some(acc) => (tmp, MangoAccount::load_mut_checked(acc, program_id, mango_group_ai.key)?)
+                                Some(acc) => (tmp, MangoAccount::load_mut_checked(acc, program_id, mango_group_ai.key)?, *acc.key)
                             } 
                         }
                     };
@@ -6551,6 +6634,19 @@ impl Processor {
                     }
                     if fill.maker_out {
                         trade_data_info.remove_order(fill.maker_slot as usize, fill.quantity)?;
+                    }
+                    // update cache
+                    {
+                        let (user_option_health_cache_pk, _user_bump) = Pubkey::find_program_address( 
+                            &[OptionHealthCache::ACCOUNT_SEEDS, mango_account_pk.as_ref()], 
+                            program_id);
+                        let user_option_health_cache_ai = mango_accounts_and_data_ais.iter().find(|ai| *ai.key == user_option_health_cache_pk).unwrap();
+                        let mut user_option_health_cache = OptionHealthCache::load_mut_checked(
+                            user_option_health_cache_ai, 
+                            program_id, 
+                            &mango_account_pk,)?;
+            
+                        user_option_health_cache.update_option_tokens(&option_market, options_market_ai.key, &trade_data_info)?;
                     }
                 }
                 EventType::Out => {
@@ -6594,8 +6690,9 @@ impl Processor {
         accounts: &[AccountInfo],
         client_order_id: u64,
     ) -> MangoResult<()> {
-        const NUM_FIXED: usize = 10;
+        const NUM_FIXED: usize = 11;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
+
         let [
             mango_group_ai,     // read
             mango_cache_ai,     // read
@@ -6603,6 +6700,7 @@ impl Processor {
             owner_ai,           // read, signer
             option_market_ai,   // read
             user_trade_data_ai, // write
+            user_option_health_cache_ai, //write
             bids_ai,            // write
             asks_ai,            // write
             usdc_root_bank_ai,  // read
@@ -6661,6 +6759,15 @@ impl Processor {
             }
         }
         user_trade_data.remove_order(order.owner_slot as usize, order.quantity)?;
+
+        {
+            let mut user_option_health_cache = OptionHealthCache::load_mut_checked(
+                user_option_health_cache_ai, 
+                program_id, 
+                mango_account_ai.key,)?;
+
+            user_option_health_cache.update_option_tokens(&option_market, option_market_ai.key, &user_trade_data)?;
+        }
         Ok(())
     }
 

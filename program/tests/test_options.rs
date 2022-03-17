@@ -156,7 +156,7 @@ async fn test_european_options() {
     mango_group_cookie
         .full_setup(&mut test, num_precreated_mango_users, config.num_mints - 1)
         .await;
-    println!("Creating option market");
+    println!("Creating european option market CALL MNGO of 100@10.2");
     
     let expiry = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 30 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
     let expiry_to_exercise = { let clock = test.get_clock().await; clock.unix_timestamp as u64 + 60 * solana_program::clock::DEFAULT_TICKS_PER_SECOND }; // after 30 sec
@@ -181,7 +181,7 @@ async fn test_european_options() {
     mango_group_cookie.run_keeper(&mut test).await;
     mango_group_cookie.run_keeper(&mut test).await;
 
-    println!("Write option");
+    println!("User0 writes option for 10 tokens");
     // deposit some underlying tokens for user0
     let load_amount = 120_000_000 * 10;
     test.perform_deposit(&mango_group_cookie, 0, option_market.underlying_token_index, load_amount).await;
@@ -201,7 +201,9 @@ async fn test_european_options() {
         assert_eq!(option_market_ck.tokens_in_underlying_pool, 100_000_000 * 10);
         assert_eq!(option_market_ck.tokens_in_quote_pool, 0);
     }
-    println!("exercise option");
+    
+    mango_group_cookie.run_keeper(&mut test).await;
+    println!("User0 exercises option");
     
     let mango_account_u0_key = mango_group_cookie.mango_accounts[0].address;
     let mut funds_underlying_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.underlying_token_index).await;
@@ -210,6 +212,8 @@ async fn test_european_options() {
     test.perform_deposit(&mango_group_cookie, 0, option_market.quote_token_index, load_amount).await;
     let mut funds_quote_old :u64 = test.with_mango_account_deposit(&mango_account_u0_key, option_market.quote_token_index).await;
     test.advance_clock_past_timestamp(option_market.expiry as i64 + 1).await;
+    
+    mango_group_cookie.run_keeper(&mut test).await;
 
     test.exercise_option(&mango_group_cookie, option_market_pk, &option_market, 0, 5_000_000).await;
     //check exercise
@@ -260,6 +264,8 @@ async fn test_european_options() {
         funds_underlying_old = funds_underlying;
         funds_quote_old =  funds_quote;
     }
+    
+    mango_group_cookie.run_keeper(&mut test).await;
     println!("exchange writers 8 tokens");
     test.exchange_writers_tokens(&mango_group_cookie, option_market_pk, &option_market, 0, 8_000_000,).await;
     {
@@ -342,16 +348,20 @@ async fn test_placing_orders_for_options() {
         assert_eq!(trade_data.number_of_usdc_to_settle, 0 );
         assert_eq!(trade_data.number_of_locked_options_tokens, 1_000_000 );
     }
+    mango_group_cookie.run_keeper(&mut test).await;
+
     println!("User0 places ask of 1 option @0.1 USDC by mistake");
     test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 0, 1_000_000, 100_000, Side::Ask, 1).await;
     println!("User0 cancels last order");
     test.cancel_option_order_by_client_order_id(&mango_group_cookie, option_market_pk, &option_market, 0, 1).await;
+    
     println!("User1 places bid of 0.5 option @0.6 USDC");
     // user 1 places order for bid
     let mango_account_u0 = mango_group_cookie.mango_accounts[0].address;
     let mango_account_u1 = mango_group_cookie.mango_accounts[1].address;
     let (u1_trade_data_pk, _) = Pubkey::find_program_address( &[b"mango_option_user_data", option_market_pk.as_ref(), mango_account_u1.as_ref()], &test.mango_program_id );
-        
+
+    mango_group_cookie.run_keeper(&mut test).await;
     let mut usdc_with_u1 :u64 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
     test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 1, 500_000, 600_000, Side::Bid, 0).await;
     {
@@ -367,6 +377,8 @@ async fn test_placing_orders_for_options() {
         assert_eq!(usdc_with_u1 - usdc_with_u1_after, 250_000);
         usdc_with_u1 = usdc_with_u1_after;
     }
+    
+    mango_group_cookie.run_keeper(&mut test).await;
     println!("Consume Event will update User0 trade data and deposit USDC recieved from User1");
     let mut usdc_with_u0 :u64 = test.with_mango_account_deposit(&mango_account_u0, QUOTE_INDEX).await;
     // comsume events to update user0
@@ -386,7 +398,9 @@ async fn test_placing_orders_for_options() {
         assert_eq!(usdc_with_u0 + 250_000, usdc_with_u0_after); // user0 recieved 250_000 USDC 25 cents
         usdc_with_u0 = usdc_with_u0_after;
     }
+    
     test.advance_clock_by_slots(20).await;
+    mango_group_cookie.run_keeper(&mut test).await;
 
     println!("User1 places bid of 2 option @1 USDC");
     test.place_options_order(&mango_group_cookie, option_market_pk, &option_market, 1, 2_000_000, 1_000_000, Side::Bid, 0).await;
@@ -407,6 +421,7 @@ async fn test_placing_orders_for_options() {
         usdc_with_u1 = usdc_with_u1_after;
     }
     test.advance_clock().await;
+    mango_group_cookie.run_keeper(&mut test).await;
 
     println!("Consume Event will update User0 trade data and deposit USDC recieved from User1");
     // comsume events to update user0
@@ -427,6 +442,7 @@ async fn test_placing_orders_for_options() {
     }
 
     test.advance_clock_by_slots(20).await;
+    mango_group_cookie.run_keeper(&mut test).await;
 
     println!("User1 places bid of 2 option @0.9 USDC");
     usdc_with_u1 = test.with_mango_account_deposit(&mango_account_u1, QUOTE_INDEX).await;
@@ -443,6 +459,8 @@ async fn test_placing_orders_for_options() {
         assert_eq!(trade_data.number_of_locked_options_tokens, 0 );
     }
     test.advance_clock().await;
+    mango_group_cookie.run_keeper(&mut test).await;
+
     println!("User1 cancels bid of 2 option @0.9 USDC");
     test.cancel_option_order_by_client_order_id(&mango_group_cookie, option_market_pk, &option_market, 1, 1).await;
     {
@@ -477,6 +495,8 @@ async fn test_placing_orders_for_options() {
         usdc_with_u0 = usdc_with_u0_after;
     }
     test.advance_clock().await;
+    mango_group_cookie.run_keeper(&mut test).await;
+
     println!("Consume Event will update User1 trade data and deposit Opion tokens recieved from User0");
     // comsume events to update user0
     test.consume_events_for_options(&mango_group_cookie, option_market_pk, &option_market, Vec::from([1,0])).await;
