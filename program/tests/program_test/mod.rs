@@ -1491,7 +1491,7 @@ impl MangoProgramTest {
         mango_group_cookie: &MangoGroupCookie,
         spot_market_cookie: &SpotMarketCookie,
         user_index: usize,
-    ){
+    ) {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -1514,32 +1514,30 @@ impl MangoProgramTest {
         let (dex_signer_pk, _dex_signer_nonce) =
             create_signer_key_and_nonce(&self.serum_program_id, &spot_market_cookie.market);
 
-
-        let instructions = [
-            cancel_all_spot_orders(
-                &mango_program_id, 
-                &mango_group_pk, 
-                &mango_group.mango_cache, 
-                &mango_account_pk, 
-                &user.pubkey(), 
-                &base_root_bank_pk, 
-                &base_node_bank_pk, 
-                &base_node_bank.vault, 
-                &quote_root_bank_pk, 
-                &quote_node_bank_pk, 
-                &quote_node_bank.vault, 
-                &spot_market_cookie.market, 
-                &spot_market_cookie.bids, 
-                &spot_market_cookie.asks, 
-                &mango_account.spot_open_orders[mint_index], 
-                &signer_pk, 
-                &spot_market_cookie.event_q, 
-                &spot_market_cookie.coin_vault,
-                &spot_market_cookie.pc_vault, 
-                &dex_signer_pk, 
-                &mango_group.dex_program_id,
-            ).unwrap()
-        ];
+        let instructions = [cancel_all_spot_orders(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &mango_account_pk,
+            &user.pubkey(),
+            &base_root_bank_pk,
+            &base_node_bank_pk,
+            &base_node_bank.vault,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &spot_market_cookie.market,
+            &spot_market_cookie.bids,
+            &spot_market_cookie.asks,
+            &mango_account.spot_open_orders[mint_index],
+            &signer_pk,
+            &spot_market_cookie.event_q,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &dex_signer_pk,
+            &mango_group.dex_program_id,
+        )
+        .unwrap()];
 
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
     }

@@ -5989,11 +5989,8 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn cancel_all_spot_orders(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-    ) -> MangoResult {
-        const NUM_FIXED : usize = 21;
+    fn cancel_all_spot_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        const NUM_FIXED: usize = 21;
 
         let [
             mango_group_ai, // read
@@ -6020,7 +6017,6 @@ impl Processor {
             token_prog_ai,          // read
         ] = array_ref![accounts, 0, NUM_FIXED];
 
-        
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
         check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
@@ -6052,7 +6048,7 @@ impl Processor {
             &[&signer_seeds],
             u8::MAX,
         )?;
-        
+
         let (pre_base, pre_quote) = {
             let open_orders = load_open_orders(open_orders_ai)?;
             (
@@ -6067,7 +6063,7 @@ impl Processor {
             mango_account.update_basket(market_index, &open_orders)?;
             return Ok(());
         }
-        
+
         // Settle funds released by canceling open orders
         // TODO OPT add a new ForceSettleFunds to save compute in this instruction
         invoke_settle_funds(
@@ -6157,7 +6153,6 @@ impl Processor {
             QUOTE_INDEX,
             quote_change,
         )
-
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
@@ -6676,8 +6671,7 @@ impl Processor {
                     limit,
                 )
             }
-            MangoInstruction::CancelAllSpotOrders{                
-            } => {
+            MangoInstruction::CancelAllSpotOrders {} => {
                 msg!("Mango: CancelAllSpotOrders");
                 Self::cancel_all_spot_orders(program_id, accounts)
             }

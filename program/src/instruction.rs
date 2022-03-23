@@ -1543,7 +1543,7 @@ impl MangoInstruction {
                     limit: u8::from_le_bytes(*limit),
                 }
             }
-            65=> MangoInstruction::CancelAllSpotOrders,
+            65 => MangoInstruction::CancelAllSpotOrders,
             _ => {
                 return None;
             }
@@ -2110,26 +2110,26 @@ pub fn force_cancel_perp_orders(
 
 pub fn cancel_all_spot_orders(
     program_id: &Pubkey,
-    mango_group_pk: &Pubkey, // read
-    mango_cache_pk: &Pubkey,   // read
-    mango_account_pk: &Pubkey, // write
-    owner_pk: &Pubkey, // read, signer
-    base_root_bank_pk: &Pubkey,      // read
-    base_node_bank_pk: &Pubkey,      // write
-    base_vault_pk: &Pubkey,          // write
-    quote_root_bank_pk: &Pubkey,     // read
-    quote_node_bank_pk: &Pubkey,     // write
-    quote_vault_pk: &Pubkey,         // write
-    spot_market_pk: &Pubkey,         // write
-    bids_pk: &Pubkey,                // write
-    asks_pk: &Pubkey,                // write
-    open_orders_pk: &Pubkey,         // write
-    signer_pk: &Pubkey,              // read
-    dex_event_queue_pk: &Pubkey,     // write
-    dex_base_pk: &Pubkey,            // write
-    dex_quote_pk: &Pubkey,           // write
-    dex_signer_pk: &Pubkey,          // read
-    dex_prog_pk: &Pubkey,            // read
+    mango_group_pk: &Pubkey,     // read
+    mango_cache_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // write
+    owner_pk: &Pubkey,           // read, signer
+    base_root_bank_pk: &Pubkey,  // read
+    base_node_bank_pk: &Pubkey,  // write
+    base_vault_pk: &Pubkey,      // write
+    quote_root_bank_pk: &Pubkey, // read
+    quote_node_bank_pk: &Pubkey, // write
+    quote_vault_pk: &Pubkey,     // write
+    spot_market_pk: &Pubkey,     // write
+    bids_pk: &Pubkey,            // write
+    asks_pk: &Pubkey,            // write
+    open_orders_pk: &Pubkey,     // write
+    signer_pk: &Pubkey,          // read
+    dex_event_queue_pk: &Pubkey, // write
+    dex_base_pk: &Pubkey,        // write
+    dex_quote_pk: &Pubkey,       // write
+    dex_signer_pk: &Pubkey,      // read
+    dex_prog_pk: &Pubkey,        // read
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
