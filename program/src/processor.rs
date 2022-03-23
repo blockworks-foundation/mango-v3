@@ -3083,8 +3083,10 @@ impl Processor {
         let contract_size = mango_group.perp_markets[market_index].base_lot_size;
         let new_quote_pos = I80F48::from_num(-pa.base_position * contract_size) * price;
         let pnl: I80F48 = pa.quote_position - new_quote_pos;
-        check!(pnl.is_negative(), MangoErrorCode::Default)?;
-        check!(perp_market.fees_accrued.is_positive(), MangoErrorCode::Default)?;
+        // ignore these cases and fail silently so transactions can continue
+        if pnl.is_negative() || perp_market.fees_accrued.is_positive() {
+            return Ok(());
+        }
 
         let settlement = pnl.abs().min(perp_market.fees_accrued).checked_floor().unwrap();
 
