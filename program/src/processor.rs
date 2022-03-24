@@ -3084,7 +3084,7 @@ impl Processor {
         let new_quote_pos = I80F48::from_num(-pa.base_position * contract_size) * price;
         let pnl: I80F48 = pa.quote_position - new_quote_pos;
         // ignore these cases and fail silently so transactions can continue
-        if pnl.is_negative() || perp_market.fees_accrued.is_positive() {
+        if !(pnl.is_negative() && perp_market.fees_accrued.is_positive()) {
             return Ok(());
         }
 
