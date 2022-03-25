@@ -3085,6 +3085,7 @@ impl Processor {
         let pnl: I80F48 = pa.quote_position - new_quote_pos;
         // ignore these cases and fail silently so transactions can continue
         if !(pnl.is_negative() && perp_market.fees_accrued.is_positive()) {
+            msg!("ignore settle_fees instruction: pnl.is_negative()={} perp_market.fees_accrued.is_positive()={}", pnl.is_negative(), perp_market.fees_accrued.is_positive());
             return Ok(());
         }
 
