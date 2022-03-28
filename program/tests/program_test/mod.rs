@@ -1536,6 +1536,7 @@ impl MangoProgramTest {
             &spot_market_cookie.pc_vault,
             &dex_signer_pk,
             &mango_group.dex_program_id,
+            u8::MAX,
         )
         .unwrap()];
 

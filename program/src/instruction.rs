@@ -1054,7 +1054,10 @@ pub enum MangoInstruction {
     /// 18. `[]` dex_signer_ai
     /// 19. `[]` dex_prog_ai
     /// 20. `[]` token_prog_ai
-    CancelAllSpotOrders,
+    CancelAllSpotOrders
+    {
+        limit: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -1543,7 +1546,13 @@ impl MangoInstruction {
                     limit: u8::from_le_bytes(*limit),
                 }
             }
-            65 => MangoInstruction::CancelAllSpotOrders,
+            65 => {
+                let data_arr = array_ref![data, 0, 1];
+                let limit = data_arr[0];
+                MangoInstruction::CancelAllSpotOrders {
+                    limit,
+                }
+            },
             _ => {
                 return None;
             }
@@ -2130,6 +2139,7 @@ pub fn cancel_all_spot_orders(
     dex_quote_pk: &Pubkey,       // write
     dex_signer_pk: &Pubkey,      // read
     dex_prog_pk: &Pubkey,        // read
+    limit: u8
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -2154,7 +2164,7 @@ pub fn cancel_all_spot_orders(
         AccountMeta::new_readonly(*dex_prog_pk, false),
         AccountMeta::new_readonly(spl_token::ID, false),
     ];
-    let instr = MangoInstruction::CancelAllSpotOrders;
+    let instr = MangoInstruction::CancelAllSpotOrders {limit};
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

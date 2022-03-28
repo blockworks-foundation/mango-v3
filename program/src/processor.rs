@@ -5989,7 +5989,11 @@ impl Processor {
     }
 
     #[inline(never)]
-    fn cancel_all_spot_orders(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+    fn cancel_all_spot_orders(
+        program_id: &Pubkey, 
+        accounts: &[AccountInfo],
+        limit: u8,
+    ) -> MangoResult {
         const NUM_FIXED: usize = 21;
 
         let [
@@ -6046,7 +6050,7 @@ impl Processor {
             signer_ai,
             dex_event_queue_ai,
             &[&signer_seeds],
-            u8::MAX,
+            limit,
         )?;
 
         let (pre_base, pre_quote) = {
@@ -6152,7 +6156,13 @@ impl Processor {
             mango_account_ai.key,
             QUOTE_INDEX,
             quote_change,
-        )
+        )?;
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+        
+        mango_cache.root_bank_cache[market_index].check_valid(&mango_group, now_ts)?;
+        mango_cache.root_bank_cache[QUOTE_INDEX].check_valid(&mango_group, now_ts)?;
+        Ok(())
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
@@ -6671,9 +6681,11 @@ impl Processor {
                     limit,
                 )
             }
-            MangoInstruction::CancelAllSpotOrders {} => {
+            MangoInstruction::CancelAllSpotOrders {
+                limit
+            } => {
                 msg!("Mango: CancelAllSpotOrders");
-                Self::cancel_all_spot_orders(program_id, accounts)
+                Self::cancel_all_spot_orders(program_id, accounts, limit)
             }
         }
     }
