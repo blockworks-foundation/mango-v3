@@ -576,6 +576,7 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(oracle_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
 
         let oracle_type = determine_oracle_type(oracle_ai);
         match oracle_type {
