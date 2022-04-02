@@ -8,10 +8,11 @@ use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
+use pyth_client::PriceStatus;
 use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
-use solana_program::clock::Clock;
+use solana_program::clock::{Clock, Slot};
 use solana_program::entrypoint::ProgramResult;
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::msg;
@@ -36,9 +37,7 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::{msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-#[cfg(not(feature = "devnet"))]
-use crate::oracle::PriceStatus;
-use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
+use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 #[cfg(not(feature = "devnet"))]
 use crate::state::PYTH_CONF_FILTER;
@@ -175,8 +174,15 @@ impl Processor {
     }
 
     #[allow(unused)]
+    /// Start the process of removing a spot market.
+    /// 1. Set the market to reduce only. Only balance changes that reduce borrows or reduce deposits
+    ///     are allowed
+    /// 2. After a certain amount of time has passed, liquidators are allowed to force cancel orders
+    ///     and force liquidate positions (implement those extra functions)
+    /// 3. Swap out the oracle
     fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        todo!()
+        // TODO
+        unimplemented!()
     }
     #[inline(never)]
     /// DEPRECATED - if you use this instruction after v3.3.0 you will not be able to close your MangoAccount
@@ -539,7 +545,7 @@ impl Processor {
                 msg!("OracleType: got unknown or stub");
                 let rent = Rent::get()?;
                 let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
-                oracle.magic = 0x6F676E4D;
+                oracle.magic = STUB_MAGIC;
             }
         }
 
@@ -550,6 +556,53 @@ impl Processor {
         Ok(())
     }
 
+    #[inline(never)]
+    #[allow(unused)]
+    /// Swap out the oracle at a slot. Only do this if it's the same asset or if the market
+    /// for that token has been emptied out and all keepers and users are ready for the change
+    fn replace_oracle(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        oracle_index: usize,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai, // write
+            oracle_ai,      // write
+            admin_ai        // read
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+
+        let oracle_type = determine_oracle_type(oracle_ai);
+        match oracle_type {
+            OracleType::Pyth => {
+                msg!("OracleType::Pyth");
+            }
+            OracleType::Switchboard => {
+                msg!("OracleType::Switchboard");
+            }
+            OracleType::Stub | OracleType::Unknown => {
+                msg!("OracleType: got unknown or stub");
+                let rent = Rent::get()?;
+                let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+                oracle.magic = STUB_MAGIC;
+            }
+        }
+
+        msg!(
+            "oracle_index: {} old oracle: {} new oracle: {}",
+            oracle_index,
+            mango_group.oracles[oracle_index].to_string(),
+            oracle_ai.key.to_string()
+        );
+        mango_group.oracles[oracle_index] = *oracle_ai.key;
+
+        Ok(())
+    }
     #[inline(never)]
     fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
@@ -1143,7 +1196,7 @@ impl Processor {
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
+            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai, clock.slot) {
                 mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
                 oracle_indexes.push(oracle_index as u64);
@@ -6659,6 +6712,7 @@ pub fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
+    curr_slot: Slot,
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -6667,7 +6721,8 @@ pub fn read_oracle(
 
     let price = match oracle_type {
         OracleType::Pyth => {
-            let price_account = Price::get_price(oracle_ai)?;
+            let oracle_data = oracle_ai.try_borrow_data()?;
+            let price_account = pyth_client::load_price(&oracle_data).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
 
             // Filter out bad prices on mainnet
@@ -6675,7 +6730,10 @@ pub fn read_oracle(
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
             #[cfg(not(feature = "devnet"))]
-            if price_account.agg.status != PriceStatus::Trading {
+            if price_account.agg.status != PriceStatus::Trading
+                && price_account.last_slot < curr_slot - 50
+            {
+                // Only ignore the pyth price if there hasn't been a valid slot in 50 slots
                 msg!("Pyth status invalid: {}", price_account.agg.status as u8);
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
             } else if conf > PYTH_CONF_FILTER {

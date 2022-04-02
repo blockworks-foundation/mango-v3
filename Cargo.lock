@@ -1510,6 +1510,7 @@ dependencies = [
  "mango-logs",
  "mango-macro",
  "num_enum",
+ "pyth-client",
  "rand 0.8.5",
  "safe-transmute",
  "serde",
@@ -1973,6 +1974,22 @@ dependencies = [
  "syn",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "pyth-client"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f779e98b8c8016d0c1409247a204bd4fcdea8b67ceeef545f04e324d66c49e52"
+dependencies = [
+ "borsh",
+ "borsh-derive",
+ "bytemuck",
+ "num-derive",
+ "num-traits",
+ "serde",
+ "solana-program",
+ "thiserror",
 ]
 
 [[package]]
