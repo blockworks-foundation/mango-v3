@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.4.3
-Deployed: | Slot:
+Deployed: Apr 3, 2022 at 19:00:13 UTC | Slot: 128,066,047
 1. SettleFees will return Ok and fail silently if not pnl negative and fees accrued positive
 2. Use pyth_client crate instead of copy pasta
 3. Remove pyth status check and just rely on confidence intervals
