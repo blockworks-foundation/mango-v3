@@ -8,10 +8,11 @@ use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
+use pyth_client::PriceStatus;
 use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
-use solana_program::clock::Clock;
+use solana_program::clock::{Clock, Slot};
 use solana_program::entrypoint::ProgramResult;
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_program::msg;
@@ -36,12 +37,8 @@ use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, Source
 use crate::ids::{msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
-#[cfg(not(feature = "devnet"))]
-use crate::oracle::PriceStatus;
-use crate::oracle::{determine_oracle_type, OracleType, Price, StubOracle};
+use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
-#[cfg(not(feature = "devnet"))]
-use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
@@ -52,6 +49,8 @@ use crate::state::{
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
     QUOTE_INDEX, ZERO_I80F48,
 };
+#[cfg(not(feature = "devnet"))]
+use crate::state::{PYTH_CONF_FILTER, PYTH_VALID_SLOTS};
 use crate::utils::{emit_perp_balances, gen_signer_key, gen_signer_seeds};
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -174,10 +173,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
-    fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        todo!()
-    }
     #[inline(never)]
     /// DEPRECATED - if you use this instruction after v3.3.0 you will not be able to close your MangoAccount
     fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
@@ -539,7 +534,7 @@ impl Processor {
                 msg!("OracleType: got unknown or stub");
                 let rent = Rent::get()?;
                 let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
-                oracle.magic = 0x6F676E4D;
+                oracle.magic = STUB_MAGIC;
             }
         }
 
@@ -1143,7 +1138,7 @@ impl Processor {
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
+            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai, clock.slot) {
                 mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
                 oracle_indexes.push(oracle_index as u64);
@@ -6659,6 +6654,7 @@ pub fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
+    curr_slot: Slot,
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -6667,7 +6663,8 @@ pub fn read_oracle(
 
     let price = match oracle_type {
         OracleType::Pyth => {
-            let price_account = Price::get_price(oracle_ai)?;
+            let oracle_data = oracle_ai.try_borrow_data()?;
+            let price_account = pyth_client::load_price(&oracle_data).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
 
             // Filter out bad prices on mainnet
@@ -6675,7 +6672,10 @@ pub fn read_oracle(
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
             #[cfg(not(feature = "devnet"))]
-            if price_account.agg.status != PriceStatus::Trading {
+            if price_account.agg.status != PriceStatus::Trading
+                && price_account.last_slot < curr_slot - PYTH_VALID_SLOTS
+            {
+                // Only ignore the pyth price if there hasn't been a valid slot in 50 slots
                 msg!("Pyth status invalid: {}", price_account.agg.status as u8);
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
             } else if conf > PYTH_CONF_FILTER {
