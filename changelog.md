@@ -4,7 +4,7 @@
 Deployed: | Slot:
 1. SettleFees will return Ok and fail silently if not pnl negative and fees accrued positive
 2. Use pyth_client crate instead of copy pasta
-3. Allow Pyth oracle updates to be 50 slots behind instead of 25 enforced by Pyth
+3. Remove pyth status check and just rely on confidence intervals
 
 ## v3.4.2
 Deployed: Mar 19, 2022 at 16:22:04 UTC | Slot: 125,699,230
