@@ -39,8 +39,6 @@ use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
-#[cfg(not(feature = "devnet"))]
-use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
@@ -51,6 +49,8 @@ use crate::state::{
     MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS, NEG_ONE_I80F48, ONE_I80F48,
     QUOTE_INDEX, ZERO_I80F48,
 };
+#[cfg(not(feature = "devnet"))]
+use crate::state::{PYTH_CONF_FILTER, PYTH_VALID_SLOTS};
 use crate::utils::{emit_perp_balances, gen_signer_key, gen_signer_seeds};
 
 declare_check_assert_macros!(SourceFileId::Processor);
@@ -173,17 +173,6 @@ impl Processor {
         Ok(())
     }
 
-    #[allow(unused)]
-    /// Start the process of removing a spot market.
-    /// 1. Set the market to reduce only. Only balance changes that reduce borrows or reduce deposits
-    ///     are allowed
-    /// 2. After a certain amount of time has passed, liquidators are allowed to force cancel orders
-    ///     and force liquidate positions (implement those extra functions)
-    /// 3. Swap out the oracle
-    fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
-        // TODO
-        unimplemented!()
-    }
     #[inline(never)]
     /// DEPRECATED - if you use this instruction after v3.3.0 you will not be able to close your MangoAccount
     fn init_mango_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult<()> {
@@ -556,54 +545,6 @@ impl Processor {
         Ok(())
     }
 
-    #[inline(never)]
-    #[allow(unused)]
-    /// Swap out the oracle at a slot. Only do this if it's the same asset or if the market
-    /// for that token has been emptied out and all keepers and users are ready for the change
-    fn replace_oracle(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        oracle_index: usize,
-    ) -> MangoResult {
-        const NUM_FIXED: usize = 3;
-        let accounts = array_ref![accounts, 0, NUM_FIXED];
-        let [
-            mango_group_ai, // write
-            oracle_ai,      // write
-            admin_ai        // read
-        ] = accounts;
-
-        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
-        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
-        check!(oracle_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
-
-        let oracle_type = determine_oracle_type(oracle_ai);
-        match oracle_type {
-            OracleType::Pyth => {
-                msg!("OracleType::Pyth");
-            }
-            OracleType::Switchboard => {
-                msg!("OracleType::Switchboard");
-            }
-            OracleType::Stub | OracleType::Unknown => {
-                msg!("OracleType: got unknown or stub");
-                let rent = Rent::get()?;
-                let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
-                oracle.magic = STUB_MAGIC;
-            }
-        }
-
-        msg!(
-            "oracle_index: {} old oracle: {} new oracle: {}",
-            oracle_index,
-            mango_group.oracles[oracle_index].to_string(),
-            oracle_ai.key.to_string()
-        );
-        mango_group.oracles[oracle_index] = *oracle_ai.key;
-
-        Ok(())
-    }
     #[inline(never)]
     fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
@@ -6732,7 +6673,7 @@ pub fn read_oracle(
 
             #[cfg(not(feature = "devnet"))]
             if price_account.agg.status != PriceStatus::Trading
-                && price_account.last_slot < curr_slot - 50
+                && price_account.last_slot < curr_slot - PYTH_VALID_SLOTS
             {
                 // Only ignore the pyth price if there hasn't been a valid slot in 50 slots
                 msg!("Pyth status invalid: {}", price_account.agg.status as u8);
