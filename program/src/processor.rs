@@ -5997,10 +5997,10 @@ impl Processor {
         const NUM_FIXED: usize = 21;
 
         let [
-            mango_group_ai, // read
-            mango_cache_ai,   // read
-            mango_account_ai, // write
-            owner_ai, // read, signer
+            mango_group_ai,         // read
+            mango_cache_ai,         // read
+            mango_account_ai,       // write
+            owner_ai,               // read, signer
             base_root_bank_ai,      // read
             base_node_bank_ai,      // write
             base_vault_ai,          // write
@@ -6032,6 +6032,7 @@ impl Processor {
             MangoErrorCode::InvalidOwner
         )?;
         check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
         check_eq!(
