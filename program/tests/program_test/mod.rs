@@ -1486,6 +1486,64 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn cancel_all_spot_orders(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        spot_market_cookie: &SpotMarketCookie,
+        user_index: usize,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+
+        let mint_index = spot_market_cookie.mint.index;
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (base_root_bank_pk, base_root_bank) =
+            self.with_root_bank(&mango_group, mint_index).await;
+        let (base_node_bank_pk, base_node_bank) = self.with_node_bank(&base_root_bank, 0).await;
+        let (quote_root_bank_pk, quote_root_bank) =
+            self.with_root_bank(&mango_group, self.quote_index).await;
+        let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
+
+        let (dex_signer_pk, _dex_signer_nonce) =
+            create_signer_key_and_nonce(&self.serum_program_id, &spot_market_cookie.market);
+
+        let instructions = [cancel_all_spot_orders(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group.mango_cache,
+            &mango_account_pk,
+            &user.pubkey(),
+            &base_root_bank_pk,
+            &base_node_bank_pk,
+            &base_node_bank.vault,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &spot_market_cookie.market,
+            &spot_market_cookie.bids,
+            &spot_market_cookie.asks,
+            &mango_account.spot_open_orders[mint_index],
+            &signer_pk,
+            &spot_market_cookie.event_q,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &dex_signer_pk,
+            &mango_group.dex_program_id,
+            u8::MAX,
+        )
+        .unwrap()];
+
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
     pub async fn settle_spot_funds(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,

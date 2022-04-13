@@ -51,7 +51,14 @@ pub async fn assert_user_spot_orders(
     let (actual_quote_free, actual_quote_locked, actual_base_free, actual_base_locked) =
         test.get_oo_info(&mango_group_cookie, user_index, mint_index).await;
 
-    println!("User index: {}", user_index);
+    println!(
+        "User index: {} quote_free {} quote_locked {} base_free {} base_locked {}",
+        user_index,
+        actual_quote_free.to_string(),
+        actual_quote_locked.to_string(),
+        actual_base_free.to_string(),
+        actual_base_locked.to_string()
+    );
     if let Some(quote_free) = expected_value.get("quote_free") {
         // println!(
         //     "==\nUser: {}, Mint: {}\nExpected quote_free: {}, Actual quote_free: {}\n==",

@@ -1030,6 +1030,33 @@ pub enum MangoInstruction {
         /// When the limit is reached, processing stops and the instruction succeeds.
         limit: u8,
     },
+
+    /// Cancels all the spot orders pending for a mango account
+    /// Accounts expected by this instruction (21)
+    /// 0. `[]` mango_group_ai
+    /// 1. `[]` mango_cache_ai
+    /// 2. `[writable]` mango_account_ai
+    /// 3. `[signer]` owner_ai
+    /// 4. `[]` base_root_bank_ai
+    /// 5. `[writable]` base_node_bank_ai
+    /// 6. `[writable]` base_vault_ai
+    /// 7. `[]` quote_root_bank_ai
+    /// 8. `[writable]` quote_node_bank_ai
+    /// 9. `[writable]` quote_vault_ai
+    /// 10. `[writable]` spot_market_ai
+    /// 11. `[writable]` bids_ai
+    /// 12. `[writable]` asks_ai
+    /// 13. `[writable]` open_orders_ai
+    /// 14. `[]` signer_ai
+    /// 15. `[writable]` dex_event_queue_ai
+    /// 16. `[writable]` dex_base_ai
+    /// 17. `[writable]` dex_quote_ai
+    /// 18. `[]` dex_signer_ai
+    /// 19. `[]` dex_prog_ai
+    /// 20. `[]` token_prog_ai
+    CancelAllSpotOrders {
+        limit: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -1517,6 +1544,11 @@ impl MangoInstruction {
                     reduce_only: reduce_only[0] != 0,
                     limit: u8::from_le_bytes(*limit),
                 }
+            }
+            65 => {
+                let data_arr = array_ref![data, 0, 1];
+                let limit = data_arr[0];
+                MangoInstruction::CancelAllSpotOrders { limit }
             }
             _ => {
                 return None;
@@ -2078,6 +2110,58 @@ pub fn force_cancel_perp_orders(
     ];
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     let instr = MangoInstruction::ForceCancelPerpOrders { limit };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn cancel_all_spot_orders(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,     // read
+    mango_cache_pk: &Pubkey,     // read
+    mango_account_pk: &Pubkey,   // write
+    owner_pk: &Pubkey,           // read, signer
+    base_root_bank_pk: &Pubkey,  // read
+    base_node_bank_pk: &Pubkey,  // write
+    base_vault_pk: &Pubkey,      // write
+    quote_root_bank_pk: &Pubkey, // read
+    quote_node_bank_pk: &Pubkey, // write
+    quote_vault_pk: &Pubkey,     // write
+    spot_market_pk: &Pubkey,     // write
+    bids_pk: &Pubkey,            // write
+    asks_pk: &Pubkey,            // write
+    open_orders_pk: &Pubkey,     // write
+    signer_pk: &Pubkey,          // read
+    dex_event_queue_pk: &Pubkey, // write
+    dex_base_pk: &Pubkey,        // write
+    dex_quote_pk: &Pubkey,       // write
+    dex_signer_pk: &Pubkey,      // read
+    dex_prog_pk: &Pubkey,        // read
+    limit: u8,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*base_root_bank_pk, false),
+        AccountMeta::new(*base_node_bank_pk, false),
+        AccountMeta::new(*base_vault_pk, false),
+        AccountMeta::new_readonly(*quote_root_bank_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_vault_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*open_orders_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new(*dex_event_queue_pk, false),
+        AccountMeta::new(*dex_base_pk, false),
+        AccountMeta::new(*dex_quote_pk, false),
+        AccountMeta::new_readonly(*dex_signer_pk, false),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+    ];
+    let instr = MangoInstruction::CancelAllSpotOrders { limit };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
