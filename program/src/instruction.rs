@@ -2563,7 +2563,6 @@ pub fn place_spot_order2(
     dex_signer_pk: &Pubkey,
     msrm_or_srm_vault_pk: &Pubkey,
     open_orders_pks: &[Pubkey],
-
     affected_market_open_orders_index: usize, // used to determine which of the open orders accounts should be passed in write
     order: serum_dex::instruction::NewOrderInstructionV3,
 ) -> Result<Instruction, ProgramError> {
