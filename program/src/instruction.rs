@@ -2564,7 +2564,7 @@ pub fn place_spot_order2(
     msrm_or_srm_vault_pk: &Pubkey,
     open_orders_pks: &[Pubkey],
 
-    market_index: usize, // used to determine which of the open orders accounts should be passed in write
+    affected_market_open_orders_index: usize, // used to determine which of the open orders accounts should be passed in write
     order: serum_dex::instruction::NewOrderInstructionV3,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
@@ -2593,7 +2593,7 @@ pub fn place_spot_order2(
     ];
 
     accounts.extend(open_orders_pks.iter().enumerate().map(|(i, pk)| {
-        if i == market_index {
+        if i == affected_market_open_orders_index {
             AccountMeta::new(*pk, false)
         } else {
             AccountMeta::new_readonly(*pk, false)
