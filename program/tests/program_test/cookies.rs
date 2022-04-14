@@ -564,6 +564,7 @@ impl SpotMarketCookie {
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: mango_group_cookie.current_spot_order_id,
             limit: u16::MAX,
+            max_ts: i64::MAX,
         };
 
         test.place_spot_order(&mango_group_cookie, self, user_index, order).await;
@@ -604,6 +605,7 @@ impl SpotMarketCookie {
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: mango_group_cookie.current_spot_order_id,
             limit: u16::MAX,
+            max_ts: i64::MAX,
         };
 
         test.place_spot_order_with_delegate(

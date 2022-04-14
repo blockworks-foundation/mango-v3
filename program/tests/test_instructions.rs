@@ -64,6 +64,7 @@ fn test_instruction_serialization() {
                 self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::CancelProvide,
                 client_order_id: 8941,
                 limit: 1597,
+                max_ts: i64::MAX,
             },
         },
         MangoInstruction::PlaceSpotOrder2 {
@@ -76,6 +77,7 @@ fn test_instruction_serialization() {
                 self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::CancelProvide,
                 client_order_id: 8941,
                 limit: 1597,
+                max_ts: i64::MAX,
             },
         },
         MangoInstruction::CancelSpotOrder {

@@ -1128,8 +1128,7 @@ impl MangoInstruction {
             7 => MangoInstruction::CachePrices,
             8 => MangoInstruction::CacheRootBanks,
             9 => {
-                let data_arr = array_ref![data, 0, 46];
-                let order = unpack_dex_new_order_v3(data_arr)?;
+                let order = unpack_dex_new_order_v3(data)?;
                 MangoInstruction::PlaceSpotOrder { order }
             }
             10 => MangoInstruction::AddOracle,
@@ -1342,8 +1341,7 @@ impl MangoInstruction {
 
             40 => MangoInstruction::ForceSettleQuotePositions,
             41 => {
-                let data_arr = array_ref![data, 0, 46];
-                let order = unpack_dex_new_order_v3(data_arr)?;
+                let order = unpack_dex_new_order_v3(data)?;
                 MangoInstruction::PlaceSpotOrder2 { order }
             }
 
@@ -1585,9 +1583,10 @@ fn unpack_u64_opt(data: &[u8; 9]) -> Option<u64> {
     }
 }
 
-fn unpack_dex_new_order_v3(
-    data: &[u8; 46],
-) -> Option<serum_dex::instruction::NewOrderInstructionV3> {
+fn unpack_dex_new_order_v3(data: &[u8]) -> Option<serum_dex::instruction::NewOrderInstructionV3> {
+    let max_ts =
+        if data.len() == 54 { i64::from_le_bytes(*array_ref![data, 46, 8]) } else { i64::MAX };
+    let data = array_ref![data, 0, 46];
     let (
         &side_arr,
         &price_arr,
@@ -1627,6 +1626,7 @@ fn unpack_dex_new_order_v3(
         order_type,
         client_order_id,
         limit,
+        max_ts,
     })
 }
 

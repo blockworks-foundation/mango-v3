@@ -22,7 +22,7 @@ cargo build-bpf --features devnet --bpf-out-dir target/devnet
 #MANGO_PROGRAM_ID="5fP7Z7a87ZEVsKr2tQPApdtq83GcTW4kz919R6ou5h5E"
 # devnet.2
 MANGO_PROGRAM_ID="4skJ85cdxQAFVKbcGgfun8iZPL7BadVYXG3kGEGkufqA"
-solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --output json-compact
+solana program deploy target/devnet/mango.so --keypair $KEYPAIR --program-id $MANGO_PROGRAM_ID --skip-fee-check
 anchor build -p mango_logs
 cp ~/blockworks-foundation/mango-v3/target/idl/mango_logs.json ~/blockworks-foundation/mango-client-v3/src/mango_logs.json
 
