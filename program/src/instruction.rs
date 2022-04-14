@@ -2599,7 +2599,7 @@ pub fn place_spot_order2(
         }
     }));
 
-    let instr = MangoInstruction::PlaceSpotOrder { order };
+    let instr = MangoInstruction::PlaceSpotOrder2 { order };
     let data = instr.pack();
 
     Ok(Instruction { program_id: *program_id, accounts, data })
