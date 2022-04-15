@@ -1319,6 +1319,8 @@ impl Processor {
             -withdraw,
         )?;
 
+        let token_account = Account::unpack(&token_account_ai.try_borrow_data()?)?;
+        check!(&token_account.owner == owner_ai.key, MangoErrorCode::InvalidAccountOwner)?;
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
