@@ -32,7 +32,7 @@ cp ~/blockworks-foundation/mango-v3/target/idl/mango_logs.json ~/blockworks-foun
 DEX_PROGRAM_ID=DESVgJVGajEgKGXhb6XmqDHGz3VjdgP7rEVESBgxmroY
 cd ~/blockworks-foundation/serum-dex/dex
 anchor build --verifiable
-solana program deploy target/verifiable/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID
+solana program deploy target/verifiable/serum_dex.so --keypair $KEYPAIR --program-id $DEX_PROGRAM_ID --skip-fee-check
 
 VERSION=v1.7.11
 sh -c "$(curl -sSfL https://release.solana.com/$VERSION/install)"
