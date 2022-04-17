@@ -1,16 +1,19 @@
-// Tests related to liquidations
-mod program_test;
+use std::cmp::min;
+use std::ops::Div;
+use std::str::FromStr;
 
 use fixed::types::I80F48;
 use fixed::FixedI128;
+use fixed_macro::types::I80F48;
+use solana_program_test::*;
+
 use mango::state::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
+
+// Tests related to liquidations
+mod program_test;
 
 pub fn get_deposit_for_user(
     mango_group_cookie: &MangoGroupCookie,
@@ -93,9 +96,9 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(bidder_btc_deposit);
     // dbg!(bidder_quote_borrow);
     // [program/tests/test_liquidation_token_and_token:92] bidder_btc_deposit = 1000000
-    // [program/tests/test_liquidation_token_and_token:93] bidder_quote_borrow = 4995500000
-    assert!(bidder_btc_deposit == I80F48::from_str("1000000").unwrap());
-    assert!(bidder_quote_borrow == I80F48::from_str("4995500000").unwrap());
+    // [program/tests/test_liquidation_token_and_token:93] bidder_quote_borrow = 5000000000
+    assert!(bidder_btc_deposit == I80F48!(1000000));
+    assert!(bidder_quote_borrow == I80F48!(5000000000));
 
     // assert that liqor has no btc deposit and full quote deposits
     let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_user_index, mint_index);
@@ -105,8 +108,8 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(liqor_quote_deposit);
     // [program/tests/test_liquidation_token_and_token.rs:101] liqor_btc_deposit = 0
     // [program/tests/test_liquidation_token_and_token.rs:102] liqor_quote_deposit = 10000000000
-    assert!(liqor_btc_deposit == I80F48::from_str("0").unwrap());
-    assert!(liqor_quote_deposit == I80F48::from_str("10000000000").unwrap());
+    assert!(liqor_btc_deposit.is_zero());
+    assert!(liqor_quote_deposit == I80F48!(10000000000));
 
     // Step 5: Change the oracle price so that bidder becomes liqee
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 15.0).await;
@@ -135,9 +138,9 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(bidder_btc_deposit);
     // dbg!(bidder_quote_borrow);
     // [program/tests/test_liquidation_token_and_token:123] bidder_btc_deposit = 999938.5000000060586
-    // [program/tests/test_liquidation_token_and_token:124] bidder_quote_borrow = 4995440000.000000011937118
-    assert!(bidder_btc_deposit < I80F48::from_str("999940").unwrap());
-    assert!(bidder_quote_borrow < I80F48::from_str("4995460000").unwrap());
+    // [program/tests/test_liquidation_token_and_token:124] bidder_quote_borrow = 4999940000.000000011937118
+    assert_approx_eq!(bidder_btc_deposit, I80F48!(999938.5), I80F48::ONE);
+    assert_approx_eq!(bidder_quote_borrow, I80F48!(4999940000), I80F48::ONE);
 
     // assert that liqors btc deposits have increased and quote deposits have reduced
     let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_user_index, mint_index);
@@ -147,8 +150,8 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(liqor_quote_deposit);
     // [program/tests/test_liquidation_token_and_token:125] liqor_btc_deposit = 61.4999999939414
     // [program/tests/test_liquidation_token_and_token:126] liqor_quote_deposit = 9999940000.000000011937118
-    assert!(liqor_btc_deposit > I80F48::from_str("60").unwrap());
-    assert!(liqor_quote_deposit < I80F48::from_str("9999941000").unwrap());
+    assert_approx_eq!(liqor_btc_deposit, I80F48!(61.5), I80F48::ONE);
+    assert_approx_eq!(liqor_quote_deposit, I80F48!(9999940000), I80F48::ONE);
 }
 
 #[tokio::test]

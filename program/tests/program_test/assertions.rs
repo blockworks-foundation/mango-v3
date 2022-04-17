@@ -4,6 +4,24 @@ use mango::state::*;
 use solana_program::pubkey::Pubkey;
 use std::collections::HashMap;
 
+#[macro_export]
+// Test equality within an epsilon for I80F48 or float
+macro_rules! assert_approx_eq {
+    ($a:expr, $b:expr, $eps:expr) => {{
+        let (a, b) = (&$a, &$b);
+        let eps = $eps;
+        assert!(
+            (*a - *b).abs() < eps,
+            "assertion failed: `(left !== right)` \
+             (left: `{:?}`, right: `{:?}`, expect diff: `{:?}`, real diff: `{:?}`)",
+            *a,
+            *b,
+            eps,
+            (*a - *b).abs()
+        );
+    }};
+}
+
 #[allow(dead_code)]
 pub fn assert_deposits(
     mango_group_cookie: &MangoGroupCookie,
@@ -26,6 +44,32 @@ pub fn assert_deposits(
             actual_deposit.to_string(),
         );
         assert!(expected_deposit == actual_deposit);
+    }
+}
+
+#[allow(dead_code)]
+pub fn assert_deposits_approx(
+    mango_group_cookie: &MangoGroupCookie,
+    expected_values: (usize, HashMap<usize, I80F48>),
+    epsilon: I80F48,
+) {
+    let (user_index, expected_value) = expected_values;
+    for (mint_index, expected_deposit) in expected_value.iter() {
+        let actual_deposit = &mango_group_cookie.mango_accounts[user_index]
+            .mango_account
+            .get_native_deposit(
+                &mango_group_cookie.mango_cache.root_bank_cache[*mint_index],
+                *mint_index,
+            )
+            .unwrap();
+        println!(
+            "==\nUser: {}, Mint: {}\nExpected deposit: {}, Actual deposit: {}\n==",
+            user_index,
+            mint_index,
+            expected_deposit.to_string(),
+            actual_deposit.to_string(),
+        );
+        assert_approx_eq!(expected_deposit, actual_deposit, epsilon);
     }
 }
 
