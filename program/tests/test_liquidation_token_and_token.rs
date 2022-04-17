@@ -1,13 +1,9 @@
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
-
 use fixed::types::I80F48;
-use fixed::FixedI128;
 use fixed_macro::types::I80F48;
+use mango::state::QUOTE_INDEX;
 use solana_program_test::*;
 
-use mango::state::*;
+use crate::assertions::EPSILON;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
@@ -123,6 +119,7 @@ async fn test_token_and_token_liquidation_v1() {
             liqor_user_index,
             mint_index,  // Asset index
             QUOTE_INDEX, // Liab index
+            I80F48!(10_000),
         )
         .await;
     }
@@ -181,10 +178,10 @@ async fn test_token_and_token_liquidation_v2() {
     // Deposit amounts
     let mut user_deposits = vec![
         (asker_user_index, liq_mint_index, 2.0),
-        (asker_user_index, test.quote_index, 10_000.0),
+        (asker_user_index, test.quote_index, 100_000.0),
         (liqor_user_index, test.quote_index, 10_000.0),
     ];
-    user_deposits.extend(arrange_deposit_all_scenario(&mut test, bidder_user_index, 1.0, 10_000.0));
+    user_deposits.extend(arrange_deposit_all_scenario(&mut test, bidder_user_index, 1.0, 0.0));
 
     // // Perp Orders
     let mut user_perp_orders = vec![];
@@ -222,21 +219,26 @@ async fn test_token_and_token_liquidation_v2() {
     // Step 5: Assert that the order has been matched and the bidder has 3 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let bidder_base_deposit = &mango_group_cookie.mango_accounts[bidder_user_index]
+    let bidder_base_deposit = mango_group_cookie.mango_accounts[bidder_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
+        .get_native_deposit(
+            &mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index],
+            liq_mint_index,
+        )
         .unwrap();
-    let asker_base_deposit = &mango_group_cookie.mango_accounts[asker_user_index]
+    let asker_base_deposit = mango_group_cookie.mango_accounts[asker_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
+        .get_native_deposit(
+            &mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index],
+            liq_mint_index,
+        )
         .unwrap();
-
-    assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(3000000).to_string());
-    assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
+    assert_eq!(bidder_base_deposit, I80F48!(3_000_000));
+    assert_eq!(asker_base_deposit, I80F48::ZERO);
 
     // Step 6: Change the oracle price so that bidder becomes liqee
     for mint_index in 0..num_orders {
-        mango_group_cookie.set_oracle(&mut test, mint_index, 0.0000000001).await;
+        mango_group_cookie.set_oracle(&mut test, mint_index, 1000.0).await;
     }
 
     // Step 7: Force cancel perp orders
@@ -256,6 +258,7 @@ async fn test_token_and_token_liquidation_v2() {
             liqor_user_index,
             liq_mint_index, // Asset index
             QUOTE_INDEX,    // Liab index
+            I80F48!(100_000_000),
         )
         .await;
     }
@@ -263,27 +266,28 @@ async fn test_token_and_token_liquidation_v2() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let bidder_base_deposit = &mango_group_cookie.mango_accounts[bidder_user_index]
+    let bidder_base_net = mango_group_cookie.mango_accounts[bidder_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
-    let liqor_base_deposit = &mango_group_cookie.mango_accounts[liqor_user_index]
+        .get_net(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], liq_mint_index);
+    let liqor_base_net = mango_group_cookie.mango_accounts[liqor_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
+        .get_net(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], liq_mint_index);
 
-    let bidder_base_borrow = &mango_group_cookie.mango_accounts[bidder_user_index]
-        .mango_account
-        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
-    let liqor_base_borrow = &mango_group_cookie.mango_accounts[liqor_user_index]
-        .mango_account
-        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
+    let bidder_quote_net =
+        mango_group_cookie.mango_accounts[bidder_user_index].mango_account.get_net(
+            &mango_group_cookie.mango_cache.root_bank_cache[test.quote_index],
+            test.quote_index,
+        );
+    let liqor_quote_net =
+        mango_group_cookie.mango_accounts[liqor_user_index].mango_account.get_net(
+            &mango_group_cookie.mango_cache.root_bank_cache[test.quote_index],
+            test.quote_index,
+        );
 
-    println!("bidder_base_deposit: {}", bidder_base_deposit.to_string());
-    println!("liqor_base_deposit: {}", liqor_base_deposit.to_string());
-    println!("bidder_base_borrow: {}", bidder_base_borrow.to_string());
-    println!("liqor_base_borrow: {}", liqor_base_borrow.to_string());
+    assert_approx_eq!(bidder_base_net, I80F48!(2487500), EPSILON);
+    assert_approx_eq!(liqor_base_net, I80F48!(512500), EPSILON);
+    assert_eq!(bidder_quote_net, I80F48!(-29500000000));
+    assert_eq!(liqor_quote_net, I80F48!(9500000000));
+
     // TODO: Actually assert here
 }

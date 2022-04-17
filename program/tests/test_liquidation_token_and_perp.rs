@@ -1,17 +1,15 @@
-// Tests related to liquidations
-mod program_test;
-
 use fixed::types::I80F48;
-use fixed::FixedI128;
-use mango::matching::Side;
-use mango::state::*;
+use fixed_macro::types::I80F48;
+use solana_program_test::*;
+
+use mango::state::{AssetType, QUOTE_INDEX};
+use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
+
+// Tests related to liquidations
+mod program_test;
 
 fn get_deposit_for_user(
     mango_group_cookie: &MangoGroupCookie,
@@ -21,17 +19,6 @@ fn get_deposit_for_user(
     mango_group_cookie.mango_accounts[user_index]
         .mango_account
         .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
-        .unwrap()
-}
-
-fn get_borrow_for_user(
-    mango_group_cookie: &MangoGroupCookie,
-    user_index: usize,
-    mint_index: usize,
-) -> I80F48 {
-    mango_group_cookie.mango_accounts[user_index]
-        .mango_account
-        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
         .unwrap()
 }
 
@@ -55,7 +42,6 @@ async fn test_liquidation_token_and_perp_basic() {
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
-    let clock = test.get_clock().await;
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -83,7 +69,7 @@ async fn test_liquidation_token_and_perp_basic() {
         get_deposit_for_user(&mango_group_cookie, bidder_user_index, QUOTE_INDEX);
     // dbg!(bidder_quote_deposit);
     // [program/tests/test_liquidation_token_and_perp.rs:81] bidder_quote_deposit = 10000000000
-    assert!(bidder_quote_deposit == I80F48::from_str("10000000000").unwrap());
+    assert_eq!(bidder_quote_deposit, I80F48!(10000000000));
 
     // Step 2: Place and match perp order
     match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;
@@ -101,8 +87,8 @@ async fn test_liquidation_token_and_perp_basic() {
     // dbg!(bidder_base_position);
     // [program/tests/test_liquidation_token_and_perp.rs:93] bidder_quote_position = -10100000000.000015631940187
     // [program/tests/test_liquidation_token_and_perp.rs:94] bidder_base_position = 10000
-    assert!(bidder_quote_position < I80F48::from_str("-10100000000").unwrap());
-    assert!(bidder_base_position == I80F48::from_str("10000").unwrap());
+    assert_approx_eq!(bidder_quote_position, I80F48!(-10100000000));
+    assert_eq!(bidder_base_position, 10000);
 
     // Step 4: lower oracle price artificially to induce bad health
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 150.0).await;
@@ -128,11 +114,8 @@ async fn test_liquidation_token_and_perp_basic() {
     // dbg!(bidder_base_position);
     // [program/tests/test_liquidation_token_and_perp.rs:123] bidder_quote_position = -10034066000.00001573604891
     // [program/tests/test_liquidation_token_and_perp.rs:124] bidder_base_position = 0
-    assert!(
-        I80F48::from_str("-10100000000").unwrap() < bidder_quote_position
-            && bidder_quote_position < I80F48::from_str("-10034066000").unwrap()
-    );
-    assert!(bidder_base_position == I80F48::from_str("0").unwrap());
+    assert_approx_eq!(bidder_quote_position, I80F48!(-10034066000));
+    assert_eq!(bidder_base_position, 0);
 
     // Step 6: Perform a couple of liquidations
     for _ in 0..6 {
@@ -145,7 +128,7 @@ async fn test_liquidation_token_and_perp_basic() {
             QUOTE_INDEX,
             AssetType::Perp,
             mint_index,
-            I80F48::from_str("100000").unwrap(),
+            I80F48!(100000),
         )
         .await;
     }
@@ -157,14 +140,13 @@ async fn test_liquidation_token_and_perp_basic() {
         get_deposit_for_user(&mango_group_cookie, bidder_user_index, QUOTE_INDEX);
     // dbg!(bidder_quote_deposit);
     // [program/tests/test_liquidation_token_and_perp.rs:155] bidder_quote_deposit = 9999400000.00000001278977
-    assert!(bidder_quote_deposit < I80F48::from_str("9999500000").unwrap());
-
+    assert_approx_eq!(bidder_quote_deposit, I80F48!(9999400000));
     // assert that liqors quote deposit has increased
     let liqor_quote_deposit =
         get_deposit_for_user(&mango_group_cookie, liqor_user_index, QUOTE_INDEX);
     // dbg!(liqor_quote_deposit);
     // [program/tests/test_liquidation_token_and_perp.rs:158] liqor_quote_deposit = 10000599999.99999998721023
-    assert!(liqor_quote_deposit > I80F48::from_str("100005").unwrap());
+    assert_approx_eq!(liqor_quote_deposit, I80F48!(10000600000));
 
     // assert that bidders quote position has reduced
     let bidder_quote_position = mango_group_cookie.mango_accounts[bidder_user_index]
@@ -173,16 +155,13 @@ async fn test_liquidation_token_and_perp_basic() {
         .quote_position;
     // dbg!(bidder_quote_position);
     // [program/tests/test_liquidation_token_and_perp.rs:173] bidder_quote_position = -10033466000.00001573604891
-    assert!(
-        I80F48::from_str("-10034066000").unwrap() < bidder_quote_position
-            && bidder_quote_position < I80F48::from_str("-10033466000").unwrap()
-    );
+    assert_approx_eq!(bidder_quote_position, I80F48!(-10033466000));
 
     // assert that liqor has a quote position now
     let liqor_quote_position =
         mango_group_cookie.mango_accounts[liqor_user_index].mango_account.perp_accounts[mint_index]
             .quote_position;
     // dbg!(liqor_quote_position);
-    // [program/tests/test_liquidation_token_and_perp.rs:164] liqor_quote_position = -60000
-    assert!(liqor_quote_position == I80F48::from_str("-600000").unwrap());
+    // [program/tests/test_liquidation_token_and_perp.rs:164] liqor_quote_position = -600000
+    assert_eq!(liqor_quote_position, I80F48!(-600000));
 }

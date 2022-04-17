@@ -40,8 +40,7 @@ pub async fn withdraw_scenario(
 ) {
     mango_group_cookie.run_keeper(test).await;
 
-    for withdraw in withdraws {
-        let (user_index, mint_index, amount, allow_borrow) = withdraw;
+    for (user_index, mint_index, amount, allow_borrow) in withdraws {
         let mint = test.with_mint(*mint_index);
         let withdraw_amount = (*amount * mint.unit) as u64;
         test.perform_withdraw(
@@ -92,9 +91,8 @@ pub async fn reset_delegate_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
     user_index: usize,
-    delegate_user_index: usize,
 ) {
-    test.perform_reset_delegate(&mango_group_cookie, user_index, delegate_user_index).await;
+    test.perform_reset_delegate(&mango_group_cookie, user_index).await;
 }
 
 #[allow(dead_code)]

@@ -5,7 +5,7 @@ use fixed_macro::types::I80F48;
 use solana_program_test::*;
 
 use mango::processor::get_leverage_weights;
-use mango::state::{MangoGroup, RootBank, SpotMarketInfo, QUOTE_INDEX, ZERO_I80F48};
+use mango::state::{MangoGroup, RootBank, QUOTE_INDEX, ZERO_I80F48};
 use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
@@ -74,7 +74,6 @@ async fn test_change_spot_market_params() {
             &mut test,
             &mango_group_cookie.address,
             &root_bank_pk,
-            0,
             init_leverage,
             maint_leverage,
             liquidation_fee,

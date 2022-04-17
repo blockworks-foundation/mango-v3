@@ -1,12 +1,29 @@
 use crate::*;
 use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
 use mango::state::*;
 use solana_program::pubkey::Pubkey;
 use std::collections::HashMap;
 
-#[macro_export]
 // Test equality within an epsilon for I80F48 or float
+#[allow(dead_code)]
+pub const EPSILON: I80F48 = I80F48!(0.001);
+
+#[macro_export]
 macro_rules! assert_approx_eq {
+    ($a:expr, $b:expr) => {{
+        let (a, b) = (&$a, &$b);
+        assert!(
+            (*a - *b).abs() < EPSILON,
+            "assertion failed: `(left !== right)` \
+             (left: `{:?}`, right: `{:?}`, expect diff: `{:?}`, real diff: `{:?}`)",
+            *a,
+            *b,
+            EPSILON,
+            (*a - *b).abs()
+        );
+    }};
+
     ($a:expr, $b:expr, $eps:expr) => {{
         let (a, b) = (&$a, &$b);
         let eps = $eps;
