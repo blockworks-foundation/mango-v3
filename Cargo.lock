@@ -2421,7 +2421,7 @@ dependencies = [
 [[package]]
 name = "serum_dex"
 version = "0.5.5"
-source = "git+https://github.com/blockworks-foundation/serum-dex.git#7f55a5ef5f7937b74381a3124021a261cd7d7283"
+source = "git+https://github.com/blockworks-foundation/serum-dex.git?rev=7f55a5ef5f7937b74381a3124021a261cd7d7283#7f55a5ef5f7937b74381a3124021a261cd7d7283"
 dependencies = [
  "arrayref",
  "bincode",
