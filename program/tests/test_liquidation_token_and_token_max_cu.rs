@@ -1,15 +1,11 @@
 mod program_test;
 
-use fixed::types::I80F48;
-use fixed::FixedI128;
+use fixed_macro::types::I80F48;
 use mango::state::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
 
 /// for ix liquidate_token_and_token, test max cu usage (that it doesnt exceed 200k),
 /// by having spot open orders accounts, orders,
@@ -130,6 +126,7 @@ async fn test_liquidation_token_and_token_max_cu() {
         asker_user_index,
         mint_index,  // Asset index
         QUOTE_INDEX, // Liab index
+        I80F48!(10_000),
     )
     .await;
 }

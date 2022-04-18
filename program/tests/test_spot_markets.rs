@@ -1,13 +1,17 @@
-mod program_test;
+use std::collections::HashMap;
+
 use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
+use solana_program_test::*;
+
 use mango::processor::get_leverage_weights;
-use mango::state::{MangoGroup, RootBank, SpotMarketInfo, QUOTE_INDEX, ZERO_I80F48};
+use mango::state::{MangoGroup, RootBank, QUOTE_INDEX, ZERO_I80F48};
 use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program_test::*;
-use std::collections::HashMap;
+
+mod program_test;
 
 #[tokio::test]
 async fn test_list_spot_market_on_serum() {
@@ -70,7 +74,6 @@ async fn test_change_spot_market_params() {
             &mut test,
             &mango_group_cookie.address,
             &root_bank_pk,
-            0,
             init_leverage,
             maint_leverage,
             liquidation_fee,
@@ -205,7 +208,7 @@ async fn test_match_spot_order() {
             asker_user_index, // User index
             [
                 (mint_index, ZERO_I80F48),
-                (QUOTE_INDEX, test.to_native(&quote_mint, 9978.0)), // taker fee: 0.22% of base price
+                (QUOTE_INDEX, test.to_native(&quote_mint, 9996.0)), // taker fee: 0.04% of base price
             ]
             .iter()
             .cloned()
@@ -221,7 +224,7 @@ async fn test_match_spot_order() {
             mint_index,        // Mint index
             bidder_user_index, // User index
             [
-                ("quote_free", test.to_native(&quote_mint, 3.0)), // maker fee: -0.03% of base_price
+                ("quote_free", test.to_native(&quote_mint, 0.0)), // maker fee: 0.0% of base_price
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", test.to_native(&mint, base_size)),
                 ("base_locked", ZERO_I80F48),
@@ -234,7 +237,7 @@ async fn test_match_spot_order() {
             mint_index,       // Mint index
             asker_user_index, // User index
             [
-                ("quote_free", test.to_native(&quote_mint, 4.4)), // referrer rebate: 1/5 of taker fee
+                ("quote_free", test.to_native(&quote_mint, 0.8)), // referrer rebate: 1/5 of taker fee
                 ("quote_locked", ZERO_I80F48),
                 ("base_free", ZERO_I80F48),
                 ("base_locked", ZERO_I80F48),
@@ -303,7 +306,7 @@ async fn test_match_and_settle_spot_order() {
             bidder_user_index, // User index
             [
                 (mint_index, test.to_native(&mint, 1.0)),
-                (QUOTE_INDEX, test.to_native(&quote_mint, 3.0)), // serum_dex fee
+                (QUOTE_INDEX, test.to_native(&quote_mint, 0.0)), // serum_dex fee
             ]
             .iter()
             .cloned()
@@ -314,14 +317,8 @@ async fn test_match_and_settle_spot_order() {
             [
                 (mint_index, ZERO_I80F48),
                 // Match the fractional I80F48 result, which is not exactly 9982.4
-                // The result is 10000, minus taker fee (22), plus referrer rebate (4.4).
-                (
-                    QUOTE_INDEX,
-                    test.to_native_fixedint(
-                        &quote_mint,
-                        I80F48::from_num(9982) + I80F48::from_num(4) / 10,
-                    ),
-                ),
+                // The result is 10000, minus taker fee (4), plus referrer rebate (0.8).
+                (QUOTE_INDEX, test.to_native_fixedint(&quote_mint, I80F48!(9996.8))),
             ]
             .iter()
             .cloned()
@@ -329,7 +326,7 @@ async fn test_match_and_settle_spot_order() {
         ),
     ];
     for expected_deposits in expected_deposits_vec {
-        assert_deposits(&mango_group_cookie, expected_deposits);
+        assert_deposits_approx(&mango_group_cookie, expected_deposits, I80F48!(0.0001));
     }
 
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![

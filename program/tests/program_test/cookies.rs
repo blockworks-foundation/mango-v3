@@ -1,8 +1,7 @@
-use fixed::types::I80F48;
-use fixed::FixedI128;
 use std::mem::size_of;
 use std::num::NonZeroU64;
 
+use fixed::types::I80F48;
 use solana_program::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transport::TransportError;
@@ -38,6 +37,8 @@ pub struct MangoGroupCookie {
     pub spot_markets: Vec<SpotMarketCookie>,
 
     pub perp_markets: Vec<PerpMarketCookie>,
+
+    pub root_banks: Vec<RootBank>,
 
     pub current_spot_order_id: u64,
 
@@ -102,14 +103,15 @@ impl MangoGroupCookie {
 
         let mango_group = test.load_account::<MangoGroup>(mango_group_pk).await;
         let mango_cache = test.load_account::<MangoCache>(mango_group.mango_cache).await;
-
+        let quote_root_bank = test.load_account::<RootBank>(quote_root_bank_pk).await;
         MangoGroupCookie {
             address: mango_group_pk,
-            mango_group: mango_group,
-            mango_cache: mango_cache,
+            mango_group,
+            mango_cache,
             mango_accounts: vec![],
             spot_markets: vec![],
             perp_markets: vec![],
+            root_banks: vec![quote_root_bank],
             current_spot_order_id: STARTING_SPOT_ORDER_ID,
             current_perp_order_id: STARTING_PERP_ORDER_ID,
             current_advanced_order_id: STARTING_ADVANCED_ORDER_ID,
@@ -130,6 +132,17 @@ impl MangoGroupCookie {
         self.spot_markets = self.add_spot_markets(test, num_markets, &oracle_pks).await;
         self.perp_markets = self.add_perp_markets(test, num_markets, &oracle_pks).await;
         self.mango_group = test.load_account::<MangoGroup>(self.address).await;
+        self.root_banks = self.add_root_banks(test).await;
+    }
+
+    pub async fn add_root_banks(&mut self, test: &mut MangoProgramTest) -> Vec<RootBank> {
+        let mut root_banks = vec![];
+        for ti in self.mango_group.tokens.iter() {
+            if !ti.is_empty() {
+                root_banks.push(test.load_account::<RootBank>(ti.root_bank).await)
+            }
+        }
+        root_banks
     }
 
     #[allow(dead_code)]
@@ -198,26 +211,23 @@ impl MangoGroupCookie {
 
     #[allow(dead_code)]
     pub async fn run_keeper(&mut self, test: &mut MangoProgramTest) {
-        let mango_group = self.mango_group;
-        let mango_group_pk = self.address;
-        let oracle_pks = mango_group
-            .oracles
-            .iter()
-            .filter(|x| **x != Pubkey::default())
-            .map(|x| *x)
-            .collect::<Vec<Pubkey>>();
-        let perp_market_pks = self.perp_markets.iter().map(|x| x.address).collect::<Vec<Pubkey>>();
+        let mango_group = &self.mango_group;
 
         test.advance_clock().await;
-        test.cache_all_prices(&mango_group, &mango_group_pk, &oracle_pks[..]).await;
-        test.update_all_root_banks(&mango_group, &mango_group_pk).await;
-        for perp_market_index in 0..self.perp_markets.len() {
-            let perp_market = &self.perp_markets[perp_market_index];
-            test.update_funding(self, perp_market).await;
-        }
-        test.cache_all_root_banks(&mango_group, &mango_group_pk).await;
-        test.cache_all_perp_markets(&mango_group, &mango_group_pk, &perp_market_pks).await;
+
+        test.cache_all_prices(
+            mango_group,
+            &self.address,
+            &mango_group.oracles[0..mango_group.num_oracles],
+        )
+        .await;
+
+        test.update_all_root_banks(self, &self.address).await;
+
+        test.update_all_funding(self).await;
+
         self.mango_cache = test.load_account::<MangoCache>(mango_group.mango_cache).await;
+
         for user_index in 0..self.mango_accounts.len() {
             self.mango_accounts[user_index].mango_account =
                 test.load_account::<MangoAccount>(self.mango_accounts[user_index].address).await;
@@ -501,7 +511,6 @@ impl SpotMarketCookie {
         test: &mut MangoProgramTest,
         mango_group_pk: &Pubkey,
         root_bank_pk: &Pubkey,
-        mint_index: usize,
         init_leverage: Option<I80F48>,
         maint_leverage: Option<I80F48>,
         liquidation_fee: Option<I80F48>,
@@ -564,6 +573,7 @@ impl SpotMarketCookie {
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: mango_group_cookie.current_spot_order_id,
             limit: u16::MAX,
+            max_ts: i64::MAX,
         };
 
         test.place_spot_order(&mango_group_cookie, self, user_index, order).await;
@@ -604,6 +614,7 @@ impl SpotMarketCookie {
             order_type: serum_dex::matching::OrderType::Limit,
             client_order_id: mango_group_cookie.current_spot_order_id,
             limit: u16::MAX,
+            max_ts: i64::MAX,
         };
 
         test.place_spot_order_with_delegate(

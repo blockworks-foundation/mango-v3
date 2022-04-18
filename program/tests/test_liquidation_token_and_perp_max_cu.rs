@@ -1,39 +1,12 @@
 // Tests related to liquidations
 mod program_test;
 
-use fixed::types::I80F48;
-use fixed::FixedI128;
-use mango::matching::Side;
-use mango::state::*;
+use fixed_macro::types::I80F48;
+use mango::state::{AssetType, QUOTE_INDEX};
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
-
-fn get_deposit_for_user(
-    mango_group_cookie: &MangoGroupCookie,
-    user_index: usize,
-    mint_index: usize,
-) -> I80F48 {
-    mango_group_cookie.mango_accounts[user_index]
-        .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
-        .unwrap()
-}
-
-fn get_borrow_for_user(
-    mango_group_cookie: &MangoGroupCookie,
-    user_index: usize,
-    mint_index: usize,
-) -> I80F48 {
-    mango_group_cookie.mango_accounts[user_index]
-        .mango_account
-        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[mint_index], mint_index)
-        .unwrap()
-}
 
 /// for ix liquidate_token_and_perp, test max cu usage (that it doesnt exceed 200k),
 /// by having spot open orders accounts, orders,
@@ -42,7 +15,7 @@ fn get_borrow_for_user(
 async fn test_liquidation_token_and_perp_max_cu() {
     let config = MangoProgramTestConfig {
         num_users: 3,
-        compute_limit: 140000, // consumed 130094 of 140000 compute units
+        compute_limit: 160000, // consumed 130094 of 140000 compute units
         ..MangoProgramTestConfig::default()
     };
     let mut test = MangoProgramTest::start_new(&config).await;
@@ -177,7 +150,7 @@ async fn test_liquidation_token_and_perp_max_cu() {
         QUOTE_INDEX,
         AssetType::Perp,
         mint_index,
-        I80F48::from_str("100000").unwrap(),
+        I80F48!(100000),
     )
     .await;
 }

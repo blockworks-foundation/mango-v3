@@ -1,16 +1,10 @@
-mod program_test;
+use solana_program_test::*;
 
-use fixed::types::I80F48;
-use fixed::FixedI128;
-use mango::matching::Side;
-use mango::state::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
+
+mod program_test;
 
 /// for ix liquidate_perp_market, test max cu usage (that it doesnt exceed 200k),
 /// by having spot open orders accounts, orders,
@@ -21,7 +15,7 @@ async fn test_liquidation_perp_market_max_cu() {
         num_users: 3,
         // other ixs (CreateSpotOpenOrders) take more cu than the liquidate ix in this case,
         // the liquidate ix 'consumed 83426 of 200000 compute units'
-        compute_limit: 130_000,
+        compute_limit: 200_000,
         ..MangoProgramTestConfig::default()
     };
     let mut test = MangoProgramTest::start_new(&config).await;

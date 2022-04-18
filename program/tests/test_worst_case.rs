@@ -1,12 +1,15 @@
-mod program_test;
+use std::collections::HashMap;
+
 use fixed::types::I80F48;
-use mango::state::*;
+use solana_program_test::*;
+
+use mango::state::{MAX_NUM_IN_MARGIN_BASKET, ZERO_I80F48};
 use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program_test::*;
-use std::collections::HashMap;
+
+mod program_test;
 
 #[tokio::test]
 async fn test_worst_case_v1() {
@@ -171,23 +174,22 @@ async fn test_worst_case_v2() {
 
     // Step 3: Check that lenders all deposits are not a nice number anymore (> 10 mint)
     mango_group_cookie.run_keeper(&mut test).await;
-    mango_group_cookie.run_keeper(&mut test).await;
 
-    for mint_index in 0..num_orders {
-        let base_mint = test.with_mint(mint_index);
-        let base_deposit_amount = (base_deposit_size * base_mint.unit) as u64;
-        let lender_base_deposit = &mango_group_cookie.mango_accounts[lender_user_index]
-            .mango_account
-            .get_native_deposit(
-                &mango_group_cookie.mango_cache.root_bank_cache[mint_index],
-                mint_index,
-            )
-            .unwrap();
-        // assert_ne!(
-        //     lender_base_deposit.to_string(),
-        //     I80F48::from_num(base_deposit_amount).to_string()
-        // );
-    }
+    // for mint_index in 0..num_orders {
+    //     let base_mint = test.with_mint(mint_index);
+    //     let base_deposit_amount = (base_deposit_size * base_mint.unit) as u64;
+    //     let lender_base_deposit = &mango_group_cookie.mango_accounts[lender_user_index]
+    //         .mango_account
+    //         .get_native_deposit(
+    //             &mango_group_cookie.mango_cache.root_bank_cache[mint_index],
+    //             mint_index,
+    //         )
+    //         .unwrap();
+    //     assert_ne!(
+    //         lender_base_deposit.to_string(),
+    //         I80F48::from_num(base_deposit_amount).to_string()
+    //     );
+    // }
 
     // Step 4: Place spot orders
     place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders).await;

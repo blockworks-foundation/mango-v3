@@ -1,35 +1,11 @@
 mod program_test;
 use fixed::types::I80F48;
-use mango::{matching::*, state::*};
+use mango::matching::{BookSide, OrderType, Side};
 use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
-use std::{mem::size_of, mem::size_of_val};
-
-#[tokio::test]
-async fn test_init_perp_markets() {
-    // === Arrange ===
-    let config = MangoProgramTestConfig::default();
-    let mut test = MangoProgramTest::start_new(&config).await;
-
-    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
-
-    // === Act ===
-    // Need to add oracles first in order to add perp_markets
-    let oracle_pks = test.add_oracles_to_mango_group(&mango_group_cookie.address).await;
-    let perp_market_cookies =
-        mango_group_cookie.add_perp_markets(&mut test, config.num_mints - 1, &oracle_pks).await;
-    mango_group_cookie.mango_group =
-        test.load_account::<MangoGroup>(mango_group_cookie.address).await;
-    // === Assert ===
-    mango_group_cookie.run_keeper(&mut test).await;
-
-    for perp_market_cookie in perp_market_cookies {
-        assert_eq!(size_of_val(&perp_market_cookie.perp_market), size_of::<PerpMarket>());
-    }
-}
 
 #[tokio::test]
 async fn test_place_perp_order() {

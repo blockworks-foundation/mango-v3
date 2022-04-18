@@ -1328,7 +1328,7 @@ impl MangoAccount {
         )
     }
 
-    fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
+    pub fn get_net(&self, bank_cache: &RootBankCache, token_index: usize) -> I80F48 {
         if self.deposits[token_index].is_positive() {
             self.deposits[token_index].checked_mul(bank_cache.deposit_index).unwrap()
         } else if self.borrows[token_index].is_positive() {
@@ -2299,7 +2299,7 @@ pub fn load_market_state<'a>(
             from_bytes_mut(mid)
         });
 
-    state.check_flags()?;
+    state.check_flags(false)?;
     Ok(state)
 }
 

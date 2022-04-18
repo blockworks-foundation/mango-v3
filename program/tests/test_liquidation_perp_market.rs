@@ -1,16 +1,11 @@
 mod program_test;
 
-use fixed::types::I80F48;
-use fixed::FixedI128;
-use mango::matching::Side;
-use mango::state::*;
+use fixed_macro::types::I80F48;
+use program_test::assertions::*;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
 use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
 
 #[tokio::test]
 /// Simple test for ix liquidate_perp_market
@@ -32,7 +27,6 @@ async fn test_liquidation_perp_market_basic() {
     let mint_index: usize = 0;
     let base_price: f64 = 10_000.0;
     let base_size: f64 = 1.0;
-    let clock = test.get_clock().await;
 
     // Set oracles
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
@@ -70,8 +64,8 @@ async fn test_liquidation_perp_market_basic() {
     // dbg!(bidder_base_position);
     // [program/tests/test_liquidation_perp_market.rs:93] bidder_quote_position = -10100000000.000015631940187
     // [program/tests/test_liquidation_perp_market.rs:94] bidder_base_position = 10000
-    assert!(bidder_quote_position < I80F48::from_str("-10100000000").unwrap());
-    assert!(bidder_base_position == I80F48::from_str("10000").unwrap());
+    assert_approx_eq!(bidder_quote_position, I80F48!(-10100000000));
+    assert!(bidder_base_position == I80F48!(10000));
 
     // assert that liqor has no base & quote positions
     let liqor_quote_position =
@@ -84,8 +78,8 @@ async fn test_liquidation_perp_market_basic() {
     // dbg!(liqor_base_position);
     // [program/tests/test_liquidation_perp_market.rs:95] liqor_quote_position = 0
     // [program/tests/test_liquidation_perp_market.rs:96] liqor_base_position = 0
-    assert!(liqor_quote_position == I80F48::from_str("0").unwrap());
-    assert!(liqor_base_position == I80F48::from_str("0").unwrap());
+    assert!(liqor_quote_position.is_zero());
+    assert_eq!(liqor_base_position, 0);
 
     // Step 3: lower oracle price artificially to induce bad health
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 150.0).await;
@@ -119,11 +113,8 @@ async fn test_liquidation_perp_market_basic() {
     // dbg!(bidder_base_position);
     // [program/tests/test_liquidation_perp_market.rs:127] bidder_quote_position = -10061000000.000015572325644
     // [program/tests/test_liquidation_perp_market.rs:128] bidder_base_position = 4000
-    assert!(
-        I80F48::from_str("-10100000000").unwrap() < bidder_quote_position
-            && bidder_quote_position < I80F48::from_str("-10060000000").unwrap()
-    );
-    assert!(bidder_base_position == I80F48::from_str("4000").unwrap());
+    assert_approx_eq!(I80F48!(-10061000000), bidder_quote_position);
+    assert_eq!(bidder_base_position, I80F48!(4000));
 
     // assert that liqor has non zero quote and base positions
     let liqor_quote_position =
@@ -136,6 +127,6 @@ async fn test_liquidation_perp_market_basic() {
     // dbg!(liqor_base_position);
     // [program/tests/test_liquidation_perp_market.rs:129] liqor_quote_position = -39000000.000000059614543
     // [program/tests/test_liquidation_perp_market.rs:130] liqor_base_position = 6000
-    assert!(liqor_quote_position < I80F48::from_str("-39000000").unwrap());
-    assert!(liqor_base_position == I80F48::from_str("6000").unwrap());
+    assert_approx_eq!(liqor_quote_position, I80F48!(-39000000));
+    assert_eq!(liqor_base_position, I80F48!(6000));
 }

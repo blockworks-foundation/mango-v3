@@ -1,16 +1,15 @@
-// Tests related to liquidations
-mod program_test;
-
 use fixed::types::I80F48;
-use fixed::FixedI128;
-use mango::state::*;
+use fixed_macro::types::I80F48;
+use mango::state::QUOTE_INDEX;
+use solana_program_test::*;
+
+use crate::assertions::EPSILON;
 use program_test::cookies::*;
 use program_test::scenarios::*;
 use program_test::*;
-use solana_program_test::*;
-use std::cmp::min;
-use std::ops::Div;
-use std::str::FromStr;
+
+// Tests related to liquidations
+mod program_test;
 
 pub fn get_deposit_for_user(
     mango_group_cookie: &MangoGroupCookie,
@@ -93,9 +92,9 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(bidder_btc_deposit);
     // dbg!(bidder_quote_borrow);
     // [program/tests/test_liquidation_token_and_token:92] bidder_btc_deposit = 1000000
-    // [program/tests/test_liquidation_token_and_token:93] bidder_quote_borrow = 4995500000
-    assert!(bidder_btc_deposit == I80F48::from_str("1000000").unwrap());
-    assert!(bidder_quote_borrow == I80F48::from_str("4995500000").unwrap());
+    // [program/tests/test_liquidation_token_and_token:93] bidder_quote_borrow = 5000000000
+    assert!(bidder_btc_deposit == I80F48!(1000000));
+    assert!(bidder_quote_borrow == I80F48!(5000000000));
 
     // assert that liqor has no btc deposit and full quote deposits
     let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_user_index, mint_index);
@@ -105,8 +104,8 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(liqor_quote_deposit);
     // [program/tests/test_liquidation_token_and_token.rs:101] liqor_btc_deposit = 0
     // [program/tests/test_liquidation_token_and_token.rs:102] liqor_quote_deposit = 10000000000
-    assert!(liqor_btc_deposit == I80F48::from_str("0").unwrap());
-    assert!(liqor_quote_deposit == I80F48::from_str("10000000000").unwrap());
+    assert!(liqor_btc_deposit.is_zero());
+    assert!(liqor_quote_deposit == I80F48!(10000000000));
 
     // Step 5: Change the oracle price so that bidder becomes liqee
     mango_group_cookie.set_oracle(&mut test, mint_index, base_price / 15.0).await;
@@ -120,6 +119,7 @@ async fn test_token_and_token_liquidation_v1() {
             liqor_user_index,
             mint_index,  // Asset index
             QUOTE_INDEX, // Liab index
+            I80F48!(10_000),
         )
         .await;
     }
@@ -135,9 +135,9 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(bidder_btc_deposit);
     // dbg!(bidder_quote_borrow);
     // [program/tests/test_liquidation_token_and_token:123] bidder_btc_deposit = 999938.5000000060586
-    // [program/tests/test_liquidation_token_and_token:124] bidder_quote_borrow = 4995440000.000000011937118
-    assert!(bidder_btc_deposit < I80F48::from_str("999940").unwrap());
-    assert!(bidder_quote_borrow < I80F48::from_str("4995460000").unwrap());
+    // [program/tests/test_liquidation_token_and_token:124] bidder_quote_borrow = 4999940000.000000011937118
+    assert_approx_eq!(bidder_btc_deposit, I80F48!(999938.5), I80F48::ONE);
+    assert_approx_eq!(bidder_quote_borrow, I80F48!(4999940000), I80F48::ONE);
 
     // assert that liqors btc deposits have increased and quote deposits have reduced
     let liqor_btc_deposit = get_deposit_for_user(&mango_group_cookie, liqor_user_index, mint_index);
@@ -147,8 +147,8 @@ async fn test_token_and_token_liquidation_v1() {
     // dbg!(liqor_quote_deposit);
     // [program/tests/test_liquidation_token_and_token:125] liqor_btc_deposit = 61.4999999939414
     // [program/tests/test_liquidation_token_and_token:126] liqor_quote_deposit = 9999940000.000000011937118
-    assert!(liqor_btc_deposit > I80F48::from_str("60").unwrap());
-    assert!(liqor_quote_deposit < I80F48::from_str("9999941000").unwrap());
+    assert_approx_eq!(liqor_btc_deposit, I80F48!(61.5), I80F48::ONE);
+    assert_approx_eq!(liqor_quote_deposit, I80F48!(9999940000), I80F48::ONE);
 }
 
 #[tokio::test]
@@ -178,10 +178,10 @@ async fn test_token_and_token_liquidation_v2() {
     // Deposit amounts
     let mut user_deposits = vec![
         (asker_user_index, liq_mint_index, 2.0),
-        (asker_user_index, test.quote_index, 10_000.0),
+        (asker_user_index, test.quote_index, 100_000.0),
         (liqor_user_index, test.quote_index, 10_000.0),
     ];
-    user_deposits.extend(arrange_deposit_all_scenario(&mut test, bidder_user_index, 1.0, 10_000.0));
+    user_deposits.extend(arrange_deposit_all_scenario(&mut test, bidder_user_index, 1.0, 0.0));
 
     // // Perp Orders
     let mut user_perp_orders = vec![];
@@ -219,21 +219,26 @@ async fn test_token_and_token_liquidation_v2() {
     // Step 5: Assert that the order has been matched and the bidder has 3 BTC in deposits
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let bidder_base_deposit = &mango_group_cookie.mango_accounts[bidder_user_index]
+    let bidder_base_deposit = mango_group_cookie.mango_accounts[bidder_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
+        .get_native_deposit(
+            &mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index],
+            liq_mint_index,
+        )
         .unwrap();
-    let asker_base_deposit = &mango_group_cookie.mango_accounts[asker_user_index]
+    let asker_base_deposit = mango_group_cookie.mango_accounts[asker_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
+        .get_native_deposit(
+            &mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index],
+            liq_mint_index,
+        )
         .unwrap();
-
-    assert_eq!(bidder_base_deposit.to_string(), I80F48::from_num(3000000).to_string());
-    assert_eq!(asker_base_deposit.to_string(), I80F48::from_num(0).to_string());
+    assert_eq!(bidder_base_deposit, I80F48!(3_000_000));
+    assert_eq!(asker_base_deposit, I80F48::ZERO);
 
     // Step 6: Change the oracle price so that bidder becomes liqee
     for mint_index in 0..num_orders {
-        mango_group_cookie.set_oracle(&mut test, mint_index, 0.0000000001).await;
+        mango_group_cookie.set_oracle(&mut test, mint_index, 1000.0).await;
     }
 
     // Step 7: Force cancel perp orders
@@ -253,6 +258,7 @@ async fn test_token_and_token_liquidation_v2() {
             liqor_user_index,
             liq_mint_index, // Asset index
             QUOTE_INDEX,    // Liab index
+            I80F48!(100_000_000),
         )
         .await;
     }
@@ -260,27 +266,28 @@ async fn test_token_and_token_liquidation_v2() {
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
 
-    let bidder_base_deposit = &mango_group_cookie.mango_accounts[bidder_user_index]
+    let bidder_base_net = mango_group_cookie.mango_accounts[bidder_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
-    let liqor_base_deposit = &mango_group_cookie.mango_accounts[liqor_user_index]
+        .get_net(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], liq_mint_index);
+    let liqor_base_net = mango_group_cookie.mango_accounts[liqor_user_index]
         .mango_account
-        .get_native_deposit(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
+        .get_net(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], liq_mint_index);
 
-    let bidder_base_borrow = &mango_group_cookie.mango_accounts[bidder_user_index]
-        .mango_account
-        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
-    let liqor_base_borrow = &mango_group_cookie.mango_accounts[liqor_user_index]
-        .mango_account
-        .get_native_borrow(&mango_group_cookie.mango_cache.root_bank_cache[liq_mint_index], 0)
-        .unwrap();
+    let bidder_quote_net =
+        mango_group_cookie.mango_accounts[bidder_user_index].mango_account.get_net(
+            &mango_group_cookie.mango_cache.root_bank_cache[test.quote_index],
+            test.quote_index,
+        );
+    let liqor_quote_net =
+        mango_group_cookie.mango_accounts[liqor_user_index].mango_account.get_net(
+            &mango_group_cookie.mango_cache.root_bank_cache[test.quote_index],
+            test.quote_index,
+        );
 
-    println!("bidder_base_deposit: {}", bidder_base_deposit.to_string());
-    println!("liqor_base_deposit: {}", liqor_base_deposit.to_string());
-    println!("bidder_base_borrow: {}", bidder_base_borrow.to_string());
-    println!("liqor_base_borrow: {}", liqor_base_borrow.to_string());
+    assert_approx_eq!(bidder_base_net, I80F48!(2487500), EPSILON);
+    assert_approx_eq!(liqor_base_net, I80F48!(512500), EPSILON);
+    assert_eq!(bidder_quote_net, I80F48!(-29500000000));
+    assert_eq!(liqor_quote_net, I80F48!(9500000000));
+
     // TODO: Actually assert here
 }

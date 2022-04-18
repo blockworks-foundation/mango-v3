@@ -544,39 +544,6 @@ impl BookSide {
         self.find_min_max(false)
     }
 
-    #[cfg(test)]
-    fn to_price_quantity_vec(&self, reverse: bool) -> Vec<(i64, i64)> {
-        let mut pqs = vec![];
-        let mut current: NodeHandle = match self.root() {
-            None => return pqs,
-            Some(node_handle) => node_handle,
-        };
-
-        let left = reverse as usize;
-        let right = !reverse as usize;
-        let mut stack = vec![];
-        loop {
-            let root_contents = self.get(current).unwrap(); // should never fail unless book is already fucked
-            match root_contents.case().unwrap() {
-                NodeRef::Inner(inner) => {
-                    stack.push(inner);
-                    current = inner.children[left];
-                }
-                NodeRef::Leaf(leaf) => {
-                    // if you hit leaf then pop stack and go right
-                    // all inner nodes on stack have already been visited to the left
-                    pqs.push((leaf.price(), leaf.quantity));
-                    match stack.pop() {
-                        None => return pqs,
-                        Some(inner) => {
-                            current = inner.children[right];
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     fn find_min_max(&self, find_max: bool) -> Option<NodeHandle> {
         let mut root: NodeHandle = self.root()?;
 
