@@ -1,83 +1,83 @@
-name: UXD Composability testing
+# name: UXD Composability testing
 
-on:
-  push:
-    branches: main
-  pull_request:
-    branches: [main, v*.*]
-  workflow_dispatch:
+# on:
+#   push:
+#     branches: main
+#   pull_request:
+#     branches: [main, v*.*]
+#   workflow_dispatch:
   
-permissions:
-  contents: read
-  pull-requests: write
+# permissions:
+#   contents: read
+#   pull-requests: write
   
-env:
-  CARGO_TERM_COLOR: always
-  SOLANA_VERSION: 1.9.7
-  ANCHOR_VERSION: 0.21.0
-  RUST_TOOLCHAIN: nightly-2021-12-15
+# env:
+#   CARGO_TERM_COLOR: always
+#   SOLANA_VERSION: 1.9.7
+#   ANCHOR_VERSION: 0.21.0
+#   RUST_TOOLCHAIN: nightly-2021-12-15
 
-jobs:
+# jobs:
 
-  cargo-tests:
-    runs-on: ubuntu-latest
-    name: Run tests
-    steps:
-      # Checkout Mango-v3 Repo
-      - uses: actions/checkout@v2
-      # Checkout UXDProtocol/UXD-Program 
-      - name: Checkout @UXDProtocol/UXD-Program, install dependencies
-        uses: actions/checkout@v2
-        with:
-          repository: UXDProtocol/uxd-program
-          ref: main
-          # GitHub's personal access token with access to repository
-          token: ${{ secrets.MANGO_CI_UXD }}
-          persist-credentials: false
-          path: ./uxd-program
-      # Installs Rust
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v1
-      - name: Rust toolchain installation
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          override: true
-          profile: minimal
-      - name: Rust toolchain update
-        run: |
-          rustup update
-      - name: Rust override set nightly 
-        run: |
-          rustup override set nightly
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v1
-      # Install Solana
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config build-essential libudev-dev
-      - name: Cache Solana binaries
-        uses: actions/cache@v2
-        with:
-          path: ~/.cache/solana
-          key: ${{ runner.os }}-${{ env.SOLANA_VERSION }}
-      - name: Install Solana
-        run: |
-          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-          export PATH="/home/runner/.local/share/solana/install/active_release/bin:$PATH"
-          solana --version
-          echo "Generating keypair..."
-          solana-keygen new -o "$HOME/.config/solana/id.json" --no-passphrase --silent
-      # Run tests
-      - name: Move to UXD Program folder and replace the dependency to local mango
-        run: | 
-          cd ./uxd-program
-          sed -i.bak 's/^mango.*/mango={path="..\/..\/..\/program\/",features=["no-entrypoint"]}/' ./programs/uxd/Cargo.toml
-      - name: Run unit tests
-        run: cargo test --manifest-path ./uxd-program/programs/uxd/Cargo.toml
-      - name: Build program
-        run: cargo build-bpf --manifest-path ./uxd-program/programs/uxd/Cargo.toml
-      - name: Run tests
-        run: cargo test-bpf --manifest-path ./uxd-program/programs/uxd/Cargo.toml
+#   cargo-tests:
+#     runs-on: ubuntu-latest
+#     name: Run tests
+#     steps:
+#       # Checkout Mango-v3 Repo
+#       - uses: actions/checkout@v2
+#       # Checkout UXDProtocol/UXD-Program 
+#       - name: Checkout @UXDProtocol/UXD-Program, install dependencies
+#         uses: actions/checkout@v2
+#         with:
+#           repository: UXDProtocol/uxd-program
+#           ref: main
+#           # GitHub's personal access token with access to repository
+#           token: ${{ secrets.MANGO_CI_UXD }}
+#           persist-credentials: false
+#           path: ./uxd-program
+#       # Installs Rust
+#       - name: Cache Rust
+#         uses: Swatinem/rust-cache@v1
+#       - name: Rust toolchain installation
+#         uses: actions-rs/toolchain@v1
+#         with:
+#           toolchain: ${{ env.RUST_TOOLCHAIN }}
+#           override: true
+#           profile: minimal
+#       - name: Rust toolchain update
+#         run: |
+#           rustup update
+#       - name: Rust override set nightly 
+#         run: |
+#           rustup override set nightly
+#       - name: Cache dependencies
+#         uses: Swatinem/rust-cache@v1
+#       # Install Solana
+#       - name: Install Linux dependencies
+#         run: |
+#           sudo apt-get update
+#           sudo apt-get install -y pkg-config build-essential libudev-dev
+#       - name: Cache Solana binaries
+#         uses: actions/cache@v2
+#         with:
+#           path: ~/.cache/solana
+#           key: ${{ runner.os }}-${{ env.SOLANA_VERSION }}
+#       - name: Install Solana
+#         run: |
+#           sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+#           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+#           export PATH="/home/runner/.local/share/solana/install/active_release/bin:$PATH"
+#           solana --version
+#           echo "Generating keypair..."
+#           solana-keygen new -o "$HOME/.config/solana/id.json" --no-passphrase --silent
+#       # Run tests
+#       - name: Move to UXD Program folder and replace the dependency to local mango
+#         run: | 
+#           cd ./uxd-program
+#           sed -i.bak 's/^mango.*/mango={path="..\/..\/..\/program\/",features=["no-entrypoint"]}/' ./programs/uxd/Cargo.toml
+#       - name: Run unit tests
+#         run: cargo test --manifest-path ./uxd-program/programs/uxd/Cargo.toml
+#       - name: Build program
+#         run: cargo build-bpf --manifest-path ./uxd-program/programs/uxd/Cargo.toml
+#       - name: Run tests
+#         run: cargo test-bpf --manifest-path ./uxd-program/programs/uxd/Cargo.toml
