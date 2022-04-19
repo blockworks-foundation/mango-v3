@@ -191,7 +191,7 @@ impl PerpMarketInfo {
 #[repr(C)]
 pub struct MangoGroup {
     pub meta_data: MetaData,
-    pub num_oracles: usize, // incremented every time add_oracle is called
+    pub num_oracles: u64, // incremented every time add_oracle is called
 
     pub tokens: [TokenInfo; MAX_TOKENS],
     pub spot_markets: [SpotMarketInfo; MAX_PAIRS],
@@ -703,7 +703,7 @@ impl MangoCache {
         active_assets: &UserActiveAssets,
         now_ts: u64,
     ) -> MangoResult<()> {
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if active_assets.spot[i] || active_assets.perps[i] {
                 self.price_cache[i].check_valid(&mango_group, now_ts)?;
             }
@@ -741,7 +741,7 @@ impl UserActiveAssets {
     ) -> Self {
         let mut spot = [false; MAX_PAIRS];
         let mut perps = [false; MAX_PAIRS];
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize{
             spot[i] = !mango_group.spot_markets[i].is_empty()
                 && (mango_account.in_margin_basket[i]
                     || !mango_account.deposits[i].is_zero()
@@ -805,7 +805,7 @@ impl HealthCache {
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize{
             if self.active_assets.spot[i] {
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
@@ -839,7 +839,7 @@ impl HealthCache {
         open_orders: &[Option<T>],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize{
             if self.active_assets.spot[i] {
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
@@ -866,7 +866,7 @@ impl HealthCache {
             None => {
                 // apply weights, cache result, return health
                 let mut health = self.quote;
-                for i in 0..mango_group.num_oracles {
+                for i in 0..mango_group.num_oracles as usize {
                     let spot_market_info = &mango_group.spot_markets[i];
                     let perp_market_info = &mango_group.perp_markets[i];
 
@@ -924,7 +924,7 @@ impl HealthCache {
         } else {
             (self.quote, ZERO_I80F48)
         };
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             let spot_market_info = &mango_group.spot_markets[i];
             let perp_market_info = &mango_group.perp_markets[i];
 
@@ -1446,7 +1446,7 @@ impl MangoAccount {
             return false;
         }
 
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if self.deposits[i] > DUST_THRESHOLD {
                 return false;
             }
@@ -1477,7 +1477,7 @@ impl MangoAccount {
             return false;
         }
 
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if self.borrows[i] > DUST_THRESHOLD {
                 return false;
             }
@@ -1510,7 +1510,7 @@ impl MangoAccount {
         packed_open_orders_ais: &'a [AccountInfo<'b>],
     ) -> MangoResult<Vec<Option<&'a AccountInfo<'b>>>> {
         let mut unpacked = vec![None; MAX_PAIRS];
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if self.in_margin_basket[i] {
                 unpacked[i] = Some(self.checked_unpack_open_orders_single(
                     mango_group,
@@ -1526,7 +1526,7 @@ impl MangoAccount {
         mango_group: &MangoGroup,
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> MangoResult {
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if self.in_margin_basket[i] {
                 check_eq!(
                     open_orders_ais[i].key,

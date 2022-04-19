@@ -1889,9 +1889,9 @@ impl MangoProgramTest {
             &liqee_mango_account.spot_open_orders,
             &liqor_mango_account.spot_open_orders,
             asset_type,
-            asset_index,
+            asset_index as u64,
             liab_type,
-            liab_index,
+            liab_index as u64,
             max_liab_transfer,
         )
         .unwrap()];

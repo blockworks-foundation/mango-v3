@@ -109,7 +109,7 @@ pub enum MangoInstruction {
 
     /// DEPRECATED
     AddToBasket {
-        market_index: usize,
+        market_index: u64,
     },
 
     /// DEPRECATED - use Withdraw with allow_borrow = true
@@ -250,7 +250,7 @@ pub enum MangoInstruction {
     },
 
     ConsumeEvents {
-        limit: usize,
+        limit: u64,
     },
 
     /// Cache perp markets
@@ -313,7 +313,7 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected (6):
     SettlePnl {
-        market_index: usize,
+        market_index: u64,
     },
 
     /// DEPRECATED - no longer makes sense
@@ -321,7 +321,7 @@ pub enum MangoInstruction {
     ///
     /// Accounts expected by this instruction (5):
     SettleBorrow {
-        token_index: usize,
+        token_index: u64,
         quantity: u64,
     },
 
@@ -399,9 +399,9 @@ pub enum MangoInstruction {
     /// 7+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidateTokenAndPerp {
         asset_type: AssetType,
-        asset_index: usize,
+        asset_index: u64,
         liab_type: AssetType,
-        liab_index: usize,
+        liab_index: u64,
         max_liab_transfer: I80F48,
     },
 
@@ -454,7 +454,7 @@ pub enum MangoInstruction {
     /// 12+... `[]` liqor_open_orders_ais - Liqor open orders accs
     ResolvePerpBankruptcy {
         // 30
-        liab_index: usize,
+        liab_index: u64,
         max_liab_transfer: I80F48,
     },
 
@@ -1119,7 +1119,7 @@ impl MangoInstruction {
             }
             5 => {
                 let market_index = array_ref![data, 0, 8];
-                MangoInstruction::AddToBasket { market_index: usize::from_le_bytes(*market_index) }
+                MangoInstruction::AddToBasket { market_index: u64::from_le_bytes(*market_index) }
             }
             6 => {
                 let quantity = array_ref![data, 0, 8];
@@ -1196,7 +1196,7 @@ impl MangoInstruction {
             }
             15 => {
                 let data_arr = array_ref![data, 0, 8];
-                MangoInstruction::ConsumeEvents { limit: usize::from_le_bytes(*data_arr) }
+                MangoInstruction::ConsumeEvents { limit: u64::from_le_bytes(*data_arr) }
             }
             16 => MangoInstruction::CachePerpMarkets,
             17 => MangoInstruction::UpdateFunding,
@@ -1222,14 +1222,14 @@ impl MangoInstruction {
             22 => {
                 let data_arr = array_ref![data, 0, 8];
 
-                MangoInstruction::SettlePnl { market_index: usize::from_le_bytes(*data_arr) }
+                MangoInstruction::SettlePnl { market_index: u64::from_le_bytes(*data_arr) }
             }
             23 => {
                 let data = array_ref![data, 0, 16];
                 let (token_index, quantity) = array_refs![data, 8, 8];
 
                 MangoInstruction::SettleBorrow {
-                    token_index: usize::from_le_bytes(*token_index),
+                    token_index: u64::from_le_bytes(*token_index),
                     quantity: u64::from_le_bytes(*quantity),
                 }
             }
@@ -1257,9 +1257,9 @@ impl MangoInstruction {
 
                 MangoInstruction::LiquidateTokenAndPerp {
                     asset_type: AssetType::try_from(u8::from_le_bytes(*asset_type)).unwrap(),
-                    asset_index: usize::from_le_bytes(*asset_index),
+                    asset_index: u64::from_le_bytes(*asset_index),
                     liab_type: AssetType::try_from(u8::from_le_bytes(*liab_type)).unwrap(),
-                    liab_index: usize::from_le_bytes(*liab_index),
+                    liab_index: u64::from_le_bytes(*liab_index),
                     max_liab_transfer: I80F48::from_le_bytes(*max_liab_transfer),
                 }
             }
@@ -1276,7 +1276,7 @@ impl MangoInstruction {
                 let (liab_index, max_liab_transfer) = array_refs![data, 8, 16];
 
                 MangoInstruction::ResolvePerpBankruptcy {
-                    liab_index: usize::from_le_bytes(*liab_index),
+                    liab_index: u64::from_le_bytes(*liab_index),
                     max_liab_transfer: I80F48::from_le_bytes(*max_liab_transfer),
                 }
             }
@@ -2314,7 +2314,7 @@ pub fn consume_events(
     mango_acc_pks.sort();
     let mango_accounts = mango_acc_pks.into_iter().map(|pk| AccountMeta::new(*pk, false));
     let accounts = fixed_accounts.into_iter().chain(mango_accounts).collect();
-    let instr = MangoInstruction::ConsumeEvents { limit };
+    let instr = MangoInstruction::ConsumeEvents { limit: limit as u64 };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -2337,7 +2337,7 @@ pub fn settle_pnl(
         AccountMeta::new_readonly(*root_bank_pk, false),
         AccountMeta::new(*node_bank_pk, false),
     ];
-    let instr = MangoInstruction::SettlePnl { market_index };
+    let instr = MangoInstruction::SettlePnl { market_index: market_index as u64 };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
@@ -2838,9 +2838,9 @@ pub fn liquidate_token_and_perp(
     liqee_open_orders_pks: &[Pubkey],
     liqor_open_orders_pks: &[Pubkey],
     asset_type: AssetType,
-    asset_index: usize,
+    asset_index: u64,
     liab_type: AssetType,
-    liab_index: usize,
+    liab_index: u64,
     max_liab_transfer: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![

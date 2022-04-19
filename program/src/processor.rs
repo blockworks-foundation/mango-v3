@@ -429,7 +429,7 @@ impl Processor {
         let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
         // This will catch the issue if oracle_ai.key == Pubkey::Default
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
+        check!(market_index < mango_group.num_oracles as usize, MangoErrorCode::InvalidParam)?;
 
         // Make sure spot market at this index not already initialized
         check!(
@@ -537,7 +537,7 @@ impl Processor {
             }
         }
 
-        let oracle_index = mango_group.num_oracles;
+        let oracle_index = mango_group.num_oracles as usize;
         mango_group.oracles[oracle_index] = *oracle_ai.key;
         mango_group.num_oracles += 1;
 
@@ -622,7 +622,7 @@ impl Processor {
         let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
         // This will catch the issue if oracle_ai.key == Pubkey::Default
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
+        check!(market_index < mango_group.num_oracles as usize, MangoErrorCode::InvalidParam)?;
 
         // Make sure perp market at this index not already initialized
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
@@ -756,7 +756,7 @@ impl Processor {
         let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
         // This will catch the issue if oracle_ai.key == Pubkey::Default
-        check!(market_index < mango_group.num_oracles, MangoErrorCode::InvalidParam)?;
+        check!(market_index < mango_group.num_oracles as usize, MangoErrorCode::InvalidParam)?;
 
         // Make sure perp market at this index not already initialized
         check!(mango_group.perp_markets[market_index].is_empty(), MangoErrorCode::InvalidParam)?;
@@ -1649,7 +1649,7 @@ impl Processor {
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if mango_account.in_margin_basket[i] {
                 let open_orders = load_open_orders(&open_orders_ais[i])?;
                 mango_account.update_basket(i, &open_orders)?;
@@ -1927,7 +1927,7 @@ impl Processor {
         let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         // Fix the margin basket incase there are empty ones; main benefit is freeing up basket space
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if mango_account.in_margin_basket[i] {
                 let open_orders = load_open_orders(open_orders_ais[i].unwrap())?;
                 mango_account.update_basket(i, &open_orders)?;
@@ -3458,7 +3458,7 @@ impl Processor {
         )?;
 
         // Make sure orders are cancelled for perps and check orders
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if liqee_active_assets.perps[i] {
                 check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
@@ -3676,7 +3676,7 @@ impl Processor {
         )?;
 
         // Make sure orders are cancelled for perps and check orders
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if liqee_active_assets.perps[i] {
                 check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
@@ -4000,7 +4000,7 @@ impl Processor {
         liqor_ma.perp_accounts[market_index].settle_funding(cache);
 
         // Make sure orders are cancelled for perps before liquidation
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             if liqee_active_assets.perps[i] {
                 check!(liqee_ma.perp_accounts[i].has_no_open_orders(), MangoErrorCode::Default)?;
             }
@@ -5564,7 +5564,7 @@ impl Processor {
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
 
-        for i in 0..mango_group.num_oracles {
+        for i in 0..mango_group.num_oracles as usize {
             check_eq!(
                 open_orders_ais[i].key,
                 &mango_account.spot_open_orders[i],
@@ -6349,7 +6349,7 @@ impl Processor {
             }
             MangoInstruction::ConsumeEvents { limit } => {
                 msg!("Mango: ConsumeEvents limit={}", limit);
-                Self::consume_events(program_id, accounts, limit)
+                Self::consume_events(program_id, accounts, limit as usize)
             }
             MangoInstruction::CachePerpMarkets => {
                 msg!("Mango: CachePerpMarkets");
@@ -6366,7 +6366,7 @@ impl Processor {
             }
             MangoInstruction::SettlePnl { market_index } => {
                 msg!("Mango: SettlePnl");
-                Self::settle_pnl(program_id, accounts, market_index)
+                Self::settle_pnl(program_id, accounts, market_index as usize)
             }
             MangoInstruction::SettleBorrow { .. } => {
                 msg!("Mango: SettleBorrow DEPRECATED");
@@ -6396,9 +6396,9 @@ impl Processor {
                     program_id,
                     accounts,
                     asset_type,
-                    asset_index,
+                    asset_index as usize,
                     liab_type,
-                    liab_index,
+                    liab_index as usize,
                     max_liab_transfer,
                 )
             }
@@ -6412,7 +6412,7 @@ impl Processor {
             }
             MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
                 msg!("Mango: ResolvePerpBankruptcy");
-                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)
+                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index as usize, max_liab_transfer)
             }
             MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
                 msg!("Mango: ResolveTokenBankruptcy");
