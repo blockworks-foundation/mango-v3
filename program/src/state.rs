@@ -741,7 +741,7 @@ impl UserActiveAssets {
     ) -> Self {
         let mut spot = [false; MAX_PAIRS];
         let mut perps = [false; MAX_PAIRS];
-        for i in 0..mango_group.num_oracles as usize{
+        for i in 0..mango_group.num_oracles as usize {
             spot[i] = !mango_group.spot_markets[i].is_empty()
                 && (mango_account.in_margin_basket[i]
                     || !mango_account.deposits[i].is_zero()
@@ -805,7 +805,7 @@ impl HealthCache {
         open_orders_ais: &[AccountInfo; MAX_PAIRS],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        for i in 0..mango_group.num_oracles as usize{
+        for i in 0..mango_group.num_oracles as usize {
             if self.active_assets.spot[i] {
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
@@ -839,7 +839,7 @@ impl HealthCache {
         open_orders: &[Option<T>],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
-        for i in 0..mango_group.num_oracles as usize{
+        for i in 0..mango_group.num_oracles as usize {
             if self.active_assets.spot[i] {
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],

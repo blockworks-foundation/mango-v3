@@ -6412,7 +6412,12 @@ impl Processor {
             }
             MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
                 msg!("Mango: ResolvePerpBankruptcy");
-                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index as usize, max_liab_transfer)
+                Self::resolve_perp_bankruptcy(
+                    program_id,
+                    accounts,
+                    liab_index as usize,
+                    max_liab_transfer,
+                )
             }
             MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
                 msg!("Mango: ResolveTokenBankruptcy");
