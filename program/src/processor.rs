@@ -870,16 +870,16 @@ impl Processor {
 
     #[inline(never)]
     /// Deposit instruction
+    /// Note: this won't work if there are more than 1 NodeBanks
     fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], quantity: u64) -> MangoResult<()> {
-        // TODO - consider putting update crank here
         const NUM_FIXED: usize = 9;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,         // read
             mango_account_ai,       // write
             owner_ai,               // read
-            mango_cache_ai,         // read
-            root_bank_ai,           // read
+            mango_cache_ai,         // write
+            root_bank_ai,           // write
             node_bank_ai,           // write
             vault_ai,               // write
             token_prog_ai,          // read

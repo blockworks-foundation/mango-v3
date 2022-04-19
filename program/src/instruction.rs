@@ -55,9 +55,9 @@ pub enum MangoInstruction {
     /// 0. `[]` mango_group_ai - MangoGroup that this mango account is for
     /// 1. `[writable]` mango_account_ai - the mango account for this user
     /// 2. `[signer]` owner_ai - Solana account of owner of the mango account
-    /// 3. `[]` mango_cache_ai - MangoCache
-    /// 4. `[]` root_bank_ai - RootBank owned by MangoGroup
-    /// 5. `[writable]` node_bank_ai - NodeBank owned by RootBank
+    /// 3. `[writable]` mango_cache_ai - MangoCache
+    /// 4. `[writable]` root_bank_ai - RootBank of token being deposited
+    /// 5. `[writable]` node_bank_ai - NodeBank
     /// 6. `[writable]` vault_ai - TokenAccount owned by MangoGroup
     /// 7. `[]` token_prog_ai - acc pointed to by SPL token program id
     /// 8. `[writable]` owner_token_account_ai - TokenAccount owned by user which will be sending the funds
@@ -1770,6 +1770,7 @@ pub fn upgrade_mango_account_v0_v1(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+/// Note: this instruction will not work if/when a new node bank is added
 pub fn deposit(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
@@ -1787,8 +1788,8 @@ pub fn deposit(
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new(*mango_account_pk, false),
         AccountMeta::new_readonly(*owner_pk, true),
-        AccountMeta::new_readonly(*mango_cache_pk, false),
-        AccountMeta::new_readonly(*root_bank_pk, false),
+        AccountMeta::new(*mango_cache_pk, false),
+        AccountMeta::new(*root_bank_pk, false),
         AccountMeta::new(*node_bank_pk, false),
         AccountMeta::new(*vault_pk, false),
         AccountMeta::new_readonly(spl_token::ID, false),
