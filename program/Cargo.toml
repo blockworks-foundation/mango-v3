@@ -11,7 +11,7 @@ devnet = []
 client = ["no-entrypoint"]
 
 [dependencies]
-solana-program = ">=1.9.0, <1.10.0"
+solana-program = ">=1.9.0"
 arrayref = "^0.3.6"
 serde = "^1.0.118"
 bs58 = "0.4.0"
@@ -38,9 +38,9 @@ switchboard-utils = ">=0.1.36"
 anchor-lang = "0.22.1"
 
 [dev-dependencies]
-solana-sdk = ">=1.9.0, <1.10.0"
-solana-program-test = ">=1.9.0, <1.10.0"
-solana-logger = ">=1.9.0, <1.10.0"
+solana-sdk = ">=1.9.0"
+solana-program-test = ">=1.9.0"
+solana-logger = ">=1.9.0"
 tarpc = { version = "^0.26.2", features = ["full"] }
 rand = "0.8.4"
 
