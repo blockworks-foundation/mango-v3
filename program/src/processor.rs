@@ -6017,6 +6017,7 @@ impl Processor {
             dex_prog_ai,            // read
             token_prog_ai,          // read
         ] = array_ref![accounts, 0, NUM_FIXED];
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
@@ -6028,10 +6029,14 @@ impl Processor {
             &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
-        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+        check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
+        let market_index = mango_group
+            .find_spot_market_index(spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        check_open_orders(open_orders_ai, &mango_group.signer_key, &mango_group.dex_program_id)?;
+
         check_eq!(
             &mango_account.spot_open_orders[market_index],
             open_orders_ai.key,
@@ -6067,7 +6072,6 @@ impl Processor {
         }
 
         // Settle funds released by canceling open orders
-        // TODO OPT add a new ForceSettleFunds to save compute in this instruction
         invoke_settle_funds(
             dex_prog_ai,
             spot_market_ai,
@@ -6110,6 +6114,12 @@ impl Processor {
         let quote_change = I80F48::from_num(pre_quote - post_quote);
 
         let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let clock = Clock::get()?;
+        let now_ts = clock.unix_timestamp as u64;
+
+        mango_cache.root_bank_cache[market_index].check_valid(&mango_group, now_ts)?;
+        mango_cache.root_bank_cache[QUOTE_INDEX].check_valid(&mango_group, now_ts)?;
+
         check_eq!(
             &mango_group.tokens[market_index].root_bank,
             base_root_bank_ai.key,
@@ -6138,7 +6148,6 @@ impl Processor {
         let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
         check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        msg!("Cancel all order change {} {}", base_change.to_string(), quote_change.to_string());
         checked_change_net(
             &mango_cache.root_bank_cache[market_index],
             &mut base_node_bank,
@@ -6155,11 +6164,6 @@ impl Processor {
             QUOTE_INDEX,
             quote_change,
         )?;
-        let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
-
-        mango_cache.root_bank_cache[market_index].check_valid(&mango_group, now_ts)?;
-        mango_cache.root_bank_cache[QUOTE_INDEX].check_valid(&mango_group, now_ts)?;
         Ok(())
     }
 
