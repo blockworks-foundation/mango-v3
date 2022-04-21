@@ -2012,7 +2012,7 @@ impl PerpAccount {
                 .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(taker_quote * pmi.quote_lot_size)
-                + I80F48::from_num(asks_quantity.checked_mul(pmi.base_lot_size))
+                + I80F48::from_num(asks_quantity.checked_mul(pmi.base_lot_size).unwrap())
                     .checked_mul(price)
                     .unwrap();
             Ok((base, quote))
