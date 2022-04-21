@@ -1,5 +1,16 @@
 # Mango Program Change Log
 
+## v3.4.4
+Deployed: | Slot:
+1. Update serum-dex package and allow for max_ts param
+2. Allow solana libs beyond 1.10
+3. Update anchor to 0.24.2
+4. Update all packages
+5. Mark RootBank and MangoCache as writable when passed into Deposit instruction
+6. CancelAllSpotOrders
+7. Add more checked math
+8. Clean up tests and speed them up
+
 ## v3.4.3
 Deployed: Apr 3, 2022 at 19:00:13 UTC | Slot: 128,066,047
 1. SettleFees will return Ok and fail silently if not pnl negative and fees accrued positive
