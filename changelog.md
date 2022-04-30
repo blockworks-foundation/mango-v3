@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.4.4
-Deployed: | Slot:
+Deployed: Apr 21, 2022 at 19:16:14 UTC | Slot: 130,742,427
 1. Update serum-dex package and allow for max_ts param
 2. Allow solana libs beyond 1.10
 3. Update anchor to 0.24.2
