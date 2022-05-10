@@ -8,6 +8,7 @@ edition = "2018"
 no-entrypoint = []
 test-bpf = []
 devnet = []
+testnet = []
 client = ["no-entrypoint"]
 
 [dependencies]
