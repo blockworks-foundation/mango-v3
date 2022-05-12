@@ -1838,11 +1838,12 @@ impl Processor {
         )?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
 
-        // If an account is in reduce_only mode, health must only go up
-        check!(
-            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
-            MangoErrorCode::InsufficientFunds
-        )?;
+        if reduce_only {
+            // If an account is in reduce_only mode, health must only go up
+            check!(post_health >= pre_health, MangoErrorCode::InsufficientFunds)?;
+        } else {
+            check!(post_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        }
 
         mango_emit_heap!(OpenOrdersBalanceLog {
             mango_group: *mango_group_ai.key,
@@ -2129,11 +2130,12 @@ impl Processor {
         )?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
 
-        // If an account is in reduce_only mode, health must only go up
-        check!(
-            post_health >= ZERO_I80F48 || (reduce_only && post_health >= pre_health),
-            MangoErrorCode::InsufficientFunds
-        )?;
+        if reduce_only {
+            // If an account is in reduce_only mode, health must only go up
+            check!(post_health >= pre_health, MangoErrorCode::InsufficientFunds)?;
+        } else {
+            check!(post_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
+        }
 
         mango_emit_heap!(OpenOrdersBalanceLog {
             mango_group: *mango_group_ai.key,
