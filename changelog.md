@@ -1,5 +1,13 @@
 # Mango Program Change Log
 
+## v3.4.5
+Deployed: May 12, 2022 at 14:29:36 UTC | Slot: 133,529,809
+1. LUNA perp market has been moved to reduce only. Only orders with reduce_only flag set will go through
+2. LUNA deposits are only allowed if you're offsetting a borrow
+3. LUNA borrows not allowed
+4. LUNA spot orders only allowed if reducing position
+5. LUNA price cache updates ignore confidence interval
+
 ## v3.4.4
 Deployed: Apr 21, 2022 at 19:16:14 UTC | Slot: 130,742,427
 1. Update serum-dex package and allow for max_ts param
