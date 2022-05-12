@@ -21,3 +21,13 @@ pub mod mngo_token {
     #[cfg(not(feature = "devnet"))]
     declare_id!("MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac");
 }
+
+pub mod luna_spot_market {
+    use solana_program::declare_id;
+    declare_id!("HBTu8hNaoT3VyiSSzJYa8jwt9sDGKtJviSwFa11iXdmE");
+}
+
+pub mod luna_perp_market {
+    use solana_program::declare_id;
+    declare_id!("BCJrpvsB2BJtqiDgKVC4N6gyX1y24Jz96C6wMraYmXss");
+}

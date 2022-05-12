@@ -35,7 +35,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{msrm_token, srm_token};
+use crate::ids::{luna_perp_market, msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -2383,6 +2383,9 @@ impl Processor {
             event_queue_ai,     // write
         ] = fixed_ais;
 
+        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
+        check!(!is_luna_market || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
+
         let referrer_mango_account_ai = opt_ais.first();
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
@@ -2519,6 +2522,9 @@ impl Processor {
             event_queue_ai,             // write
             referrer_mango_account_ai,  // write
         ] = fixed_ais;
+
+        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
+        check!(!is_luna_market || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         // If referrer same as user, assume no referrer
         let referrer_mango_account_ai = if referrer_mango_account_ai.key == mango_account_ai.key {
