@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.4.6
+Deployed: | Slot:
+1. Force reduce only for perp market advanced order 
+
 ## v3.4.5
 Deployed: May 12, 2022 at 14:29:36 UTC | Slot: 133,529,809
 1. LUNA perp market has been moved to reduce only. Only orders with reduce_only flag set will go through

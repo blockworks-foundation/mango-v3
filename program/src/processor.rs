@@ -5374,6 +5374,11 @@ impl Processor {
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
+        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
+        if is_luna_market {
+            order.reduce_only = true;
+        }
+
         let mut health_cache = HealthCache::new(active_assets);
         health_cache.init_vals_with_orders_vec(
             &mango_group,
