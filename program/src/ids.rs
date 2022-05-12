@@ -36,3 +36,7 @@ pub mod luna_root_bank {
     use solana_program::declare_id;
     declare_id!("AUU8Zw5ezmZJBuWtMjfTTyP6eowkpNbH5pHh6uY5BHu7");
 }
+pub mod luna_pyth_oracle {
+    use solana_program::declare_id;
+    declare_id!("5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY");
+}
