@@ -475,9 +475,9 @@ impl Processor {
         mango_group.spot_markets[market_index] = SpotMarketInfo {
             spot_market: *spot_market_ai.key,
             maint_asset_weight,
-            init_asset_weight,
+            init_asset_weight_private: init_asset_weight,
             maint_liab_weight,
-            init_liab_weight,
+            init_liab_weight_private: init_liab_weight,
             liquidation_fee,
         };
 
@@ -639,9 +639,9 @@ impl Processor {
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
             maint_asset_weight,
-            init_asset_weight,
+            init_asset_weight_private: init_asset_weight,
             maint_liab_weight,
-            init_liab_weight,
+            init_liab_weight_private: init_liab_weight,
             liquidation_fee,
             maker_fee,
             taker_fee,
@@ -855,9 +855,9 @@ impl Processor {
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: *perp_market_ai.key,
             maint_asset_weight,
-            init_asset_weight,
+            init_asset_weight_private: init_asset_weight,
             maint_liab_weight,
-            init_liab_weight,
+            init_liab_weight_private: init_liab_weight,
             liquidation_fee,
             maker_fee,
             taker_fee,
@@ -1017,7 +1017,7 @@ impl Processor {
         let (init_asset_weight, init_liab_weight) = if let Some(x) = init_leverage {
             get_leverage_weights(x)
         } else {
-            (info.init_asset_weight, info.init_liab_weight)
+            (info.init_asset_weight_private, info.init_liab_weight_private)
         };
 
         let liquidation_fee = liquidation_fee.unwrap_or(info.liquidation_fee);
@@ -1037,9 +1037,9 @@ impl Processor {
         info.taker_fee = taker_fee;
         info.liquidation_fee = liquidation_fee;
         info.maint_asset_weight = maint_asset_weight;
-        info.init_asset_weight = init_asset_weight;
+        info.init_asset_weight_private = init_asset_weight;
         info.maint_liab_weight = maint_liab_weight;
-        info.init_liab_weight = init_liab_weight;
+        info.init_liab_weight_private = init_liab_weight;
 
         let version = version.unwrap_or(perp_market.meta_data.version);
         check!(version == 0 || version == 1, MangoErrorCode::InvalidParam)?;
@@ -3495,7 +3495,7 @@ impl Processor {
         } else {
             let asset_info = &mango_group.spot_markets[asset_index];
             check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-            (ONE_I80F48 + asset_info.liquidation_fee, asset_info.init_asset_weight)
+            (ONE_I80F48 + asset_info.liquidation_fee, asset_info.init_asset_weight_override())
         };
 
         let (liab_fee, init_liab_weight) = if liab_index == QUOTE_INDEX {
@@ -3503,7 +3503,7 @@ impl Processor {
         } else {
             let liab_info = &mango_group.spot_markets[liab_index];
             check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-            (ONE_I80F48 - liab_info.liquidation_fee, liab_info.init_liab_weight)
+            (ONE_I80F48 - liab_info.liquidation_fee, liab_info.init_liab_weight_override())
         };
 
         // Max liab transferred to reach init_health == 0
@@ -3723,7 +3723,7 @@ impl Processor {
             } else {
                 let asset_info = &mango_group.spot_markets[asset_index];
                 check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-                (ONE_I80F48 + asset_info.liquidation_fee, asset_info.init_asset_weight)
+                (ONE_I80F48 + asset_info.liquidation_fee, asset_info.init_asset_weight_override())
             };
 
             let liab_info = &mango_group.perp_markets[liab_index];
@@ -3804,7 +3804,7 @@ impl Processor {
             } else {
                 let liab_info = &mango_group.spot_markets[liab_index];
                 check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-                (ONE_I80F48 - liab_info.liquidation_fee, liab_info.init_liab_weight)
+                (ONE_I80F48 - liab_info.liquidation_fee, liab_info.init_liab_weight_override())
             };
 
             let native_borrows = liqee_ma.get_native_borrow(bank_cache, liab_index)?;
@@ -4035,7 +4035,7 @@ impl Processor {
             check!(base_transfer_request > 0, MangoErrorCode::InvalidParam)?;
 
             let health_per_lot =
-                lot_price * (ONE_I80F48 - pmi.init_asset_weight - pmi.liquidation_fee);
+                lot_price * (ONE_I80F48 - pmi.init_asset_weight_override() - pmi.liquidation_fee);
             let max_transfer = -init_health / health_per_lot;
             let max_transfer: i64 = max_transfer.checked_ceil().unwrap().checked_to_num().unwrap();
 
@@ -4052,7 +4052,7 @@ impl Processor {
             check!(base_transfer_request < 0, MangoErrorCode::InvalidParam)?;
 
             let health_per_lot =
-                lot_price * (ONE_I80F48 - pmi.init_liab_weight + pmi.liquidation_fee);
+                lot_price * (ONE_I80F48 - pmi.init_liab_weight_override() + pmi.liquidation_fee);
             let max_transfer = -init_health / health_per_lot;
             let max_transfer: i64 = max_transfer.checked_floor().unwrap().checked_to_num().unwrap();
 
@@ -5811,7 +5811,9 @@ impl Processor {
 
         // Unwrap params. Default to current state if Option is None
         let (init_asset_weight, init_liab_weight) = init_leverage
-            .map_or((info.init_asset_weight, info.init_liab_weight), |x| get_leverage_weights(x));
+            .map_or((info.init_asset_weight_private, info.init_liab_weight_private), |x| {
+                get_leverage_weights(x)
+            });
         let (maint_asset_weight, maint_liab_weight) = maint_leverage
             .map_or((info.maint_asset_weight, info.maint_liab_weight), |x| get_leverage_weights(x));
 
@@ -5833,9 +5835,9 @@ impl Processor {
         // set the params on MangoGroup SpotMarketInfo
         info.liquidation_fee = liquidation_fee;
         info.maint_asset_weight = maint_asset_weight;
-        info.init_asset_weight = init_asset_weight;
+        info.init_asset_weight_private = init_asset_weight;
         info.maint_liab_weight = maint_liab_weight;
-        info.init_liab_weight = init_liab_weight;
+        info.init_liab_weight_private = init_liab_weight;
 
         check!(version == 0, MangoErrorCode::InvalidParam)?;
 

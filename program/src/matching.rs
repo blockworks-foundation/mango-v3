@@ -2333,9 +2333,9 @@ mod tests {
         mango_group.perp_markets[0] = PerpMarketInfo {
             perp_market: Pubkey::default(),
             maint_asset_weight: I80F48::ONE,
-            init_asset_weight: I80F48::ONE,
+            init_asset_weight_private: I80F48::ONE,
             maint_liab_weight: I80F48::ONE,
-            init_liab_weight: I80F48::ONE,
+            init_liab_weight_private: I80F48::ONE,
             liquidation_fee: I80F48::ZERO,
             maker_fee: I80F48::ZERO,
             taker_fee: I80F48::ZERO,

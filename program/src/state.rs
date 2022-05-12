@@ -154,13 +154,59 @@ impl TokenInfo {
 pub struct SpotMarketInfo {
     pub spot_market: Pubkey,
     pub maint_asset_weight: I80F48,
-    pub init_asset_weight: I80F48,
+    pub init_asset_weight_private: I80F48,
     pub maint_liab_weight: I80F48,
-    pub init_liab_weight: I80F48,
+    pub init_liab_weight_private: I80F48,
     pub liquidation_fee: I80F48,
 }
 
+// serum market account: HBTu8hNaoT3VyiSSzJYa8jwt9sDGKtJviSwFa11iXdmE
+const LUNA_SPOT_MARKET: [u8; 32] = [
+    0xf0, 0x69, 0x36, 0xa9, 0xb7, 0x7c, 0xf2, 0xf3, 0x3e, 0x78, 0xd6, 0x16, 0x67, 0xa5, 0x64, 0x2c,
+    0xbe, 0xf7, 0xd3, 0x83, 0xfa, 0x3f, 0x2c, 0xee, 0x7a, 0x6e, 0xdb, 0xf9, 0x7a, 0x1c, 0x8b, 0xd5,
+];
+
+// perp account: BCJrpvsB2BJtqiDgKVC4N6gyX1y24Jz96C6wMraYmXss
+const LUNA_PERP_MARKET: [u8; 32] = [
+    0x97, 0x7a, 0x73, 0x94, 0x74, 0x05, 0x1d, 0x6f, 0x61, 0x63, 0x26, 0x06, 0xfa, 0x88, 0xfa, 0x28,
+    0xc4, 0xee, 0x18, 0xb0, 0xde, 0xfd, 0xca, 0xce, 0xde, 0xc8, 0xb7, 0xe4, 0x15, 0x62, 0x23, 0x6e,
+];
+
+#[test]
+fn check_manual_markets() {
+    use std::str::FromStr;
+    assert_eq!(
+        &LUNA_SPOT_MARKET,
+        Pubkey::from_str(&"HBTu8hNaoT3VyiSSzJYa8jwt9sDGKtJviSwFa11iXdmE").unwrap().as_ref()
+    );
+    assert_eq!(
+        &LUNA_PERP_MARKET,
+        Pubkey::from_str(&"BCJrpvsB2BJtqiDgKVC4N6gyX1y24Jz96C6wMraYmXss").unwrap().as_ref()
+    );
+}
+
+const LUNA_SPOT_INIT_ASSET_WEIGHT: I80F48 = I80F48!(0.5); // prev 0.8
+const LUNA_SPOT_INIT_LIAB_WEIGHT: I80F48 = I80F48!(1.5); // prev 1.2
+const LUNA_PERP_INIT_ASSET_WEIGHT: I80F48 = I80F48!(0.5); // prev 0.9
+const LUNA_PERP_INIT_LIAB_WEIGHT: I80F48 = I80F48!(1.5); // prev 1.1
+
 impl SpotMarketInfo {
+    pub fn init_asset_weight_override(&self) -> I80F48 {
+        if self.spot_market.as_ref() == &LUNA_SPOT_MARKET {
+            LUNA_SPOT_INIT_ASSET_WEIGHT
+        } else {
+            self.init_asset_weight_private
+        }
+    }
+
+    pub fn init_liab_weight_override(&self) -> I80F48 {
+        if self.spot_market.as_ref() == &LUNA_SPOT_MARKET {
+            LUNA_SPOT_INIT_LIAB_WEIGHT
+        } else {
+            self.init_liab_weight_private
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.spot_market == Pubkey::default()
     }
@@ -171,9 +217,9 @@ impl SpotMarketInfo {
 pub struct PerpMarketInfo {
     pub perp_market: Pubkey, // One of these may be empty
     pub maint_asset_weight: I80F48,
-    pub init_asset_weight: I80F48,
+    pub init_asset_weight_private: I80F48,
     pub maint_liab_weight: I80F48,
-    pub init_liab_weight: I80F48,
+    pub init_liab_weight_private: I80F48,
     pub liquidation_fee: I80F48,
     pub maker_fee: I80F48,
     pub taker_fee: I80F48,
@@ -182,6 +228,22 @@ pub struct PerpMarketInfo {
 }
 
 impl PerpMarketInfo {
+    pub fn init_asset_weight_override(&self) -> I80F48 {
+        if self.perp_market.as_ref() == &LUNA_PERP_MARKET {
+            LUNA_PERP_INIT_ASSET_WEIGHT
+        } else {
+            self.init_asset_weight_private
+        }
+    }
+
+    pub fn init_liab_weight_override(&self) -> I80F48 {
+        if self.perp_market.as_ref() == &LUNA_PERP_MARKET {
+            LUNA_PERP_INIT_LIAB_WEIGHT
+        } else {
+            self.init_liab_weight_private
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.perp_market == Pubkey::default()
     }
@@ -281,7 +343,7 @@ impl MangoGroup {
         } else {
             match health_type {
                 HealthType::Maint => self.spot_markets[token_index].maint_asset_weight,
-                HealthType::Init => self.spot_markets[token_index].init_asset_weight,
+                HealthType::Init => self.spot_markets[token_index].init_asset_weight_override(),
                 HealthType::Equity => ONE_I80F48,
             }
         }
@@ -879,10 +941,10 @@ impl HealthCache {
                                 perp_market_info.maint_liab_weight,
                             ),
                             HealthType::Init => (
-                                spot_market_info.init_asset_weight,
-                                spot_market_info.init_liab_weight,
-                                perp_market_info.init_asset_weight,
-                                perp_market_info.init_liab_weight,
+                                spot_market_info.init_asset_weight_override(),
+                                spot_market_info.init_liab_weight_override(),
+                                perp_market_info.init_asset_weight_override(),
+                                perp_market_info.init_liab_weight_override(),
                             ),
                             HealthType::Equity => (ONE_I80F48, ONE_I80F48, ONE_I80F48, ONE_I80F48),
                         };
@@ -937,10 +999,10 @@ impl HealthCache {
                         perp_market_info.maint_liab_weight,
                     ),
                     HealthType::Init => (
-                        spot_market_info.init_asset_weight,
-                        spot_market_info.init_liab_weight,
-                        perp_market_info.init_asset_weight,
-                        perp_market_info.init_liab_weight,
+                        spot_market_info.init_asset_weight_override(),
+                        spot_market_info.init_liab_weight_override(),
+                        perp_market_info.init_asset_weight_override(),
+                        perp_market_info.init_liab_weight_override(),
                     ),
                     HealthType::Equity => (ONE_I80F48, ONE_I80F48, ONE_I80F48, ONE_I80F48),
                 };
@@ -1016,7 +1078,9 @@ impl HealthCache {
 
                 let (asset_weight, liab_weight) = match health_type {
                     HealthType::Maint => (smi.maint_asset_weight, smi.maint_liab_weight),
-                    HealthType::Init => (smi.init_asset_weight, smi.init_liab_weight),
+                    HealthType::Init => {
+                        (smi.init_asset_weight_override(), smi.init_liab_weight_override())
+                    }
                     HealthType::Equity => (ONE_I80F48, ONE_I80F48),
                 };
 
@@ -1094,7 +1158,7 @@ impl HealthCache {
 
         let (asset_weight, liab_weight) = match health_type {
             HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
-            HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+            HealthType::Init => (pmi.init_asset_weight_override(), pmi.init_liab_weight_override()),
             HealthType::Equity => (ONE_I80F48, ONE_I80F48),
         };
 
@@ -1158,7 +1222,9 @@ impl HealthCache {
 
                 let (asset_weight, liab_weight) = match health_type {
                     HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
-                    HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+                    HealthType::Init => {
+                        (pmi.init_asset_weight_override(), pmi.init_liab_weight_override())
+                    }
                     HealthType::Equity => (ONE_I80F48, ONE_I80F48),
                 };
 
