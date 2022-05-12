@@ -14,12 +14,12 @@ use solana_program::account_info::AccountInfo;
 use solana_program::clock::Clock;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::instruction::{AccountMeta, Instruction};
-use solana_program::msg;
 use solana_program::program_error::ProgramError;
 use solana_program::program_pack::{IsInitialized, Pack};
 use solana_program::pubkey::Pubkey;
 use solana_program::rent::Rent;
 use solana_program::sysvar::Sysvar;
+use solana_program::{msg, pubkey};
 use spl_token::state::{Account, Mint};
 use switchboard_program::FastRoundResultAccountData;
 
@@ -545,6 +545,56 @@ impl Processor {
     }
 
     #[inline(never)]
+    /// Replace LUNA oracle with an emergency stub oracle
+    fn switch_oracle(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        oracle_index: u8,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 3;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai, // write
+            oracle_ai,      // write
+            admin_ai        // read
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        // ignore admin check for setting stub oracles in case we are switching out the luna pyth oracle using the
+        if admin_ai.key == pubkey!("8oD7mjXcQkrAsh6nt78TL4Z9DGnDiWsX29DmdUcxPi4p") {
+            check_eq!(
+                mango_group.oracles[oracle_index],
+                pubkey!("5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY")
+            )?;
+        } else {
+            check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        }
+
+        let oracle_type = determine_oracle_type(oracle_ai);
+        match oracle_type {
+            OracleType::Pyth => {
+                msg!("OracleType:Pyth"); // Do nothing really cause all that's needed is storing the pkey
+            }
+            OracleType::Switchboard => {
+                msg!("OracleType::Switchboard");
+            }
+            OracleType::Stub | OracleType::Unknown => {
+                msg!("OracleType: got unknown or stub");
+                let rent = Rent::get()?;
+                let mut oracle = StubOracle::load_and_init(oracle_ai, program_id, &rent)?;
+                oracle.magic = 0x6F676E4D;
+            }
+        }
+
+        mango_group.oracles[oracle_index] = *oracle_ai.key;
+        mango_group.num_oracles += 1;
+
+        Ok(())
+    }
+
+    #[inline(never)]
     fn set_oracle(program_id: &Pubkey, accounts: &[AccountInfo], price: I80F48) -> MangoResult<()> {
         const NUM_FIXED: usize = 3;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -556,11 +606,16 @@ impl Processor {
 
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(mango_group.find_oracle_index(oracle_ai.key).is_some(), MangoErrorCode::Default)?;
 
         let oracle_type = determine_oracle_type(oracle_ai);
         check_eq!(oracle_type, OracleType::Stub, MangoErrorCode::Default)?;
+
+        // allow a temporary admin key to check setting stub oracles
+        if admin_ai.key == pubkey!("8oD7mjXcQkrAsh6nt78TL4Z9DGnDiWsX29DmdUcxPi4p") {
+        } else {
+            check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        }
 
         let mut oracle = StubOracle::load_mut_checked(oracle_ai, program_id)?;
         oracle.price = price;
