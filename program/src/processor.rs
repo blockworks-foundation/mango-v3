@@ -5439,6 +5439,7 @@ impl Processor {
                     i64::MAX,
                     order.order_type,
                     now_ts,
+                    market_index,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,

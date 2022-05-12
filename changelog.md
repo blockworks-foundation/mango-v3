@@ -2,7 +2,8 @@
 
 ## v3.4.6
 Deployed: | Slot:
-1. Force reduce only for perp market advanced order 
+1. Force reduce only for perp market advanced order
+2. Allow LUNA-PERP bids to be as high as 9c
 
 ## v3.4.5
 Deployed: May 12, 2022 at 14:29:36 UTC | Slot: 133,529,809
