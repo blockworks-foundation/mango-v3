@@ -1753,7 +1753,7 @@ impl Processor {
             // if short, buy quantity may only be as large as position
             let net_pos = mango_account
                 .get_net(&mango_cache.root_bank_cache[market_index], market_index)
-                .checked_add(I80F48::from_num(pre_base))
+                .checked_add(I80F48::from_num(open_orders.native_coin_total))
                 .unwrap();
 
             match order_side {
@@ -2085,7 +2085,7 @@ impl Processor {
             // if short, buy quantity may only be as large as position
             let net_pos = mango_account
                 .get_net(&mango_cache.root_bank_cache[market_index], market_index)
-                .checked_add(I80F48::from_num(pre_base))
+                .checked_add(I80F48::from_num(open_orders.native_coin_total))
                 .unwrap();
 
             match order_side {
