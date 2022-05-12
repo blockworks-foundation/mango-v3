@@ -129,6 +129,10 @@ pub enum MangoErrorCode {
         "MangoErrorCode::InvalidAllowBorrow This market requires allow-borrow flag to be false"
     )]
     InvalidAllowBorrow,
+    #[error(
+        "MangoErrorCode::InvalidOrderInClosingMarket You may only have one open order at a time and it must be reducing position"
+    )]
+    InvalidOrderInClosingMarket,
 
     #[error("MangoErrorCode::Default Check the source code for more info")] // 40
     Default = u32::MAX_VALUE,

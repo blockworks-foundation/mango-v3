@@ -33,7 +33,9 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{luna_perp_market, luna_pyth_oracle, luna_root_bank, msrm_token, srm_token};
+use crate::ids::{
+    luna_perp_market, luna_pyth_oracle, luna_root_bank, luna_spot_market, msrm_token, srm_token,
+};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -1737,7 +1739,50 @@ impl Processor {
         let info = &mango_group.spot_markets[market_index];
 
         // If not post_allowed, then pre_locked may not increase
-        let (post_allowed, pre_locked) = {
+        let is_luna_market = spot_market_ai.key == &luna_spot_market::ID;
+        let (post_allowed, pre_locked) = if is_luna_market {
+            let open_orders = load_open_orders(&open_orders_ais[market_index])?;
+            // only one open order at a time
+            check!(
+                open_orders.free_slot_bits == u128::MAX,
+                MangoErrorCode::InvalidOrderInClosingMarket
+            )?;
+
+            // For markets in close only mode:
+            // if long, sell quantity may only be as large as position
+            // if short, buy quantity may only be as large as position
+            let net_pos = mango_account
+                .get_net(&mango_cache.root_bank_cache[market_index], market_index)
+                .checked_add(I80F48::from_num(pre_base))
+                .unwrap();
+
+            match order_side {
+                serum_dex::matching::Side::Bid => {
+                    check!(
+                        net_pos.is_negative()
+                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        MangoErrorCode::InvalidOrderInClosingMarket
+                    )?;
+
+                    (
+                        order.limit_price.get() < 10,
+                        open_orders.native_pc_total - open_orders.native_pc_free,
+                    )
+                }
+                serum_dex::matching::Side::Ask => {
+                    check!(
+                        net_pos.is_positive()
+                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        MangoErrorCode::InvalidOrderInClosingMarket
+                    )?;
+
+                    (
+                        native_price.checked_div(oracle_price).unwrap() >= info.maint_asset_weight,
+                        open_orders.native_coin_total - open_orders.native_coin_free,
+                    )
+                }
+            }
+        } else {
             let open_orders = load_open_orders(&open_orders_ais[market_index])?;
             match order_side {
                 serum_dex::matching::Side::Bid => (
@@ -2026,7 +2071,50 @@ impl Processor {
         let market_open_orders_ai = open_orders_ais[market_index].unwrap();
 
         // If not post_allowed, then pre_locked may not increase
-        let (post_allowed, pre_locked) = {
+        let is_luna_market = spot_market_ai.key == &luna_spot_market::ID;
+        let (post_allowed, pre_locked) = if is_luna_market {
+            let open_orders = load_open_orders(market_open_orders_ai)?;
+            // only one open order at a time
+            check!(
+                open_orders.free_slot_bits == u128::MAX,
+                MangoErrorCode::InvalidOrderInClosingMarket
+            )?;
+
+            // For markets in close only mode:
+            // if long, sell quantity may only be as large as position
+            // if short, buy quantity may only be as large as position
+            let net_pos = mango_account
+                .get_net(&mango_cache.root_bank_cache[market_index], market_index)
+                .checked_add(I80F48::from_num(pre_base))
+                .unwrap();
+
+            match order_side {
+                serum_dex::matching::Side::Bid => {
+                    check!(
+                        net_pos.is_negative()
+                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        MangoErrorCode::InvalidOrderInClosingMarket
+                    )?;
+
+                    (
+                        order.limit_price.get() < 10,
+                        open_orders.native_pc_total - open_orders.native_pc_free,
+                    )
+                }
+                serum_dex::matching::Side::Ask => {
+                    check!(
+                        net_pos.is_positive()
+                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        MangoErrorCode::InvalidOrderInClosingMarket
+                    )?;
+
+                    (
+                        native_price.checked_div(oracle_price).unwrap() >= info.maint_asset_weight,
+                        open_orders.native_coin_total - open_orders.native_coin_free,
+                    )
+                }
+            }
+        } else {
             let open_orders = load_open_orders(market_open_orders_ai)?;
             match order_side {
                 serum_dex::matching::Side::Bid => (
