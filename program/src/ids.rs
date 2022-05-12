@@ -24,6 +24,9 @@ pub mod mngo_token {
 
 pub mod luna_spot_market {
     use solana_program::declare_id;
+    #[cfg(feature = "devnet")]
+    declare_id!("DW83EpHFywBxCHmyARxwj3nzxJd7MUdSeznmrdzZKNZB"); // BTC/USDC on devnet for testing
+    #[cfg(not(feature = "devnet"))]
     declare_id!("HBTu8hNaoT3VyiSSzJYa8jwt9sDGKtJviSwFa11iXdmE");
 }
 
