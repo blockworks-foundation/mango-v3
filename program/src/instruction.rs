@@ -263,7 +263,12 @@ pub enum MangoInstruction {
     /// Update funding related variables
     UpdateFunding,
 
-    /// Can only be used on a stub oracle in devnet
+    /// Can only be used by admin_key, can only set the value of StubOracles
+    ///
+    /// Accounts expected: 3
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` oracle_ai - oracle
+    /// 2. `[signer]` admin_ai - admin
     SetOracle {
         price: I80F48,
     },
@@ -1057,6 +1062,16 @@ pub enum MangoInstruction {
     CancelAllSpotOrders {
         limit: u8,
     },
+
+    /// Can only be used by admin_key, can only replace the LUNA oracle
+    ///
+    /// Accounts expected: 3
+    /// 0. `[writable]` mango_group_ai - MangoGroup
+    /// 1. `[]` oracle_ai - oracle
+    /// 2. `[signer]` admin_ai - admin
+    SwitchOracle {
+        oracle_index: u8,
+    },
 }
 
 impl MangoInstruction {
@@ -1547,6 +1562,11 @@ impl MangoInstruction {
                 let data_arr = array_ref![data, 0, 1];
                 let limit = data_arr[0];
                 MangoInstruction::CancelAllSpotOrders { limit }
+            }
+            66 => {
+                let data_arr = array_ref![data, 0, 1];
+                let oracle_index = data_arr[0];
+                MangoInstruction::SwitchOracle { oracle_index }
             }
             _ => {
                 return None;

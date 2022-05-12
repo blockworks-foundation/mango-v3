@@ -555,8 +555,8 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai, // write
-            oracle_ai,      // write
-            admin_ai        // read
+            oracle_ai,      // read
+            admin_ai        // read, signer
         ] = accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
@@ -6741,6 +6741,11 @@ impl Processor {
             MangoInstruction::CancelAllSpotOrders { limit } => {
                 msg!("Mango: CancelAllSpotOrders");
                 Self::cancel_all_spot_orders(program_id, accounts, limit)
+            }
+
+            MangoInstruction::SwitchOracle { oracle_index } => {
+                msg!("Mango: SwitchOracle oracle_index={}", oracle_index);
+                Self::switch_oracle(program_id, accounts, oracle_index)
             }
         }
     }
