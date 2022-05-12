@@ -48,7 +48,7 @@ pub const MAX_PERP_OPEN_ORDERS: usize = 64;
 pub const FREE_ORDER_SLOT: u8 = u8::MAX;
 pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
-pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
+pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.50); // filter out pyth prices with conf > 50% of price, note: was previously 10%, raise to 50% due to luna crash
 pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
 
 declare_check_assert_macros!(SourceFileId::State);
