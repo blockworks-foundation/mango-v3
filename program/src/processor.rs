@@ -1726,15 +1726,16 @@ impl Processor {
         };
 
         // Enforce order price limits if the order is a limit order that goes on the book
-        let native_price = {
+        let (coin_lot_size, pc_lot_size) = {
             let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
-
-            I80F48::from_num(order.limit_price.get())
-                .checked_mul(I80F48::from_num(market.pc_lot_size))
-                .unwrap()
-                .checked_div(I80F48::from_num(market.coin_lot_size))
-                .unwrap()
+            (market.coin_lot_size, market.pc_lot_size)
         };
+        let native_price = I80F48::from_num(order.limit_price.get())
+            .checked_mul(I80F48::from_num(pc_lot_size))
+            .unwrap()
+            .checked_div(I80F48::from_num(coin_lot_size))
+            .unwrap();
+
         let oracle_price = mango_cache.get_price(market_index);
         let info = &mango_group.spot_markets[market_index];
 
@@ -1756,11 +1757,11 @@ impl Processor {
                 .checked_add(I80F48::from_num(open_orders.native_coin_total))
                 .unwrap();
 
+            let order_quantity = order.max_coin_qty.get().checked_mul(coin_lot_size).unwrap();
             match order_side {
                 serum_dex::matching::Side::Bid => {
                     check!(
-                        net_pos.is_negative()
-                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_negative() && order_quantity < net_pos.abs().to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
@@ -1771,8 +1772,7 @@ impl Processor {
                 }
                 serum_dex::matching::Side::Ask => {
                     check!(
-                        net_pos.is_positive()
-                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_positive() && order_quantity < net_pos.abs().to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
@@ -2057,15 +2057,16 @@ impl Processor {
         };
 
         // Enforce order price limits if the order is a limit order that goes on the book
-        let native_price = {
-            // Conver the price in
+        let (coin_lot_size, pc_lot_size) = {
             let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
-            I80F48::from_num(order.limit_price.get())
-                .checked_mul(I80F48::from_num(market.pc_lot_size))
-                .unwrap()
-                .checked_div(I80F48::from_num(market.coin_lot_size))
-                .unwrap()
+            (market.coin_lot_size, market.pc_lot_size)
         };
+        let native_price = I80F48::from_num(order.limit_price.get())
+            .checked_mul(I80F48::from_num(pc_lot_size))
+            .unwrap()
+            .checked_div(I80F48::from_num(coin_lot_size))
+            .unwrap();
+
         let oracle_price = mango_cache.get_price(market_index);
         let info = &mango_group.spot_markets[market_index];
         let market_open_orders_ai = open_orders_ais[market_index].unwrap();
@@ -2088,11 +2089,11 @@ impl Processor {
                 .checked_add(I80F48::from_num(open_orders.native_coin_total))
                 .unwrap();
 
+            let order_quantity = order.max_coin_qty.get().checked_mul(coin_lot_size).unwrap();
             match order_side {
                 serum_dex::matching::Side::Bid => {
                     check!(
-                        net_pos.is_negative()
-                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_negative() && order_quantity < net_pos.abs().to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
@@ -2103,8 +2104,7 @@ impl Processor {
                 }
                 serum_dex::matching::Side::Ask => {
                     check!(
-                        net_pos.is_positive()
-                            && order.max_coin_qty.get() < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_positive() && order_quantity < net_pos.abs().to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
