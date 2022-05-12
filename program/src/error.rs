@@ -125,6 +125,10 @@ pub enum MangoErrorCode {
     MaxAccountsReached,
     #[error("MangoErrorCode::ReduceOnlyRequired This market requires reduce-only flag to be set")]
     ReduceOnlyRequired,
+    #[error(
+        "MangoErrorCode::InvalidAllowBorrow This market requires allow-borrow flag to be false"
+    )]
+    InvalidAllowBorrow,
 
     #[error("MangoErrorCode::Default Check the source code for more info")] // 40
     Default = u32::MAX_VALUE,
