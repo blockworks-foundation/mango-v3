@@ -36,6 +36,8 @@ const NODE_SIZE: usize = 88;
 /// This exists as a guard against excessive compute use.
 const DROP_EXPIRED_ORDER_LIMIT: usize = 5;
 
+const LUNA_MARKET_INDEX: usize = 13;
+
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u32)]
 pub enum NodeTag {
@@ -1006,6 +1008,7 @@ impl<'a> Book<'a> {
         max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         now_ts: u64,
+        market_index: usize,
     ) -> MangoResult<(i64, i64, i64, i64)> {
         let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0i64, 0);
 
@@ -1026,7 +1029,15 @@ impl<'a> Book<'a> {
         if post_allowed {
             // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+
+            // Temporary hard coding LUNA price limit for bid to be below 10c.
+            // This is safe because it's already in reduce only mode
+            if market_index == LUNA_MARKET_INDEX && native_price >= market.lot_to_native_price(10) {
+                msg!(
+                    "Posting on book disallowed due to price limits. Price must be below 10 cents."
+                );
+                post_allowed = false;
+            } else if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
                 msg!("Posting on book disallowed due to price limits");
                 post_allowed = false;
             }
@@ -1174,7 +1185,15 @@ impl<'a> Book<'a> {
         if post_allowed {
             // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+
+            // Temporary hard coding LUNA price limit for bid to be below 10c.
+            // This is safe because it's already in reduce only mode
+            if market_index == LUNA_MARKET_INDEX && native_price >= market.lot_to_native_price(10) {
+                msg!(
+                    "Posting on book disallowed due to price limits. Price must be below 10 cents."
+                );
+                post_allowed = false;
+            } else if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
                 msg!("Posting on book disallowed due to price limits");
                 post_allowed = false;
             }
