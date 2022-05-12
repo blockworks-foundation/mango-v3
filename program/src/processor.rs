@@ -33,7 +33,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{luna_perp_market, luna_root_bank, msrm_token, srm_token};
+use crate::ids::{luna_perp_market, luna_pyth_oracle, luna_root_bank, msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -6897,7 +6897,7 @@ pub fn read_oracle(
                 );
 
                 // For luna, to prevent market from getting stuck, just continue using last known price in cache
-                if oracle_ai.key == &luna_perp_market::ID {
+                if oracle_ai.key == &luna_pyth_oracle::ID {
                     return Ok(last_known_price_in_cache);
                 }
 
