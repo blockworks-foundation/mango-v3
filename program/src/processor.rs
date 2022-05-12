@@ -2,14 +2,12 @@ use std::cell::RefMut;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
-use std::str::FromStr;
 use std::vec;
 
 use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
-use fixed_macro::types::I80F48;
 use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
@@ -1155,7 +1153,12 @@ impl Processor {
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
+            if let Ok(price) = read_oracle(
+                &mango_group,
+                oracle_index,
+                oracle_ai,
+                mango_cache.price_cache[oracle_index].price,
+            ) {
                 mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
                 oracle_indexes.push(oracle_index as u64);
@@ -6867,6 +6870,7 @@ pub fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
+    last_known_price_in_cache: I80F48,
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -6879,27 +6883,24 @@ pub fn read_oracle(
             let price_account = pyth_client::load_price(&oracle_data).unwrap();
             let value = I80F48::from_num(price_account.agg.price);
 
-            #[cfg(not(feature = "devnet"))]
-            let pyth_conf_filter = if oracle_ai.key
-                == &Pubkey::from_str("5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY").unwrap()
-            {
-                I80F48!(0.80) // use higher confidence lolerance for LUNA
-            } else {
-                PYTH_CONF_FILTER
-            };
-
             // Filter out bad prices on mainnet
             #[cfg(not(feature = "devnet"))]
             let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
 
             #[cfg(not(feature = "devnet"))]
-            if conf > pyth_conf_filter {
+            if conf > PYTH_CONF_FILTER {
                 msg!(
                     "Pyth conf interval too high; oracle index: {} value: {} conf: {}",
                     token_index,
                     value.to_num::<f64>(),
                     conf.to_num::<f64>()
                 );
+
+                // For luna, to prevent market from getting stuck, just continue using last known price in cache
+                if oracle_ai.key == &luna_perp_market::ID {
+                    return Ok(last_known_price_in_cache);
+                }
+
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
             }
 
