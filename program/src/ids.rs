@@ -31,3 +31,8 @@ pub mod luna_perp_market {
     use solana_program::declare_id;
     declare_id!("BCJrpvsB2BJtqiDgKVC4N6gyX1y24Jz96C6wMraYmXss");
 }
+
+pub mod luna_root_bank {
+    use solana_program::declare_id;
+    declare_id!("AUU8Zw5ezmZJBuWtMjfTTyP6eowkpNbH5pHh6uY5BHu7");
+}

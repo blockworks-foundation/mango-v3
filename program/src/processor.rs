@@ -35,7 +35,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{luna_perp_market, msrm_token, srm_token};
+use crate::ids::{luna_perp_market, luna_root_bank, msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -910,14 +910,30 @@ impl Processor {
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        // deposit into node bank token vault using invoke_transfer
-        invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
-
         // Check validity of root bank cache
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
-        let deposit = I80F48::from_num(quantity);
         root_bank_cache.check_valid(&mango_group, now_ts)?;
+
+        let is_luna_token = root_bank_ai.key == &luna_root_bank::ID;
+        let reduce_only = is_luna_token;
+
+        let quantity = if reduce_only {
+            let max_deposit = mango_account
+                .get_native_borrow(root_bank_cache, token_index)?
+                .checked_floor()
+                .unwrap()
+                .checked_to_num()
+                .unwrap();
+            quantity.min(max_deposit)
+        } else {
+            quantity
+        };
+
+        // deposit into node bank token vault using invoke_transfer
+        invoke_transfer(token_prog_ai, owner_token_account_ai, vault_ai, owner_ai, &[], quantity)?;
+
+        let deposit = I80F48::from(quantity);
 
         checked_change_net(
             root_bank_cache,
@@ -1301,9 +1317,10 @@ impl Processor {
 
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
 
+        let is_luna_token = root_bank_ai.key == &luna_root_bank::ID;
         let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index)?;
         // if quantity is u64 max, interpret as a request to get all
-        let (withdraw, quantity) = if quantity == u64::MAX && !allow_borrow {
+        let (withdraw, quantity) = if (quantity == u64::MAX && !allow_borrow) || is_luna_token {
             let floored = native_deposit.checked_floor().unwrap();
             (floored, floored.to_num::<u64>())
         } else {
