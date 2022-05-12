@@ -1284,6 +1284,9 @@ impl Processor {
         ] = fixed_ais;
         check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
 
+        let is_luna_token = root_bank_ai.key == &luna_root_bank::ID;
+        check!(!(is_luna_token && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
+
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
@@ -1317,10 +1320,9 @@ impl Processor {
 
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
 
-        let is_luna_token = root_bank_ai.key == &luna_root_bank::ID;
         let native_deposit = mango_account.get_native_deposit(root_bank_cache, token_index)?;
         // if quantity is u64 max, interpret as a request to get all
-        let (withdraw, quantity) = if (quantity == u64::MAX && !allow_borrow) || is_luna_token {
+        let (withdraw, quantity) = if quantity == u64::MAX && !allow_borrow {
             let floored = native_deposit.checked_floor().unwrap();
             (floored, floored.to_num::<u64>())
         } else {
