@@ -36,8 +36,6 @@ const NODE_SIZE: usize = 88;
 /// This exists as a guard against excessive compute use.
 const DROP_EXPIRED_ORDER_LIMIT: usize = 5;
 
-const LUNA_MARKET_INDEX: usize = 13;
-
 #[derive(IntoPrimitive, TryFromPrimitive)]
 #[repr(u32)]
 pub enum NodeTag {
@@ -949,6 +947,7 @@ impl<'a> Book<'a> {
         now_ts: u64,
         referrer_mango_account_ai: Option<&AccountInfo>,
         limit: u8,
+        is_luna_market: bool,
     ) -> MangoResult {
         match side {
             Side::Bid => self.new_bid(
@@ -971,6 +970,7 @@ impl<'a> Book<'a> {
                 now_ts,
                 referrer_mango_account_ai,
                 limit,
+                is_luna_market,
             ),
             Side::Ask => self.new_ask(
                 program_id,
@@ -1008,7 +1008,7 @@ impl<'a> Book<'a> {
         max_quote_quantity: i64, // guaranteed to be greater than zero due to initial check
         order_type: OrderType,
         now_ts: u64,
-        market_index: usize,
+        is_luna_market: bool,
     ) -> MangoResult<(i64, i64, i64, i64)> {
         let (mut taker_base, mut taker_quote, mut bids_quantity, asks_quantity) = (0, 0, 0i64, 0);
 
@@ -1032,11 +1032,11 @@ impl<'a> Book<'a> {
 
             // Temporary hard coding LUNA price limit for bid to be below 10c.
             // This is safe because it's already in reduce only mode
-            if market_index == LUNA_MARKET_INDEX && native_price >= market.lot_to_native_price(10) {
-                msg!(
-                    "Posting on book disallowed due to price limits. Price must be below 10 cents."
-                );
-                post_allowed = false;
+            if is_luna_market {
+                if native_price >= market.lot_to_native_price(10) {
+                    msg!("Posting on book disallowed due to price limits. Price must be below 10 cents.");
+                    post_allowed = false;
+                }
             } else if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
                 msg!("Posting on book disallowed due to price limits");
                 post_allowed = false;
@@ -1164,6 +1164,7 @@ impl<'a> Book<'a> {
         now_ts: u64,
         referrer_mango_account_ai: Option<&AccountInfo>,
         mut limit: u8, // max number of FillEvents allowed; guaranteed to be greater than 0
+        is_luna_market: bool,
     ) -> MangoResult {
         // TODO proper error handling
         // TODO handle the case where we run out of compute (right now just fails)
@@ -1188,11 +1189,11 @@ impl<'a> Book<'a> {
 
             // Temporary hard coding LUNA price limit for bid to be below 10c.
             // This is safe because it's already in reduce only mode
-            if market_index == LUNA_MARKET_INDEX && native_price >= market.lot_to_native_price(10) {
-                msg!(
-                    "Posting on book disallowed due to price limits. Price must be below 10 cents."
-                );
-                post_allowed = false;
+            if is_luna_market {
+                if native_price >= market.lot_to_native_price(10) {
+                    msg!("Posting on book disallowed due to price limits. Price must be below 10 cents.");
+                    post_allowed = false;
+                }
             } else if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
                 msg!("Posting on book disallowed due to price limits");
                 post_allowed = false;
@@ -2407,6 +2408,7 @@ mod tests {
                     now_ts,
                     None,
                     u8::MAX,
+                    false,
                 )
                 .unwrap();
                 mango_account.orders[0]

@@ -2560,6 +2560,13 @@ impl Processor {
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
+            } else if is_luna_market {
+                // Take into account outstanding open orders as well
+                let on_orders = match side {
+                    Side::Bid => mango_account.perp_accounts[market_index].bids_quantity,
+                    Side::Ask => mango_account.perp_accounts[market_index].asks_quantity,
+                };
+                base_pos.abs().checked_sub(on_orders).unwrap().min(quantity).max(0)
             } else {
                 base_pos.abs().min(quantity)
             }
@@ -2592,6 +2599,7 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             u8::MAX,
+            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2724,6 +2732,13 @@ impl Processor {
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
+            } else if is_luna_market {
+                // Take into account outstanding open orders as well
+                let on_orders = match side {
+                    Side::Bid => mango_account.perp_accounts[market_index].bids_quantity,
+                    Side::Ask => mango_account.perp_accounts[market_index].asks_quantity,
+                };
+                base_pos.abs().checked_sub(on_orders).unwrap().min(max_base_quantity).max(0)
             } else {
                 base_pos.abs().min(max_base_quantity)
             }
@@ -2755,6 +2770,7 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             limit,
+            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -5527,7 +5543,7 @@ impl Processor {
                     i64::MAX,
                     order.order_type,
                     now_ts,
-                    market_index,
+                    is_luna_market,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,
@@ -5586,6 +5602,7 @@ impl Processor {
                     now_ts,
                     None,
                     u8::MAX,
+                    is_luna_market,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing

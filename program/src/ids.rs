@@ -29,6 +29,9 @@ pub mod luna_spot_market {
 
 pub mod luna_perp_market {
     use solana_program::declare_id;
+    #[cfg(feature = "devnet")]
+    declare_id!("CuYEjB3vneuzpimL5iZXeiQRHuDwRefcVbJSsBPoxgwF");
+    #[cfg(not(feature = "devnet"))]
     declare_id!("BCJrpvsB2BJtqiDgKVC4N6gyX1y24Jz96C6wMraYmXss");
 }
 
