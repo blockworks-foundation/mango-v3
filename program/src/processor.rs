@@ -1761,7 +1761,7 @@ impl Processor {
             match order_side {
                 serum_dex::matching::Side::Bid => {
                     check!(
-                        net_pos.is_negative() && order_quantity < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_negative() && order_quantity <= net_pos.abs().to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
@@ -1772,7 +1772,7 @@ impl Processor {
                 }
                 serum_dex::matching::Side::Ask => {
                     check!(
-                        net_pos.is_positive() && order_quantity < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_positive() && order_quantity <= net_pos.to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
@@ -2093,7 +2093,7 @@ impl Processor {
             match order_side {
                 serum_dex::matching::Side::Bid => {
                     check!(
-                        net_pos.is_negative() && order_quantity < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_negative() && order_quantity <= net_pos.abs().to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
@@ -2104,7 +2104,7 @@ impl Processor {
                 }
                 serum_dex::matching::Side::Ask => {
                     check!(
-                        net_pos.is_positive() && order_quantity < net_pos.abs().to_num::<u64>(),
+                        net_pos.is_positive() && order_quantity <= net_pos.to_num::<u64>(),
                         MangoErrorCode::InvalidOrderInClosingMarket
                     )?;
 
