@@ -33,9 +33,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{
-    luna_perp_market, luna_pyth_oracle, luna_root_bank, luna_spot_market, msrm_token, srm_token,
-};
+use crate::ids::{luna_perp_market, luna_pyth_oracle, luna_root_bank, msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -1703,9 +1701,8 @@ impl Processor {
             }
         }
 
-        // This means health must only go up -- forced for LUNA
-        let is_luna_market = spot_market_ai.key == &luna_spot_market::ID;
-        let reduce_only = pre_health < ZERO_I80F48 || is_luna_market;
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
 
         // TODO maybe check that root bank was updated recently
         // TODO maybe check oracle was updated recently
@@ -1993,9 +1990,8 @@ impl Processor {
             }
         }
 
-        // This means health must only go up -- forced for LUNA
-        let is_luna_market = spot_market_ai.key == &luna_spot_market::ID;
-        let reduce_only = pre_health < ZERO_I80F48 || is_luna_market;
+        // This means health must only go up
+        let reduce_only = pre_health < ZERO_I80F48;
 
         // TODO maybe check that root bank was updated recently
         // TODO maybe check oracle was updated recently
