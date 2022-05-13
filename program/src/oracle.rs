@@ -63,7 +63,7 @@ impl StubOracle {
 pub fn determine_oracle_type(account: &AccountInfo) -> OracleType {
     let borrowed = account.data.borrow();
     let magic = u32::from_le_bytes(*array_ref![borrowed, 0, 4]);
-    if magic == pyth_client::MAGIC {
+    if magic == pyth_sdk_solana::state::MAGIC {
         OracleType::Pyth
     } else if borrowed.len() == 1000 {
         OracleType::Switchboard

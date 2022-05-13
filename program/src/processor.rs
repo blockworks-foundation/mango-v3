@@ -6881,13 +6881,13 @@ pub fn read_oracle(
 
     let price = match oracle_type {
         OracleType::Pyth => {
-            let oracle_data = oracle_ai.try_borrow_data()?;
-            let price_account = pyth_client::load_price(&oracle_data).unwrap();
-            let value = I80F48::from_num(price_account.agg.price);
+            let price_feed = pyth_sdk_solana::load_price_feed_from_account_info(oracle_ai).unwrap();
+            let price = price_feed.get_current_price().unwrap();
+            let value = I80F48::from_num(price.price);
 
             // Filter out bad prices on mainnet
             #[cfg(not(feature = "devnet"))]
-            let conf = I80F48::from_num(price_account.agg.conf).checked_div(value).unwrap();
+            let conf = I80F48::from_num(price.conf).checked_div(value).unwrap();
 
             #[cfg(not(feature = "devnet"))]
             if conf > PYTH_CONF_FILTER {
@@ -6907,7 +6907,7 @@ pub fn read_oracle(
             }
 
             let decimals = quote_decimals
-                .checked_add(price_account.expo)
+                .checked_add(price.expo)
                 .unwrap()
                 .checked_sub(base_decimals)
                 .unwrap();
