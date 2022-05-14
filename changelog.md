@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.4.7
+Deployed: | Slot:
+1. Fix overflow in SettlePnl
+
 ## v3.4.6
 Deployed: May 13, 2022 at 17:09:10 UTC | Slot: 133,663,345
 1. Force reduce only for perp market advanced order
