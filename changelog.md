@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.4.7
-Deployed: | Slot:
+Deployed: May 14, 2022 at 21:27:20 UTC | Slot: 133,813,868
 1. Fix overflow in SettlePnl
 2. Fix 0 base quantity trade for perps
 
