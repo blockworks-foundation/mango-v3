@@ -1250,6 +1250,11 @@ impl<'a> Book<'a> {
             }
 
             let max_match_by_quote = rem_quote_quantity / best_ask_price;
+            if max_match_by_quote == 0 {
+                // Done matching because we reached max quote quantity
+                post_allowed = false;
+                break;
+            }
             let match_quantity = rem_base_quantity.min(best_ask.quantity).min(max_match_by_quote);
             let done = match_quantity == max_match_by_quote || match_quantity == rem_base_quantity;
 
@@ -1505,6 +1510,11 @@ impl<'a> Book<'a> {
             }
 
             let max_match_by_quote = rem_quote_quantity / best_bid_price;
+            if max_match_by_quote == 0 {
+                // Done matching because we reached max quote quantity
+                post_allowed = false;
+                break;
+            }
             let match_quantity = rem_base_quantity.min(best_bid.quantity).min(max_match_by_quote);
             let done = match_quantity == max_match_by_quote || match_quantity == rem_base_quantity;
 

@@ -3,6 +3,7 @@
 ## v3.4.7
 Deployed: | Slot:
 1. Fix overflow in SettlePnl
+2. Fix 0 base quantity trade for perps
 
 ## v3.4.6
 Deployed: May 13, 2022 at 17:09:10 UTC | Slot: 133,663,345
