@@ -3111,7 +3111,9 @@ impl Processor {
         let b_pnl: I80F48 = b.quote_position - new_quote_pos_b;
 
         // pnl must be opposite signs for there to be a settlement
-        if a_pnl * b_pnl > 0 {
+        if !((a_pnl.is_positive() && b_pnl.is_negative())
+            || (a_pnl.is_negative() && b_pnl.is_positive()))
+        {
             return Ok(());
         }
 
