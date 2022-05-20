@@ -1057,6 +1057,13 @@ pub enum MangoInstruction {
     CancelAllSpotOrders {
         limit: u8,
     },
+
+    /// Replaces a spot order on the Serum Dex
+    /// Accounts expected by this instruction are the same as PlaceSpotOrder2
+    EditSpotOrder {
+        cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+        new_order: serum_dex::instruction::NewOrderInstructionV3,
+    },
 }
 
 impl MangoInstruction {
@@ -1547,6 +1554,19 @@ impl MangoInstruction {
                 let data_arr = array_ref![data, 0, 1];
                 let limit = data_arr[0];
                 MangoInstruction::CancelAllSpotOrders { limit }
+            }
+            66 => {
+                let (cancel_array, new_order_array) = array_refs![data, 20; ..;];
+                let fields = array_refs![cancel_array, 4, 16];
+                let side = match u32::from_le_bytes(*fields.0) {
+                    0 => serum_dex::matching::Side::Bid,
+                    1 => serum_dex::matching::Side::Ask,
+                    _ => return None,
+                };
+                let order_id = u128::from_le_bytes(*fields.1);
+                let cancel_order = serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
+                let new_order = unpack_dex_new_order_v3(new_order_array)?;
+                MangoInstruction::EditSpotOrder { cancel_order, new_order }
             }
             _ => {
                 return None;
@@ -2952,4 +2972,73 @@ fn serialize_option_fixed_width<S: serde::Serializer, T: Sized + Default + Seria
         }
     };
     tup.end()
+}
+
+pub fn edit_spot_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    dex_request_queue_pk: &Pubkey,
+    dex_event_queue_pk: &Pubkey,
+    dex_base_pk: &Pubkey,
+    dex_quote_pk: &Pubkey,
+    base_root_bank_pk: &Pubkey,
+    base_node_bank_pk: &Pubkey,
+    base_vault_pk: &Pubkey,
+    quote_root_bank_pk: &Pubkey,
+    quote_node_bank_pk: &Pubkey,
+    quote_vault_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    dex_signer_pk: &Pubkey,
+    msrm_or_srm_vault_pk: &Pubkey,
+    open_orders_pks: &[Pubkey], // caller only need to pass in open_orders_pks that are in margin basket
+    affected_market_open_orders_index: usize, // used to determine which of the open orders accounts should be passed in write
+    cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+    new_order: serum_dex::instruction::NewOrderInstructionV3,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*dex_request_queue_pk, false),
+        AccountMeta::new(*dex_event_queue_pk, false),
+        AccountMeta::new(*dex_base_pk, false),
+        AccountMeta::new(*dex_quote_pk, false),
+        AccountMeta::new_readonly(*base_root_bank_pk, false),
+        AccountMeta::new(*base_node_bank_pk, false),
+        AccountMeta::new(*base_vault_pk, false),
+        AccountMeta::new_readonly(*quote_root_bank_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_vault_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(*dex_signer_pk, false),
+        AccountMeta::new_readonly(*msrm_or_srm_vault_pk, false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().enumerate().map(|(i, pk)| {
+        if i == affected_market_open_orders_index {
+            AccountMeta::new(*pk, false)
+        } else {
+            AccountMeta::new_readonly(*pk, false)
+        }
+    }));
+
+    println!("pack");
+    let instr = MangoInstruction::EditSpotOrder { cancel_order, new_order };
+    let data = instr.pack();
+    println!("pack ok");
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
 }

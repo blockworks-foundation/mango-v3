@@ -489,3 +489,117 @@ async fn test_cancel_all_spot_orders() {
     assert_eq!(deposit_base, deposit_base_after_cancel);
     assert_eq!(deposit_quote, deposit_quote_after_cancel);
 }
+
+#[tokio::test]
+async fn test_edit_spot_order() {
+    let config = MangoProgramTestConfig::default_two_mints();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let user_index: usize = 0;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
+    let mint = test.with_mint(mint_index);
+    let quote_mint = test.quote_mint;
+    let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Deposit amounts
+    let user_deposits =
+        vec![(user_index, test.quote_index, base_price * 10.0), (user_index, mint_index, 10.0)];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+    let deposit_base = test.with_mango_account_deposit(&mango_account_pk, mint_index).await;
+    let deposit_quote = test.with_mango_account_deposit(&mango_account_pk, test.quote_index).await;
+
+    // Step 2: Place spot order
+
+    // Spot Orders
+    let user_spot_orders1 =
+        vec![(user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price)];
+
+    place_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_orders1).await;
+    mango_group_cookie.run_keeper(&mut test).await;
+    // === Assert ===
+
+    let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![(
+        mint_index, // Mint index
+        user_index, // User index
+        [
+            ("quote_free", ZERO_I80F48),
+            ("quote_locked", test.to_native(&quote_mint, base_price * base_size)),
+            ("base_free", ZERO_I80F48),
+            ("base_locked", ZERO_I80F48),
+        ]
+        .iter()
+        .cloned()
+        .collect(),
+    )];
+    for expected_values in expected_values_vec {
+        assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
+    }
+
+    // check deposits
+    let deposit_base_after_order =
+        test.with_mango_account_deposit(&mango_account_pk, mint_index).await;
+    let deposit_quote_after_order =
+        test.with_mango_account_deposit(&mango_account_pk, test.quote_index).await;
+
+    assert_eq!(deposit_base - deposit_base_after_order, 0);
+    assert_eq!(deposit_quote - deposit_quote_after_order, test.to_native(&quote_mint, base_price * base_size));
+
+    // Step 3: Edit the order
+    let oo = test.get_oo(&mango_group_cookie, mint_index, user_index).await;
+
+    let user_spot_order2 = (
+        user_index,
+        mint_index,
+        serum_dex::matching::Side::Bid,
+        base_size,
+        base_price * 0.50,
+    );
+
+    edit_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_order2, oo.orders[0]).await;
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![(
+        mint_index, // Mint index
+        user_index, // User index
+        [
+            ("quote_free", ZERO_I80F48),
+            ("quote_locked", test.to_native(&quote_mint, base_price * 0.50 * base_size)),
+            ("base_free", ZERO_I80F48),
+            ("base_locked", ZERO_I80F48),
+        ]
+        .iter()
+        .cloned()
+        .collect(),
+    )];
+
+    for expected_values in expected_values_vec {
+        assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
+    }
+    // check deposits
+    let deposit_base_after_edit =
+        test.with_mango_account_deposit(&mango_account_pk, mint_index).await;
+    let deposit_quote_after_edit =
+        test.with_mango_account_deposit(&mango_account_pk, test.quote_index).await;
+
+    println!("{}, {}, {}", deposit_base, deposit_base_after_edit, deposit_base_after_order);
+    println!("{}, {}, {}", deposit_quote, deposit_quote_after_edit, deposit_quote_after_order);
+
+    assert_eq!(deposit_base - deposit_base_after_edit, 0);
+    assert_eq!(deposit_quote_after_edit - deposit_quote_after_order, test.to_native(&quote_mint, base_price * base_size * 0.50));
+}
+
+// #[tokio::test]
+// async fn test_edit_spot_order_will_have_some_other_behavior() {
+// }

@@ -626,6 +626,51 @@ impl SpotMarketCookie {
         )
         .await
     }
+
+    #[allow(dead_code)]
+    pub async fn edit_order(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_cookie: &mut MangoGroupCookie,
+        user_index: usize,
+        side: serum_dex::matching::Side,
+        size: f64,
+        price: f64,
+        cancel_order_id: u128,
+    ) {
+        let limit_price = test.price_number_to_lots(&self.mint, price);
+        let max_coin_qty = test.base_size_number_to_lots(&self.mint, size);
+        let max_native_pc_qty_including_fees = match side {
+            serum_dex::matching::Side::Bid => {
+                self.mint.quote_lot as u64 * limit_price * max_coin_qty
+            }
+            serum_dex::matching::Side::Ask => std::u64::MAX,
+        };
+
+        let cancel_order = serum_dex::instruction::CancelOrderInstructionV2 {
+            side, 
+            order_id: cancel_order_id,
+        };
+
+        let new_order = serum_dex::instruction::NewOrderInstructionV3 {
+            side, 
+            limit_price: NonZeroU64::new(limit_price).unwrap(),
+            max_coin_qty: NonZeroU64::new(max_coin_qty).unwrap(),
+            max_native_pc_qty_including_fees: NonZeroU64::new(max_native_pc_qty_including_fees)
+                .unwrap(),
+            self_trade_behavior: serum_dex::instruction::SelfTradeBehavior::DecrementTake,
+            order_type: serum_dex::matching::OrderType::Limit,
+            client_order_id: mango_group_cookie.current_spot_order_id,
+            limit: u16::MAX,
+            max_ts: i64::MAX,
+        };
+
+        test.edit_spot_order(&mango_group_cookie, self, user_index, cancel_order, new_order).await;
+
+        mango_group_cookie.mango_accounts[user_index].mango_account = test
+            .load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address)
+            .await;
+    }
 }
 
 pub struct PlacePerpOptions {

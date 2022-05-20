@@ -195,3 +195,21 @@ pub async fn match_perp_order_scenario(
     }
     mango_group_cookie.run_keeper(test).await;
 }
+
+#[allow(dead_code)]
+pub async fn edit_spot_order_scenario(
+    test: &mut MangoProgramTest,
+    mango_group_cookie: &mut MangoGroupCookie,
+    spot_order: &(usize, usize, serum_dex::matching::Side, f64, f64),
+    cancel_order_id: u128,
+) {
+    mango_group_cookie.run_keeper(test).await;
+
+    let (user_index, market_index, order_side, order_size, order_price) = *spot_order;
+    let mut spot_market_cookie = mango_group_cookie.spot_markets[market_index];
+    spot_market_cookie
+        .edit_order(test, mango_group_cookie, user_index, order_side, order_size, order_price, cancel_order_id)
+        .await;
+
+    mango_group_cookie.users_with_spot_event[market_index].push(user_index);
+}
