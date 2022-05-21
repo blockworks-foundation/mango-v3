@@ -554,20 +554,25 @@ async fn test_edit_spot_order() {
         test.with_mango_account_deposit(&mango_account_pk, test.quote_index).await;
 
     assert_eq!(deposit_base - deposit_base_after_order, 0);
-    assert_eq!(deposit_quote - deposit_quote_after_order, test.to_native(&quote_mint, base_price * base_size));
+    assert_eq!(
+        deposit_quote - deposit_quote_after_order,
+        test.to_native(&quote_mint, base_price * base_size)
+    );
 
     // Step 3: Edit the order
     let oo = test.get_oo(&mango_group_cookie, mint_index, user_index).await;
 
-    let user_spot_order2 = (
-        user_index,
-        mint_index,
-        serum_dex::matching::Side::Bid,
-        base_size,
-        base_price * 0.50,
-    );
+    let user_spot_order2 =
+        (user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price * 0.50);
 
-    edit_spot_order_scenario(&mut test, &mut mango_group_cookie, &user_spot_order2, oo.orders[0]).await;
+    edit_spot_order_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        &user_spot_order2,
+        oo.orders[0],
+        base_size as u64,
+    )
+    .await;
     mango_group_cookie.run_keeper(&mut test).await;
 
     let expected_values_vec: Vec<(usize, usize, HashMap<&str, I80F48>)> = vec![(
@@ -597,7 +602,10 @@ async fn test_edit_spot_order() {
     println!("{}, {}, {}", deposit_quote, deposit_quote_after_edit, deposit_quote_after_order);
 
     assert_eq!(deposit_base - deposit_base_after_edit, 0);
-    assert_eq!(deposit_quote_after_edit - deposit_quote_after_order, test.to_native(&quote_mint, base_price * base_size * 0.50));
+    assert_eq!(
+        deposit_quote_after_edit - deposit_quote_after_order,
+        test.to_native(&quote_mint, base_price * base_size * 0.50)
+    );
 }
 
 // #[tokio::test]

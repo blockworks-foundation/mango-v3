@@ -1062,6 +1062,7 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction are the same as PlaceSpotOrder2
     EditSpotOrder {
         cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+        cancel_order_size: u64,
         new_order: serum_dex::instruction::NewOrderInstructionV3,
     },
 }
@@ -1556,7 +1557,7 @@ impl MangoInstruction {
                 MangoInstruction::CancelAllSpotOrders { limit }
             }
             66 => {
-                let (cancel_array, new_order_array) = array_refs![data, 20; ..;];
+                let (cancel_array, original_size, new_order_array) = array_refs![data, 20, 8; ..;];
                 let fields = array_refs![cancel_array, 4, 16];
                 let side = match u32::from_le_bytes(*fields.0) {
                     0 => serum_dex::matching::Side::Bid,
@@ -1564,9 +1565,11 @@ impl MangoInstruction {
                     _ => return None,
                 };
                 let order_id = u128::from_le_bytes(*fields.1);
-                let cancel_order = serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
+                let cancel_order_size = u64::from_le_bytes(*original_size);
+                let cancel_order =
+                    serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
                 let new_order = unpack_dex_new_order_v3(new_order_array)?;
-                MangoInstruction::EditSpotOrder { cancel_order, new_order }
+                MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order }
             }
             _ => {
                 return None;
@@ -3000,6 +3003,7 @@ pub fn edit_spot_order(
     open_orders_pks: &[Pubkey], // caller only need to pass in open_orders_pks that are in margin basket
     affected_market_open_orders_index: usize, // used to determine which of the open orders accounts should be passed in write
     cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+    cancel_order_size: u64,
     new_order: serum_dex::instruction::NewOrderInstructionV3,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
@@ -3035,10 +3039,8 @@ pub fn edit_spot_order(
         }
     }));
 
-    println!("pack");
-    let instr = MangoInstruction::EditSpotOrder { cancel_order, new_order };
+    let instr = MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order };
     let data = instr.pack();
-    println!("pack ok");
 
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

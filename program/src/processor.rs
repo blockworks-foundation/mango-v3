@@ -8,6 +8,7 @@ use anchor_lang::prelude::emit;
 use arrayref::{array_ref, array_refs};
 use bytemuck::{cast, cast_mut, cast_ref};
 use fixed::types::I80F48;
+use serum_dex::critbit::SlabView;
 use serum_dex::instruction::NewOrderInstructionV3;
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
@@ -2316,6 +2317,7 @@ impl Processor {
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         cancel_data: Vec<u8>,
+        cancel_size: u64,
         new_order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 22;
@@ -2345,9 +2347,6 @@ impl Processor {
             msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
-        // TODO: make sure health + orders are correct, etc.
-
-        
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
@@ -2373,7 +2372,70 @@ impl Processor {
         )?;
         let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
 
+        // load order
         let market_open_orders_ai = open_orders_ais[market_index].unwrap();
+
+        // fetch the order size, to compare it to what the user is expecting
+        let mut remaining_cancel_size: u64 = 0;
+        {
+            let open_orders = load_open_orders(market_open_orders_ai)?;
+
+            let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
+            let bids = load_bids_mut(&market, bids_ai)?;
+            let asks = load_asks_mut(&market, asks_ai)?;
+
+            for j in 0..128 {
+                let slot_mask = 1u128 << j;
+                if open_orders.free_slot_bits & slot_mask != 0 {
+                    // means slot is free
+                    continue;
+                }
+                let order_id = open_orders.orders[j];
+
+                if open_orders.is_bid_bits & slot_mask != 0 {
+                    match bids
+                        .find_by_key(order_id)
+                        .and_then(|order| bids.get(order))
+                        .and_then(|node| node.as_leaf())
+                    {
+                        None => continue,
+                        Some(bid) => {
+                            msg!("bid: {:?}", bid);
+                            remaining_cancel_size = bid.quantity();
+                            break;
+                        }
+                    };
+                } else {
+                    match asks
+                        .find_by_key(order_id)
+                        .and_then(|order| asks.get(order))
+                        .and_then(|node| node.as_leaf())
+                    {
+                        None => continue,
+                        Some(ask) => {
+                            msg!("ask: {:?}", ask);
+                            remaining_cancel_size = ask.quantity();
+                            break;
+                        }
+                    };
+                };
+            }
+        }
+
+        msg!("remaining_cancel_size: {:?}", remaining_cancel_size);
+        msg!("cancel_size: {:?}", cancel_size);
+
+        // cancel order (if size matches)
+
+        // settle funds?
+
+        // place order pre checks
+
+        // place order
+
+        // update health, etc
+
+        // TODO: make sure health + orders are correct, etc.
 
         let order_side = new_order.side;
         let vault_ai = match order_side {
@@ -2382,9 +2444,7 @@ impl Processor {
         };
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
 
-
         // TODO:  make sure the size is correct
-        
 
         msg!("invoke cancel");
         invoke_cancel_order(
@@ -2418,8 +2478,6 @@ impl Processor {
             new_order,
         )?;
 
-
-
         msg!("invoke settle");
 
         let (pre_base, pre_quote) = {
@@ -2452,7 +2510,6 @@ impl Processor {
             &[&signers_seeds],
         )?;
 
-        
         // The whole settle balances?? From cancel_all_orders
 
         let (post_base, post_quote) = {
@@ -2533,7 +2590,6 @@ impl Processor {
             QUOTE_INDEX,
             quote_change,
         )?;
-
 
         // TODO: health adjustments
 
@@ -7061,13 +7117,18 @@ impl Processor {
                 msg!("Mango: CancelAllSpotOrders");
                 Self::cancel_all_spot_orders(program_id, accounts, limit)
             }
-            MangoInstruction::EditSpotOrder { cancel_order, new_order } => {
+            MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order } => {
                 msg!("Mango: EditSpotOrder");
-                let cancel_data = serum_dex::instruction::MarketInstruction::CancelOrderV2(cancel_order).pack();
-                Self::edit_spot_order(program_id, accounts, cancel_data,  new_order)
-            } 
-            
-            // MangoInstruction::EditPerpOrderByClientId { client_order_id, invalid_id_ok } => {
+                let cancel_data =
+                    serum_dex::instruction::MarketInstruction::CancelOrderV2(cancel_order).pack();
+                Self::edit_spot_order(
+                    program_id,
+                    accounts,
+                    cancel_data,
+                    cancel_order_size,
+                    new_order,
+                )
+            } // MangoInstruction::EditPerpOrderByClientId { client_order_id, invalid_id_ok } => {
               //     msg!("Mango: EditPerpOrderByClientId client_order_id={}", client_order_id);
               //     let result =
               //         Self::edit_perp_order_by_client_id(program_id, accounts, client_order_id);

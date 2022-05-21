@@ -3,7 +3,10 @@ use std::mem::size_of;
 
 use bincode::deserialize;
 use fixed::types::I80F48;
-use serum_dex::{instruction::{CancelOrderInstructionV2, NewOrderInstructionV3}, state::OpenOrders};
+use serum_dex::{
+    instruction::{CancelOrderInstructionV2, NewOrderInstructionV3},
+    state::OpenOrders,
+};
 use solana_program::entrypoint::ProgramResult;
 use solana_program::{
     account_info::AccountInfo,
@@ -1971,13 +1974,14 @@ impl MangoProgramTest {
             self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
     }
 
-#[allow(dead_code)]
+    #[allow(dead_code)]
     pub async fn edit_spot_order(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         spot_market_cookie: &SpotMarketCookie,
         user_index: usize,
         cancel_order: CancelOrderInstructionV2,
+        cancel_order_size: u64,
         new_order: NewOrderInstructionV3,
     ) {
         let mango_program_id = self.mango_program_id;
@@ -2050,6 +2054,7 @@ impl MangoProgramTest {
             &open_orders_pks, // oo ais
             mint_index,
             cancel_order,
+            cancel_order_size,
             new_order,
         )
         .unwrap()];
