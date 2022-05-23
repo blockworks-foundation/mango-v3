@@ -802,7 +802,7 @@ impl HealthCache {
         mango_group: &MangoGroup,
         mango_cache: &MangoCache,
         mango_account: &MangoAccount,
-        open_orders_ais: &[AccountInfo; MAX_PAIRS],
+        open_orders_ais: &[AccountInfo],
     ) -> MangoResult<()> {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
@@ -811,7 +811,7 @@ impl HealthCache {
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    &if *open_orders_ais[i].key == Pubkey::default() {
+                    &if mango_account.spot_open_orders[i] == Pubkey::default() {
                         None
                     } else {
                         Some(load_open_orders(&open_orders_ais[i])?)
@@ -1524,7 +1524,7 @@ impl MangoAccount {
     pub fn check_open_orders(
         &self,
         mango_group: &MangoGroup,
-        open_orders_ais: &[AccountInfo; MAX_PAIRS],
+        open_orders_ais: &[AccountInfo],
     ) -> MangoResult {
         for i in 0..mango_group.num_oracles {
             if self.in_margin_basket[i] {

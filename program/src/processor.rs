@@ -1273,8 +1273,8 @@ impl Processor {
         allow_borrow: bool,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 10;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
-        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+        let fixed_ais = array_ref![accounts, 0, NUM_FIXED];
+        let open_orders_ais = &accounts[NUM_FIXED..];
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write

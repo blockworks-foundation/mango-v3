@@ -123,6 +123,9 @@ async fn test_place_spot_order() {
     // Deposit amounts
     let user_deposits = vec![(user_index, test.quote_index, base_price)];
 
+    // Withdraw amounts
+    let user_withdraws = vec![(user_index, test.quote_index, base_price, false)];
+
     // Spot Orders
     let user_spot_orders =
         vec![(user_index, mint_index, serum_dex::matching::Side::Bid, base_size, base_price)];
@@ -154,6 +157,10 @@ async fn test_place_spot_order() {
     for expected_values in expected_values_vec {
         assert_user_spot_orders(&mut test, &mango_group_cookie, expected_values).await;
     }
+
+    withdraw_scenario_no_oo(&mut test, &mut mango_group_cookie, &user_withdraws)
+        .await
+        .expect_err("should not be able to withdraw");
 }
 
 #[tokio::test]

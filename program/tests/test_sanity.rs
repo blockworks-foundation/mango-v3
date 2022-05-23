@@ -46,7 +46,7 @@ async fn test_vault_net_deposit_diff() {
     deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
 
     // Step 2: Make withdraws
-    withdraw_scenario(&mut test, &mut mango_group_cookie, &user_withdraws).await;
+    withdraw_scenario_no_oo(&mut test, &mut mango_group_cookie, &user_withdraws).await.unwrap();
 
     // === Assert ===
     mango_group_cookie.run_keeper(&mut test).await;
