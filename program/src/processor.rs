@@ -2331,7 +2331,7 @@ impl Processor {
             spot_market_ai,         // write
             bids_ai,                // write
             asks_ai,                // write
-            dex_request_queue_ai,   // write
+            _dex_request_queue_ai,   // write
             dex_event_queue_ai,     // write
             dex_base_ai,            // write
             dex_quote_ai,           // write
@@ -2344,36 +2344,23 @@ impl Processor {
             token_prog_ai,          // read
             signer_ai,              // read
             dex_signer_ai,          // read
-            msrm_or_srm_vault_ai,   // read
+            _msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
+        // Don't load mango account outside of brackets (needs to stay off stack bx it changes when we cancel/settle/place)
+
+        // For the most part, we can piggy back off of validations in the other functions :)
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
         check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
-        let mut mango_account =
-            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(
-            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
-            MangoErrorCode::InvalidOwner
-        )?;
-        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
-        check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        let mut open_orders_ais =
-            mango_account.checked_unpack_open_orders(&mango_group, packed_open_orders_ais)?;
         let market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        check!(
-            &mango_group.tokens[market_index].root_bank == base_root_bank_ai.key,
-            MangoErrorCode::InvalidRootBank
-        )?;
-        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
-
         // load order
-        let market_open_orders_ai = open_orders_ais[market_index].unwrap();
+        let market_open_orders_ai = &packed_open_orders_ais[market_index];
 
         // fetch the order size, to compare it to what the user is expecting
         let mut remaining_cancel_size: u64 = 0;
@@ -2425,173 +2412,54 @@ impl Processor {
         msg!("remaining_cancel_size: {:?}", remaining_cancel_size);
         msg!("cancel_size: {:?}", cancel_size);
 
-        // cancel order (if size matches)
+        // TODO:  cancel order (if size matches)
 
-        // settle funds?
-
-        // place order pre checks
-
-        // place order
-
-        // update health, etc
-
-        // TODO: make sure health + orders are correct, etc.
-
-        let order_side = new_order.side;
-        let vault_ai = match order_side {
-            serum_dex::matching::Side::Bid => quote_vault_ai,
-            serum_dex::matching::Side::Ask => base_vault_ai,
-        };
-        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
-
-        // TODO:  make sure the size is correct
-
-        msg!("invoke cancel");
-        invoke_cancel_order(
-            dex_prog_ai,
-            spot_market_ai,
-            bids_ai,
-            asks_ai,
-            market_open_orders_ai,
-            signer_ai,
-            dex_event_queue_ai,
-            cancel_data,
-            &[&signers_seeds],
-        )?;
-
-        msg!("invoke new order");
-        invoke_new_order(
-            dex_prog_ai,
-            spot_market_ai,
-            &market_open_orders_ai,
-            dex_request_queue_ai,
-            dex_event_queue_ai,
-            bids_ai,
-            asks_ai,
-            vault_ai,
-            signer_ai,
-            dex_base_ai,
-            dex_quote_ai,
-            token_prog_ai,
-            msrm_or_srm_vault_ai,
-            &[&signers_seeds],
-            new_order,
-        )?;
-
-        msg!("invoke settle");
-
-        let (pre_base, pre_quote) = {
-            let open_orders = load_open_orders(market_open_orders_ai)?;
-            (
-                open_orders.native_coin_free,
-                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
-            )
-        };
-
-        if pre_base == 0 && pre_quote == 0 {
-            // margin basket may be in an invalid state; correct it before returning
-            let open_orders = load_open_orders(market_open_orders_ai)?;
-            mango_account.update_basket(market_index, &open_orders)?;
-            return Ok(());
+        msg!("cancel");
+        {
+            let cancel_accounts = [
+                mango_group_ai.clone(),
+                owner_ai.clone(),
+                mango_account_ai.clone(),
+                dex_prog_ai.clone(),
+                spot_market_ai.clone(),
+                bids_ai.clone(),
+                asks_ai.clone(),
+                market_open_orders_ai.clone(),
+                signer_ai.clone(),
+                dex_event_queue_ai.clone(),
+            ];
+            Self::cancel_spot_order(program_id, &cancel_accounts[..], cancel_data).unwrap();
         }
 
-        // Settle funds for this market
-        invoke_settle_funds(
-            dex_prog_ai,
-            spot_market_ai,
-            market_open_orders_ai,
-            signer_ai,
-            dex_base_ai,
-            dex_quote_ai,
-            base_vault_ai,
-            quote_vault_ai,
-            dex_signer_ai,
-            token_prog_ai,
-            &[&signers_seeds],
-        )?;
+        msg!("settle");
+        {
+            let settle_accounts = [
+                mango_group_ai.clone(),
+                mango_cache_ai.clone(),
+                owner_ai.clone(),
+                mango_account_ai.clone(),
+                dex_prog_ai.clone(),
+                spot_market_ai.clone(),
+                market_open_orders_ai.clone(),
+                signer_ai.clone(),
+                dex_base_ai.clone(),
+                dex_quote_ai.clone(),
+                base_root_bank_ai.clone(),
+                base_node_bank_ai.clone(),
+                quote_root_bank_ai.clone(),
+                quote_node_bank_ai.clone(),
+                base_vault_ai.clone(),
+                quote_vault_ai.clone(),
+                dex_signer_ai.clone(),
+                token_prog_ai.clone(),
+            ];
+            Self::settle_funds(program_id, &settle_accounts[..]).unwrap();
+        }
 
-        // The whole settle balances?? From cancel_all_orders
-
-        let (post_base, post_quote) = {
-            let open_orders = load_open_orders(market_open_orders_ai)?;
-            mango_account.update_basket(market_index, &open_orders)?;
-            mango_emit_stack::<_, 256>(OpenOrdersBalanceLog {
-                mango_group: *mango_group_ai.key,
-                mango_account: *mango_account_ai.key,
-                market_index: market_index as u64,
-                base_total: open_orders.native_coin_total,
-                base_free: open_orders.native_coin_free,
-                quote_total: open_orders.native_pc_total,
-                quote_free: open_orders.native_pc_free,
-                referrer_rebates_accrued: open_orders.referrer_rebates_accrued,
-            });
-
-            (
-                open_orders.native_coin_free,
-                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
-            )
-        };
-
-        check!(post_base <= pre_base, MangoErrorCode::Default)?;
-        check!(post_quote <= pre_quote, MangoErrorCode::Default)?;
-
-        // Update balances from settling funds
-        let base_change = I80F48::from_num(pre_base - post_base);
-        let quote_change = I80F48::from_num(pre_quote - post_quote);
-
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
-        let clock = Clock::get()?;
-        let now_ts = clock.unix_timestamp as u64;
-
-        mango_cache.root_bank_cache[market_index].check_valid(&mango_group, now_ts)?;
-        mango_cache.root_bank_cache[QUOTE_INDEX].check_valid(&mango_group, now_ts)?;
-
-        check_eq!(
-            &mango_group.tokens[market_index].root_bank,
-            base_root_bank_ai.key,
-            MangoErrorCode::InvalidRootBank
-        )?;
-        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
-
-        check!(
-            base_root_bank.node_banks.contains(base_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        let mut base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
-        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
-
-        check_eq!(
-            &mango_group.tokens[QUOTE_INDEX].root_bank,
-            quote_root_bank_ai.key,
-            MangoErrorCode::InvalidRootBank
-        )?;
-        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
-
-        check!(
-            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
-        )?;
-        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
-        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
-
-        checked_change_net(
-            &mango_cache.root_bank_cache[market_index],
-            &mut base_node_bank,
-            &mut mango_account,
-            mango_account_ai.key,
-            market_index,
-            base_change,
-        )?;
-        checked_change_net(
-            &mango_cache.root_bank_cache[QUOTE_INDEX],
-            &mut quote_node_bank,
-            &mut mango_account,
-            mango_account_ai.key,
-            QUOTE_INDEX,
-            quote_change,
-        )?;
-
-        // TODO: health adjustments
+        msg!("new order");
+        {
+            Self::place_spot_order2(program_id, accounts, new_order).unwrap();
+        }
 
         Ok(())
     }
