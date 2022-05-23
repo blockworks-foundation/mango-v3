@@ -2,6 +2,7 @@ use std::cell::RefMut;
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
+use std::num::NonZeroU64;
 use std::vec;
 
 use anchor_lang::prelude::emit;
@@ -2316,9 +2317,9 @@ impl Processor {
     fn edit_spot_order(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        cancel_data: Vec<u8>,
-        cancel_size: u64,
-        new_order: serum_dex::instruction::NewOrderInstructionV3,
+        cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+        expected_cancel_size: u64,
+        mut new_order: serum_dex::instruction::NewOrderInstructionV3,
     ) -> MangoResult<()> {
         const NUM_FIXED: usize = 22;
         let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
@@ -2347,9 +2348,6 @@ impl Processor {
             _msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
-        // Don't load mango account outside of brackets (needs to stay off stack bx it changes when we cancel/settle/place)
-
-        // For the most part, we can piggy back off of validations in the other functions :)
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
         check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
@@ -2358,11 +2356,9 @@ impl Processor {
         let market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
-
-        // load order
         let market_open_orders_ai = &packed_open_orders_ais[market_index];
 
-        // fetch the order size, to compare it to what the user is expecting
+        // fetch the size of the order that the user is cancelling
         let mut remaining_cancel_size: u64 = 0;
         {
             let open_orders = load_open_orders(market_open_orders_ai)?;
@@ -2387,7 +2383,6 @@ impl Processor {
                     {
                         None => continue,
                         Some(bid) => {
-                            msg!("bid: {:?}", bid);
                             remaining_cancel_size = bid.quantity();
                             break;
                         }
@@ -2400,7 +2395,6 @@ impl Processor {
                     {
                         None => continue,
                         Some(ask) => {
-                            msg!("ask: {:?}", ask);
                             remaining_cancel_size = ask.quantity();
                             break;
                         }
@@ -2409,12 +2403,38 @@ impl Processor {
             }
         }
 
-        msg!("remaining_cancel_size: {:?}", remaining_cancel_size);
-        msg!("cancel_size: {:?}", cancel_size);
+        check!(new_order.side == cancel_order.side, MangoErrorCode::Default);
 
-        // TODO:  cancel order (if size matches)
+        // if cancel order has been partially filled, reduce the new order size to accommodate
+        let filled_amount = expected_cancel_size.checked_sub(remaining_cancel_size).unwrap();
+        if filled_amount > 0 {
+            let (_coin_lot_size, pc_lot_size) = {
+                let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
+                (market.coin_lot_size, market.pc_lot_size)
+            };
 
-        msg!("cancel");
+            let new_max_qty = new_order.max_coin_qty.get().checked_sub(filled_amount).unwrap();
+            new_order.max_coin_qty = NonZeroU64::new(new_max_qty).unwrap();
+            match cancel_order.side {
+                serum_dex::matching::Side::Bid => {
+                    let new_max_pc_qty_including_fees = pc_lot_size
+                        .checked_mul(new_order.limit_price.get())
+                        .unwrap()
+                        .checked_mul(new_order.max_coin_qty.get())
+                        .unwrap();
+                    new_order.max_native_pc_qty_including_fees =
+                        NonZeroU64::new(new_max_pc_qty_including_fees).unwrap();
+                }
+                serum_dex::matching::Side::Ask => {
+                    new_order.max_native_pc_qty_including_fees =
+                        NonZeroU64::new(std::u64::MAX).unwrap();
+                }
+            };
+        }
+
+        let cancel_data =
+            serum_dex::instruction::MarketInstruction::CancelOrderV2(cancel_order).pack();
+
         {
             let cancel_accounts = [
                 mango_group_ai.clone(),
@@ -2431,7 +2451,6 @@ impl Processor {
             Self::cancel_spot_order(program_id, &cancel_accounts[..], cancel_data).unwrap();
         }
 
-        msg!("settle");
         {
             let settle_accounts = [
                 mango_group_ai.clone(),
@@ -2456,7 +2475,6 @@ impl Processor {
             Self::settle_funds(program_id, &settle_accounts[..]).unwrap();
         }
 
-        msg!("new order");
         {
             Self::place_spot_order2(program_id, accounts, new_order).unwrap();
         }
@@ -6987,12 +7005,10 @@ impl Processor {
             }
             MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order } => {
                 msg!("Mango: EditSpotOrder");
-                let cancel_data =
-                    serum_dex::instruction::MarketInstruction::CancelOrderV2(cancel_order).pack();
                 Self::edit_spot_order(
                     program_id,
                     accounts,
-                    cancel_data,
+                    cancel_order,
                     cancel_order_size,
                     new_order,
                 )
