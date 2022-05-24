@@ -1299,11 +1299,12 @@ impl Processor {
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        // Don't allow initialization of spot open orders if market is in ForceClose
+        // Don't allow initialization of spot open orders if market is in ForceClose or Swapping
         // Don't need to check MarketMode::Inactive because spot market is zero key in that case
+        let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(
-            mango_group.tokens[market_index].spot_market_mode != MarketMode::ForceCloseOnly,
-            MangoErrorCode::InvalidMarket
+            !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket),
+            MangoErrorCode::InvalidAccountState
         )?;
 
         let mut mango_account =
@@ -1376,11 +1377,12 @@ impl Processor {
         let market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
-        // Don't allow initialization of spot open orders if market is in ForceClose
+        // Don't allow initialization of spot open orders if market is in ForceClose or Swapping
         // Don't need to check MarketMode::Inactive because spot market is zero key in that case
+        let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(
-            mango_group.tokens[market_index].spot_market_mode != MarketMode::ForceCloseOnly,
-            MangoErrorCode::InvalidMarket
+            !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket),
+            MangoErrorCode::InvalidAccountState
         )?;
 
         let mut mango_account =
@@ -1462,8 +1464,9 @@ impl Processor {
             MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
         check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
 
-        // Owner signature not necessary if market is in ForceCloseOnly
-        if mango_group.tokens[market_index].spot_market_mode != MarketMode::ForceCloseOnly {
+        // Owner signature not necessary if market is in ForceCloseOnly or SwappingSpotMarket
+        let mode = mango_group.tokens[market_index].spot_market_mode;
+        if !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket) {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
         check!(!mango_account.being_liquidated, MangoErrorCode::BeingLiquidated)?;
@@ -1657,7 +1660,10 @@ impl Processor {
 
         // If not post_allowed, then pre_locked may not increase
         let mode = mango_group.tokens[market_index].spot_market_mode;
-        check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
+        check!(
+            !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket),
+            MangoErrorCode::NewOrdersNotAllowed
+        )?;
         let is_market_closing =
             mode == MarketMode::CloseOnly || spot_market_ai.key == &luna_spot_market::ID;
         let (post_allowed, pre_locked) = if is_market_closing {
@@ -1992,7 +1998,10 @@ impl Processor {
 
         // If not post_allowed, then pre_locked may not increase
         let mode = mango_group.tokens[market_index].spot_market_mode;
-        check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
+        check!(
+            !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket),
+            MangoErrorCode::NewOrdersNotAllowed
+        )?;
         let is_market_closing =
             mode == MarketMode::CloseOnly || spot_market_ai.key == &luna_spot_market::ID;
         let (post_allowed, pre_locked) = if is_market_closing {
@@ -6113,8 +6122,9 @@ impl Processor {
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        // Owner signature not necessary if market is in ForceClose mode
-        if mango_group.tokens[market_index].spot_market_mode != MarketMode::ForceCloseOnly {
+        // Owner signature not necessary if market is in ForceClose or SwappingSpotMarket
+        let mode = mango_group.tokens[market_index].spot_market_mode;
+        if !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket) {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
 
@@ -6256,7 +6266,7 @@ impl Processor {
     ///     Default -> CloseOnly
     ///     Active -> CloseOnly
     ///     CloseOnly -> ForceCloseOnly
-    ///     Default | Active <-> CloseOrdersOnly
+    ///     Default | Active <-> SwappingSpotMarket
     /// You must use `RemoveSpotMarket` to do ForceCloseOnly -> Inactive
     #[inline(never)]
     fn set_market_mode(
@@ -6289,7 +6299,7 @@ impl Processor {
         match mode {
             MarketMode::Active => check!(
                 *current_mode == MarketMode::Default
-                    || *current_mode == MarketMode::ClosingOrdersOnly,
+                    || *current_mode == MarketMode::SwappingSpotMarket,
                 MangoErrorCode::InvalidAccountState
             )?,
             MarketMode::CloseOnly => check!(
@@ -6300,7 +6310,7 @@ impl Processor {
                 check!(*current_mode == MarketMode::CloseOnly, MangoErrorCode::InvalidAccountState)?
             }
 
-            MarketMode::ClosingOrdersOnly => {
+            MarketMode::SwappingSpotMarket => {
                 check!(market_type == AssetType::Token, MangoErrorCode::InvalidAccountState)?;
                 check!(
                     *current_mode == MarketMode::Default || *current_mode == MarketMode::Active,
