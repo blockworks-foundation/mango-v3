@@ -2947,7 +2947,12 @@ impl Processor {
 
         let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
 
-        if mango_group.tokens[market_index].perp_market_mode != MarketMode::ForceCloseOnly {
+        // Owner signature not necessary if market is in ForceClose
+        let mode = mango_group.tokens[market_index].perp_market_mode;
+        if mode == MarketMode::ForceCloseOnly {
+            // To guard against possibility delegate is zero key and that's passed in
+            check!(owner_ai.key != Pubkey::default(), MangoErrorCode::InvalidOwner)?;
+        } else {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
 
@@ -6124,7 +6129,10 @@ impl Processor {
 
         // Owner signature not necessary if market is in ForceClose or SwappingSpotMarket
         let mode = mango_group.tokens[market_index].spot_market_mode;
-        if !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket) {
+        if mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket {
+            // To guard against possibility delegate is zero key and that's passed in
+            check!(owner_ai.key != Pubkey::default(), MangoErrorCode::InvalidOwner)?;
+        } else {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
 
@@ -6398,6 +6406,28 @@ impl Processor {
         mango_group.tokens[market_index].root_bank = Pubkey::default();
         mango_group.tokens[market_index].spot_market_mode = MarketMode::Inactive;
         Ok(())
+    }
+
+    #[inline(never)]
+    /// For a market in `SwappingSpotMarket` where we know all the OpenOrders have been closed,
+    /// swap out the spot market for new serum spot market that uses the same base token and quote token.
+    /// Afterwards set the market back to Active
+    fn swap_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
+        // mango_group.spot_markets[market_index].spot_market = *spot_market_ai.key;
+        //
+        // let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
+        //
+        // check_eq!(
+        //     identity(spot_market.coin_mint),
+        //     mint_ai.key.to_aligned_bytes(),
+        //     MangoErrorCode::Default
+        // )?;
+        // check_eq!(
+        //     identity(spot_market.pc_mint),
+        //     mango_group.tokens[QUOTE_INDEX].mint.to_aligned_bytes(),
+        //     MangoErrorCode::Default
+        // )?;
+        unimplemented!()
     }
 
     /// Calling this ix means you know that sum of quote positions is zero.
