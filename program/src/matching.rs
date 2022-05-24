@@ -784,6 +784,10 @@ impl BookSide {
         self.free_list_len <= 1 && self.bump_index >= self.nodes.len() - 1
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.leaf_count == 0
+    }
+
     /// When a node changes, the parents' child_earliest_expiry may need to be updated.
     ///
     /// This function walks up the `stack` of parents and applies the change where the

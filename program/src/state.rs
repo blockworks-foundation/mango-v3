@@ -134,16 +134,51 @@ impl MetaData {
     }
 }
 
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum MarketMode {
+    Default = 0, // Legacy value before v3.5 -- may imply Inactive or Active
+    Active = 1,
+    CloseOnly = 2,
+    ForceCloseOnly = 3,
+    Inactive = 4,
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {
     pub mint: Pubkey,
     pub root_bank: Pubkey,
     pub decimals: u8,
-    pub padding: [u8; 7],
+    pub spot_market_mode: MarketMode,
+    pub perp_market_mode: MarketMode,
+    pub oracle_inactive: bool,
+    pub padding: [u8; 4],
 }
 
 impl TokenInfo {
+    pub fn new(
+        &self,
+        mint: Pubkey,
+        root_bank: Pubkey,
+        decimals: u8,
+        spot_market_mode: MarketMode,
+        perp_market_mode: MarketMode,
+        oracle_inactive: bool,
+    ) -> Self {
+        Self {
+            mint,
+            root_bank,
+            decimals,
+            spot_market_mode,
+            perp_market_mode,
+            oracle_inactive,
+            padding: [0u8; 4],
+        }
+    }
     pub fn is_empty(&self) -> bool {
         self.mint == Pubkey::default()
     }
@@ -218,7 +253,10 @@ pub struct MangoGroup {
     pub ref_surcharge_centibps: u32, // 100
     pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
     pub ref_mngo_required: u64,
-    pub padding: [u8; 8], // padding used for future expansions
+
+    pub oracle_inactive_bits: u16,
+
+    pub padding: [u8; 6], // padding used for future expansions
 }
 
 impl MangoGroup {
@@ -256,21 +294,37 @@ impl MangoGroup {
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
+        if oracle_pk == &Pubkey::default() {
+            // sanity check to be extra sure about data corruption
+            return None;
+        }
         self.oracles.iter().position(|pk| pk == oracle_pk) // TODO OPT profile
     }
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
         // TODO profile and optimize
+        if root_bank_pk == &Pubkey::default() {
+            return None;
+        }
         self.tokens.iter().position(|token_info| &token_info.root_bank == root_bank_pk)
     }
     pub fn find_token_index(&self, mint_pk: &Pubkey) -> Option<usize> {
+        if mint_pk == &Pubkey::default() {
+            return None;
+        }
         self.tokens.iter().position(|token_info| &token_info.mint == mint_pk)
     }
     pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
+        if spot_market_pk == &Pubkey::default() {
+            return None;
+        }
         self.spot_markets
             .iter()
             .position(|spot_market_info| &spot_market_info.spot_market == spot_market_pk)
     }
     pub fn find_perp_market_index(&self, perp_market_pk: &Pubkey) -> Option<usize> {
+        if perp_market_pk == &Pubkey::default() {
+            return None;
+        }
         self.perp_markets
             .iter()
             .position(|perp_market_info| &perp_market_info.perp_market == perp_market_pk)
@@ -285,6 +339,12 @@ impl MangoGroup {
                 HealthType::Equity => ONE_I80F48,
             }
         }
+    }
+
+    pub fn is_spot_market_active(&self, market_index: usize) -> bool {
+        !self.spot_markets[market_index].is_empty()
+            && (self.tokens[market_index].spot_market_mode == MarketMode::Active
+                || self.tokens[market_index].spot_market_mode == MarketMode::Default)
     }
 }
 
