@@ -133,6 +133,8 @@ pub enum MangoErrorCode {
         "MangoErrorCode::InvalidOrderInClosingMarket You may only have one open order at a time and it must be reducing position"
     )]
     InvalidOrderInClosingMarket,
+    #[error("MangoErrorCode::MissingOpenOrdersAccount")] // 40
+    MissingOpenOrdersAccount,
 
     #[error("MangoErrorCode::Default Check the source code for more info")] // 40
     Default = u32::MAX_VALUE,

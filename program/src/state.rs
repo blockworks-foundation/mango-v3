@@ -807,15 +807,20 @@ impl HealthCache {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
             if self.active_assets.spot[i] {
+                let oo: MangoResult<Option<Ref<serum_dex::state::OpenOrders>>> = if mango_account
+                    .spot_open_orders[i]
+                    == Pubkey::default()
+                {
+                    Ok(None)
+                } else {
+                    check!(i < open_orders_ais.len(), MangoErrorCode::MissingOpenOrdersAccount)?;
+                    Ok(Some(load_open_orders(&open_orders_ais[i])?))
+                };
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
                     i,
-                    &if mango_account.spot_open_orders[i] == Pubkey::default() {
-                        None
-                    } else {
-                        Some(load_open_orders(&open_orders_ais[i])?)
-                    },
+                    &oo?,
                 )?;
             }
 
@@ -1528,6 +1533,7 @@ impl MangoAccount {
     ) -> MangoResult {
         for i in 0..mango_group.num_oracles {
             if self.in_margin_basket[i] {
+                check!(i < open_orders_ais.len(), MangoErrorCode::MissingOpenOrdersAccount)?;
                 check_eq!(
                     open_orders_ais[i].key,
                     &self.spot_open_orders[i],

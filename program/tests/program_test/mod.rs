@@ -1760,7 +1760,7 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let _mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
         let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
 
         let delegate_user =
