@@ -6256,9 +6256,10 @@ impl Processor {
     ///     Default -> CloseOnly
     ///     Active -> CloseOnly
     ///     CloseOnly -> ForceCloseOnly
+    ///     Default | Active <-> CloseOrdersOnly
     /// You must use `RemoveSpotMarket` to do ForceCloseOnly -> Inactive
     #[inline(never)]
-    fn set_spot_market_mode(
+    fn set_market_mode(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
         market_index: usize,
@@ -6286,9 +6287,11 @@ impl Processor {
             AssetType::Perp => &mut mango_group.tokens[market_index].perp_market_mode,
         };
         match mode {
-            MarketMode::Active => {
-                check!(*current_mode == MarketMode::Default, MangoErrorCode::InvalidAccountState)?
-            }
+            MarketMode::Active => check!(
+                *current_mode == MarketMode::Default
+                    || *current_mode == MarketMode::ClosingOrdersOnly,
+                MangoErrorCode::InvalidAccountState
+            )?,
             MarketMode::CloseOnly => check!(
                 *current_mode == MarketMode::Default || *current_mode == MarketMode::Active,
                 MangoErrorCode::InvalidAccountState
@@ -6296,7 +6299,17 @@ impl Processor {
             MarketMode::ForceCloseOnly => {
                 check!(*current_mode == MarketMode::CloseOnly, MangoErrorCode::InvalidAccountState)?
             }
-            _ => return Err(throw_err!(MangoErrorCode::InvalidParam)),
+
+            MarketMode::ClosingOrdersOnly => {
+                check!(market_type == AssetType::Token, MangoErrorCode::InvalidAccountState)?;
+                check!(
+                    *current_mode == MarketMode::Default || *current_mode == MarketMode::Active,
+                    MangoErrorCode::InvalidAccountState
+                )?;
+            }
+            MarketMode::Default | MarketMode::Inactive => {
+                return Err(throw_err!(MangoErrorCode::InvalidParam))
+            }
         }
         // TODO: ? rename mode to status
         // TODO: msg! about previous mode and current mode
@@ -6515,13 +6528,11 @@ impl Processor {
     }
 
     /// Liquidate a token balance on a market that is in ForceCloseOnly mode
-    /// Liqor must either move the tokens into the ATA of owner or, if that's not possible, move
-    /// tokens into his own ATA while taking on some borrows.
+    /// First the tokens will be moved into the owner's ATA until maint health = 0
+    /// Then liquidate token for some other asset until it gets back to init health 0
+    /// required: cancel_all_spot_orders and close_spot_open_orders first before calling this ix
     #[inline(never)]
-    fn delist_liquidate_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
-        // required: cancel_all_spot_orders and close_spot_open_orders first before calling this ix
-        // Remove all the delisting token up until the account gets to init health boundary
-        // after that start liquidation process
+    fn liquidate_delisting_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         unimplemented!()
     }
 

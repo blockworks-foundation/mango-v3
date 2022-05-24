@@ -145,6 +145,7 @@ pub enum MarketMode {
     CloseOnly = 2,
     ForceCloseOnly = 3,
     Inactive = 4,
+    ClosingOrdersOnly = 5, // special mode when we're swapping out a spot market
 }
 
 #[derive(Copy, Clone, Pod)]
