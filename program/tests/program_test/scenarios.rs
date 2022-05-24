@@ -223,3 +223,35 @@ pub async fn edit_spot_order_scenario(
 
     mango_group_cookie.users_with_spot_event[market_index].push(user_index);
 }
+
+#[allow(dead_code)]
+pub async fn edit_perp_order_scenario(
+    test: &mut MangoProgramTest,
+    mango_group_cookie: &mut MangoGroupCookie,
+    perp_orders: &Vec<(usize, usize, mango::matching::Side, f64, f64)>,
+    client_order_id: u64,
+    cancel_order_size: f64,
+) {
+    mango_group_cookie.run_keeper(test).await;
+
+    for perp_order in perp_orders {
+        let (user_index, market_index, order_side, order_size, order_price) = *perp_order;
+        let mut perp_market_cookie = mango_group_cookie.perp_markets[market_index];
+        perp_market_cookie
+            .edit_order(
+                test,
+                mango_group_cookie,
+                user_index,
+                order_side,
+                order_size,
+                order_price,
+                PlacePerpOptions::default(),
+                client_order_id,
+                cancel_order_size,
+                false,
+            )
+            .await;
+
+        mango_group_cookie.users_with_perp_event[market_index].push(user_index);
+    }
+}

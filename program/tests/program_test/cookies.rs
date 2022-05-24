@@ -927,4 +927,49 @@ impl PerpMarketCookie {
 
         result
     }
+
+    #[allow(dead_code)]
+    pub async fn edit_order(
+        &mut self,
+        test: &mut MangoProgramTest,
+        mango_group_cookie: &mut MangoGroupCookie,
+        user_index: usize,
+        side: mango::matching::Side,
+        base_size: f64,
+        price: f64,
+        options: PlacePerpOptions,
+        client_order_id: u64,
+        cancel_order_size: f64,
+        invalid_id_ok: bool,
+    ) {
+        let cancel_size = test.base_size_number_to_lots(&self.mint, cancel_order_size) as i64;
+        let order_base_size = test.base_size_number_to_lots(&self.mint, base_size) as i64;
+        let order_quote_size = options
+            .max_quote_size
+            .map(|s| ((s * test.quote_mint.unit) / self.mint.quote_lot) as i64)
+            .unwrap_or(i64::MAX);
+        let order_price = test.price_number_to_lots(&self.mint, price) as i64;
+
+        test.edit_perp_order(
+            &mango_group_cookie,
+            self,
+            user_index,
+            order_price,
+            order_base_size,
+            order_quote_size,
+            options.expiry_timestamp.unwrap_or_else(|| 0),
+            client_order_id,
+            cancel_size,
+            side,
+            options.order_type,
+            options.reduce_only,
+            options.limit,
+            invalid_id_ok,
+        )
+        .await;
+
+        mango_group_cookie.mango_accounts[user_index].mango_account = test
+            .load_account::<MangoAccount>(mango_group_cookie.mango_accounts[user_index].address)
+            .await;
+    }
 }

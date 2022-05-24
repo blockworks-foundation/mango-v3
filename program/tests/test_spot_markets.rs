@@ -733,7 +733,7 @@ async fn test_edit_spot_order_will_adjust_order_size_if_user_passes_stale_order(
         base_price * 0.50,
     );
     // Use the original order size (the user is not aware they have been filled)
-    let cancel_size = test.base_size_number_to_lots(&mint, base_size); 
+    let cancel_size = test.base_size_number_to_lots(&mint, base_size);
 
     edit_spot_order_scenario(
         &mut test,

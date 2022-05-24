@@ -638,6 +638,37 @@ impl BookSide {
         Some(removed_leaf)
     }
 
+    fn get_by_key(&self, search_key: i128) -> Option<LeafNode> {
+        let parent_h = self.root()?;
+        let (mut child_h, _crit_bit) = match self.get(parent_h).unwrap().case().unwrap() {
+            NodeRef::Leaf(&leaf) if leaf.key == search_key => {
+                assert_eq!(self.leaf_count, 1);
+                return Some(leaf);
+            }
+            NodeRef::Leaf(_) => return None,
+            NodeRef::Inner(inner) => inner.walk_down(search_key),
+        };
+
+        // walk down the tree until finding the key
+        loop {
+            match self.get(child_h).unwrap().case().unwrap() {
+                NodeRef::Inner(inner) => {
+                    let (new_child_h, _new_crit_bit) = inner.walk_down(search_key);
+                    child_h = new_child_h;
+                }
+                NodeRef::Leaf(leaf) => {
+                    if leaf.key != search_key {
+                        return None;
+                    }
+                    break;
+                }
+            }
+        }
+        let leaf: LeafNode = *self.get(child_h).unwrap().as_leaf().unwrap();
+
+        Some(leaf)
+    }
+
     fn remove(&mut self, key: NodeHandle) -> Option<AnyNode> {
         let val = *self.get(key)?;
 
@@ -1672,6 +1703,17 @@ impl<'a> Book<'a> {
         }
 
         Ok(())
+    }
+
+    pub fn get_order(&self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
+        match side {
+            Side::Bid => {
+                self.bids.get_by_key(order_id).ok_or(throw_err!(MangoErrorCode::InvalidOrderId))
+            }
+            Side::Ask => {
+                self.asks.get_by_key(order_id).ok_or(throw_err!(MangoErrorCode::InvalidOrderId))
+            }
+        }
     }
 
     pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
