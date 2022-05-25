@@ -2403,6 +2403,8 @@ impl Processor {
             }
         }
 
+        check!(expected_cancel_size > 0, MangoErrorCode::Default)?;
+        check!(remaining_cancel_size > 0, MangoErrorCode::Default)?;
         check!(new_order.side == cancel_order.side, MangoErrorCode::Default)?;
 
         // if cancel order has been partially filled, reduce the new order size to accommodate
@@ -2536,8 +2538,8 @@ impl Processor {
 
             let book_order = book.get_order(order_id, side)?;
             check!(cancel_side == side, MangoErrorCode::Default)?;
-            if book_order.quantity < 0
-                || expected_cancel_size < 0
+            if book_order.quantity <= 0
+                || expected_cancel_size <= 0
                 || book_order.quantity > expected_cancel_size
             {
                 throw_err!(MangoErrorCode::Default);
@@ -2642,8 +2644,8 @@ impl Processor {
 
             let book_order = book.get_order(cancel_order_id, side)?;
             check!(cancel_side == side, MangoErrorCode::Default)?;
-            if book_order.quantity < 0
-                || expected_cancel_size < 0
+            if book_order.quantity <= 0
+                || expected_cancel_size <= 0
                 || book_order.quantity > expected_cancel_size
             {
                 throw_err!(MangoErrorCode::Default);
