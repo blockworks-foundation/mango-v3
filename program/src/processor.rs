@@ -2589,6 +2589,108 @@ impl Processor {
     }
 
     #[inline(never)]
+    pub fn edit_perp_order(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        cancel_order_id: i128,
+        price: i64,
+        mut max_base_quantity: i64,
+        max_quote_quantity: i64,
+        expiry_timestamp: u64,
+        client_order_id: u64,
+        expected_cancel_size: i64,
+        side: Side,
+        order_type: OrderType,
+        reduce_only: bool,
+        limit: u8,
+    ) -> MangoResult {
+        const NUM_FIXED: usize = 9;
+        let (fixed_ais, _packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        let [
+            mango_group_ai,             // read
+            mango_account_ai,           // write
+            owner_ai,                   // read, signer
+            _mango_cache_ai,             // read
+            perp_market_ai,             // write
+            bids_ai,                    // write
+            asks_ai,                    // write
+            _event_queue_ai,             // write
+            _referrer_mango_account_ai,  // write
+        ] = fixed_ais;
+
+        {
+            let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+
+            let mango_account =
+                MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+            check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
+            check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+            check!(
+                &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+                MangoErrorCode::InvalidOwner
+            )?;
+
+            let perp_market =
+                PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+            let market_index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
+
+            let book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+            let cancel_side = mango_account
+                .find_order_side(market_index, cancel_order_id)
+                .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
+
+            let book_order = book.get_order(cancel_order_id, side)?;
+            check!(cancel_side == side, MangoErrorCode::Default)?;
+            if book_order.quantity < 0
+                || expected_cancel_size < 0
+                || book_order.quantity > expected_cancel_size
+            {
+                throw_err!(MangoErrorCode::Default);
+            }
+
+            let filled_amount = expected_cancel_size.checked_sub(book_order.quantity).unwrap();
+            if filled_amount > 0 {
+                let new_max_base = max_base_quantity.checked_sub(filled_amount).unwrap();
+                if new_max_base < 0 {
+                    throw_err!(MangoErrorCode::Default);
+                }
+                max_base_quantity = new_max_base;
+            };
+        }
+
+        {
+            let cancel_accounts = [
+                mango_group_ai.clone(),
+                mango_account_ai.clone(),
+                owner_ai.clone(),
+                perp_market_ai.clone(),
+                bids_ai.clone(),
+                asks_ai.clone(),
+            ];
+            Self::cancel_perp_order(program_id, &cancel_accounts[..], cancel_order_id)?;
+        }
+
+        {
+            Self::place_perp_order2(
+                program_id,
+                accounts,
+                side,
+                price,
+                max_base_quantity,
+                max_quote_quantity,
+                client_order_id,
+                order_type,
+                reduce_only,
+                expiry_timestamp,
+                limit,
+            )?
+        }
+
+        Ok(())
+    }
+
+    #[inline(never)]
     fn settle_funds(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 18;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -7157,19 +7259,48 @@ impl Processor {
                     }
                 }
                 result
-            } // MangoInstruction::EditPerpOrder { order_id, invalid_id_ok } => {
-              //     // TODO OPT this log may cost too much compute
-              //     msg!("Mango: EditPerpOrder order_id={}", order_id);
-              //     let result = Self::edit_perp_order(program_id, accounts, order_id);
-              //     if invalid_id_ok {
-              //         if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
-              //             if mango_error_code == MangoErrorCode::InvalidOrderId {
-              //                 return Ok(());
-              //             }
-              //         }
-              //     }
-              //     result
-              // }
+            }
+            MangoInstruction::EditPerpOrder {
+                cancel_order_id,
+                price,
+                max_base_quantity,
+                max_quote_quantity,
+                expiry_timestamp,
+                client_order_id,
+                cancel_order_size,
+                side,
+                order_type,
+                reduce_only,
+                limit,
+                invalid_id_ok,
+            } => {
+                msg!("Mango: EditPerpOrder order_id={}", cancel_order_id);
+                let result = Self::edit_perp_order(
+                    program_id,
+                    accounts,
+                    cancel_order_id,
+                    price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    expiry_timestamp,
+                    client_order_id,
+                    cancel_order_size,
+                    side,
+                    order_type,
+                    reduce_only,
+                    limit,
+                );
+                if invalid_id_ok {
+                    if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
+                        if mango_error_code == MangoErrorCode::InvalidOrderId
+                            || mango_error_code == MangoErrorCode::ClientIdNotFound
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+                result
+            }
         }
     }
 }

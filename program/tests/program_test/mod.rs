@@ -2065,7 +2065,7 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
-    pub async fn edit_perp_order(
+    pub async fn edit_perp_order_by_client_id(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
         perp_market_cookie: &PerpMarketCookie,
@@ -2110,6 +2110,70 @@ impl MangoProgramTest {
             &perp_market.event_queue,
             None,
             &open_orders_pks,
+            order_price,
+            order_base_size,
+            order_quote_size,
+            expiry_timestamp,
+            client_order_id,
+            expected_cancel_size,
+            side,
+            order_type,
+            reduce_only,
+            limit,
+            invalid_id_ok,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn edit_perp_order(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_index: usize,
+        order_id: i128,
+        order_price: i64,
+        order_base_size: i64,
+        order_quote_size: i64,
+        expiry_timestamp: u64,
+        client_order_id: u64,
+        expected_cancel_size: i64,
+        side: Side,
+        order_type: OrderType,
+        reduce_only: bool,
+        limit: u8,
+        invalid_id_ok: bool,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let open_orders_pks: Vec<Pubkey> = mango_account
+            .spot_open_orders
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &pk)| if mango_account.in_margin_basket[i] { Some(pk) } else { None })
+            .collect();
+
+        let instructions = [mango::instruction::edit_perp_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &perp_market.event_queue,
+            None,
+            &open_orders_pks,
+            order_id,
             order_price,
             order_base_size,
             order_quote_size,

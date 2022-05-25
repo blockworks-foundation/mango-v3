@@ -225,7 +225,7 @@ pub async fn edit_spot_order_scenario(
 }
 
 #[allow(dead_code)]
-pub async fn edit_perp_order_scenario(
+pub async fn edit_perp_order_by_client_id_scenario(
     test: &mut MangoProgramTest,
     mango_group_cookie: &mut MangoGroupCookie,
     perp_orders: &Vec<(usize, usize, mango::matching::Side, f64, f64)>,
@@ -238,7 +238,7 @@ pub async fn edit_perp_order_scenario(
         let (user_index, market_index, order_side, order_size, order_price) = *perp_order;
         let mut perp_market_cookie = mango_group_cookie.perp_markets[market_index];
         perp_market_cookie
-            .edit_order(
+            .edit_order_by_client_id(
                 test,
                 mango_group_cookie,
                 user_index,
@@ -247,6 +247,38 @@ pub async fn edit_perp_order_scenario(
                 order_price,
                 PlacePerpOptions::default(),
                 client_order_id,
+                cancel_order_size,
+                false,
+            )
+            .await;
+
+        mango_group_cookie.users_with_perp_event[market_index].push(user_index);
+    }
+}
+
+#[allow(dead_code)]
+pub async fn edit_perp_order_scenario(
+    test: &mut MangoProgramTest,
+    mango_group_cookie: &mut MangoGroupCookie,
+    perp_orders: &Vec<(usize, usize, mango::matching::Side, f64, f64)>,
+    cancel_order_id: i128,
+    cancel_order_size: f64,
+) {
+    mango_group_cookie.run_keeper(test).await;
+
+    for perp_order in perp_orders {
+        let (user_index, market_index, order_side, order_size, order_price) = *perp_order;
+        let mut perp_market_cookie = mango_group_cookie.perp_markets[market_index];
+        perp_market_cookie
+            .edit_order(
+                test,
+                mango_group_cookie,
+                user_index,
+                cancel_order_id,
+                order_side,
+                order_size,
+                order_price,
+                PlacePerpOptions::default(),
                 cancel_order_size,
                 false,
             )
