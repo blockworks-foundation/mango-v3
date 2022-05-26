@@ -1086,11 +1086,11 @@ pub enum MangoInstruction {
     SwapSpotMarket,
 
     /// Remove a spot market
-    /// Accounts expected by this instruction (3 + NUM_NODE_BANKS)
+    /// Accounts expected by this instruction (3 + MAX_NODE_BANKS)
     /// 0. `[writable]` mango_group_ai
     /// 1. `[signer, writable]` admin_ai
     /// 2. `[writable]` oracle_ai
-    /// 3..3 + NUM_NODE_BANKS `[writable]` node_bank_ais
+    /// 3..3 + MAX_NODE_BANKS `[writable]` node_bank_ais
     RemoveSpotMarket,
 
     /// Remove an oracle
