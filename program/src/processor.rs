@@ -6341,13 +6341,16 @@ impl Processor {
     /// Close down RootBank and NodeBank(s) and transfer lamports to admin
     #[inline(never)]
     fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
-        const NUM_FIXED: usize = 3;
-        let (fixed_accounts, node_bank_ais) = array_refs![accounts, NUM_FIXED; ..;];
+        const NUM_FIXED: usize = 6;
+        let (fixed_accounts, node_bank_ais, vault_ais) = array_refs![accounts, NUM_FIXED, MAX_NODE_BANKS, MAX_NODE_BANKS];
 
         let [
             mango_group_ai, // write
             admin_ai,       // write, signer
             root_bank_ai,   // write
+            admin_vault_ai, // write
+            signer_ai,      // write
+            token_prog_ai,  // read
         ] = fixed_accounts;
 
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
@@ -6373,7 +6376,7 @@ impl Processor {
             )?;
         }
 
-        for node_bank_ai in node_bank_ais.iter() {
+        for (i, node_bank_ai) in node_bank_ais.iter().enumerate() {
             let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
             // TODO: make less stringent. sometimes vault.amount - (deposits - borrows) != 0
@@ -6382,9 +6385,32 @@ impl Processor {
             check!(node_bank.deposits.is_zero(), MangoErrorCode::InvalidAccountState)?;
             check!(node_bank.borrows.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
-            node_bank.meta_data.is_initialized = false;
-            // todo: Transfer out what's in vault to admin owned vault (?)
+            // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
+            // check vault was passed in
+            check!(vault_ais[i].key == &node_bank.vault, MangoErrorCode::InvalidVault);
+            let vault = Account::unpack(&vault_ais[i].try_borrow_data()?)?;
+            let admin_vault = Account::unpack(&admin_vault_ai.try_borrow_data()?)?;
 
+            check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner);
+            let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+            invoke_transfer(
+                token_prog_ai,
+                &vault_ais[i],
+                &admin_vault_ai,
+                signer_ai,
+                &[&signers_seeds],
+                vault.amount,
+            )?;
+            invoke_close_token_account(
+                token_prog_ai,
+                &vault_ais[i],
+                admin_vault_ai,
+                signer_ai,
+                &[&signers_seeds],
+            )?;
+
+            // Close node bank, return lamports to admin
+            node_bank.meta_data.is_initialized = false;
             program_transfer_lamports(node_bank_ai, admin_ai, node_bank_ai.lamports())?;
         }
 
