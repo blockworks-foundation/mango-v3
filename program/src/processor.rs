@@ -2951,7 +2951,7 @@ impl Processor {
         let mode = mango_group.tokens[market_index].perp_market_mode;
         if mode == MarketMode::ForceCloseOnly {
             // To guard against possibility delegate is zero key and that's passed in
-            check!(owner_ai.key != Pubkey::default(), MangoErrorCode::InvalidOwner)?;
+            check!(owner_ai.key != &Pubkey::default(), MangoErrorCode::InvalidOwner)?;
         } else {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
@@ -6131,7 +6131,7 @@ impl Processor {
         let mode = mango_group.tokens[market_index].spot_market_mode;
         if mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket {
             // To guard against possibility delegate is zero key and that's passed in
-            check!(owner_ai.key != Pubkey::default(), MangoErrorCode::InvalidOwner)?;
+            check!(owner_ai.key != &Pubkey::default(), MangoErrorCode::InvalidOwner)?;
         } else {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
@@ -6346,7 +6346,7 @@ impl Processor {
 
         let [
             mango_group_ai, // write
-            admin_ai,       // read, signer
+            admin_ai,       // write, signer
             root_bank_ai,   // write
         ] = fixed_accounts;
 
@@ -7146,6 +7146,34 @@ impl Processor {
             MangoInstruction::CancelAllSpotOrders { limit } => {
                 msg!("Mango: CancelAllSpotOrders");
                 Self::cancel_all_spot_orders(program_id, accounts, limit)
+            }
+            MangoInstruction::SetMarketMode { market_index, market_type, mode } => {
+                msg!("Mango: SetMarketMode");
+                Self::set_market_mode(program_id, accounts, market_index, mode, market_type)
+            }
+            MangoInstruction::RemovePerpMarket => {
+                msg!("Mango: RemovePerpMarket");
+                Self::remove_perp_market(program_id, accounts)
+            }
+            MangoInstruction::SwapSpotMarket => {
+                msg!("Mango: SwapSpotMarket");
+                Self::swap_spot_market(program_id, accounts)
+            }
+            MangoInstruction::RemoveSpotMarket => {
+                msg!("Mango: RemoveSpotMarket");
+                Self::remove_spot_market(program_id, accounts)
+            }
+            MangoInstruction::RemoveOracle => {
+                msg!("Mango: RemoveOracle");
+                Self::remove_oracle(program_id, accounts)
+            }
+            MangoInstruction::LiquidateDelistingToken => {
+                msg!("Mango: LiquidateDelistingToken");
+                Self::liquidate_delisting_token(program_id, accounts)
+            }
+            MangoInstruction::ForceSettlePerpPosition => {
+                msg!("Mango: ForceSettlePerpPosition");
+                Self::force_settle_perp_position(program_id, accounts)
             }
         }
     }

@@ -1,5 +1,5 @@
 use crate::matching::{OrderType, Side};
-use crate::state::{AssetType, INFO_LEN};
+use crate::state::{AssetType, MarketMode, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -1057,6 +1057,60 @@ pub enum MangoInstruction {
     CancelAllSpotOrders {
         limit: u8,
     },
+
+    /// Set the market mode in TokenInfo
+    /// Accounts expected by this instruction (2)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer]` admin_ai
+    SetMarketMode {
+        market_index: usize,
+        mode: MarketMode,
+        market_type: AssetType,
+    },
+
+    /// Remove a perp market from the group
+    /// Accounts expected by this instruction (10)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer, writable]` admin_ai
+    /// 2. `[writable]` perp_market_ai
+    /// 3. `[writable]` event_queue_ai
+    /// 4. `[writable]` bids_ai
+    /// 5. `[writable]` asks_ai
+    /// 6. `[writable]` mngo_vault_ai
+    /// 7. `[writable]` mngo_dao_vault_ai
+    /// 8. `[writable]` signer_ai
+    /// 9. `[]` token_prog_ai
+    RemovePerpMarket,
+
+    // TODO
+    SwapSpotMarket,
+
+    /// Remove a spot market
+    /// Accounts expected by this instruction (3 + NUM_NODE_BANKS)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer, writable]` admin_ai
+    /// 2. `[writable]` oracle_ai
+    /// 3..3 + NUM_NODE_BANKS `[writable]` node_bank_ais
+    RemoveSpotMarket,
+
+    /// Remove an oracle
+    /// Accounts expected by this instruction (10)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer]` admin_ai
+    /// 2. `[]` oracle_ai
+    RemoveOracle,
+
+    // TODO
+    LiquidateDelistingToken,
+
+    /// Force settle a user's perp positions
+    /// Accounts expected by this instruction (10)
+    /// 0. `[]` mango_group_ai
+    /// 1. `[writable]` mango_account_a_ai
+    /// 2. `[writable]` mango_account_b_ai
+    /// 3. `[]` mango_cache_ai
+    /// 4. `[]` perp_market_ai
+    ForceSettlePerpPosition,     
 }
 
 impl MangoInstruction {
@@ -1548,6 +1602,22 @@ impl MangoInstruction {
                 let limit = data_arr[0];
                 MangoInstruction::CancelAllSpotOrders { limit }
             }
+            66 => {
+                let data = array_ref![data, 0, 10];
+                let (market_index, mode, market_type) = array_refs![data, 8, 1, 1];
+
+                MangoInstruction::SetMarketMode { 
+                    market_index: usize::from_le_bytes(*market_index),
+                    mode: MarketMode::try_from(u8::from_le_bytes(*mode)).unwrap(),
+                    market_type: AssetType::try_from(u8::from_le_bytes(*market_type)).unwrap(),   
+                }
+            }
+            67 => MangoInstruction::RemovePerpMarket,
+            68 => MangoInstruction::SwapSpotMarket,
+            69 => MangoInstruction::RemoveSpotMarket,
+            70 => MangoInstruction::RemoveOracle,
+            71 => MangoInstruction::LiquidateDelistingToken,
+            72 => MangoInstruction::ForceSettlePerpPosition,
             _ => {
                 return None;
             }
