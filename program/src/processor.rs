@@ -6342,6 +6342,7 @@ impl Processor {
     #[inline(never)]
     fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_NODE_BANKS];
         let (fixed_accounts, node_bank_ais, vault_ais) = array_refs![accounts, NUM_FIXED, MAX_NODE_BANKS, MAX_NODE_BANKS];
 
         let [
@@ -6387,11 +6388,11 @@ impl Processor {
 
             // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
             // check vault was passed in
-            check!(vault_ais[i].key == &node_bank.vault, MangoErrorCode::InvalidVault);
+            check!(vault_ais[i].key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
             let vault = Account::unpack(&vault_ais[i].try_borrow_data()?)?;
             let admin_vault = Account::unpack(&admin_vault_ai.try_borrow_data()?)?;
 
-            check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner);
+            check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner)?;
             let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
