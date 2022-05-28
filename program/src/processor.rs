@@ -2454,8 +2454,8 @@ impl Processor {
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_market_closing =
-            mode == MarketMode::CloseOnly || perp_market_ai.key == &luna_perp_market::ID;
+        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
+        let is_market_closing = mode == MarketMode::CloseOnly || is_luna_market;
         check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
@@ -2536,7 +2536,7 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             u8::MAX,
-            is_market_closing,
+            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2624,8 +2624,8 @@ impl Processor {
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_market_closing =
-            mode == MarketMode::CloseOnly || perp_market_ai.key == &luna_perp_market::ID;
+        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
+        let is_market_closing = mode == MarketMode::CloseOnly || is_luna_market;
         check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
@@ -2710,7 +2710,7 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             limit,
-            is_market_closing,
+            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
