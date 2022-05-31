@@ -335,6 +335,24 @@ pub enum Side {
     Ask = 1,
 }
 
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
+)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum ExpiryType {
+    /// Expire at exactly the given block time.
+    ///
+    /// Orders with an expiry in the past are ignored. Expiry more than 255s in the future
+    /// is clamped to 255 seconds.
+    Absolute,
+
+    /// Expire a number of block time seconds in the future.
+    ///
+    /// Must be between 1 and 255.
+    Relative,
+}
+
 pub const MAX_BOOK_NODES: usize = 1024; // NOTE: this cannot be larger than u32::MAX
 
 /// A binary tree on AnyNode::key()
