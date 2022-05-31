@@ -26,7 +26,8 @@ use switchboard_program::FastRoundResultAccountData;
 use mango_common::Loadable;
 use mango_logs::{
     mango_emit_heap, mango_emit_stack, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog,
-    CancelAllPerpOrdersLog, DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog,
+    CancelAllPerpOrdersLog, CloseMangoAccountLog, CloseSpotOpenOrdersLog, CreateMangoAccountLog,
+    CreateSpotOpenOrdersLog, DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog,
     LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog,
     RedeemMngoLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
     UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
@@ -208,6 +209,13 @@ impl Processor {
         mango_account.order_market = [FREE_ORDER_SLOT; MAX_PERP_OPEN_ORDERS];
         mango_account.meta_data = MetaData::new(DataType::MangoAccount, 0, true);
         mango_account.not_upgradable = true;
+
+        mango_emit_heap!(CreateMangoAccountLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            owner: *owner_ai.key,
+        });
+
         Ok(())
     }
 
@@ -274,6 +282,12 @@ impl Processor {
         mango_account.delegate = Pubkey::default();
         mango_account.in_margin_basket = [false; MAX_PAIRS];
         mango_account.info = [0; INFO_LEN];
+
+        mango_emit_heap!(CloseMangoAccountLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            owner: *owner_ai.key
+        });
 
         Ok(())
     }
@@ -1433,6 +1447,13 @@ impl Processor {
 
         mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
 
+        mango_emit_heap!(CreateSpotOpenOrdersLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            open_orders: *open_orders_ai.key,
+            spot_market: *spot_market_ai.key,
+        });
+
         Ok(())
     }
 
@@ -1519,6 +1540,13 @@ impl Processor {
 
         mango_account.spot_open_orders[market_index] = *open_orders_ai.key;
 
+        mango_emit_heap!(CreateSpotOpenOrdersLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            open_orders: *open_orders_ai.key,
+            spot_market: *spot_market_ai.key,
+        });
+
         Ok(())
     }
 
@@ -1578,6 +1606,13 @@ impl Processor {
         )?;
 
         mango_account.spot_open_orders[market_index] = Pubkey::default();
+
+        mango_emit_heap!(CloseSpotOpenOrdersLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            open_orders: *open_orders_ai.key,
+            spot_market: *spot_market_ai.key,
+        });
 
         Ok(())
     }
@@ -5691,6 +5726,12 @@ impl Processor {
 
         mango_group.num_mango_accounts += 1;
 
+        mango_emit_heap!(CreateMangoAccountLog {
+            mango_group: *mango_group_ai.key,
+            mango_account: *mango_account_ai.key,
+            owner: *owner_ai.key
+        });
+
         Ok(())
     }
 
@@ -7100,7 +7141,9 @@ fn checked_change_net(
         mango_account: *mango_account_pk,
         token_index: token_index as u64,
         deposit: mango_account.deposits[token_index].to_bits(),
-        borrow: mango_account.borrows[token_index].to_bits()
+        borrow: mango_account.borrows[token_index].to_bits(),
+        deposit_index: root_bank_cache.deposit_index.to_bits(),
+        borrow_index: root_bank_cache.borrow_index.to_bits(),
     });
 
     Ok(()) // This is an optimization to prevent unnecessary I80F48 calculations
