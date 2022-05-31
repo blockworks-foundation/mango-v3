@@ -38,7 +38,7 @@ use crate::ids::{
     luna_perp_market, luna_pyth_oracle, luna_root_bank, luna_spot_market, msrm_token, srm_token,
 };
 use crate::instruction::MangoInstruction;
-use crate::matching::{Book, BookSide, OrderType, Side};
+use crate::matching::{Book, BookSide, ExpiryType, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
 use crate::queue::{EventQueue, EventType, FillEvent, LiquidateEvent, OutEvent};
 #[cfg(not(feature = "devnet"))]
@@ -2658,6 +2658,7 @@ impl Processor {
         reduce_only: bool,
         expiry_timestamp: u64,
         limit: u8,
+        expiry_type: ExpiryType,
     ) -> MangoResult {
         check!(price > 0, MangoErrorCode::InvalidParam)?;
         check!(max_base_quantity > 0, MangoErrorCode::InvalidParam)?;
@@ -2704,17 +2705,28 @@ impl Processor {
         let open_orders_accounts = load_open_orders_accounts(&open_orders_ais)?;
 
         let now_ts = Clock::get()?.unix_timestamp as u64;
-        let time_in_force = if expiry_timestamp != 0 {
-            // If expiry is far in the future, clamp to 255 seconds
-            let tif = expiry_timestamp.saturating_sub(now_ts).min(255);
-            if tif == 0 {
-                // If expiry is in the past, ignore the order
-                msg!("Order is already expired");
-                return Ok(());
+        let time_in_force = match expiry_type {
+            ExpiryType::Absolute => {
+                if expiry_timestamp != 0 {
+                    // If expiry is far in the future, clamp to 255 seconds
+                    let tif = expiry_timestamp.saturating_sub(now_ts).min(255) as u8;
+                    if tif == 0 {
+                        // If expiry is in the past or now, ignore the order
+                        msg!("Order is already expired");
+                        return Ok(());
+                    }
+                    tif
+                } else {
+                    0 // never expire
+                }
             }
-            tif as u8
-        } else {
-            0 // never expire
+            ExpiryType::Relative => {
+                check!(
+                    expiry_timestamp > 0 && expiry_timestamp <= 255,
+                    MangoErrorCode::InvalidParam
+                )?;
+                expiry_timestamp as u8
+            }
         };
 
         let mut perp_market =
@@ -6853,6 +6865,7 @@ impl Processor {
                 order_type,
                 reduce_only,
                 limit,
+                expiry_type,
             } => {
                 msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
                 Self::place_perp_order2(
@@ -6867,6 +6880,7 @@ impl Processor {
                     reduce_only,
                     expiry_timestamp,
                     limit,
+                    expiry_type,
                 )
             }
             MangoInstruction::CancelAllSpotOrders { limit } => {
