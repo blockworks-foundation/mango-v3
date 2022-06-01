@@ -1751,6 +1751,54 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn perform_withdraw2(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        mint_index: usize,
+        quantity: u64,
+        allow_borrow: bool,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let user_token_account = self.with_user_token_account(user_index, mint_index);
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (root_bank_pk, root_bank) = self.with_root_bank(&mango_group, mint_index).await;
+        let (node_bank_pk, node_bank) = self.with_node_bank(&root_bank, 0).await; // Note: not sure if nb_index is ever anything else than 0
+
+        let instructions = [withdraw2(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &root_bank_pk,
+            &node_bank_pk,
+            &node_bank.vault,
+            &user_token_account,
+            &signer_pk,
+            &mut mango_account
+                .spot_open_orders
+                .iter()
+                .enumerate()
+                .filter(|(i, _oo)| mango_account.in_margin_basket[*i])
+                .map(|(_, oo)| oo.clone()),
+            quantity,
+            allow_borrow,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
     pub async fn perform_set_delegate(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,

@@ -1066,6 +1066,26 @@ pub enum MangoInstruction {
     CancelAllSpotOrders {
         limit: u8,
     },
+
+    /// Withdraw funds that were deposited earlier.
+    ///
+    /// Accounts expected by this instruction (10):
+    ///
+    /// 0. `[read]` mango_group_ai,   -
+    /// 1. `[write]` mango_account_ai, -
+    /// 2. `[read]` owner_ai,         -
+    /// 3. `[read]` mango_cache_ai,   -
+    /// 4. `[read]` root_bank_ai,     -
+    /// 5. `[write]` node_bank_ai,     -
+    /// 6. `[write]` vault_ai,         -
+    /// 7. `[write]` token_account_ai, -
+    /// 8. `[read]` signer_ai,        -
+    /// 9. `[read]` token_prog_ai,    -
+    /// 10..10 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
+    Withdraw2 {
+        quantity: u64,
+        allow_borrow: bool,
+    },
 }
 
 impl MangoInstruction {
@@ -1558,6 +1578,20 @@ impl MangoInstruction {
                 let data_arr = array_ref![data, 0, 1];
                 let limit = data_arr[0];
                 MangoInstruction::CancelAllSpotOrders { limit }
+            }
+            66 => {
+                let data = array_ref![data, 0, 9];
+                let (quantity, allow_borrow) = array_refs![data, 8, 1];
+
+                let allow_borrow = match allow_borrow {
+                    [0] => false,
+                    [1] => true,
+                    _ => return None,
+                };
+                MangoInstruction::Withdraw2 {
+                    quantity: u64::from_le_bytes(*quantity),
+                    allow_borrow,
+                }
             }
             _ => {
                 return None;
@@ -2408,6 +2442,42 @@ pub fn withdraw(
     accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::Withdraw { quantity, allow_borrow };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn withdraw2(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    root_bank_pk: &Pubkey,
+    node_bank_pk: &Pubkey,
+    vault_pk: &Pubkey,
+    token_account_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    open_orders_pks: &mut dyn Iterator<Item = Pubkey>,
+
+    quantity: u64,
+    allow_borrow: bool,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*root_bank_pk, false),
+        AccountMeta::new(*node_bank_pk, false),
+        AccountMeta::new(*vault_pk, false),
+        AccountMeta::new(*token_account_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+    ];
+
+    accounts.extend(open_orders_pks.map(|pk| AccountMeta::new_readonly(pk, false)));
+
+    let instr = MangoInstruction::Withdraw2 { quantity, allow_borrow };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
