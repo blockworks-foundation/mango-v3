@@ -95,6 +95,8 @@ pub struct TokenBalanceLog {
     pub token_index: u64, // IDL doesn't support usize
     pub deposit: i128, // on client convert i128 to I80F48 easily by passing in the BN to I80F48 ctor
     pub borrow: i128,
+    pub deposit_index: i128, // I80F48
+    pub borrow_index: i128,  // I80F48
 }
 
 #[event]
@@ -297,4 +299,34 @@ pub struct ReferralFeeAccrualLog {
     pub referree_mango_account: Pubkey,
     pub market_index: u64,
     pub referral_fee_accrual: i128, // I80F48
+}
+
+#[event]
+pub struct CreateMangoAccountLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub owner: Pubkey,
+}
+
+#[event]
+pub struct CloseMangoAccountLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub owner: Pubkey,
+}
+
+#[event]
+pub struct CreateSpotOpenOrdersLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub open_orders: Pubkey,
+    pub spot_market: Pubkey,
+}
+
+#[event]
+pub struct CloseSpotOpenOrdersLog {
+    pub mango_group: Pubkey,
+    pub mango_account: Pubkey,
+    pub open_orders: Pubkey,
+    pub spot_market: Pubkey,
 }
