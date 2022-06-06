@@ -1082,15 +1082,25 @@ pub enum MangoInstruction {
     /// 9. `[]` token_prog_ai
     RemovePerpMarket,
 
-    // TODO
+    /// Swap an existing serum market for another one with the same pair. All open orders must be closed.
+    /// Accounts expected by this instruction (10)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer, writable]` admin_ai
+    /// 2. `[writable]` new_spot_market_ai
+    /// 3. `[writable]` old_spot_market_ai
+    /// 4. `[]` dex_program_ai
     SwapSpotMarket,
 
     /// Remove a spot market
-    /// Accounts expected by this instruction (3 + MAX_NODE_BANKS)
+    /// Accounts expected by this instruction (6 + MAX_NODE_BANKS)
     /// 0. `[writable]` mango_group_ai
-    /// 1. `[signer, writable]` admin_ai
-    /// 2. `[writable]` oracle_ai
-    /// 3..3 + MAX_NODE_BANKS `[writable]` node_bank_ais
+    /// 1. `[signer, writable] admin_ai
+    /// 2. `[writable]` root_bank_ai
+    /// 3. `[writable]` admin_vault_ai
+    /// 4. `[]` signer_ai
+    /// 5. `[]` token_prog_ai
+    /// 6..6 + MAX_NODE_BANKS `[writable]` node_bank_ais
+    /// 6 + MAX_NODE_BANKS.. `[writable]` vault_ais
     RemoveSpotMarket,
 
     /// Remove an oracle
@@ -1110,7 +1120,7 @@ pub enum MangoInstruction {
     /// 2. `[writable]` mango_account_b_ai
     /// 3. `[]` mango_cache_ai
     /// 4. `[]` perp_market_ai
-    ForceSettlePerpPosition,     
+    ForceSettlePerpPosition,
 }
 
 impl MangoInstruction {
@@ -1606,10 +1616,10 @@ impl MangoInstruction {
                 let data = array_ref![data, 0, 10];
                 let (market_index, mode, market_type) = array_refs![data, 8, 1, 1];
 
-                MangoInstruction::SetMarketMode { 
+                MangoInstruction::SetMarketMode {
                     market_index: usize::from_le_bytes(*market_index),
                     mode: MarketMode::try_from(u8::from_le_bytes(*mode)).unwrap(),
-                    market_type: AssetType::try_from(u8::from_le_bytes(*market_type)).unwrap(),   
+                    market_type: AssetType::try_from(u8::from_le_bytes(*market_type)).unwrap(),
                 }
             }
             67 => MangoInstruction::RemovePerpMarket,

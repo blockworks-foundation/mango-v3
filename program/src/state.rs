@@ -148,6 +148,20 @@ pub enum MarketMode {
     SwappingSpotMarket = 5, // special mode when we're swapping out a spot market
 }
 
+pub trait MarketModeCheck {
+    fn is_reduce_only(self) -> bool;
+    fn allow_new_open_orders(self) -> bool;
+}
+
+impl MarketModeCheck for MarketMode {
+    fn is_reduce_only(self) -> bool {
+        self == MarketMode::CloseOnly || self == MarketMode::ForceCloseOnly
+    }
+    fn allow_new_open_orders(self) -> bool {
+        !(self == MarketMode::ForceCloseOnly || self == MarketMode::SwappingSpotMarket)
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {
@@ -255,9 +269,7 @@ pub struct MangoGroup {
     pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
     pub ref_mngo_required: u64,
 
-    pub oracle_inactive_bits: u16,
-
-    pub padding: [u8; 6], // padding used for future expansions
+    pub padding: [u8; 8], // padding used for future expansions
 }
 
 impl MangoGroup {
