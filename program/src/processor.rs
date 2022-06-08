@@ -6354,7 +6354,7 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
+        let root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
         check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
         for i in 0..root_bank.num_node_banks {
             check!(
@@ -6368,7 +6368,7 @@ impl Processor {
                 continue;
             }
 
-            let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+            let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
             // TODO: make less stringent. sometimes vault.amount - (deposits - borrows) != 0
             // In the few cases as of today, it is a very small negative balance
@@ -6430,21 +6430,49 @@ impl Processor {
     /// swap out the spot market for new serum spot market that uses the same base token and quote token.
     /// Afterwards set the market back to Active
     fn swap_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
-        // mango_group.spot_markets[market_index].spot_market = *spot_market_ai.key;
-        //
-        // let spot_market = load_market_state(spot_market_ai, dex_program_ai.key)?;
-        //
-        // check_eq!(
-        //     identity(spot_market.coin_mint),
-        //     mint_ai.key.to_aligned_bytes(),
-        //     MangoErrorCode::Default
-        // )?;
-        // check_eq!(
-        //     identity(spot_market.pc_mint),
-        //     mango_group.tokens[QUOTE_INDEX].mint.to_aligned_bytes(),
-        //     MangoErrorCode::Default
-        // )?;
-        unimplemented!()
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai,     // write
+            admin_ai,           // read, signer
+            new_spot_market_ai, // read
+            old_spot_market_ai, // read
+            dex_program_ai,     // read
+        ] = accounts;
+
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        let market_index = mango_group
+            .find_spot_market_index(old_spot_market_ai.key)
+            .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
+
+        // Check market is in the correct state
+        check_eq!(
+            mango_group.tokens[market_index].spot_market_mode,
+            MarketMode::SwappingSpotMarket,
+            MangoErrorCode::InvalidAccountState
+        )?;
+        let new_spot_market = load_market_state(new_spot_market_ai, dex_program_ai.key)?;
+        let old_spot_market = load_market_state(new_spot_market_ai, dex_program_ai.key)?;
+        // Check base and quote mints are the same
+        check_eq!(
+            identity(new_spot_market.coin_mint),
+            identity(old_spot_market.coin_mint),
+            MangoErrorCode::Default
+        )?;
+        check_eq!(
+            identity(new_spot_market.pc_mint),
+            identity(old_spot_market.pc_mint),
+            MangoErrorCode::Default
+        )?;
+
+        mango_group.spot_markets[market_index].spot_market = *new_spot_market_ai.key;
+        mango_group.tokens[market_index].spot_market_mode = MarketMode::Active;
+
+        Ok(())
     }
 
     /// Calling this ix means you know that sum of quote positions is zero.
@@ -6484,7 +6512,7 @@ impl Processor {
         )?;
 
         // Make sure perp market has zero open interest
-        let mut perp_market =
+        let perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
 
@@ -6493,10 +6521,9 @@ impl Processor {
         sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
 
         // Make sure event queue has no events
-        let mut event_queue =
+        let event_queue =
             EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
-        event_queue.header.meta_data.is_initialized = false;
 
         // Close event queue, return lamports to admin
         program_transfer_lamports(event_queue_ai, admin_ai, event_queue_ai.lamports())?;
@@ -6595,9 +6622,296 @@ impl Processor {
     /// First the tokens will be moved into the owner's ATA until maint health = 0
     /// Then liquidate token for some other asset until it gets back to init health 0
     /// required: cancel_all_spot_orders and close_spot_open_orders first before calling this ix
+    /// liab must be the delisting token
+    /// in progress, borrow resolution needs work
     #[inline(never)]
     fn liquidate_delisting_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
-        unimplemented!()
+        const NUM_FIXED: usize = 14;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+
+        let [
+            mango_group_ai,              // read
+            mango_cache_ai,              // read
+            liqee_mango_account_ai,      // write
+            liqor_mango_account_ai,      // write
+            liqor_ai,                    // read, signer
+            asset_root_bank_ai,          // read
+            asset_node_bank_ai,          // write
+            liab_root_bank_ai,           // read
+            liab_node_bank_ai,           // write
+            liab_vault_ai,               // write
+            liqee_liab_token_account_ai, // write
+            liqor_liab_token_account_ai, // write
+            signer_ai,                   // read
+            token_prog_ai                // read
+        ] = fixed_ais;
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+
+        check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+
+        // Check liqee account
+        let mut liqee_ma =
+            MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
+
+        // Check liqor account
+        let mut liqor_ma =
+            MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
+        check!(
+            &liqor_ma.owner == liqor_ai.key || &liqor_ma.delegate == liqor_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
+        check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+        check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+        liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
+
+        // Load and check liab token banks
+        let liab_root_bank = RootBank::load_checked(liab_root_bank_ai, program_id)?;
+        let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
+        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
+        check!(
+            liab_root_bank.node_banks.contains(liab_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+
+        // Check passed in ATA belongs to liqee and has correct mint
+        let liqee_liab_token_account =
+            Account::unpack(&liqee_liab_token_account_ai.try_borrow_data()?)?;
+        check_eq!(liqee_liab_token_account.owner, liqee_ma.owner, MangoErrorCode::InvalidAccount)?;
+        check_eq!(
+            liqee_liab_token_account.mint,
+            mango_group.tokens[liab_index].mint,
+            MangoErrorCode::InvalidAccountState
+        )?;
+
+        // Check passed in liqor ATA has correct mint
+        let liqor_liab_token_account =
+            Account::unpack(&liqee_liab_token_account_ai.try_borrow_data()?)?;
+        check_eq!(
+            liqor_liab_token_account.mint,
+            mango_group.tokens[liab_index].mint,
+            MangoErrorCode::InvalidAccountState
+        )?;
+
+        // Check market is in correct state
+        check_eq!(
+            mango_group.tokens[liab_index].spot_market_mode,
+            MarketMode::ForceCloseOnly,
+            MangoErrorCode::InvalidAccountState
+        )?;
+
+        // Load and check asset banks
+        let asset_root_bank = RootBank::load_checked(asset_root_bank_ai, program_id)?;
+        let asset_index = mango_group.find_root_bank_index(asset_root_bank_ai.key).unwrap();
+        let mut asset_node_bank = NodeBank::load_mut_checked(asset_node_bank_ai, program_id)?;
+        check!(
+            asset_root_bank.node_banks.contains(asset_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+
+        check!(asset_index != liab_index, MangoErrorCode::InvalidParam)?;
+
+        // Check cache validity
+        let now_ts = Clock::get()?.unix_timestamp as u64;
+        let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
+        let liqor_active_assets = UserActiveAssets::new(
+            &mango_group,
+            &liqor_ma,
+            vec![(AssetType::Token, asset_index), (AssetType::Token, liab_index)],
+        );
+        mango_cache.check_valid(
+            &mango_group,
+            &UserActiveAssets::merge(&liqee_active_assets, &liqor_active_assets),
+            now_ts,
+        )?;
+
+        // Check liqee health and deposits/borrows
+        let mut health_cache = HealthCache::new(liqee_active_assets);
+        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
+        let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
+
+        let liab_info = &mango_group.spot_markets[liab_index];
+        let asset_info = &mango_group.spot_markets[asset_index];
+        check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+        check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+        let asset_root_bank_cache = &mango_cache.root_bank_cache[asset_index];
+        let liab_root_bank_cache = &mango_cache.root_bank_cache[liab_index];
+        let mut native_liab_deposits =
+            liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
+        let native_liab_borrows = liqee_ma.get_native_borrow(liab_root_bank_cache, liab_index)?;
+
+        check!(
+            native_liab_deposits > ZERO_I80F48 || native_liab_borrows > ZERO_I80F48,
+            MangoErrorCode::InvalidAccountState
+        );
+
+        // Get prices weights and fees
+        // TODO: what fees should the liqor get?
+        let liab_price = mango_cache.get_price(liab_index);
+        let asset_price = mango_cache.get_price(asset_index);
+        let (asset_fee, init_asset_weight) = if asset_index == QUOTE_INDEX {
+            (ONE_I80F48, ONE_I80F48)
+        } else {
+            let asset_info = &mango_group.spot_markets[asset_index];
+            check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+            (ONE_I80F48, asset_info.init_asset_weight)
+        };
+
+        let (liab_fee, init_liab_weight) = if liab_index == QUOTE_INDEX {
+            (ONE_I80F48, ONE_I80F48)
+        } else {
+            let liab_info = &mango_group.spot_markets[liab_index];
+            check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+            (ONE_I80F48, liab_info.init_liab_weight)
+        };
+
+        // How much can be withdrawn before maint_health < 0
+        let withdrawable_amount = native_liab_deposits
+            .min(maint_health / liab_info.maint_asset_weight / liab_price)
+            .max(ZERO_I80F48);
+
+        // Withdraw all except dust
+        if withdrawable_amount >= ONE_I80F48 {
+            checked_change_net(
+                liab_root_bank_cache,
+                &mut liab_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                liab_index,
+                -withdrawable_amount,
+            )?;
+            invoke_transfer(
+                token_prog_ai,
+                liab_vault_ai,
+                liqee_liab_token_account_ai,
+                signer_ai,
+                &[&signers_seeds],
+                withdrawable_amount.to_num::<u64>(),
+            )?;
+
+            native_liab_deposits = liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
+        }
+
+        // Resolve any remaining non-dust deposits
+        // They must be forming collateral for an open position so just swap for equivalent value in asset
+        if native_liab_deposits > ONE_I80F48 {
+            let asset_amount = (native_liab_deposits * liab_price * liab_info.init_asset_weight)
+                / (asset_price * asset_info.init_asset_weight);
+
+            // Transfer enough asset to cover liab deposits into liqee
+            checked_change_net(
+                &asset_root_bank_cache,
+                &mut asset_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                asset_index,
+                asset_amount,
+            )?;
+            checked_change_net(
+                &asset_root_bank_cache,
+                &mut asset_node_bank,
+                &mut liqor_ma,
+                liqor_mango_account_ai.key,
+                asset_index,
+                asset_amount,
+            )?;
+
+            // Withdraw remaining delisting asset to liqor token acct
+            // TODO: what hapopens to dust here?
+            checked_change_net(
+                &liab_root_bank_cache,
+                &mut liab_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                liab_index,
+                -native_liab_deposits,
+            )?;
+            invoke_transfer(
+                token_prog_ai,
+                liab_vault_ai,
+                liqor_liab_token_account_ai,
+                signer_ai,
+                &[&signers_seeds],
+                native_liab_deposits.to_num::<u64>(),
+            )?;
+        }
+
+        // Liquidate any borrows
+        if native_liab_borrows > ZERO_I80F48 {
+            let asset_implied_liab_transfer =
+                liqor_ma.get_native_deposit(asset_root_bank_cache, asset_index)? * asset_price
+                    / liab_price;
+            let actual_liab_transfer = min(native_liab_borrows, asset_implied_liab_transfer);
+
+            // Transfer into liqee to reduce liabilities
+            checked_change_net(
+                &liab_root_bank_cache,
+                &mut liab_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                liab_index,
+                actual_liab_transfer,
+            )?;
+
+            // Transfer from liqor
+            checked_change_net(
+                &liab_root_bank_cache,
+                &mut liab_node_bank,
+                &mut liqor_ma,
+                liqor_mango_account_ai.key,
+                liab_index,
+                -actual_liab_transfer,
+            )?;
+
+            let asset_transfer = actual_liab_transfer * liab_price / asset_price;
+
+            // Transfer collater into liqor
+            checked_change_net(
+                &asset_root_bank_cache,
+                &mut asset_node_bank,
+                &mut liqor_ma,
+                liqor_mango_account_ai.key,
+                asset_index,
+                asset_transfer,
+            )?;
+
+            // Transfer collateral out of liqee
+            checked_change_net(
+                &asset_root_bank_cache,
+                &mut asset_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                asset_index,
+                -asset_transfer,
+            )?;
+        }
+
+        // Resolve dust if necessary
+        if native_liab_deposits < ONE_I80F48 && native_liab_deposits > ZERO_I80F48 {
+            // transfer_token_internal(
+            //     root_bank_cache,
+            //     &mut node_bank,
+            //     &mut mango_account,
+            //     &mut dust_account,
+            //     mango_account_ai.key,
+            //     dust_account_ai.key,
+            //     token_index,
+            //     deposit_amount,
+            // )?;
+            native_liab_deposits =
+                liqee_ma.get_native_deposit(liab_root_bank_cache, asset_index)?;
+        }
+        // check liqor health
+
+        Ok(())
     }
 
     /// Select two accounts with opposite positions and settle perp position between them using oracle price

@@ -3013,6 +3013,67 @@ pub fn change_spot_market_params(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
+pub fn set_market_mode(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    market_index: usize,
+    mode: MarketMode,
+    market_type: AssetType,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new(*mango_group_pk, false),
+        AccountMeta::new_readonly(*admin_pk, true),
+    ];
+
+    let instr = MangoInstruction::SetMarketMode {
+        market_index,
+        mode,
+        market_type,
+    };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn liquidate_delisting_token(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    liqee_mango_account_pk: &Pubkey,
+    liqor_mango_account_pk: &Pubkey,
+    liqor_pk: &Pubkey,
+    asset_root_bank_pk: &Pubkey,
+    asset_node_bank_pk: &Pubkey,
+    liab_root_bank_pk: &Pubkey,
+    liab_node_bank_pk: &Pubkey,
+    liab_vault_pk: &Pubkey,
+    liqee_liab_token_account_pk: &Pubkey,
+    liqor_liab_token_account_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    token_program_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*liqee_mango_account_pk, false),
+        AccountMeta::new(*liqor_mango_account_pk, false),
+        AccountMeta::new_readonly(*liqor_pk, true),
+        AccountMeta::new_readonly(*asset_root_bank_pk, false),
+        AccountMeta::new(*asset_node_bank_pk, false),
+        AccountMeta::new_readonly(*liab_root_bank_pk, false),
+        AccountMeta::new(*liab_node_bank_pk, false),
+        AccountMeta::new(*liab_vault_pk, false),
+        AccountMeta::new(*liqee_liab_token_account_pk, false),
+        AccountMeta::new(*liqor_liab_token_account_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(*token_program_pk, false),
+    ];
+
+    let instr = MangoInstruction::LiquidateDelistingToken;
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
 /// Serialize Option<T> as (bool, T). This gives the binary representation
 /// a fixed width, instead of it becoming one byte for None.
 fn serialize_option_fixed_width<S: serde::Serializer, T: Sized + Default + Serialize>(
