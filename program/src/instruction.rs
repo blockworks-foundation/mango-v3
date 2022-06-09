@@ -1,4 +1,4 @@
-use crate::matching::{OrderType, Side};
+use crate::matching::{ExpiryType, OrderType, Side};
 use crate::state::{AssetType, MarketMode, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
 use arrayref::{array_ref, array_refs};
@@ -1012,9 +1012,15 @@ pub enum MangoInstruction {
 
         /// Timestamp of when order expires
         ///
-        /// Send 0 if you want the order to never expire.
-        /// Timestamps in the past mean the instruction is skipped.
-        /// Timestamps in the future are reduced to now + 255s.
+        /// If expiry_type is Absolute:
+        /// - Send 0 if you want the order to never expire.
+        /// - Timestamps in the past mean the instruction is skipped.
+        /// - Timestamps in the future are reduced to now + 255s.
+        ///
+        /// If expiry_type is Relative:
+        /// - Must be between 1 and 255.
+        /// - The order will expire when the block timestamp has reached or exceeded
+        ///   the current block timestamp plus that number of seconds.
         expiry_timestamp: u64,
 
         side: Side,
@@ -1029,6 +1035,9 @@ pub enum MangoInstruction {
         /// Use this to limit compute used during order matching.
         /// When the limit is reached, processing stops and the instruction succeeds.
         limit: u8,
+
+        /// Can be 0 -> Absolute or 1 -> Relative; see expiry_timestamp
+        expiry_type: ExpiryType,
     },
 
     /// Cancels all the spot orders pending for a mango account
@@ -1595,6 +1604,7 @@ impl MangoInstruction {
                     reduce_only,
                     limit,
                 ) = array_refs![data_arr, 8, 8, 8, 8, 8, 1, 1, 1, 1];
+                let expiry_type_byte = if data.len() > 44 { data[44] } else { 0 };
                 MangoInstruction::PlacePerpOrder2 {
                     price: i64::from_le_bytes(*price),
                     max_base_quantity: i64::from_le_bytes(*max_base_quantity),
@@ -1605,6 +1615,7 @@ impl MangoInstruction {
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
                     limit: u8::from_le_bytes(*limit),
+                    expiry_type: ExpiryType::try_from_primitive(expiry_type_byte).ok()?,
                 }
             }
             65 => {
@@ -2044,6 +2055,7 @@ pub fn place_perp_order2(
     reduce_only: bool,
     expiry_timestamp: Option<u64>, // Send 0 if you want to ignore time in force
     limit: u8,                     // maximum number of FillEvents before terminating
+    expiry_type: ExpiryType,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
@@ -2069,6 +2081,7 @@ pub fn place_perp_order2(
         reduce_only,
         expiry_timestamp: expiry_timestamp.unwrap_or(0),
         limit,
+        expiry_type,
     };
     let data = instr.pack();
 

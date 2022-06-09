@@ -850,6 +850,7 @@ impl MangoProgramTest {
             reduce_only,
             expiry_timestamp,
             limit,
+            ExpiryType::Absolute,
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
