@@ -2981,10 +2981,7 @@ impl Processor {
 
         // Owner signature not necessary if market is in ForceClose
         let mode = mango_group.tokens[market_index].perp_market_mode;
-        if mode == MarketMode::ForceCloseOnly {
-            // To guard against possibility delegate is zero key and that's passed in
-            check!(owner_ai.key != &Pubkey::default(), MangoErrorCode::InvalidOwner)?;
-        } else {
+        if mode != MarketMode::ForceCloseOnly {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
 
@@ -6167,10 +6164,7 @@ impl Processor {
 
         // Owner signature not necessary if market is in ForceClose or SwappingSpotMarket
         let mode = mango_group.tokens[market_index].spot_market_mode;
-        if mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket {
-            // To guard against possibility delegate is zero key and that's passed in
-            check!(owner_ai.key != &Pubkey::default(), MangoErrorCode::InvalidOwner)?;
-        } else {
+        if !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket) {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
 
