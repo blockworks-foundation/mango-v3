@@ -6503,7 +6503,7 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
         let new_spot_market = load_market_state(new_spot_market_ai, dex_program_ai.key)?;
-        let old_spot_market = load_market_state(new_spot_market_ai, dex_program_ai.key)?;
+        let old_spot_market = load_market_state(old_spot_market_ai, dex_program_ai.key)?;
         // Check base and quote mints are the same
         check_eq!(
             identity(new_spot_market.coin_mint),
@@ -6522,7 +6522,7 @@ impl Processor {
         Ok(())
     }
 
-    /// Calling this ix means you know that sum of quote positions is zero.
+    /// Only call this instruction if you know the sum of all quote positions is zero
     /// There is no way to check it from program so must be manually checked
     #[inline(never)]
     fn remove_perp_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
