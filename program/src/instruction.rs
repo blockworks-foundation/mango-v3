@@ -3049,10 +3049,11 @@ pub fn liquidate_delisting_token(
     liab_vault_pk: &Pubkey,
     liqee_liab_token_account_pk: &Pubkey,
     liqor_liab_token_account_pk: &Pubkey,
+    liqee_open_orders_pks: &[Pubkey],
+    liqor_open_orders_pks: &[Pubkey],
     signer_pk: &Pubkey,
-    token_program_pk: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new_readonly(*mango_cache_pk, false),
         AccountMeta::new(*liqee_mango_account_pk, false),
@@ -3066,8 +3067,11 @@ pub fn liquidate_delisting_token(
         AccountMeta::new(*liqee_liab_token_account_pk, false),
         AccountMeta::new(*liqor_liab_token_account_pk, false),
         AccountMeta::new_readonly(*signer_pk, false),
-        AccountMeta::new_readonly(*token_program_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
     ];
+
+    accounts.extend(liqee_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
     let instr = MangoInstruction::LiquidateDelistingToken;
     let data = instr.pack();

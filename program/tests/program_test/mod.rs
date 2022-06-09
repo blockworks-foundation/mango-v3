@@ -620,6 +620,21 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    #[allow(non_snake_case)]
+    pub async fn with_mango_account_deposit_I80F48(
+        &mut self,
+        mango_account_pk: &Pubkey,
+        mint_index: usize,
+    ) -> I80F48 {
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index =
+            if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+        let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
+        // TODO - make this use cached root bank deposit index instead
+        mango_account.deposits[actual_mint_index] * INDEX_START
+    }
+
+    #[allow(dead_code)]
     pub async fn with_mango_account_borrow(
         &mut self,
         mango_account_pk: &Pubkey,
@@ -631,6 +646,21 @@ impl MangoProgramTest {
         let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
         // TODO - make this use cached root bank deposit index instead
         return (mango_account.borrows[actual_mint_index] * INDEX_START).to_num();
+    }
+
+    #[allow(dead_code)]
+    #[allow(non_snake_case)]
+    pub async fn with_mango_account_borrow_I80F48(
+        &mut self,
+        mango_account_pk: &Pubkey,
+        mint_index: usize,
+    ) -> I80F48 {
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index =
+            if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+        let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
+        // TODO - make this use cached root bank deposit index instead
+        mango_account.borrows[actual_mint_index] * INDEX_START
     }
 
     #[allow(dead_code)]
@@ -2008,6 +2038,60 @@ impl MangoProgramTest {
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&user])).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_liquidate_delisting_token(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        liqee_index: usize,
+        liqor_index: usize,
+        liab_index: usize,
+        asset_index: usize,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
+        let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;
+        let liqor_mango_account = mango_group_cookie.mango_accounts[liqor_index].mango_account;
+        let liqor_mango_account_pk = mango_group_cookie.mango_accounts[liqor_index].address;
+
+        let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
+
+        let (asset_root_bank_pk, asset_root_bank) =
+            self.with_root_bank(&mango_group, asset_index).await;
+        let (asset_node_bank_pk, _asset_node_bank) = self.with_node_bank(&asset_root_bank, 0).await;
+        let (liab_root_bank_pk, liab_root_bank) =
+            self.with_root_bank(&mango_group, liab_index).await;
+        let (liab_node_bank_pk, liab_node_bank) = self.with_node_bank(&liab_root_bank, 0).await;
+
+        let liqee_liab_token_account_pk = self.with_user_token_account(liqee_index, liab_index);
+        let liqor_liab_token_account_pk = self.with_user_token_account(liqor_index, liab_index);
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let instructions = [mango::instruction::liquidate_delisting_token(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group_cookie.mango_group.mango_cache,
+            &liqee_mango_account_pk,
+            &liqor_mango_account_pk,
+            &liqor.pubkey(),
+            &asset_root_bank_pk,
+            &asset_node_bank_pk,
+            &liab_root_bank_pk,
+            &liab_node_bank_pk,
+            &liab_node_bank.vault,
+            &liqee_liab_token_account_pk,
+            &liqor_liab_token_account_pk,
+            &liqee_mango_account.spot_open_orders,
+            &liqor_mango_account.spot_open_orders,
+            &signer_pk,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&liqor])).await
     }
 }
 

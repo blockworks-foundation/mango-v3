@@ -6521,8 +6521,7 @@ impl Processor {
         sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
 
         // Make sure event queue has no events
-        let event_queue =
-            EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+        let event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
 
         // Close event queue, return lamports to admin
@@ -6735,13 +6734,8 @@ impl Processor {
         // Check liqee health and deposits/borrows
         let mut health_cache = HealthCache::new(liqee_active_assets);
         health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
-        let init_health = health_cache.get_health(&mango_group, HealthType::Init);
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
-        let liab_info = &mango_group.spot_markets[liab_index];
-        let asset_info = &mango_group.spot_markets[asset_index];
-        check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-        check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
         let asset_root_bank_cache = &mango_cache.root_bank_cache[asset_index];
         let liab_root_bank_cache = &mango_cache.root_bank_cache[liab_index];
         let mut native_liab_deposits =
@@ -6757,29 +6751,22 @@ impl Processor {
         // TODO: what fees should the liqor get?
         let liab_price = mango_cache.get_price(liab_index);
         let asset_price = mango_cache.get_price(asset_index);
-        let (asset_fee, init_asset_weight) = if asset_index == QUOTE_INDEX {
-            (ONE_I80F48, ONE_I80F48)
-        } else {
-            let asset_info = &mango_group.spot_markets[asset_index];
-            check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-            (ONE_I80F48, asset_info.init_asset_weight)
-        };
 
-        let (liab_fee, init_liab_weight) = if liab_index == QUOTE_INDEX {
-            (ONE_I80F48, ONE_I80F48)
-        } else {
-            let liab_info = &mango_group.spot_markets[liab_index];
-            check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-            (ONE_I80F48, liab_info.init_liab_weight)
-        };
+        let liab_info = &mango_group.spot_markets[liab_index];
+        check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
 
         // How much can be withdrawn before maint_health < 0
         let withdrawable_amount = native_liab_deposits
             .min(maint_health / liab_info.maint_asset_weight / liab_price)
             .max(ZERO_I80F48);
-
+        msg!(
+            "native_liab_deposits: {}, withdrawable: {}",
+            native_liab_deposits,
+            withdrawable_amount
+        );
         // Withdraw all except dust
         if withdrawable_amount >= ONE_I80F48 {
+            msg!("withdrawing");
             checked_change_net(
                 liab_root_bank_cache,
                 &mut liab_node_bank,
@@ -6799,13 +6786,21 @@ impl Processor {
 
             native_liab_deposits = liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
         }
-
         // Resolve any remaining non-dust deposits
         // They must be forming collateral for an open position so just swap for equivalent value in asset
         if native_liab_deposits > ONE_I80F48 {
-            let asset_amount = (native_liab_deposits * liab_price * liab_info.init_asset_weight)
-                / (asset_price * asset_info.init_asset_weight);
+            msg!("native_liab_deposits: {} native_liab_deposits_value: {} native_liab_deposits_u64 {} native_liab_deposits_floor {}", native_liab_deposits, native_liab_deposits * liab_price, native_liab_deposits.to_num::<u64>(), native_liab_deposits.checked_floor().unwrap());
+            let init_asset_weight = if asset_index == QUOTE_INDEX {
+                ONE_I80F48
+            } else {
+                let asset_info = &mango_group.spot_markets[asset_index];
+                check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
+                asset_info.init_asset_weight
+            };
 
+            let asset_amount = (native_liab_deposits * liab_price * liab_info.init_asset_weight)
+                / (asset_price * init_asset_weight);
+            msg!("asset_amount: {}", asset_amount);
             // Transfer enough asset to cover liab deposits into liqee
             checked_change_net(
                 &asset_root_bank_cache,
@@ -6821,18 +6816,17 @@ impl Processor {
                 &mut liqor_ma,
                 liqor_mango_account_ai.key,
                 asset_index,
-                asset_amount,
+                -asset_amount,
             )?;
 
             // Withdraw remaining delisting asset to liqor token acct
-            // TODO: what hapopens to dust here?
             checked_change_net(
                 &liab_root_bank_cache,
                 &mut liab_node_bank,
                 &mut liqee_ma,
                 liqee_mango_account_ai.key,
                 liab_index,
-                -native_liab_deposits,
+                -native_liab_deposits.checked_floor().unwrap(),
             )?;
             invoke_transfer(
                 token_prog_ai,
@@ -6842,15 +6836,28 @@ impl Processor {
                 &[&signers_seeds],
                 native_liab_deposits.to_num::<u64>(),
             )?;
+            native_liab_deposits = liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
         }
 
         // Liquidate any borrows
         if native_liab_borrows > ZERO_I80F48 {
+            msg!(
+                "native_liab_borrows {} value {}",
+                native_liab_borrows,
+                native_liab_borrows * liab_price
+            );
+            msg!("asset_price {}", asset_price);
+            msg!("liab_price {}", liab_price);
+            msg!(
+                "liqor_native_asset_deposits {}",
+                liqor_ma.get_native_deposit(asset_root_bank_cache, asset_index)?
+            );
             let asset_implied_liab_transfer =
                 liqor_ma.get_native_deposit(asset_root_bank_cache, asset_index)? * asset_price
                     / liab_price;
             let actual_liab_transfer = min(native_liab_borrows, asset_implied_liab_transfer);
-
+            msg!("asset_implied_liab_transfer {}", asset_implied_liab_transfer);
+            msg!("actual_liab_transfer {}", actual_liab_transfer);
             // Transfer into liqee to reduce liabilities
             checked_change_net(
                 &liab_root_bank_cache,
@@ -6872,7 +6879,7 @@ impl Processor {
             )?;
 
             let asset_transfer = actual_liab_transfer * liab_price / asset_price;
-
+            msg!("asset_transfer {}", asset_transfer);
             // Transfer collater into liqor
             checked_change_net(
                 &asset_root_bank_cache,
@@ -6895,19 +6902,24 @@ impl Processor {
         }
 
         // Resolve dust if necessary
+        // TODO: dust borrows?
         if native_liab_deposits < ONE_I80F48 && native_liab_deposits > ZERO_I80F48 {
-            // transfer_token_internal(
-            //     root_bank_cache,
-            //     &mut node_bank,
-            //     &mut mango_account,
-            //     &mut dust_account,
-            //     mango_account_ai.key,
-            //     dust_account_ai.key,
-            //     token_index,
-            //     deposit_amount,
-            // )?;
+            msg!("resolving dust of {} ", native_liab_deposits);
+            // Just zero dust balances
+            // TODO: is this ok?
+            checked_change_net(
+                &liab_root_bank_cache,
+                &mut liab_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                liab_index,
+                -native_liab_deposits,
+            )?;
+
             native_liab_deposits =
                 liqee_ma.get_native_deposit(liab_root_bank_cache, asset_index)?;
+
+            check_eq!(native_liab_deposits, ZERO_I80F48, MangoErrorCode::Default)?;
         }
         // check liqor health
 
