@@ -6538,7 +6538,7 @@ impl Processor {
             asks_ai,            // write
             mngo_vault_ai,      // write
             mngo_dao_vault_ai,  // write
-            signer_ai,          // write
+            signer_ai,          // read
             token_prog_ai,      // read
         ] = accounts;
         check!(token_prog_ai.key == &spl_token::ID, MangoErrorCode::InvalidProgramId)?;

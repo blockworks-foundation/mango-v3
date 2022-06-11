@@ -1087,21 +1087,21 @@ pub enum MangoInstruction {
     /// 5. `[writable]` asks_ai
     /// 6. `[writable]` mngo_vault_ai
     /// 7. `[writable]` mngo_dao_vault_ai
-    /// 8. `[writable]` signer_ai
+    /// 8. `[]` signer_ai
     /// 9. `[]` token_prog_ai
     RemovePerpMarket,
 
     /// Swap an existing serum market for another one with the same pair. All open orders must be closed.
-    /// Accounts expected by this instruction (10)
+    /// Accounts expected by this instruction (5)
     /// 0. `[writable]` mango_group_ai
-    /// 1. `[signer, writable]` admin_ai
-    /// 2. `[writable]` new_spot_market_ai
-    /// 3. `[writable]` old_spot_market_ai
+    /// 1. `[signer]` admin_ai
+    /// 2. `[]` new_spot_market_ai
+    /// 3. `[]` old_spot_market_ai
     /// 4. `[]` dex_program_ai
     SwapSpotMarket,
 
     /// Remove a spot market
-    /// Accounts expected by this instruction (6 + MAX_NODE_BANKS)
+    /// Accounts expected by this instruction (6 + MAX_NODE_BANKS * 2)
     /// 0. `[writable]` mango_group_ai
     /// 1. `[signer, writable] admin_ai
     /// 2. `[writable]` root_bank_ai
@@ -1119,7 +1119,24 @@ pub enum MangoInstruction {
     /// 2. `[]` oracle_ai
     RemoveOracle,
 
-    // TODO
+    /// Resolve deposits/borrows of a delisting token for an account
+    /// Accounts expected by this instruction (14 + 2 * MAX_PAIRS)
+    /// 0. `[]` mango_group_ai
+    /// 1. `[]` mango_cache_ai
+    /// 2. `[writable]` liqee_mango_account_ai
+    /// 3. `[writable]` liqor_mango_account_ai
+    /// 4. `[signer]` liqor_ai
+    /// 5. `[]` asset_root_bank_ai
+    /// 6. `[writable]` asset_node_bank_ai
+    /// 7. `[]` liab_root_bank_ai
+    /// 8. `[writable]` liab_node_bank_ai
+    /// 9. `[writable]` liab_vault_ai
+    /// 10. `[writable]` liqee_liab_token_account_ai
+    /// 11. `[writable]` liqor_liab_token_account_ai
+    /// 12. `[]` signer_ai
+    /// 13. `[]` token_prog_ai
+    /// 13... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 13+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidateDelistingToken,
 
     /// Force settle a user's perp positions
