@@ -1,4 +1,4 @@
-use std::cell::RefMut;
+use std::cell::{Ref, RefMut};
 use std::cmp::min;
 use std::convert::{identity, TryFrom};
 use std::mem::size_of;
@@ -49,8 +49,8 @@ use crate::state::{
     load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
     HealthType, MangoAccount, MangoCache, MangoGroup, MarketMode, MarketModeCheck, MetaData,
     NodeBank, PerpMarket, PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache,
-    ReferrerIdRecord, ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo,
-    TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
+    ReferrerIdRecord, ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenAccount,
+    TokenInfo, TriggerCondition, UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN,
     MAX_ADVANCED_ORDERS, MAX_NODE_BANKS, MAX_PAIRS, MAX_PERP_OPEN_ORDERS, MAX_TOKENS,
     NEG_ONE_I80F48, ONE_I80F48, QUOTE_INDEX, ZERO_I80F48,
 };
@@ -6728,23 +6728,34 @@ impl Processor {
         )?;
 
         // Check passed in ATA belongs to liqee and has correct mint
-        let liqee_liab_token_account =
-            Account::unpack(&liqee_liab_token_account_ai.try_borrow_data()?)?;
-        check_eq!(liqee_liab_token_account.owner, liqee_ma.owner, MangoErrorCode::InvalidAccount)?;
-        check_eq!(
-            liqee_liab_token_account.mint,
-            mango_group.tokens[liab_index].mint,
-            MangoErrorCode::InvalidAccountState
-        )?;
+        {
+            let liqee_liab_token_account: Ref<TokenAccount> =
+                TokenAccount::load(liqee_liab_token_account_ai)?;
+
+            // let liqee_liab_token_account =
+            //     Account::unpack(&liqee_liab_token_account_ai.try_borrow_data()?)?;
+            check_eq!(
+                liqee_liab_token_account.owner,
+                liqee_ma.owner,
+                MangoErrorCode::InvalidAccount
+            )?;
+            check_eq!(
+                liqee_liab_token_account.mint,
+                mango_group.tokens[liab_index].mint,
+                MangoErrorCode::InvalidAccountState
+            )?;
+        }
 
         // Check passed in liqor ATA has correct mint
-        let liqor_liab_token_account =
-            Account::unpack(&liqee_liab_token_account_ai.try_borrow_data()?)?;
-        check_eq!(
-            liqor_liab_token_account.mint,
-            mango_group.tokens[liab_index].mint,
-            MangoErrorCode::InvalidAccountState
-        )?;
+        {
+            let liqor_liab_token_account: Ref<TokenAccount> =
+                TokenAccount::load(liqor_liab_token_account_ai)?;
+            check_eq!(
+                liqor_liab_token_account.mint,
+                mango_group.tokens[liab_index].mint,
+                MangoErrorCode::InvalidAccountState
+            )?;
+        }
 
         // Check market is in correct state
         check_eq!(
@@ -6792,7 +6803,7 @@ impl Processor {
         check!(
             native_liab_deposits > ZERO_I80F48 || native_liab_borrows > ZERO_I80F48,
             MangoErrorCode::InvalidAccountState
-        );
+        )?;
 
         // Get prices weights and fees
         // TODO: what fees should the liqor get?

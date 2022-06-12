@@ -13,10 +13,11 @@ use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
+use solana_program::program_option::COption;
 use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
-use spl_token::state::Account;
+use spl_token::state::{Account, AccountState};
 use static_assertions::const_assert_eq;
 
 use mango_common::Loadable;
@@ -2686,3 +2687,36 @@ impl ReferrerIdRecord {
         Ok(())
     }
 }
+
+/// SPL Token `Account` that is zero copy loadable. Saves 700 CU over `Account::unpack`
+/// example usage:
+/// ```
+///     let token_account: Ref<TokenAccount> = TokenAccount::load(token_account_ai)?;
+/// ```
+#[repr(C, packed)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Loadable)]
+pub struct TokenAccount {
+    /// The mint associated with this account
+    pub mint: Pubkey,
+    /// The owner of this account.
+    pub owner: Pubkey,
+    /// The amount of tokens this account holds.
+    pub amount: u64, // 72
+    /// If `delegate` is `Some` then `delegated_amount` represents
+    /// the amount authorized by the delegate
+    pub delegate: COption<Pubkey>, // 108
+    /// The account's state
+    pub state: AccountState, // 109
+
+    // /// If is_native.is_some, this is a native token, and the value logs the rent-exempt reserve. An
+    // /// Account is required to be rent-exempt, so the value is used by the Processor to ensure that
+    // /// wrapped SOL accounts do not drop below this threshold.
+    // pub is_native: COption<u64>, // 121
+    padding: [u8; 12], // COption<u64> tries to take 16 bytes instead of actual 12
+    /// The amount delegated
+    pub delegated_amount: u64, // 129
+    /// Optional authority to close the account.
+    pub close_authority: COption<Pubkey>, // 165
+}
+
+const_assert_eq!(size_of::<TokenAccount>(), 165);
