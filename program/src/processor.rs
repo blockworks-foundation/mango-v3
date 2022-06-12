@@ -6373,7 +6373,7 @@ impl Processor {
     /// Close down RootBank and NodeBank(s) and transfer lamports to admin
     #[inline(never)]
     fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
-        const NUM_FIXED: usize = 6;
+        const NUM_FIXED: usize = 7;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_NODE_BANKS];
         let (fixed_accounts, node_bank_ais, vault_ais) =
             array_refs![accounts, NUM_FIXED, MAX_NODE_BANKS, MAX_NODE_BANKS];
@@ -6381,6 +6381,7 @@ impl Processor {
         let [
             mango_group_ai, // write
             admin_ai,       // write, signer
+            dust_account_ai,// write
             root_bank_ai,   // write
             admin_vault_ai, // write
             signer_ai,      // read
@@ -6410,6 +6411,16 @@ impl Processor {
             )?;
         }
 
+        // Check dust account
+        let (pda_address, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_ai.key.as_ref(), b"DustAccount"],
+            program_id,
+        );
+        check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
+        let mut dust_account =
+            MangoAccount::load_mut_checked(dust_account_ai, program_id, mango_group_ai.key)?;
+
+        let mut total_deposits = ZERO_I80F48;
         for (vault_ai, node_bank_ai) in node_bank_ais.iter().zip(vault_ais.iter()) {
             if node_bank_ai.key == &Pubkey::default() {
                 continue;
@@ -6417,10 +6428,9 @@ impl Processor {
 
             let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-            // TODO: make less stringent. sometimes vault.amount - (deposits - borrows) != 0
-            // In the few cases as of today, it is a very small negative balance
-            // In the positive cases, it's larger but that's fine
-            check!(node_bank.deposits.is_zero(), MangoErrorCode::InvalidAccountState)?;
+            // borrows must be zero
+            // deposits must be same as DustAccount
+            total_deposits += node_bank.deposits;
             check!(node_bank.borrows.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
             // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
@@ -6451,6 +6461,12 @@ impl Processor {
             program_transfer_lamports(node_bank_ai, admin_ai, node_bank_ai.lamports())?;
             sol_memset(&mut root_bank_ai.try_borrow_mut_data()?, 0, size_of::<NodeBank>());
         }
+
+        // todo: maybe even this needs to be within some dust threshold
+        check!(
+            total_deposits == dust_account.deposits[market_index],
+            MangoErrorCode::InvalidAccountState
+        )?;
 
         // Close RootBank and transfer lamports to admin
         program_transfer_lamports(root_bank_ai, admin_ai, root_bank_ai.lamports())?;

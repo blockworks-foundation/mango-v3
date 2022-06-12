@@ -1101,15 +1101,16 @@ pub enum MangoInstruction {
     SwapSpotMarket,
 
     /// Remove a spot market
-    /// Accounts expected by this instruction (6 + MAX_NODE_BANKS * 2)
+    /// Accounts expected by this instruction (7 + MAX_NODE_BANKS * 2)
     /// 0. `[writable]` mango_group_ai
-    /// 1. `[signer, writable] admin_ai
-    /// 2. `[writable]` root_bank_ai
-    /// 3. `[writable]` admin_vault_ai
-    /// 4. `[]` signer_ai
-    /// 5. `[]` token_prog_ai
-    /// 6..6 + MAX_NODE_BANKS `[writable]` node_bank_ais
-    /// 6 + MAX_NODE_BANKS.. `[writable]` vault_ais
+    /// 1. `[signer, writable]` admin_ai
+    /// 2. `[writable]` dust_account_ai
+    /// 3. `[writable]` root_bank_ai
+    /// 4. `[writable]` admin_vault_ai
+    /// 5. `[]` signer_ai
+    /// 6. `[]` token_prog_ai
+    /// 7..7 + MAX_NODE_BANKS `[writable]` node_bank_ais
+    /// 7 + MAX_NODE_BANKS.. `[writable]` vault_ais
     RemoveSpotMarket,
 
     /// Remove an oracle
@@ -3051,16 +3052,10 @@ pub fn set_market_mode(
     mode: MarketMode,
     market_type: AssetType,
 ) -> Result<Instruction, ProgramError> {
-    let accounts = vec![
-        AccountMeta::new(*mango_group_pk, false),
-        AccountMeta::new_readonly(*admin_pk, true),
-    ];
+    let accounts =
+        vec![AccountMeta::new(*mango_group_pk, false), AccountMeta::new_readonly(*admin_pk, true)];
 
-    let instr = MangoInstruction::SetMarketMode {
-        market_index,
-        mode,
-        market_type,
-    };
+    let instr = MangoInstruction::SetMarketMode { market_index, mode, market_type };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
