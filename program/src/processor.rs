@@ -6726,14 +6726,13 @@ impl Processor {
             liab_root_bank.node_banks.contains(liab_node_bank_ai.key),
             MangoErrorCode::InvalidNodeBank
         )?;
+        check_eq!(&liab_node_bank.vault, liab_vault_ai.key, MangoErrorCode::InvalidAccount)?;
 
         // Check passed in ATA belongs to liqee and has correct mint
         {
             let liqee_liab_token_account: Ref<TokenAccount> =
                 TokenAccount::load(liqee_liab_token_account_ai)?;
 
-            // let liqee_liab_token_account =
-            //     Account::unpack(&liqee_liab_token_account_ai.try_borrow_data()?)?;
             check_eq!(
                 liqee_liab_token_account.owner,
                 liqee_ma.owner,
