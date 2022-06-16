@@ -5519,6 +5519,7 @@ impl Processor {
                 Side::Bid => book.sim_new_bid(
                     &perp_market,
                     &mango_group.perp_markets[market_index],
+                    &mango_group.tokens[market_index],
                     mango_cache.get_price(market_index),
                     order.price,
                     quantity,
@@ -6364,9 +6365,12 @@ impl Processor {
                 return Err(throw_err!(MangoErrorCode::InvalidParam))
             }
         }
-        // TODO: ? rename mode to status
-        // TODO: msg! about previous mode and current mode
-        // *** TODO: allow 10 lots precision for force close perp markets
+        msg!(
+            "market_type: {:?} old_market_mode: {:?} new_market_mode: {:?}",
+            market_type,
+            current_mode,
+            mode
+        );
 
         *current_mode = mode;
         Ok(())
@@ -6471,7 +6475,7 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        // todo: log this?
+        // todo: @clarkeni you think we should log this?
         dust_account.deposits[market_index] = ZERO_I80F48;
 
         // Close RootBank and transfer lamports to admin
@@ -6584,6 +6588,7 @@ impl Processor {
         let perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
+        check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
         // Close perp market, return lamports to admin
         program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
@@ -6825,6 +6830,7 @@ impl Processor {
                     let liqee_delist_token_account: Ref<TokenAccount> =
                         TokenAccount::load(liqee_delist_token_account_ai)?;
 
+                    // todo: check it's the actual ATA not just an account owned by the liqee
                     check_eq!(
                         liqee_delist_token_account.owner,
                         liqee_ma.owner,
