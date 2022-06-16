@@ -4938,10 +4938,13 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
-        check!(
-            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
-            MangoErrorCode::InvalidOwner
-        )?;
+        if mango_group.tokens[market_index].perp_market_mode.allow_new_open_orders() {
+            // Anyone can redeem MNGO if market is in ForceCloseOnly mode
+            check!(
+                &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+                MangoErrorCode::InvalidOwner
+            )?;
+        }
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
         check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
