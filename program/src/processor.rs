@@ -28,10 +28,10 @@ use mango_common::Loadable;
 use mango_logs::{
     mango_emit_heap, mango_emit_stack, CachePerpMarketsLog, CachePricesLog, CacheRootBanksLog,
     CancelAllPerpOrdersLog, CloseMangoAccountLog, CloseSpotOpenOrdersLog, CreateMangoAccountLog,
-    CreateSpotOpenOrdersLog, DepositLog, LiquidatePerpMarketLog, LiquidateTokenAndPerpLog,
-    LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog, PerpBankruptcyLog,
-    RedeemMngoLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog, TokenBankruptcyLog,
-    UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
+    CreateSpotOpenOrdersLog, DepositLog, ForceSettlePerpPositionLog, LiquidatePerpMarketLog,
+    LiquidateTokenAndPerpLog, LiquidateTokenAndTokenLog, MngoAccrualLog, OpenOrdersBalanceLog,
+    PerpBankruptcyLog, RedeemMngoLog, SettleFeesLog, SettlePnlLog, TokenBalanceLog,
+    TokenBankruptcyLog, UpdateFundingLog, UpdateRootBankLog, WithdrawLog,
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
@@ -6851,6 +6851,14 @@ impl Processor {
                     &[&signers_seeds],
                     withdrawable.to_num::<u64>(),
                 )?;
+
+                mango_emit_heap!(WithdrawLog {
+                    mango_group: *mango_group_ai.key,
+                    mango_account: *liqee_mango_account_ai.key,
+                    owner: liqee_ma.owner,
+                    token_index: delist_index as u64,
+                    quantity: withdrawable.to_num::<u64>(),
+                });
             }
 
             // If there are still non-dust deposits left, swap out for quote token
@@ -6896,8 +6904,14 @@ impl Processor {
                     quote_transfer,
                 )?;
 
-                // todo: @clarkeni will it mess up accounting if asset is actually withdrawn not transferred?
-                //  any inconsistency with fact "liab" is not necessarily a negative balance?
+                mango_emit_heap!(WithdrawLog {
+                    mango_group: *mango_group_ai.key,
+                    mango_account: *liqor_mango_account_ai.key,
+                    owner: liqor_ma.owner,
+                    token_index: delist_index as u64,
+                    quantity: delist_transfer.to_num::<u64>(),
+                });
+
                 mango_emit_heap!(LiquidateTokenAndTokenLog {
                     mango_group: *mango_group_ai.key,
                     liqee: *liqee_mango_account_ai.key,
@@ -6963,6 +6977,14 @@ impl Processor {
                 QUOTE_INDEX,
                 quote_transfer,
             )?;
+
+            mango_emit_heap!(DepositLog {
+                mango_group: *mango_group_ai.key,
+                mango_account: *liqor_mango_account_ai.key,
+                owner: liqor_ma.owner,
+                token_index: delist_index as u64,
+                quantity: delist_transfer.to_num::<u64>(),
+            });
 
             mango_emit_heap!(LiquidateTokenAndTokenLog {
                 mango_group: *mango_group_ai.key,
@@ -7092,7 +7114,31 @@ impl Processor {
         b.change_base_position(&mut perp_market, base_settle);
         a.transfer_quote_position(b, quote_settle);
 
-        // todo: @clarkeni log perp balances
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_a_ai.key,
+            market_index as u64,
+            a,
+            &perp_market_cache,
+        );
+
+        emit_perp_balances(
+            *mango_group_ai.key,
+            *mango_account_b_ai.key,
+            market_index as u64,
+            b,
+            &perp_market_cache,
+        );
+
+        mango_emit_heap!(ForceSettlePerpPositionLog {
+            mango_account_a: *mango_account_a_ai.key,
+            mango_account_b: *mango_account_b_ai.key,
+            market_index: market_index as u64,
+            base_settle: base_settle,
+            quote_settle: quote_settle.to_bits(),
+            cache_price: price_cache.price.to_bits(),
+        });
+
         Ok(())
     }
 
