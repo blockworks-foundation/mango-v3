@@ -1121,24 +1121,27 @@ pub enum MangoInstruction {
     RemoveOracle,
 
     /// Resolve deposits/borrows of a delisting token for an account
-    /// Accounts expected by this instruction (14 + 2 * MAX_PAIRS)
+    /// Accounts expected by this instruction (15 + 2 * MAX_PAIRS)
     /// 0. `[]` mango_group_ai
     /// 1. `[]` mango_cache_ai
-    /// 2. `[writable]` liqee_mango_account_ai
-    /// 3. `[writable]` liqor_mango_account_ai
-    /// 4. `[signer]` liqor_ai
-    /// 5. `[]` asset_root_bank_ai
-    /// 6. `[writable]` asset_node_bank_ai
-    /// 7. `[]` liab_root_bank_ai
-    /// 8. `[writable]` liab_node_bank_ai
-    /// 9. `[writable]` liab_vault_ai
-    /// 10. `[writable]` liqee_liab_token_account_ai
-    /// 11. `[writable]` liqor_liab_token_account_ai
-    /// 12. `[]` signer_ai
-    /// 13. `[]` token_prog_ai
-    /// 13... `[]` liqee_open_orders_ais - Liqee open orders accs
-    /// 13+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
-    LiquidateDelistingToken,
+    /// 2. `[writable]` dust_account_ai
+    /// 3. `[writable]` liqee_mango_account_ai
+    /// 4. `[writable]` liqor_mango_account_ai
+    /// 5. `[signer]` liqor_ai
+    /// 6. `[]` asset_root_bank_ai
+    /// 7. `[writable]` asset_node_bank_ai
+    /// 8. `[]` liab_root_bank_ai
+    /// 9. `[writable]` liab_node_bank_ai
+    /// 10. `[writable]` liab_vault_ai
+    /// 11. `[writable]` liqee_liab_token_account_ai
+    /// 12. `[writable]` liqor_liab_token_account_ai
+    /// 13. `[]` signer_ai
+    /// 14. `[]` token_prog_ai
+    /// 14... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 14+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    LiquidateDelistingToken {
+        max_liquidate_amount: u64,
+    },
 
     /// Force settle a user's perp positions
     /// Accounts expected by this instruction (10)
@@ -1655,7 +1658,12 @@ impl MangoInstruction {
             68 => MangoInstruction::SwapSpotMarket,
             69 => MangoInstruction::RemoveSpotMarket,
             70 => MangoInstruction::RemoveOracle,
-            71 => MangoInstruction::LiquidateDelistingToken,
+            71 => {
+                let max_liquidate_amount = array_ref![data, 0, 8];
+                MangoInstruction::LiquidateDelistingToken {
+                    max_liquidate_amount: u64::from_le_bytes(*max_liquidate_amount),
+                }
+            }
             72 => MangoInstruction::ForceSettlePerpPosition,
             _ => {
                 return None;
@@ -3064,6 +3072,7 @@ pub fn liquidate_delisting_token(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
     mango_cache_pk: &Pubkey,
+    dust_account_pk: &Pubkey,
     liqee_mango_account_pk: &Pubkey,
     liqor_mango_account_pk: &Pubkey,
     liqor_pk: &Pubkey,
@@ -3077,10 +3086,12 @@ pub fn liquidate_delisting_token(
     liqee_open_orders_pks: &[Pubkey],
     liqor_open_orders_pks: &[Pubkey],
     signer_pk: &Pubkey,
+    max_liquidate_amount: u64,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
         AccountMeta::new_readonly(*mango_group_pk, false),
         AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*dust_account_pk, false),
         AccountMeta::new(*liqee_mango_account_pk, false),
         AccountMeta::new(*liqor_mango_account_pk, false),
         AccountMeta::new_readonly(*liqor_pk, true),
@@ -3098,7 +3109,7 @@ pub fn liquidate_delisting_token(
     accounts.extend(liqee_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
     accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
 
-    let instr = MangoInstruction::LiquidateDelistingToken;
+    let instr = MangoInstruction::LiquidateDelistingToken { max_liquidate_amount };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }

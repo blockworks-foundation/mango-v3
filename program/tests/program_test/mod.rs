@@ -2053,6 +2053,9 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
+        let (dust_account_pk, _bump_seed) =
+            Pubkey::find_program_address(&[&mango_group_pk.as_ref(), b"DustAccount"], program_id);
+
         let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
         let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;
         let liqor_mango_account = mango_group_cookie.mango_accounts[liqor_index].mango_account;
@@ -2077,6 +2080,7 @@ impl MangoProgramTest {
             &mango_program_id,
             &mango_group_pk,
             &mango_group_cookie.mango_group.mango_cache,
+            &dust_account_pk,
             &liqee_mango_account_pk,
             &liqor_mango_account_pk,
             &liqor.pubkey(),
@@ -2090,6 +2094,7 @@ impl MangoProgramTest {
             &liqee_mango_account.spot_open_orders,
             &liqor_mango_account.spot_open_orders,
             &signer_pk,
+            u64::MAX,
         )
         .unwrap()];
         self.process_transaction(&instructions, Some(&[&liqor])).await

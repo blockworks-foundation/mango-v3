@@ -6468,6 +6468,9 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
+        // todo: log this?
+        dust_account.deposits[market_index] = ZERO_I80F48;
+
         // Close RootBank and transfer lamports to admin
         program_transfer_lamports(root_bank_ai, admin_ai, root_bank_ai.lamports())?;
         sol_memset(&mut root_bank_ai.try_borrow_mut_data()?, 0, size_of::<RootBank>());
@@ -6684,30 +6687,37 @@ impl Processor {
     /// First the tokens will be moved into the owner's ATA until maint health = 0
     /// Then liquidate token for some other asset until it gets back to init health 0
     /// required: cancel_all_spot_orders and close_spot_open_orders first before calling this ix
-    /// liab must be the delisting token
-    /// in progress, borrow resolution needs work
+    /// `max_liquidate_amount`:
+    ///     if liqee has delist token deposits, max amount liqor is willing to take into his token account
+    ///     if liqee has delist token borrows, max amount liqor is willing to deposit from his token account
     #[inline(never)]
-    fn liquidate_delisting_token(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
-        const NUM_FIXED: usize = 14;
+    fn liquidate_delisting_token(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        max_liquidate_amount: u64,
+    ) -> MangoResult {
+        check!(max_liquidate_amount > 0, MangoErrorCode::InvalidParam)?;
+        const NUM_FIXED: usize = 15;
         let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
         let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
             array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
 
         let [
-            mango_group_ai,              // read
-            mango_cache_ai,              // read
-            liqee_mango_account_ai,      // write
-            liqor_mango_account_ai,      // write
-            liqor_ai,                    // read, signer
-            asset_root_bank_ai,          // read
-            asset_node_bank_ai,          // write
-            liab_root_bank_ai,           // read
-            liab_node_bank_ai,           // write
-            liab_vault_ai,               // write
-            liqee_liab_token_account_ai, // write
-            liqor_liab_token_account_ai, // write
-            signer_ai,                   // read
-            token_prog_ai                // read
+            mango_group_ai,                 // read
+            mango_cache_ai,                 // read
+            dust_account_ai,                // write
+            liqee_mango_account_ai,         // write
+            liqor_mango_account_ai,         // write
+            liqor_ai,                       // read, signer
+            quote_root_bank_ai,             // read
+            quote_node_bank_ai,             // write
+            delist_root_bank_ai,            // read
+            delist_node_bank_ai,            // write
+            delist_vault_ai,                // write
+            liqee_delist_token_account_ai,  // write
+            liqor_delist_token_account_ai,  // write
+            signer_ai,                      // read
+            token_prog_ai                   // read
         ] = fixed_ais;
         check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
 
@@ -6734,70 +6744,46 @@ impl Processor {
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
         liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
 
-        // Load and check liab token banks
-        let liab_root_bank = RootBank::load_checked(liab_root_bank_ai, program_id)?;
-        let liab_index = mango_group.find_root_bank_index(liab_root_bank_ai.key).unwrap();
-        let mut liab_node_bank = NodeBank::load_mut_checked(liab_node_bank_ai, program_id)?;
+        // Load and check delisting token banks
+        let delist_root_bank = RootBank::load_checked(delist_root_bank_ai, program_id)?;
+        let delist_index = mango_group.find_root_bank_index(delist_root_bank_ai.key).unwrap();
+        let mut delist_node_bank = NodeBank::load_mut_checked(delist_node_bank_ai, program_id)?;
         check!(
-            liab_root_bank.node_banks.contains(liab_node_bank_ai.key),
+            delist_root_bank.node_banks.contains(delist_node_bank_ai.key),
             MangoErrorCode::InvalidNodeBank
         )?;
-        check_eq!(&liab_node_bank.vault, liab_vault_ai.key, MangoErrorCode::InvalidAccount)?;
-
-        // Check passed in ATA belongs to liqee and has correct mint
-        {
-            let liqee_liab_token_account: Ref<TokenAccount> =
-                TokenAccount::load(liqee_liab_token_account_ai)?;
-
-            check_eq!(
-                liqee_liab_token_account.owner,
-                liqee_ma.owner,
-                MangoErrorCode::InvalidAccount
-            )?;
-            check_eq!(
-                liqee_liab_token_account.mint,
-                mango_group.tokens[liab_index].mint,
-                MangoErrorCode::InvalidAccountState
-            )?;
-        }
-
-        // Check passed in liqor ATA has correct mint
-        {
-            let liqor_liab_token_account: Ref<TokenAccount> =
-                TokenAccount::load(liqor_liab_token_account_ai)?;
-            check_eq!(
-                liqor_liab_token_account.mint,
-                mango_group.tokens[liab_index].mint,
-                MangoErrorCode::InvalidAccountState
-            )?;
-        }
+        check_eq!(&delist_node_bank.vault, delist_vault_ai.key, MangoErrorCode::InvalidVault)?;
 
         // Check market is in correct state
         check_eq!(
-            mango_group.tokens[liab_index].spot_market_mode,
+            mango_group.tokens[delist_index].spot_market_mode,
             MarketMode::ForceCloseOnly,
             MangoErrorCode::InvalidAccountState
         )?;
 
-        // Load and check asset banks
-        let asset_root_bank = RootBank::load_checked(asset_root_bank_ai, program_id)?;
-        let asset_index = mango_group.find_root_bank_index(asset_root_bank_ai.key).unwrap();
-        let mut asset_node_bank = NodeBank::load_mut_checked(asset_node_bank_ai, program_id)?;
+        // Make sure there is no spot open orders account for liqee
         check!(
-            asset_root_bank.node_banks.contains(asset_node_bank_ai.key),
-            MangoErrorCode::InvalidNodeBank
+            liqee_ma.spot_open_orders[delist_index] == Pubkey::default(),
+            MangoErrorCode::InvalidAccountState
         )?;
 
-        check!(asset_index != liab_index, MangoErrorCode::InvalidParam)?;
+        // Load and check quote banks
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+        check!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank == quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let mut quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
 
         // Check cache validity
         let now_ts = Clock::get()?.unix_timestamp as u64;
         let liqee_active_assets = UserActiveAssets::new(&mango_group, &liqee_ma, vec![]);
-        let liqor_active_assets = UserActiveAssets::new(
-            &mango_group,
-            &liqor_ma,
-            vec![(AssetType::Token, asset_index), (AssetType::Token, liab_index)],
-        );
+        let liqor_active_assets =
+            UserActiveAssets::new(&mango_group, &liqor_ma, vec![(AssetType::Token, delist_index)]);
         mango_cache.check_valid(
             &mango_group,
             &UserActiveAssets::merge(&liqee_active_assets, &liqor_active_assets),
@@ -6809,193 +6795,194 @@ impl Processor {
         health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
-        let asset_root_bank_cache = &mango_cache.root_bank_cache[asset_index];
-        let liab_root_bank_cache = &mango_cache.root_bank_cache[liab_index];
-        let mut native_liab_deposits =
-            liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
-        let native_liab_borrows = liqee_ma.get_native_borrow(liab_root_bank_cache, liab_index)?;
+        let quote_root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
+        let delist_root_bank_cache = &mango_cache.root_bank_cache[delist_index];
 
-        check!(
-            native_liab_deposits > ZERO_I80F48 || native_liab_borrows > ZERO_I80F48,
-            MangoErrorCode::InvalidAccountState
+        let delist_price = mango_cache.get_price(delist_index);
+        let delist_info = &mango_group.spot_markets[delist_index];
+
+        let mut delist_net = liqee_ma.get_net(delist_root_bank_cache, delist_index);
+        if delist_net >= ONE_I80F48 {
+            // deposits are positive, borrows are zero
+            // Transfer enough deposits such that maint_health == 0, then start liquidating for quote currency
+
+            let withdrawable = maint_health
+                .checked_div(delist_info.maint_asset_weight)
+                .unwrap()
+                .checked_div(delist_price)
+                .unwrap()
+                .clamp(ZERO_I80F48, delist_net)
+                .checked_floor() // make an integer
+                .unwrap();
+
+            // Withdraw enough deposits into liqee's token account such that maint_health >= 0
+            if withdrawable >= ONE_I80F48 {
+                // Check passed in token account belongs to liqee
+                {
+                    let liqee_delist_token_account: Ref<TokenAccount> =
+                        TokenAccount::load(liqee_delist_token_account_ai)?;
+
+                    check_eq!(
+                        liqee_delist_token_account.owner,
+                        liqee_ma.owner,
+                        MangoErrorCode::InvalidAccount
+                    )?;
+                }
+
+                // Withdraw delisting token into liqee's token account
+                checked_change_net(
+                    delist_root_bank_cache,
+                    &mut delist_node_bank,
+                    &mut liqee_ma,
+                    liqee_mango_account_ai.key,
+                    delist_index,
+                    -withdrawable,
+                )?;
+                delist_net = liqee_ma.get_net(delist_root_bank_cache, delist_index);
+
+                invoke_transfer(
+                    token_prog_ai,
+                    delist_vault_ai,
+                    liqee_delist_token_account_ai,
+                    signer_ai,
+                    &[&signers_seeds],
+                    withdrawable.to_num::<u64>(),
+                )?;
+            }
+
+            // If there are still non-dust deposits left, swap out for quote token
+            if delist_net >= ONE_I80F48 {
+                let delist_transfer =
+                    delist_net.min(I80F48::from_num(max_liquidate_amount)).checked_floor().unwrap();
+
+                let quote_transfer = delist_transfer
+                    .checked_mul(delist_price)
+                    .unwrap()
+                    .checked_mul(ONE_I80F48 - delist_info.liquidation_fee)
+                    .unwrap();
+
+                // Send that amount to liqor's token account
+                checked_change_net(
+                    delist_root_bank_cache,
+                    &mut delist_node_bank,
+                    &mut liqee_ma,
+                    liqee_mango_account_ai.key,
+                    delist_index,
+                    -delist_transfer,
+                )?;
+                delist_net = liqee_ma.get_net(delist_root_bank_cache, delist_index);
+
+                invoke_transfer(
+                    token_prog_ai,
+                    delist_vault_ai,
+                    liqor_delist_token_account_ai,
+                    signer_ai,
+                    &[&signers_seeds],
+                    delist_transfer.to_num::<u64>(),
+                )?;
+
+                // Transfer quote token from liqor to liqee
+                transfer_token_internal(
+                    quote_root_bank_cache,
+                    &mut quote_node_bank,
+                    &mut liqor_ma,
+                    &mut liqee_ma,
+                    liqor_mango_account_ai.key,
+                    liqee_mango_account_ai.key,
+                    QUOTE_INDEX,
+                    quote_transfer,
+                )?;
+            }
+        } else if delist_net <= NEG_ONE_I80F48 {
+            // deposits are zero, borrows are positive
+            // Transfer delisting token from liqor's token account to offset liqee's borrows
+            // Transfer quote token from liqee to liqor plus fee
+
+            let max_liquidate_amount: u64 =
+                TokenAccount::load(liqor_delist_token_account_ai)?.amount.min(max_liquidate_amount);
+
+            let delist_transfer = delist_net
+                .checked_abs()
+                .unwrap()
+                .checked_ceil()
+                .unwrap()
+                .min(I80F48::from_num(max_liquidate_amount));
+
+            let quote_transfer = delist_transfer
+                .checked_mul(delist_price)
+                .unwrap()
+                .checked_mul(ONE_I80F48 + delist_info.liquidation_fee)
+                .unwrap();
+
+            // Send from liqor's token account to offset liqee borrows
+            checked_change_net(
+                delist_root_bank_cache,
+                &mut delist_node_bank,
+                &mut liqee_ma,
+                liqee_mango_account_ai.key,
+                delist_index,
+                delist_transfer,
+            )?;
+            delist_net = liqee_ma.get_net(delist_root_bank_cache, delist_index);
+
+            invoke_transfer(
+                token_prog_ai,
+                liqor_delist_token_account_ai,
+                delist_vault_ai,
+                signer_ai,
+                &[&signers_seeds],
+                delist_transfer.to_num::<u64>(),
+            )?;
+
+            // Transfer quote token from liqee to liqor
+            transfer_token_internal(
+                quote_root_bank_cache,
+                &mut quote_node_bank,
+                &mut liqee_ma,
+                &mut liqor_ma,
+                liqee_mango_account_ai.key,
+                liqor_mango_account_ai.key,
+                QUOTE_INDEX,
+                quote_transfer,
+            )?;
+        }
+
+        if NEG_ONE_I80F48 < delist_net && delist_net < ONE_I80F48 {
+            // -1 < net < 1
+            // Settle the dust
+
+            // Check dust account
+            let (pda_address, _bump_seed) = Pubkey::find_program_address(
+                &[&mango_group_ai.key.as_ref(), b"DustAccount"],
+                program_id,
+            );
+            check!(&pda_address == dust_account_ai.key, MangoErrorCode::InvalidAccount)?;
+            let mut dust_account =
+                MangoAccount::load_mut_checked(dust_account_ai, program_id, mango_group_ai.key)?;
+
+            // Transfer balance from liqee to dust_account
+            transfer_token_internal(
+                delist_root_bank_cache,
+                &mut delist_node_bank,
+                &mut liqee_ma,
+                &mut dust_account,
+                liqee_mango_account_ai.key,
+                dust_account_ai.key,
+                delist_index,
+                -delist_net,
+            )?;
+        }
+
+        // Check liqor health
+        let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
+        liqor_health_cache.init_vals(
+            &mango_group,
+            &mango_cache,
+            &liqor_ma,
+            liqor_open_orders_ais,
         )?;
-
-        // Get prices weights and fees
-        // TODO: what fees should the liqor get?
-        let liab_price = mango_cache.get_price(liab_index);
-        let asset_price = mango_cache.get_price(asset_index);
-
-        let liab_info = &mango_group.spot_markets[liab_index];
-        check!(!liab_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-
-        // How much can be withdrawn before maint_health < 0
-        let withdrawable_amount = native_liab_deposits
-            .min(maint_health / liab_info.maint_asset_weight / liab_price)
-            .max(ZERO_I80F48);
-        msg!(
-            "native_liab_deposits: {}, withdrawable: {}",
-            native_liab_deposits,
-            withdrawable_amount
-        );
-        // Withdraw all except dust
-        if withdrawable_amount >= ONE_I80F48 {
-            msg!("withdrawing");
-            checked_change_net(
-                liab_root_bank_cache,
-                &mut liab_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                liab_index,
-                -withdrawable_amount,
-            )?;
-            invoke_transfer(
-                token_prog_ai,
-                liab_vault_ai,
-                liqee_liab_token_account_ai,
-                signer_ai,
-                &[&signers_seeds],
-                withdrawable_amount.to_num::<u64>(),
-            )?;
-
-            native_liab_deposits = liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
-        }
-        // Resolve any remaining non-dust deposits
-        // They must be forming collateral for an open position so just swap for equivalent value in asset
-        if native_liab_deposits > ONE_I80F48 {
-            msg!("native_liab_deposits: {} native_liab_deposits_value: {} native_liab_deposits_u64 {} native_liab_deposits_floor {}", native_liab_deposits, native_liab_deposits * liab_price, native_liab_deposits.to_num::<u64>(), native_liab_deposits.checked_floor().unwrap());
-            let init_asset_weight = if asset_index == QUOTE_INDEX {
-                ONE_I80F48
-            } else {
-                let asset_info = &mango_group.spot_markets[asset_index];
-                check!(!asset_info.is_empty(), MangoErrorCode::InvalidMarket)?;
-                asset_info.init_asset_weight
-            };
-
-            let asset_amount = (native_liab_deposits * liab_price * liab_info.init_asset_weight)
-                / (asset_price * init_asset_weight);
-            msg!("asset_amount: {}", asset_amount);
-            // Transfer enough asset to cover liab deposits into liqee
-            checked_change_net(
-                &asset_root_bank_cache,
-                &mut asset_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                asset_index,
-                asset_amount,
-            )?;
-            checked_change_net(
-                &asset_root_bank_cache,
-                &mut asset_node_bank,
-                &mut liqor_ma,
-                liqor_mango_account_ai.key,
-                asset_index,
-                -asset_amount,
-            )?;
-
-            // Withdraw remaining delisting asset to liqor token acct
-            checked_change_net(
-                &liab_root_bank_cache,
-                &mut liab_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                liab_index,
-                -native_liab_deposits.checked_floor().unwrap(),
-            )?;
-            invoke_transfer(
-                token_prog_ai,
-                liab_vault_ai,
-                liqor_liab_token_account_ai,
-                signer_ai,
-                &[&signers_seeds],
-                native_liab_deposits.to_num::<u64>(),
-            )?;
-            native_liab_deposits = liqee_ma.get_native_deposit(liab_root_bank_cache, liab_index)?;
-        }
-
-        // Liquidate any borrows
-        if native_liab_borrows > ZERO_I80F48 {
-            msg!(
-                "native_liab_borrows {} value {}",
-                native_liab_borrows,
-                native_liab_borrows * liab_price
-            );
-            msg!("asset_price {}", asset_price);
-            msg!("liab_price {}", liab_price);
-            msg!(
-                "liqor_native_asset_deposits {}",
-                liqor_ma.get_native_deposit(asset_root_bank_cache, asset_index)?
-            );
-            let asset_implied_liab_transfer =
-                liqor_ma.get_native_deposit(asset_root_bank_cache, asset_index)? * asset_price
-                    / liab_price;
-            let actual_liab_transfer = min(native_liab_borrows, asset_implied_liab_transfer);
-            msg!("asset_implied_liab_transfer {}", asset_implied_liab_transfer);
-            msg!("actual_liab_transfer {}", actual_liab_transfer);
-            // Transfer into liqee to reduce liabilities
-            checked_change_net(
-                &liab_root_bank_cache,
-                &mut liab_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                liab_index,
-                actual_liab_transfer,
-            )?;
-
-            // Transfer from liqor
-            checked_change_net(
-                &liab_root_bank_cache,
-                &mut liab_node_bank,
-                &mut liqor_ma,
-                liqor_mango_account_ai.key,
-                liab_index,
-                -actual_liab_transfer,
-            )?;
-
-            let asset_transfer = actual_liab_transfer * liab_price / asset_price;
-            msg!("asset_transfer {}", asset_transfer);
-            // Transfer collater into liqor
-            checked_change_net(
-                &asset_root_bank_cache,
-                &mut asset_node_bank,
-                &mut liqor_ma,
-                liqor_mango_account_ai.key,
-                asset_index,
-                asset_transfer,
-            )?;
-
-            // Transfer collateral out of liqee
-            checked_change_net(
-                &asset_root_bank_cache,
-                &mut asset_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                asset_index,
-                -asset_transfer,
-            )?;
-        }
-
-        // Resolve dust if necessary
-        // TODO: dust borrows?
-        if native_liab_deposits < ONE_I80F48 && native_liab_deposits > ZERO_I80F48 {
-            msg!("resolving dust of {} ", native_liab_deposits);
-            // Just zero dust balances
-            // TODO: is this ok?
-            checked_change_net(
-                &liab_root_bank_cache,
-                &mut liab_node_bank,
-                &mut liqee_ma,
-                liqee_mango_account_ai.key,
-                liab_index,
-                -native_liab_deposits,
-            )?;
-
-            native_liab_deposits =
-                liqee_ma.get_native_deposit(liab_root_bank_cache, asset_index)?;
-
-            check_eq!(native_liab_deposits, ZERO_I80F48, MangoErrorCode::Default)?;
-        }
-        // check liqor health
-
+        let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
+        check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
         Ok(())
     }
 
@@ -7592,9 +7579,9 @@ impl Processor {
                 msg!("Mango: RemoveOracle");
                 Self::remove_oracle(program_id, accounts)
             }
-            MangoInstruction::LiquidateDelistingToken => {
+            MangoInstruction::LiquidateDelistingToken { max_liquidate_amount } => {
                 msg!("Mango: LiquidateDelistingToken");
-                Self::liquidate_delisting_token(program_id, accounts)
+                Self::liquidate_delisting_token(program_id, accounts, max_liquidate_amount)
             }
             MangoInstruction::ForceSettlePerpPosition => {
                 msg!("Mango: ForceSettlePerpPosition");
