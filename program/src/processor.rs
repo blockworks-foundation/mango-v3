@@ -46,7 +46,7 @@ use crate::state::PYTH_CONF_FILTER;
 use crate::state::{
     check_open_orders, load_asks_mut, load_bids_mut, load_market_state, load_open_orders,
     load_open_orders_accounts, AdvancedOrderType, AdvancedOrders, AssetType, DataType, HealthCache,
-    HealthType, MangoAccount, MangoCache, MangoGroup, MetaData, NodeBank, PerpMarket,
+    HealthType, MangoAccount, MangoCache, MangoGroup, MarketMode, MetaData, NodeBank, PerpMarket,
     PerpMarketCache, PerpMarketInfo, PerpTriggerOrder, PriceCache, ReferrerIdRecord,
     ReferrerMemory, RootBank, RootBankCache, SpotMarketInfo, TokenInfo, TriggerCondition,
     UserActiveAssets, ADVANCED_ORDER_FEE, FREE_ORDER_SLOT, INFO_LEN, MAX_ADVANCED_ORDERS,
@@ -152,7 +152,10 @@ impl Processor {
             mint: *quote_mint_ai.key,
             root_bank: *quote_root_bank_ai.key,
             decimals: mint.decimals,
-            padding: [0u8; 7],
+            spot_market_mode: MarketMode::Default,
+            perp_market_mode: MarketMode::Default,
+            oracle_inactive: false,
+            padding: [0u8; 4],
         };
 
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
@@ -478,12 +481,10 @@ impl Processor {
             check!(mint.decimals == token_info.decimals, MangoErrorCode::InvalidParam)?;
         }
 
-        mango_group.tokens[market_index] = TokenInfo {
-            mint: *mint_ai.key,
-            root_bank: *root_bank_ai.key,
-            decimals: mint.decimals,
-            padding: [0u8; 7],
-        };
+        mango_group.tokens[market_index].mint = *mint_ai.key;
+        mango_group.tokens[market_index].root_bank = *root_bank_ai.key;
+        mango_group.tokens[market_index].decimals = mint.decimals;
+        mango_group.tokens[market_index].spot_market_mode = MarketMode::Active;
 
         let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
         let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
@@ -6365,6 +6366,82 @@ impl Processor {
         Ok(())
     }
 
+    /// Set the spot market mode in TokenInfo.
+    /// Only valid state changes:
+    ///     Default -> Active (no effect)
+    ///     Default -> CloseOnly
+    ///     Active -> CloseOnly
+    ///     CloseOnly -> ForceCloseOnly
+    ///     Default | Active <-> SwappingSpotMarket
+    /// You must use `RemoveSpotMarket` to do ForceCloseOnly -> Inactive
+    #[inline(never)]
+    fn set_market_mode(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        market_index: usize,
+        mode: MarketMode,
+        market_type: AssetType,
+    ) -> MangoResult {
+        check!(market_index < QUOTE_INDEX, MangoErrorCode::InvalidParam)?;
+
+        const NUM_FIXED: usize = 2;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+
+        let [
+            mango_group_ai, // write
+            admin_ai,       // read, signer
+        ] = accounts;
+        let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
+        check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
+        check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+
+        check!(!mango_group.tokens[market_index].is_empty(), MangoErrorCode::InvalidAccount)?;
+
+        // TODO: write test
+        let current_mode = match market_type {
+            AssetType::Token => &mut mango_group.tokens[market_index].spot_market_mode,
+            AssetType::Perp => &mut mango_group.tokens[market_index].perp_market_mode,
+        };
+        match mode {
+            MarketMode::Active => check!(
+                *current_mode == MarketMode::Default
+                    || *current_mode == MarketMode::SwappingSpotMarket,
+                MangoErrorCode::InvalidAccountState
+            )?,
+            MarketMode::CloseOnly => check!(
+                *current_mode == MarketMode::Default || *current_mode == MarketMode::Active,
+                MangoErrorCode::InvalidAccountState
+            )?,
+            MarketMode::ForceCloseOnly => {
+                check!(*current_mode == MarketMode::CloseOnly, MangoErrorCode::InvalidAccountState)?
+            }
+
+            MarketMode::SwappingSpotMarket => {
+                check!(market_type == AssetType::Token, MangoErrorCode::InvalidAccountState)?;
+                check!(
+                    *current_mode == MarketMode::Default || *current_mode == MarketMode::Active,
+                    MangoErrorCode::InvalidAccountState
+                )?;
+            }
+            MarketMode::Default | MarketMode::Inactive => {
+                return Err(throw_err!(MangoErrorCode::InvalidParam))
+            }
+        }
+
+        msg!(
+            "market_type: {:?} old_market_mode: {:?} new_market_mode: {:?}",
+            market_type,
+            current_mode,
+            mode
+        );
+        // TODO: ? rename mode to status
+        // TODO: msg! about previous mode and current mode
+        // *** TODO: allow 10 lots precision for force close perp markets
+
+        *current_mode = mode;
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -6886,6 +6963,10 @@ impl Processor {
             MangoInstruction::CancelAllSpotOrders { limit } => {
                 msg!("Mango: CancelAllSpotOrders");
                 Self::cancel_all_spot_orders(program_id, accounts, limit)
+            }
+            MangoInstruction::SetMarketMode { market_index, market_type, mode } => {
+                msg!("Mango: SetMarketMode");
+                Self::set_market_mode(program_id, accounts, market_index, mode, market_type)
             }
         }
     }

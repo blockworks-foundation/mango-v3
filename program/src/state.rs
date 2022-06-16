@@ -134,16 +134,62 @@ impl MetaData {
     }
 }
 
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum MarketMode {
+    Default = 0, // Legacy value before v3.5 -- may imply Inactive or Active
+    Active = 1,
+    CloseOnly = 2,
+    ForceCloseOnly = 3,
+    Inactive = 4,
+    SwappingSpotMarket = 5, // special mode when we're swapping out a spot market
+}
+
+impl MarketMode {
+    fn is_reduce_only(self) -> bool {
+        self == MarketMode::CloseOnly || self == MarketMode::ForceCloseOnly
+    }
+    fn allow_new_open_orders(self) -> bool {
+        !(self == MarketMode::ForceCloseOnly || self == MarketMode::SwappingSpotMarket)
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {
     pub mint: Pubkey,
     pub root_bank: Pubkey,
     pub decimals: u8,
-    pub padding: [u8; 7],
+    pub spot_market_mode: MarketMode,
+    pub perp_market_mode: MarketMode,
+    pub oracle_inactive: bool,
+    pub padding: [u8; 4],
 }
 
 impl TokenInfo {
+    pub fn new(
+        &self,
+        mint: Pubkey,
+        root_bank: Pubkey,
+        decimals: u8,
+        spot_market_mode: MarketMode,
+        perp_market_mode: MarketMode,
+        oracle_inactive: bool,
+    ) -> Self {
+        Self {
+            mint,
+            root_bank,
+            decimals,
+            spot_market_mode,
+            perp_market_mode,
+            oracle_inactive,
+            padding: [0u8; 4],
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.mint == Pubkey::default()
     }

@@ -1,5 +1,5 @@
 use crate::matching::{ExpiryType, OrderType, Side};
-use crate::state::{AssetType, INFO_LEN};
+use crate::state::{AssetType, MarketMode, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -1066,6 +1066,16 @@ pub enum MangoInstruction {
     CancelAllSpotOrders {
         limit: u8,
     },
+
+    /// Set the market mode in TokenInfo
+    /// Accounts expected by this instruction (2)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer]` admin_ai
+    SetMarketMode {
+        market_index: usize,
+        mode: MarketMode,
+        market_type: AssetType,
+    },
 }
 
 impl MangoInstruction {
@@ -1558,6 +1568,16 @@ impl MangoInstruction {
                 let data_arr = array_ref![data, 0, 1];
                 let limit = data_arr[0];
                 MangoInstruction::CancelAllSpotOrders { limit }
+            }
+            66 => {
+                let data = array_ref![data, 0, 10];
+                let (market_index, mode, market_type) = array_refs![data, 8, 1, 1];
+
+                MangoInstruction::SetMarketMode {
+                    market_index: usize::from_le_bytes(*market_index),
+                    mode: MarketMode::try_from(u8::from_le_bytes(*mode)).unwrap(),
+                    market_type: AssetType::try_from(u8::from_le_bytes(*market_type)).unwrap(),
+                }
             }
             _ => {
                 return None;
@@ -2942,6 +2962,22 @@ pub fn change_spot_market_params(
         max_rate,
         version,
     };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn set_market_mode(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    market_index: usize,
+    mode: MarketMode,
+    market_type: AssetType,
+) -> Result<Instruction, ProgramError> {
+    let accounts =
+        vec![AccountMeta::new(*mango_group_pk, false), AccountMeta::new_readonly(*admin_pk, true)];
+
+    let instr = MangoInstruction::SetMarketMode { market_index, mode, market_type };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
