@@ -6365,9 +6365,12 @@ impl Processor {
                 return Err(throw_err!(MangoErrorCode::InvalidParam))
             }
         }
-        // TODO: ? rename mode to status
-        // TODO: msg! about previous mode and current mode
-        // *** TODO: allow 10 lots precision for force close perp markets
+        msg!(
+            "market_type: {:?} old_market_mode: {:?} new_market_mode: {:?}",
+            market_type,
+            current_mode,
+            mode
+        );
 
         *current_mode = mode;
         Ok(())
@@ -6472,7 +6475,7 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        // todo: log this?
+        // todo: @clarkeni you think we should log this?
         dust_account.deposits[market_index] = ZERO_I80F48;
 
         // Close RootBank and transfer lamports to admin
