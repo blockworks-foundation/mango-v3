@@ -5519,6 +5519,7 @@ impl Processor {
                 Side::Bid => book.sim_new_bid(
                     &perp_market,
                     &mango_group.perp_markets[market_index],
+                    &mango_group.tokens[market_index],
                     mango_cache.get_price(market_index),
                     order.price,
                     quantity,
@@ -6584,6 +6585,7 @@ impl Processor {
         let perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
         check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
+        check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
         // Close perp market, return lamports to admin
         program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
@@ -6825,6 +6827,7 @@ impl Processor {
                     let liqee_delist_token_account: Ref<TokenAccount> =
                         TokenAccount::load(liqee_delist_token_account_ai)?;
 
+                    // todo: check it's the actual ATA not just an account owned by the liqee
                     check_eq!(
                         liqee_delist_token_account.owner,
                         liqee_ma.owner,
