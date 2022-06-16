@@ -6685,7 +6685,7 @@ impl Processor {
 
     /// Liquidate a token balance on a market that is in ForceCloseOnly mode
     /// First the tokens will be moved into the owner's ATA until maint health = 0
-    /// Then liquidate token for some other asset until it gets back to init health 0
+    /// Then liqor will take liqee deposits or liqee borrows in exchange for quote token
     /// required: cancel_all_spot_orders and close_spot_open_orders first before calling this ix
     /// `max_liquidate_amount`:
     ///     if liqee has delist token deposits, max amount liqor is willing to take into his token account
@@ -6892,6 +6892,21 @@ impl Processor {
                     QUOTE_INDEX,
                     quote_transfer,
                 )?;
+
+                // todo: @clarkeni will it mess up accounting if asset is actually withdrawn not transferred?
+                //  any inconsistency with fact "liab" is not necessarily a negative balance?
+                mango_emit_heap!(LiquidateTokenAndTokenLog {
+                    mango_group: *mango_group_ai.key,
+                    liqee: *liqee_mango_account_ai.key,
+                    liqor: *liqor_mango_account_ai.key,
+                    asset_index: delist_index as u64,
+                    liab_index: QUOTE_INDEX as u64,
+                    asset_transfer: delist_transfer.to_bits(),
+                    liab_transfer: quote_transfer.to_bits(),
+                    asset_price: delist_price.to_bits(),
+                    liab_price: ONE_I80F48.to_bits(),
+                    bankruptcy: liqee_ma.is_bankrupt
+                });
             }
         } else if delist_net <= NEG_ONE_I80F48 {
             // deposits are zero, borrows are positive
@@ -6945,6 +6960,19 @@ impl Processor {
                 QUOTE_INDEX,
                 quote_transfer,
             )?;
+
+            mango_emit_heap!(LiquidateTokenAndTokenLog {
+                mango_group: *mango_group_ai.key,
+                liqee: *liqee_mango_account_ai.key,
+                liqor: *liqor_mango_account_ai.key,
+                asset_index: QUOTE_INDEX as u64,
+                liab_index: delist_index as u64,
+                asset_transfer: quote_transfer.to_bits(),
+                liab_transfer: delist_transfer.to_bits(),
+                asset_price: ONE_I80F48.to_bits(),
+                liab_price: delist_price.to_bits(),
+                bankruptcy: liqee_ma.is_bankrupt
+            });
         }
 
         if NEG_ONE_I80F48 < delist_net && delist_net < ONE_I80F48 {
@@ -7061,7 +7089,7 @@ impl Processor {
         b.change_base_position(&mut perp_market, base_settle);
         a.transfer_quote_position(b, quote_settle);
 
-        // todo log perp balances
+        // todo: @clarkeni log perp balances
         Ok(())
     }
 
