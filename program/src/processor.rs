@@ -458,7 +458,7 @@ impl Processor {
         )?;
 
         // Make sure token at this index not already initialized
-        check!(mango_group.tokens[market_index].is_empty(), MangoErrorCode::InvalidAccountState)?;
+        check!(mango_group.tokens[market_index].has_no_spot_market(), MangoErrorCode::InvalidAccountState)?;
 
         let _root_bank = init_root_bank(
             program_id,
@@ -675,7 +675,7 @@ impl Processor {
 
         // This means there isn't already a token and spot market in Mango
         // Set the base decimals; if token not empty, ignore user input base_decimals
-        if mango_group.tokens[market_index].is_empty() {
+        if mango_group.tokens[market_index].has_no_spot_market() {
             mango_group.tokens[market_index].decimals = base_decimals;
         }
         // Initialize the Bids
