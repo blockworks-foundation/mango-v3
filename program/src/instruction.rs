@@ -1138,7 +1138,7 @@ pub enum MangoInstruction {
     /// 13. `[]` signer_ai
     /// 14. `[]` token_prog_ai
     /// 14... `[]` liqee_open_orders_ais - Liqee open orders accs
-    /// 14+MAX_PAIRS... `[]` liqor_open_orders_ais - Liqor open orders accs
+    /// 14+NUM_IN_MARGIN_BASKET... `[]` liqor_open_orders_ais - Liqor open orders accs
     LiquidateDelistingToken {
         max_liquidate_amount: u64,
     },

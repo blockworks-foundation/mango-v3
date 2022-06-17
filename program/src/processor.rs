@@ -6706,9 +6706,8 @@ impl Processor {
     ) -> MangoResult {
         check!(max_liquidate_amount > 0, MangoErrorCode::InvalidParam)?;
         const NUM_FIXED: usize = 15;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_PAIRS];
-        let (fixed_ais, liqee_open_orders_ais, liqor_open_orders_ais) =
-            array_refs![accounts, NUM_FIXED, MAX_PAIRS, MAX_PAIRS];
+        let (fixed_ais, liqee_open_orders_ais, liqor_packed_open_orders_ais) =
+            array_refs![accounts, NUM_FIXED, MAX_PAIRS; ..;];
 
         let [
             mango_group_ai,                 // read
@@ -6750,7 +6749,8 @@ impl Processor {
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        liqor_ma.check_open_orders(&mango_group, liqor_open_orders_ais)?;
+        let liqor_open_orders_ais = liqor_ma.checked_unpack_open_orders(&mango_group, liqor_packed_open_orders_ais)?;
+        let liqor_open_orders_accounts = load_open_orders_accounts(&liqor_open_orders_ais)?;
 
         // Load and check delisting token banks
         let delist_root_bank = RootBank::load_checked(delist_root_bank_ai, program_id)?;
@@ -7034,11 +7034,11 @@ impl Processor {
 
         // Check liqor health
         let mut liqor_health_cache = HealthCache::new(liqor_active_assets);
-        liqor_health_cache.init_vals(
+        liqor_health_cache.init_vals_with_orders_vec(
             &mango_group,
             &mango_cache,
             &liqor_ma,
-            liqor_open_orders_ais,
+            &liqor_open_orders_accounts,
         )?;
         let liqor_health = liqor_health_cache.get_health(&mango_group, HealthType::Init);
         check!(liqor_health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
