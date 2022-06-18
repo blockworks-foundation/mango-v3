@@ -172,7 +172,6 @@ pub struct TokenInfo {
 
 impl TokenInfo {
     pub fn new(
-        &self,
         mint: Pubkey,
         root_bank: Pubkey,
         decimals: u8,

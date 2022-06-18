@@ -1687,7 +1687,7 @@ impl Processor {
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
         let is_market_closing =
-            mode == MarketMode::CloseOnly || spot_market_ai.key == &luna_spot_market::ID;
+            mode.is_reduce_only() || spot_market_ai.key == &luna_spot_market::ID;
         let (post_allowed, pre_locked) = if is_market_closing {
             let open_orders = load_open_orders(&open_orders_ais[market_index])?;
             // only one open order at a time
@@ -2022,7 +2022,7 @@ impl Processor {
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
         let is_market_closing =
-            mode == MarketMode::CloseOnly || spot_market_ai.key == &luna_spot_market::ID;
+            mode.is_reduce_only() || spot_market_ai.key == &luna_spot_market::ID;
         let (post_allowed, pre_locked) = if is_market_closing {
             let open_orders = load_open_orders(market_open_orders_ai)?;
             // only one open order at a time
@@ -2472,9 +2472,9 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
-        check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
+        check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
         let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
-        let is_market_closing = mode == MarketMode::CloseOnly || is_luna_market;
+        let is_market_closing = mode.is_reduce_only() || is_luna_market;
         check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
@@ -6167,7 +6167,7 @@ impl Processor {
 
         // Owner signature not necessary if market is in ForceClose or SwappingSpotMarket
         let mode = mango_group.tokens[market_index].spot_market_mode;
-        if !(mode == MarketMode::ForceCloseOnly || mode == MarketMode::SwappingSpotMarket) {
+        if mode.allow_new_open_orders() {
             check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         }
 
