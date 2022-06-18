@@ -775,6 +775,7 @@ impl Processor {
             base_lot_size,
             quote_lot_size,
         };
+        mango_group.tokens[market_index].perp_market_mode = MarketMode::Active;
 
         Ok(())
     }
