@@ -149,15 +149,14 @@ impl Processor {
             quote_max_rate,
         )?;
         let mint = Mint::unpack(&quote_mint_ai.try_borrow_data()?)?;
-        mango_group.tokens[QUOTE_INDEX] = TokenInfo {
-            mint: *quote_mint_ai.key,
-            root_bank: *quote_root_bank_ai.key,
-            decimals: mint.decimals,
-            spot_market_mode: MarketMode::Default,
-            perp_market_mode: MarketMode::Default,
-            oracle_inactive: false,
-            padding: [0u8; 4],
-        };
+        mango_group.tokens[QUOTE_INDEX] = TokenInfo::new(
+            *quote_mint_ai.key,
+            *quote_root_bank_ai.key,
+            mint.decimals,
+            MarketMode::Default,
+            MarketMode::Default,
+            false,
+        );
 
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
         mango_group.admin = *admin_ai.key;
