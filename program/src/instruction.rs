@@ -819,8 +819,8 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction (4)
     /// 0. `[]` mango_group_ai - MangoGroup to create the dust account for
     /// 1. `[writable]` mango_account_ai - the mango account data
-    /// 2. `[signer, writable]` signer_ai - Signer and fee payer account
-    /// 3. `[writable]` system_prog_ai - System program
+    /// 2. `[signer, writable]` payer_ai - Signer and fee payer account
+    /// 3. `[]` system_prog_ai - System program
     CreateDustAccount,
 
     /// Transfer dust (< 1 native SPL token) assets and liabilities for a single token to the group's dust account
@@ -1128,17 +1128,17 @@ pub enum MangoInstruction {
     /// 3. `[writable]` liqee_mango_account_ai
     /// 4. `[writable]` liqor_mango_account_ai
     /// 5. `[signer]` liqor_ai
-    /// 6. `[]` asset_root_bank_ai
-    /// 7. `[writable]` asset_node_bank_ai
-    /// 8. `[]` liab_root_bank_ai
-    /// 9. `[writable]` liab_node_bank_ai
-    /// 10. `[writable]` liab_vault_ai
-    /// 11. `[writable]` liqee_liab_token_account_ai
-    /// 12. `[writable]` liqor_liab_token_account_ai
+    /// 6. `[]` quote_root_bank_ai
+    /// 7. `[writable]` quote_node_bank_ai
+    /// 8. `[]` delist_root_bank_ai
+    /// 9. `[writable]` delist_node_bank_ai
+    /// 10. `[writable]` delist_vault_ai
+    /// 11. `[writable]` liqee_delist_token_account_ai
+    /// 12. `[writable]` liqor_delist_token_account_ai
     /// 13. `[]` signer_ai
     /// 14. `[]` token_prog_ai
     /// 14... `[]` liqee_open_orders_ais - Liqee open orders accs
-    /// 14+NUM_IN_MARGIN_BASKET... `[]` liqor_open_orders_ais - Liqor open orders accs
+    /// 14+NUM_IN_MARGIN_BASKET... `[]` liqor_open_orders_ais - Liqor open orders accs that are in_margin_basket
     LiquidateDelistingToken {
         max_liquidate_amount: u64,
     },
@@ -3111,6 +3111,25 @@ pub fn liquidate_delisting_token(
 
     let instr = MangoInstruction::LiquidateDelistingToken { max_liquidate_amount };
     let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn create_dust_account(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    payer_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*payer_pk, true),
+        AccountMeta::new_readonly(solana_program::system_program::ID, false),
+    ];
+
+    let instr = MangoInstruction::CreateDustAccount;
+    let data = instr.pack();
+
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
