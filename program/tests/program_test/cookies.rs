@@ -218,7 +218,7 @@ impl MangoGroupCookie {
         test.cache_all_prices(
             mango_group,
             &self.address,
-            &mango_group.oracles[0..mango_group.num_oracles],
+            &mango_group.oracles[0..mango_group.num_oracles as usize],
         )
         .await;
 
