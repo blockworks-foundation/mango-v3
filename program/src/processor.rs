@@ -6397,6 +6397,7 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
 
         let market_index = mango_group
             .find_root_bank_index(root_bank_ai.key)
@@ -6409,7 +6410,7 @@ impl Processor {
         )?;
 
         let root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
-        check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
+        check_eq!(MAX_NODE_BANKS, node_bank_ais.len(), MangoErrorCode::Default)?;
         for i in 0..root_bank.num_node_banks {
             check!(
                 node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
@@ -6426,8 +6427,12 @@ impl Processor {
         let mut dust_account =
             MangoAccount::load_mut_checked(dust_account_ai, program_id, mango_group_ai.key)?;
 
+        // Check vault owner is group admin
+        let admin_vault = Account::unpack(&admin_vault_ai.try_borrow_data()?)?;
+        check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner)?;
+
         let mut total_deposits = ZERO_I80F48;
-        for (vault_ai, node_bank_ai) in node_bank_ais.iter().zip(vault_ais.iter()) {
+        for (node_bank_ai, vault_ai) in node_bank_ais.iter().zip(vault_ais.iter()) {
             if node_bank_ai.key == &Pubkey::default() {
                 continue;
             }
@@ -6443,10 +6448,7 @@ impl Processor {
             // check vault was passed in
             check!(vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
             let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
-            let admin_vault = Account::unpack(&admin_vault_ai.try_borrow_data()?)?;
 
-            check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner)?;
-            let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
             invoke_transfer(
                 token_prog_ai,
                 &vault_ai,
@@ -6458,14 +6460,14 @@ impl Processor {
             invoke_close_token_account(
                 token_prog_ai,
                 &vault_ai,
-                admin_vault_ai,
+                admin_ai,
                 signer_ai,
                 &[&signers_seeds],
             )?;
 
             // Close node bank, return lamports to admin
             program_transfer_lamports(node_bank_ai, admin_ai, node_bank_ai.lamports())?;
-            sol_memset(&mut root_bank_ai.try_borrow_mut_data()?, 0, size_of::<NodeBank>());
+            sol_memset(&mut node_bank_ai.try_borrow_mut_data()?, 0, size_of::<NodeBank>());
         }
 
         // todo: maybe even this needs to be within some dust threshold
