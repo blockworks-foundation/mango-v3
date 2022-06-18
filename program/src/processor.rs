@@ -6816,9 +6816,7 @@ impl Processor {
             // Transfer enough deposits such that maint_health == 0, then start liquidating for quote currency
 
             let withdrawable = maint_health
-                .checked_div(delist_info.maint_asset_weight)
-                .unwrap()
-                .checked_div(delist_price)
+                .checked_div(delist_price.checked_mul(delist_info.maint_asset_weight).unwrap())
                 .unwrap()
                 .clamp(ZERO_I80F48, delist_net)
                 .checked_floor() // make an integer
@@ -6968,7 +6966,7 @@ impl Processor {
                 token_prog_ai,
                 liqor_delist_token_account_ai,
                 delist_vault_ai,
-                signer_ai,
+                liqor_ai,
                 &[&signers_seeds],
                 delist_transfer.to_num::<u64>(),
             )?;
