@@ -6591,10 +6591,6 @@ impl Processor {
         check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
         check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
-        // Close perp market, return lamports to admin
-        program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
-        sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
-
         // Make sure event queue has no events
         let event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
         check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
@@ -6617,6 +6613,10 @@ impl Processor {
         // Transfer MNGO in vault to DAO treasury
         check!(mngo_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
         let mngo_vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
+
+        // Close perp market, return lamports to admin
+        program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
+        sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
 
         // todo do checks to make sure dao vault is correct
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
