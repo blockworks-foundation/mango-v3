@@ -1310,8 +1310,7 @@ impl Processor {
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
-        // Don't allow initialization of spot open orders if market is in ForceClose or Swapping
-        // Don't need to check MarketMode::Inactive because spot market is zero key in that case
+        // Don't allow initialization of spot open orders if market is in ForceClose, Swapping, or Inactive
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::InvalidAccountState)?;
 

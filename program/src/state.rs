@@ -154,7 +154,7 @@ impl MarketMode {
         self == MarketMode::CloseOnly || self == MarketMode::ForceCloseOnly
     }
     pub fn allow_new_open_orders(self) -> bool {
-        !(self == MarketMode::ForceCloseOnly || self == MarketMode::SwappingSpotMarket)
+        !(self == MarketMode::ForceCloseOnly || self == MarketMode::SwappingSpotMarket || self == MarketMode::Inactive)
     }
 }
 
