@@ -154,7 +154,9 @@ impl MarketMode {
         self == MarketMode::CloseOnly || self == MarketMode::ForceCloseOnly
     }
     pub fn allow_new_open_orders(self) -> bool {
-        !(self == MarketMode::ForceCloseOnly || self == MarketMode::SwappingSpotMarket || self == MarketMode::Inactive)
+        !(self == MarketMode::ForceCloseOnly
+            || self == MarketMode::SwappingSpotMarket
+            || self == MarketMode::Inactive)
     }
 }
 
@@ -2716,4 +2718,16 @@ pub struct TokenAccount {
     pub close_authority: COption<Pubkey>, // 165
 }
 
+impl TokenAccount {
+    pub fn load_checked<'a>(account: &'a AccountInfo) -> MangoResult<Ref<'a, Self>> {
+        let state: Ref<'a, Self> = Self::load(account)?;
+        check!(
+            state.state == AccountState::Uninitialized
+                || state.state == AccountState::Initialized
+                || state.state == AccountState::Frozen,
+            MangoErrorCode::InvalidAccountState
+        )?;
+        Ok(state)
+    }
+}
 const_assert_eq!(size_of::<TokenAccount>(), 165);

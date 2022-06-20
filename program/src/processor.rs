@@ -457,7 +457,10 @@ impl Processor {
         )?;
 
         // Make sure token at this index not already initialized
-        check!(mango_group.tokens[market_index].has_no_spot_market(), MangoErrorCode::InvalidAccountState)?;
+        check!(
+            mango_group.tokens[market_index].has_no_spot_market(),
+            MangoErrorCode::InvalidAccountState
+        )?;
 
         let _root_bank = init_root_bank(
             program_id,
@@ -6750,7 +6753,8 @@ impl Processor {
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        let liqor_open_orders_ais = liqor_ma.checked_unpack_open_orders(&mango_group, liqor_packed_open_orders_ais)?;
+        let liqor_open_orders_ais =
+            liqor_ma.checked_unpack_open_orders(&mango_group, liqor_packed_open_orders_ais)?;
         let liqor_open_orders_accounts = load_open_orders_accounts(&liqor_open_orders_ais)?;
 
         // Load and check delisting token banks
@@ -6827,9 +6831,8 @@ impl Processor {
                 // Check passed in token account belongs to liqee
                 {
                     let liqee_delist_token_account: Ref<TokenAccount> =
-                        TokenAccount::load(liqee_delist_token_account_ai)?;
+                        TokenAccount::load_checked(liqee_delist_token_account_ai)?;
 
-                    // todo: check it's the actual ATA not just an account owned by the liqee
                     check_eq!(
                         liqee_delist_token_account.owner,
                         liqee_ma.owner,
@@ -6936,7 +6939,9 @@ impl Processor {
             // Transfer quote token from liqee to liqor plus fee
 
             let max_liquidate_amount: u64 =
-                TokenAccount::load(liqor_delist_token_account_ai)?.amount.min(max_liquidate_amount);
+                TokenAccount::load_checked(liqor_delist_token_account_ai)?
+                    .amount
+                    .min(max_liquidate_amount);
 
             let delist_transfer = delist_net
                 .checked_abs()
