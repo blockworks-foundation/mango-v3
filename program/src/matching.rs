@@ -1053,7 +1053,7 @@ impl<'a> Book<'a> {
             // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
 
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+            if native_price > info.maint_liab_weight.checked_mul(oracle_price).unwrap() {
                 // if oracle price is below 1 and market is in close only, then allow people to place at 1
                 if token_info.perp_market_mode.is_reduce_only() || is_luna_market {
                     let low_threshold = market.lot_to_native_price(1);
@@ -1212,7 +1212,7 @@ impl<'a> Book<'a> {
             // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
 
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
+            if native_price > info.maint_liab_weight.checked_mul(oracle_price).unwrap() {
                 // if oracle price is below 1 and market is in close only, then allow people to place at 1
                 if mango_group.tokens[market_index].perp_market_mode.is_reduce_only()
                     || is_luna_market
