@@ -43,7 +43,7 @@ pub async fn withdraw_scenario(
     for (user_index, mint_index, amount, allow_borrow) in withdraws {
         let mint = test.with_mint(*mint_index);
         let withdraw_amount = (*amount * mint.unit) as u64;
-        test.perform_withdraw(
+        test.perform_withdraw2(
             &mango_group_cookie,
             *user_index,
             *mint_index,
