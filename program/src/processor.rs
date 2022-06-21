@@ -1315,9 +1315,6 @@ impl Processor {
         ] = fixed_ais;
         check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
 
-        let is_luna_token = root_bank_ai.key == &luna_root_bank::ID;
-        check!(!(is_luna_token && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
-
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
 
@@ -1331,6 +1328,10 @@ impl Processor {
         let token_index = mango_group
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
+
+        let mode = mango_group.tokens[token_index].spot_market_mode;
+        let is_market_closing = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID; // temp until luna gets moved to close only officially
+        check!(!(is_market_closing && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
