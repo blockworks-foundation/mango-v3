@@ -561,13 +561,15 @@ impl Processor {
             if mango_group.tokens[i].oracle_inactive {
                 mango_group.oracles[i] = *oracle_ai.key;
                 mango_group.tokens[i].oracle_inactive = false;
-                // TODO: msg! about oracle index and oracle pubkey
+                msg!("oracle: {} oracle_index: {}", oracle_ai.key, i);
                 return Ok(());
             }
         }
 
         let oracle_index = mango_group.num_oracles;
         mango_group.oracles[oracle_index] = *oracle_ai.key;
+        msg!("oracle: {} oracle_index: {}", oracle_ai.key, oracle_index);
+
         mango_group.num_oracles += 1;
 
         Ok(())
@@ -6521,7 +6523,11 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-
+        check_eq!(
+            dex_program_ai.key,
+            &mango_group.dex_program_id,
+            MangoErrorCode::InvalidProgramId
+        )?;
         let market_index = mango_group
             .find_spot_market_index(old_spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
@@ -6548,7 +6554,11 @@ impl Processor {
 
         mango_group.spot_markets[market_index].spot_market = *new_spot_market_ai.key;
         mango_group.tokens[market_index].spot_market_mode = MarketMode::Active;
-
+        msg!(
+            "old_spot_market: {} new_spot_market: {}",
+            old_spot_market_ai.key,
+            new_spot_market_ai.key
+        );
         Ok(())
     }
 
