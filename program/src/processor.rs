@@ -6839,8 +6839,7 @@ impl Processor {
     ) -> MangoResult {
         check!(max_liquidate_amount > 0, MangoErrorCode::InvalidParam)?;
         const NUM_FIXED: usize = 15;
-        let (fixed_ais, liqee_open_orders_ais, liqor_packed_open_orders_ais) =
-            array_refs![accounts, NUM_FIXED, MAX_PAIRS; ..;];
+        let (fixed_ais, packed_open_orders_ais) = array_refs![accounts, NUM_FIXED; ..;];
 
         let [
             mango_group_ai,                 // read
@@ -6867,13 +6866,11 @@ impl Processor {
         check!(&mango_group.signer_key == signer_ai.key, MangoErrorCode::InvalidSignerKey)?;
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
 
-        // Check liqee account
+        // Load accounts
         let mut liqee_ma =
             MangoAccount::load_mut_checked(liqee_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(!liqee_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
-        liqee_ma.check_open_orders(&mango_group, liqee_open_orders_ais)?;
 
-        // Check liqor account
         let mut liqor_ma =
             MangoAccount::load_mut_checked(liqor_mango_account_ai, program_id, mango_group_ai.key)?;
         check!(
@@ -6882,8 +6879,15 @@ impl Processor {
         )?;
         check!(liqor_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
+
+        // Split packed open orders accounts and check
+        let (liqee_packed_open_orders_ais, liqor_packed_open_orders_ais) =
+            packed_open_orders_ais.split_at((liqee_ma.num_in_margin_basket - 1).into());
+        let liqee_open_orders_ais =
+            liqee_ma.checked_unpack_open_orders(&mango_group, liqee_packed_open_orders_ais)?;
         let liqor_open_orders_ais =
             liqor_ma.checked_unpack_open_orders(&mango_group, liqor_packed_open_orders_ais)?;
+        let liqee_open_orders_accounts = load_open_orders_accounts(&liqee_open_orders_ais)?;
         let liqor_open_orders_accounts = load_open_orders_accounts(&liqor_open_orders_ais)?;
 
         // Load and check delisting token banks
@@ -6934,7 +6938,12 @@ impl Processor {
 
         // Check liqee health and deposits/borrows
         let mut health_cache = HealthCache::new(liqee_active_assets);
-        health_cache.init_vals(&mango_group, &mango_cache, &liqee_ma, liqee_open_orders_ais)?;
+        health_cache.init_vals_with_orders_vec(
+            &mango_group,
+            &mango_cache,
+            &liqee_ma,
+            &liqee_open_orders_accounts,
+        )?;
         let maint_health = health_cache.get_health(&mango_group, HealthType::Maint);
 
         let quote_root_bank_cache = &mango_cache.root_bank_cache[QUOTE_INDEX];
