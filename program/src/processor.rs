@@ -6881,8 +6881,13 @@ impl Processor {
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         // Split packed open orders accounts and check
+        let mid: usize = if liqee_ma.num_in_margin_basket > 0 {
+            (liqee_ma.num_in_margin_basket - 1).into()
+        } else {
+            0
+        };
         let (liqee_packed_open_orders_ais, liqor_packed_open_orders_ais) =
-            packed_open_orders_ais.split_at((liqee_ma.num_in_margin_basket - 1).into());
+            packed_open_orders_ais.split_at(mid);
         let liqee_open_orders_ais =
             liqee_ma.checked_unpack_open_orders(&mango_group, liqee_packed_open_orders_ais)?;
         let liqor_open_orders_ais =

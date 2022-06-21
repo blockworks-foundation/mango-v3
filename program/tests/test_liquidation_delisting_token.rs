@@ -7,7 +7,7 @@ use solana_program_test::*;
 
 #[tokio::test]
 async fn test_liquidation_delisting_token_only_deposits() {
-    let config = MangoProgramTestConfig::default();
+    let config = MangoProgramTestConfig::default_two_mints();
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;

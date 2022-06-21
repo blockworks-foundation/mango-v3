@@ -1802,7 +1802,7 @@ impl MangoProgramTest {
         mint_index: usize,
         quantity: u64,
         allow_borrow: bool,
-    ) {
+    ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -1839,7 +1839,7 @@ impl MangoProgramTest {
             allow_borrow,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await
     }
 
     #[allow(dead_code)]
