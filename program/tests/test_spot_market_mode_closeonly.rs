@@ -67,7 +67,8 @@ async fn test_spot_market_mode_closeonly() {
         user_borrow,
         true,
     )
-    .await.unwrap();
+    .await
+    .unwrap();
 
     // Expect error if executing as non-admin
     test.perform_set_market_mode_as_user(
@@ -97,11 +98,11 @@ async fn test_spot_market_mode_closeonly() {
 
     // Expect deposit to succeed but not update the balance as native_borrows is 0 and market is reduce_only
     let mango_account_deposit_pre = test
-    .with_mango_account_deposit(
-        &mango_group_cookie.mango_accounts[user_index].address,
-        market_index,
-    )
-    .await;
+        .with_mango_account_deposit(
+            &mango_group_cookie.mango_accounts[user_index].address,
+            market_index,
+        )
+        .await;
     test.perform_deposit(&mango_group_cookie, user_index, market_index, 10).await.unwrap();
     let mango_account_deposit_post = test
         .with_mango_account_deposit(
@@ -112,9 +113,14 @@ async fn test_spot_market_mode_closeonly() {
     assert!(mango_account_deposit_post == mango_account_deposit_pre);
 
     // Expect deposit to succeed and only update balance to close borrows, leaving the extra
-    test.perform_deposit(&mango_group_cookie, user_with_borrow_index, market_index, user_borrow * 100)
-        .await
-        .unwrap();
+    test.perform_deposit(
+        &mango_group_cookie,
+        user_with_borrow_index,
+        market_index,
+        user_borrow * 100,
+    )
+    .await
+    .unwrap();
     let mango_account_with_borrow_deposit = test
         .with_mango_account_deposit(
             &mango_group_cookie.mango_accounts[user_with_borrow_index].address,
@@ -140,5 +146,6 @@ async fn test_spot_market_mode_closeonly() {
         user_borrow * 10,
         true,
     )
-    .await.unwrap_err();
+    .await
+    .unwrap_err();
 }

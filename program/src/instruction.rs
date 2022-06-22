@@ -2038,7 +2038,7 @@ pub fn create_perp_market(
         AccountMeta::new(*signer_pk, false),
         AccountMeta::new_readonly(solana_program::system_program::ID, false),
         AccountMeta::new_readonly(spl_token::ID, false),
-        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),  
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
     ];
 
     let instr = MangoInstruction::CreatePerpMarket {

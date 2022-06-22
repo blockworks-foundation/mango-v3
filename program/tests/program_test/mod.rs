@@ -2104,8 +2104,10 @@ impl MangoProgramTest {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
-        let (dust_account_pk, _bump_seed) =
-            Pubkey::find_program_address(&[&mango_group_pk.as_ref(), b"DustAccount"], &self.mango_program_id);
+        let (dust_account_pk, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_pk.as_ref(), b"DustAccount"],
+            &self.mango_program_id,
+        );
 
         let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
         let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;

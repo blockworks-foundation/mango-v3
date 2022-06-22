@@ -7393,7 +7393,6 @@ impl Processor {
                 msg!("Mango: UpdateRootBank");
                 Self::update_root_bank(program_id, accounts)
             }
-
             MangoInstruction::AddPerpMarket { .. } => {
                 msg!("DEPRECATED Mango: AddPerpMarket");
                 Ok(())
