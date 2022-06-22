@@ -2689,7 +2689,7 @@ impl ReferrerIdRecord {
 
 /// SPL Token `Account` that is zero copy loadable. Saves 700 CU over `Account::unpack`
 /// example usage:
-/// ```
+/// ```no_run
 /// use std::cell::Ref;
 /// use mango::state::TokenAccount;
 /// let token_account: Ref<TokenAccount> = TokenAccount::load_checked(token_account_ai)?;
