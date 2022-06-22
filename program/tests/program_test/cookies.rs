@@ -77,27 +77,41 @@ impl MangoGroupCookie {
         let quote_optimal_rate = I80F48::from_num(0.06);
         let quote_max_rate = I80F48::from_num(1.5);
 
-        let instructions = [mango::instruction::init_mango_group(
+        let (pda_address, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_pk.as_ref(), b"DustAccount"],
             &mango_program_id,
-            &mango_group_pk,
-            &signer_pk,
-            &admin_pk,
-            &quote_mint_pk,
-            &quote_vault_pk,
-            &quote_node_bank_pk,
-            &quote_root_bank_pk,
-            &dao_vault_pk,
-            &msrm_vault_pk,
-            &fees_vault_pk,
-            &mango_cache_pk,
-            &serum_program_id,
-            signer_nonce,
-            5,
-            quote_optimal_util,
-            quote_optimal_rate,
-            quote_max_rate,
-        )
-        .unwrap()];
+        );
+
+        let instructions = [
+            mango::instruction::init_mango_group(
+                &mango_program_id,
+                &mango_group_pk,
+                &signer_pk,
+                &admin_pk,
+                &quote_mint_pk,
+                &quote_vault_pk,
+                &quote_node_bank_pk,
+                &quote_root_bank_pk,
+                &dao_vault_pk,
+                &msrm_vault_pk,
+                &fees_vault_pk,
+                &mango_cache_pk,
+                &serum_program_id,
+                signer_nonce,
+                5,
+                quote_optimal_util,
+                quote_optimal_rate,
+                quote_max_rate,
+            )
+            .unwrap(),
+            mango::instruction::create_dust_account(
+                &mango_program_id,
+                &mango_group_pk,
+                &pda_address,
+                &admin_pk,
+            )
+            .unwrap(),
+        ];
 
         test.process_transaction(&instructions, None).await.unwrap();
 
@@ -138,7 +152,7 @@ impl MangoGroupCookie {
     pub async fn add_root_banks(&mut self, test: &mut MangoProgramTest) -> Vec<RootBank> {
         let mut root_banks = vec![];
         for ti in self.mango_group.tokens.iter() {
-            if !ti.is_empty() {
+            if !ti.has_no_spot_market() {
                 root_banks.push(test.load_account::<RootBank>(ti.root_bank).await)
             }
         }
