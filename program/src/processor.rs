@@ -6881,13 +6881,8 @@ impl Processor {
         check!(!liqor_ma.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
         // Split packed open orders accounts and check
-        let mid: usize = if liqee_ma.num_in_margin_basket > 0 {
-            (liqee_ma.num_in_margin_basket - 1).into()
-        } else {
-            0
-        };
         let (liqee_packed_open_orders_ais, liqor_packed_open_orders_ais) =
-            packed_open_orders_ais.split_at(mid);
+            packed_open_orders_ais.split_at(liqee_ma.num_in_margin_basket as usize);
         let liqee_open_orders_ais =
             liqee_ma.checked_unpack_open_orders(&mango_group, liqee_packed_open_orders_ais)?;
         let liqor_open_orders_ais =
@@ -6990,7 +6985,7 @@ impl Processor {
                     &mut liqee_ma,
                     liqee_mango_account_ai.key,
                     delist_index,
-                    -withdrawable,
+                    -(withdrawable + I80F48::DELTA * delist_root_bank_cache.deposit_index),
                 )?;
                 delist_net = liqee_ma.get_net(delist_root_bank_cache, delist_index);
 
@@ -7030,7 +7025,7 @@ impl Processor {
                     &mut liqee_ma,
                     liqee_mango_account_ai.key,
                     delist_index,
-                    -delist_transfer,
+                    -(delist_transfer + I80F48::DELTA * delist_root_bank_cache.deposit_index),
                 )?;
                 delist_net = liqee_ma.get_net(delist_root_bank_cache, delist_index);
 
@@ -7175,7 +7170,7 @@ impl Processor {
                 liqee_mango_account_ai.key,
                 dust_account_ai.key,
                 delist_index,
-                -delist_net,
+                delist_net,
             )?;
         }
 
