@@ -1249,7 +1249,10 @@ impl MangoProgramTest {
             );
             oracle_pks.push(oracle_pk);
         }
-        self.process_transaction(&instructions, None).await.unwrap();
+        let instructions_chunks: Vec<&[Instruction]> = instructions.chunks(2).collect();
+        for chunk in instructions_chunks {
+            self.process_transaction(&chunk, None).await.unwrap();
+        }
         return oracle_pks;
     }
 

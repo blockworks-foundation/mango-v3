@@ -174,6 +174,7 @@ pub enum MangoInstruction {
     /// 2. `[signer]` admin_ai - admin
     AddOracle, // = 10
 
+    /// DEPRECATED - Use create_perp_market instead
     /// Add a perp market to a mango group
     ///
     /// Accounts expected by this instruction (7):
@@ -1995,7 +1996,7 @@ pub fn add_spot_market(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-pub fn add_perp_market(
+pub fn create_perp_market(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
     oracle_pk: &Pubkey,
@@ -2003,8 +2004,10 @@ pub fn add_perp_market(
     event_queue_pk: &Pubkey,
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
+    mngo_mint_pk: &Pubkey,
     mngo_vault_pk: &Pubkey,
     admin_pk: &Pubkey,
+    signer_pk: &Pubkey,
 
     maint_leverage: I80F48,
     init_leverage: I80F48,
@@ -2017,19 +2020,28 @@ pub fn add_perp_market(
     max_depth_bps: I80F48,
     target_period_length: u64,
     mngo_per_period: u64,
+    exp: u8,
+    version: u8,
+    lm_size_shift: u8,
+    base_decimals: u8,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
-        AccountMeta::new(*oracle_pk, false),
+        AccountMeta::new_readonly(*oracle_pk, false),
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*event_queue_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
-        AccountMeta::new_readonly(*mngo_vault_pk, false),
+        AccountMeta::new_readonly(*mngo_mint_pk, false),
+        AccountMeta::new(*mngo_vault_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
+        AccountMeta::new(*signer_pk, false),
+        AccountMeta::new_readonly(solana_program::system_program::ID, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),  
     ];
 
-    let instr = MangoInstruction::AddPerpMarket {
+    let instr = MangoInstruction::CreatePerpMarket {
         maint_leverage,
         init_leverage,
         liquidation_fee,
@@ -2041,7 +2053,10 @@ pub fn add_perp_market(
         max_depth_bps,
         target_period_length,
         mngo_per_period,
-        exp: 2, // TODO add this to function signature
+        exp,
+        version,
+        lm_size_shift,
+        base_decimals,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })

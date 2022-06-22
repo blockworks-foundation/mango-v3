@@ -25,14 +25,7 @@ async fn test_liquidation_delisting_token_only_deposits() {
     mango_group_cookie.set_oracle(&mut test, market_index, price as f64).await;
 
     // Deposit some asset to be delisted
-    // TODO: this is messy, replace keeper calls once updatefunding issues is fixed
-    test.update_all_root_banks(&mango_group_cookie, &mango_group_cookie.address).await;
-    test.cache_all_prices(
-        &mango_group_cookie.mango_group,
-        &mango_group_cookie.address,
-        &mango_group_cookie.mango_group.oracles[0..mango_group_cookie.mango_group.num_oracles],
-    )
-    .await;
+    mango_group_cookie.run_keeper(&mut test).await;
     test.perform_deposit(&mango_group_cookie, liqee_index, market_index, liqee_deposit)
         .await
         .unwrap();

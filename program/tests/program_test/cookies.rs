@@ -684,7 +684,10 @@ impl PerpMarketCookie {
     ) -> Self {
         let mango_program_id = test.mango_program_id;
         let mango_group_pk = mango_group_cookie.address;
-        let perp_market_pk = test.create_account(size_of::<PerpMarket>(), &mango_program_id).await;
+        let (perp_market_pk, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_pk.as_ref(), b"PerpMarket", &oracle_pks[mint_index].as_ref()],
+            &mango_program_id,
+        );
         let (signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let max_num_events = 256;
@@ -696,7 +699,10 @@ impl PerpMarketCookie {
             .await;
         let bids_pk = test.create_account(size_of::<BookSide>(), &mango_program_id).await;
         let asks_pk = test.create_account(size_of::<BookSide>(), &mango_program_id).await;
-        let mngo_vault_pk = test.create_token_account(&signer_pk, &mngo_token::ID).await;
+        let (mngo_vault_pk, _bump_seed) = Pubkey::find_program_address(
+            &[&perp_market_pk.as_ref(), &spl_token::ID.as_ref(), &mngo_token::ID.as_ref()],
+            &mango_program_id,
+        );
 
         let admin_pk = test.get_payer_pk();
 
@@ -710,7 +716,7 @@ impl PerpMarketCookie {
         let target_period_length = 3600;
         let mngo_per_period = 11400;
 
-        let instructions = [mango::instruction::add_perp_market(
+        let instructions = [mango::instruction::create_perp_market(
             &mango_program_id,
             &mango_group_pk,
             &oracle_pks[mint_index],
@@ -718,8 +724,10 @@ impl PerpMarketCookie {
             &event_queue_pk,
             &bids_pk,
             &asks_pk,
+            &mngo_token::ID,
             &mngo_vault_pk,
             &admin_pk,
+            &mango_group_cookie.mango_group.signer_key,
             maint_leverage,
             init_leverage,
             liquidation_fee,
@@ -731,6 +739,10 @@ impl PerpMarketCookie {
             max_depth_bps,
             target_period_length,
             mngo_per_period,
+            2,
+            1,
+            0,
+            test.mints[mint_index].decimals,
         )
         .unwrap()];
 

@@ -14,7 +14,7 @@ async fn test_vault_net_deposit_diff() {
     let mut test = MangoProgramTest::start_new(&config).await;
 
     let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
-    mango_group_cookie.full_setup(&mut test, 2, 1).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
     mango_group_cookie.set_oracle(&mut test, 0, 2.0).await;
 
     // General parameters
