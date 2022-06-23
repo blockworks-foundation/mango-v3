@@ -5598,7 +5598,10 @@ impl Processor {
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
         let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
-        if is_luna_market {
+        let mode = mango_group.tokens[market_index].perp_market_mode;
+        check!(mode.allow_new_open_orders(), MangoErrorCode::InvalidAccountState)?;
+        let is_market_closing = mode.is_reduce_only() || is_luna_market;
+        if is_market_closing {
             order.reduce_only = true;
         }
 
