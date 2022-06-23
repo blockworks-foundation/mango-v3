@@ -820,11 +820,11 @@ impl UserActiveAssets {
         extra.iter().for_each(|(at, i)| match at {
             AssetType::Token => {
                 if *i != QUOTE_INDEX {
-                    spot[*i] = true;
+                    spot[*i] = !mango_group.spot_markets[*i].is_empty();
                 }
             }
             AssetType::Perp => {
-                perps[*i] = true;
+                perps[*i] = !mango_group.perp_markets[*i].is_empty();
             }
         });
         Self { spot, perps }

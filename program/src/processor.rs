@@ -5390,6 +5390,12 @@ impl Processor {
             .find_perp_market_index(perp_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
 
+        // Don't allow new advanced orders to be opened if it's in ForceClose or Inactive
+        check!(
+            mango_group.tokens[market_index].perp_market_mode.allow_new_open_orders(),
+            MangoErrorCode::InvalidAccountState
+        )?;
+
         let active_assets = UserActiveAssets::new(
             &mango_group,
             &mango_account,
@@ -5481,21 +5487,32 @@ impl Processor {
             MangoErrorCode::InvalidProgramId
         )?;
 
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let mango_account =
             MangoAccount::load_checked(mango_account_ai, program_id, mango_group_ai.key)?;
         check!(
             &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
             MangoErrorCode::InvalidOwner
         )?;
-        check!(owner_ai.is_signer, MangoErrorCode::InvalidSignerKey)?;
+
         // No bankruptcy check; removing order is fine
 
         let mut advanced_orders =
             AdvancedOrders::load_mut_checked(advanced_orders_ai, program_id, &mango_account)?;
 
-        let order = &mut advanced_orders.orders[order_index];
+        if advanced_orders.orders[order_index].is_active {
+            let order: &mut PerpTriggerOrder = cast_mut(&mut advanced_orders.orders[order_index]);
+            check!(
+                order.advanced_order_type == AdvancedOrderType::PerpTrigger,
+                MangoErrorCode::InvalidParam
+            )?;
 
-        if order.is_active {
+            // Owner signature not necessary if market is in ForceCloseOnly
+            let mode = mango_group.tokens[order.market_index as usize].perp_market_mode;
+            if mode.allow_new_open_orders() {
+                check!(owner_ai.is_signer, MangoErrorCode::SignerNecessary)?;
+            }
+
             order.is_active = false;
             program_transfer_lamports(advanced_orders_ai, owner_ai, ADVANCED_ORDER_FEE)
         } else {
