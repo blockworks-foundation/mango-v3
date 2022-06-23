@@ -191,12 +191,6 @@ impl TokenInfo {
             padding: [0u8; 4],
         }
     }
-    pub fn has_no_spot_market(&self) -> bool {
-        self.mint == Pubkey::default()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.mint == Pubkey::default() && self.decimals == 0
-    }
 }
 
 #[derive(Copy, Clone, Pod)]

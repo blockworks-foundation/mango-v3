@@ -152,7 +152,7 @@ impl MangoGroupCookie {
     pub async fn add_root_banks(&mut self, test: &mut MangoProgramTest) -> Vec<RootBank> {
         let mut root_banks = vec![];
         for ti in self.mango_group.tokens.iter() {
-            if !ti.has_no_spot_market() {
+            if ti.mint != Pubkey::default() {
                 root_banks.push(test.load_account::<RootBank>(ti.root_bank).await)
             }
         }

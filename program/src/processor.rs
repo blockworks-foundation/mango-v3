@@ -411,7 +411,6 @@ impl Processor {
     /// Initialize a root bank and add it to the mango group
     /// Requires a price oracle for this asset priced in quote currency
     /// Only allow admin to add to MangoGroup
-    // TODO - implement remove asset
     fn add_spot_market(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
@@ -444,7 +443,11 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
-
+        check_eq!(
+            dex_program_ai.key,
+            &mango_group.dex_program_id,
+            MangoErrorCode::InvalidProgramId
+        )?;
         let market_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
         // This will catch the issue if oracle_ai.key == Pubkey::Default
@@ -453,12 +456,6 @@ impl Processor {
         // Make sure spot market at this index not already initialized
         check!(
             mango_group.spot_markets[market_index].is_empty(),
-            MangoErrorCode::InvalidAccountState
-        )?;
-
-        // Make sure token at this index not already initialized
-        check!(
-            mango_group.tokens[market_index].has_no_spot_market(),
             MangoErrorCode::InvalidAccountState
         )?;
 
@@ -679,7 +676,7 @@ impl Processor {
 
         // This means there isn't already a token and spot market in Mango
         // Set the base decimals; if token not empty, ignore user input base_decimals
-        if mango_group.tokens[market_index].has_no_spot_market() {
+        if mango_group.spot_markets[market_index].is_empty() {
             mango_group.tokens[market_index].decimals = base_decimals;
         }
         // Initialize the Bids
@@ -6456,12 +6453,23 @@ impl Processor {
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
 
-        check!(!mango_group.tokens[market_index].is_empty(), MangoErrorCode::InvalidAccount)?;
-
         // TODO: write test
         let current_mode = match market_type {
-            AssetType::Token => &mut mango_group.tokens[market_index].spot_market_mode,
-            AssetType::Perp => &mut mango_group.tokens[market_index].perp_market_mode,
+            AssetType::Token => {
+                check!(
+                    !mango_group.spot_markets[market_index].is_empty(),
+                    MangoErrorCode::InvalidAccountState
+                )?;
+                &mut mango_group.tokens[market_index].spot_market_mode
+            }
+            AssetType::Perp => {
+                check!(
+                    !mango_group.perp_markets[market_index].is_empty(),
+                    MangoErrorCode::InvalidAccountState
+                )?;
+
+                &mut mango_group.tokens[market_index].perp_market_mode
+            }
         };
         match mode {
             MarketMode::Active => check!(
@@ -6620,7 +6628,12 @@ impl Processor {
         mango_group.tokens[market_index].mint = Pubkey::default();
         mango_group.tokens[market_index].root_bank = Pubkey::default();
         mango_group.tokens[market_index].spot_market_mode = MarketMode::Inactive;
-        Ok(())
+        // Sanity check
+        // spot_market_mode == MarketMode::Inactive implies token_info.is_empty
+        check!(
+            mango_group.spot_markets[market_index].is_empty(),
+            MangoErrorCode::InvalidAccountState
+        )
     }
 
     #[inline(never)]
@@ -6781,7 +6794,12 @@ impl Processor {
             base_lot_size: 0,
             quote_lot_size: 0,
         };
-        Ok(())
+        // Sanity check
+        // perp_market_mode == MarketMode::Inactive implies perp_market_info.is_empty
+        check!(
+            mango_group.perp_markets[market_index].is_empty(),
+            MangoErrorCode::InvalidAccountState
+        )
     }
 
     /// Set the `inactive_oracle_bits` for this oracle to 1.
