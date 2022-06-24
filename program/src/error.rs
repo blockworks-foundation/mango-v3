@@ -124,6 +124,7 @@ pub enum MangoErrorCode {
     #[error("MangoErrorCode::MaxAccountsReached The maximum number of accounts for this group has been reached")]
     MaxAccountsReached,
     #[error("MangoErrorCode::ReduceOnlyRequired This market requires reduce-only flag to be set")]
+    // 40
     ReduceOnlyRequired,
     #[error(
         "MangoErrorCode::InvalidAllowBorrow This market requires allow-borrow flag to be false"
@@ -133,8 +134,12 @@ pub enum MangoErrorCode {
         "MangoErrorCode::InvalidOrderInClosingMarket You may only have one open order at a time and it must be reducing position"
     )]
     InvalidOrderInClosingMarket,
+    #[error(
+        "MangoErrorCode::NewOrdersNotAllowed This market is in mode ForceCloseOnly. New orders not allowed."
+    )]
+    NewOrdersNotAllowed,
 
-    #[error("MangoErrorCode::Default Check the source code for more info")] // 40
+    #[error("MangoErrorCode::Default Check the source code for more info")] // 44
     Default = u32::MAX_VALUE,
 }
 

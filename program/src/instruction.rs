@@ -1,5 +1,5 @@
 use crate::matching::{ExpiryType, OrderType, Side};
-use crate::state::{AssetType, INFO_LEN};
+use crate::state::{AssetType, MarketMode, INFO_LEN};
 use crate::state::{TriggerCondition, MAX_PAIRS};
 use arrayref::{array_ref, array_refs};
 use fixed::types::I80F48;
@@ -174,6 +174,7 @@ pub enum MangoInstruction {
     /// 2. `[signer]` admin_ai - admin
     AddOracle, // = 10
 
+    /// DEPRECATED - Use create_perp_market instead
     /// Add a perp market to a mango group
     ///
     /// Accounts expected by this instruction (7):
@@ -819,8 +820,8 @@ pub enum MangoInstruction {
     /// Accounts expected by this instruction (4)
     /// 0. `[]` mango_group_ai - MangoGroup to create the dust account for
     /// 1. `[writable]` mango_account_ai - the mango account data
-    /// 2. `[signer, writable]` signer_ai - Signer and fee payer account
-    /// 3. `[writable]` system_prog_ai - System program
+    /// 2. `[signer, writable]` payer_ai - Signer and fee payer account
+    /// 3. `[]` system_prog_ai - System program
     CreateDustAccount,
 
     /// Transfer dust (< 1 native SPL token) assets and liabilities for a single token to the group's dust account
@@ -1086,6 +1087,91 @@ pub enum MangoInstruction {
         quantity: u64,
         allow_borrow: bool,
     },
+
+    /// Set the market mode in TokenInfo
+    /// Accounts expected by this instruction (2)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer]` admin_ai
+    SetMarketMode {
+        market_index: usize,
+        mode: MarketMode,
+        market_type: AssetType,
+    },
+
+    /// Remove a perp market from the group
+    /// Accounts expected by this instruction (10)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer, writable]` admin_ai
+    /// 2. `[writable]` perp_market_ai
+    /// 3. `[writable]` event_queue_ai
+    /// 4. `[writable]` bids_ai
+    /// 5. `[writable]` asks_ai
+    /// 6. `[writable]` mngo_vault_ai
+    /// 7. `[writable]` mngo_dao_vault_ai
+    /// 8. `[]` signer_ai
+    /// 9. `[]` token_prog_ai
+    RemovePerpMarket,
+
+    /// Swap an existing serum market for another one with the same pair. All open orders must be closed.
+    /// Accounts expected by this instruction (5)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer]` admin_ai
+    /// 2. `[]` new_spot_market_ai
+    /// 3. `[]` old_spot_market_ai
+    /// 4. `[]` dex_program_ai
+    SwapSpotMarket,
+
+    /// Remove a spot market
+    /// Accounts expected by this instruction (7 + MAX_NODE_BANKS * 2)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer, writable]` admin_ai
+    /// 2. `[writable]` dust_account_ai
+    /// 3. `[writable]` root_bank_ai
+    /// 4. `[writable]` admin_vault_ai
+    /// 5. `[]` signer_ai
+    /// 6. `[]` token_prog_ai
+    /// 7..7 + MAX_NODE_BANKS `[writable]` node_bank_ais
+    /// 7 + MAX_NODE_BANKS.. `[writable]` vault_ais
+    RemoveSpotMarket,
+
+    /// Remove an oracle
+    /// Accounts expected by this instruction (10)
+    /// 0. `[writable]` mango_group_ai
+    /// 1. `[signer]` admin_ai
+    /// 2. `[]` oracle_ai
+    RemoveOracle,
+
+    /// Resolve deposits/borrows of a delisting token for an account
+    /// Accounts expected by this instruction (15 + 2 * MAX_PAIRS)
+    /// 0. `[]` mango_group_ai
+    /// 1. `[]` mango_cache_ai
+    /// 2. `[writable]` dust_account_ai
+    /// 3. `[writable]` liqee_mango_account_ai
+    /// 4. `[writable]` liqor_mango_account_ai
+    /// 5. `[signer]` liqor_ai
+    /// 6. `[]` quote_root_bank_ai
+    /// 7. `[writable]` quote_node_bank_ai
+    /// 8. `[]` delist_root_bank_ai
+    /// 9. `[writable]` delist_node_bank_ai
+    /// 10. `[writable]` delist_vault_ai
+    /// 11. `[writable]` liqee_delist_token_account_ai
+    /// 12. `[writable]` liqor_delist_token_account_ai
+    /// 13. `[]` signer_ai
+    /// 14. `[]` token_prog_ai
+    /// 14... `[]` liqee_open_orders_ais - Liqee open orders accs
+    /// 14+NUM_IN_MARGIN_BASKET... `[]` liqor_open_orders_ais - Liqor open orders accs that are in_margin_basket
+    LiquidateDelistingToken {
+        max_liquidate_amount: u64,
+    },
+
+    /// Force settle a user's perp positions
+    /// Accounts expected by this instruction (10)
+    /// 0. `[]` mango_group_ai
+    /// 1. `[writable]` mango_account_a_ai
+    /// 2. `[writable]` mango_account_b_ai
+    /// 3. `[]` mango_cache_ai
+    /// 4. `[]` perp_market_ai
+    ForceSettlePerpPosition,
 }
 
 impl MangoInstruction {
@@ -1593,6 +1679,27 @@ impl MangoInstruction {
                     allow_borrow,
                 }
             }
+            67 => {
+                let data = array_ref![data, 0, 10];
+                let (market_index, mode, market_type) = array_refs![data, 8, 1, 1];
+
+                MangoInstruction::SetMarketMode {
+                    market_index: usize::from_le_bytes(*market_index),
+                    mode: MarketMode::try_from(u8::from_le_bytes(*mode)).unwrap(),
+                    market_type: AssetType::try_from(u8::from_le_bytes(*market_type)).unwrap(),
+                }
+            }
+            68 => MangoInstruction::RemovePerpMarket,
+            69 => MangoInstruction::SwapSpotMarket,
+            70 => MangoInstruction::RemoveSpotMarket,
+            71 => MangoInstruction::RemoveOracle,
+            72 => {
+                let max_liquidate_amount = array_ref![data, 0, 8];
+                MangoInstruction::LiquidateDelistingToken {
+                    max_liquidate_amount: u64::from_le_bytes(*max_liquidate_amount),
+                }
+            }
+            73 => MangoInstruction::ForceSettlePerpPosition,
             _ => {
                 return None;
             }
@@ -1889,7 +1996,7 @@ pub fn add_spot_market(
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 
-pub fn add_perp_market(
+pub fn create_perp_market(
     program_id: &Pubkey,
     mango_group_pk: &Pubkey,
     oracle_pk: &Pubkey,
@@ -1897,8 +2004,10 @@ pub fn add_perp_market(
     event_queue_pk: &Pubkey,
     bids_pk: &Pubkey,
     asks_pk: &Pubkey,
+    mngo_mint_pk: &Pubkey,
     mngo_vault_pk: &Pubkey,
     admin_pk: &Pubkey,
+    signer_pk: &Pubkey,
 
     maint_leverage: I80F48,
     init_leverage: I80F48,
@@ -1911,19 +2020,28 @@ pub fn add_perp_market(
     max_depth_bps: I80F48,
     target_period_length: u64,
     mngo_per_period: u64,
+    exp: u8,
+    version: u8,
+    lm_size_shift: u8,
+    base_decimals: u8,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
-        AccountMeta::new(*oracle_pk, false),
+        AccountMeta::new_readonly(*oracle_pk, false),
         AccountMeta::new(*perp_market_pk, false),
         AccountMeta::new(*event_queue_pk, false),
         AccountMeta::new(*bids_pk, false),
         AccountMeta::new(*asks_pk, false),
-        AccountMeta::new_readonly(*mngo_vault_pk, false),
+        AccountMeta::new_readonly(*mngo_mint_pk, false),
+        AccountMeta::new(*mngo_vault_pk, false),
         AccountMeta::new_readonly(*admin_pk, true),
+        AccountMeta::new(*signer_pk, false),
+        AccountMeta::new_readonly(solana_program::system_program::ID, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(solana_program::sysvar::rent::ID, false),
     ];
 
-    let instr = MangoInstruction::AddPerpMarket {
+    let instr = MangoInstruction::CreatePerpMarket {
         maint_leverage,
         init_leverage,
         liquidation_fee,
@@ -1935,7 +2053,10 @@ pub fn add_perp_market(
         max_depth_bps,
         target_period_length,
         mngo_per_period,
-        exp: 2, // TODO add this to function signature
+        exp,
+        version,
+        lm_size_shift,
+        base_decimals,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -3013,6 +3134,87 @@ pub fn change_spot_market_params(
         version,
     };
     let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn set_market_mode(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    admin_pk: &Pubkey,
+    market_index: usize,
+    mode: MarketMode,
+    market_type: AssetType,
+) -> Result<Instruction, ProgramError> {
+    let accounts =
+        vec![AccountMeta::new(*mango_group_pk, false), AccountMeta::new_readonly(*admin_pk, true)];
+
+    let instr = MangoInstruction::SetMarketMode { market_index, mode, market_type };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn liquidate_delisting_token(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    dust_account_pk: &Pubkey,
+    liqee_mango_account_pk: &Pubkey,
+    liqor_mango_account_pk: &Pubkey,
+    liqor_pk: &Pubkey,
+    asset_root_bank_pk: &Pubkey,
+    asset_node_bank_pk: &Pubkey,
+    liab_root_bank_pk: &Pubkey,
+    liab_node_bank_pk: &Pubkey,
+    liab_vault_pk: &Pubkey,
+    liqee_liab_token_account_pk: &Pubkey,
+    liqor_liab_token_account_pk: &Pubkey,
+    liqee_open_orders_pks: &[Pubkey],
+    liqor_open_orders_pks: &[Pubkey],
+    signer_pk: &Pubkey,
+    max_liquidate_amount: u64,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*dust_account_pk, false),
+        AccountMeta::new(*liqee_mango_account_pk, false),
+        AccountMeta::new(*liqor_mango_account_pk, false),
+        AccountMeta::new_readonly(*liqor_pk, true),
+        AccountMeta::new_readonly(*asset_root_bank_pk, false),
+        AccountMeta::new(*asset_node_bank_pk, false),
+        AccountMeta::new_readonly(*liab_root_bank_pk, false),
+        AccountMeta::new(*liab_node_bank_pk, false),
+        AccountMeta::new(*liab_vault_pk, false),
+        AccountMeta::new(*liqee_liab_token_account_pk, false),
+        AccountMeta::new(*liqor_liab_token_account_pk, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+    ];
+
+    accounts.extend(liqee_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+    accounts.extend(liqor_open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::LiquidateDelistingToken { max_liquidate_amount };
+    let data = instr.pack();
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn create_dust_account(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    payer_pk: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    let accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new(*payer_pk, true),
+        AccountMeta::new_readonly(solana_program::system_program::ID, false),
+    ];
+
+    let instr = MangoInstruction::CreateDustAccount;
+    let data = instr.pack();
+
     Ok(Instruction { program_id: *program_id, accounts, data })
 }
 

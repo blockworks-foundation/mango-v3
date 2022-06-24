@@ -28,7 +28,9 @@ pub async fn deposit_scenario(
         let (user_index, mint_index, amount) = deposit;
         let mint = test.with_mint(*mint_index);
         let deposit_amount = (*amount * mint.unit) as u64;
-        test.perform_deposit(&mango_group_cookie, *user_index, *mint_index, deposit_amount).await;
+        test.perform_deposit(&mango_group_cookie, *user_index, *mint_index, deposit_amount)
+            .await
+            .unwrap();
     }
 }
 
@@ -50,7 +52,8 @@ pub async fn withdraw_scenario(
             withdraw_amount,
             *allow_borrow,
         )
-        .await;
+        .await
+        .unwrap();
     }
 }
 

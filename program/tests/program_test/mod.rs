@@ -620,6 +620,50 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    #[allow(non_snake_case)]
+    pub async fn with_mango_account_deposit_I80F48(
+        &mut self,
+        mango_account_pk: &Pubkey,
+        mint_index: usize,
+    ) -> I80F48 {
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index =
+            if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+        let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
+        // TODO - make this use cached root bank deposit index instead
+        mango_account.deposits[actual_mint_index] * INDEX_START
+    }
+
+    #[allow(dead_code)]
+    pub async fn with_mango_account_borrow(
+        &mut self,
+        mango_account_pk: &Pubkey,
+        mint_index: usize,
+    ) -> u64 {
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index =
+            if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+        let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
+        // TODO - make this use cached root bank deposit index instead
+        return (mango_account.borrows[actual_mint_index] * INDEX_START).to_num();
+    }
+
+    #[allow(dead_code)]
+    #[allow(non_snake_case)]
+    pub async fn with_mango_account_borrow_I80F48(
+        &mut self,
+        mango_account_pk: &Pubkey,
+        mint_index: usize,
+    ) -> I80F48 {
+        // self.mints last token index will not always be QUOTE_INDEX hence the check
+        let actual_mint_index =
+            if mint_index == self.quote_index { QUOTE_INDEX } else { mint_index };
+        let mango_account = self.load_account::<MangoAccount>(*mango_account_pk).await;
+        // TODO - make this use cached root bank deposit index instead
+        mango_account.borrows[actual_mint_index] * INDEX_START
+    }
+
+    #[allow(dead_code)]
     pub fn with_oracle_price(&mut self, base_mint: &MintCookie, price: f64) -> I80F48 {
         return I80F48::from_num(price) * I80F48::from_num(self.quote_mint.unit)
             / I80F48::from_num(base_mint.unit);
@@ -1205,7 +1249,10 @@ impl MangoProgramTest {
             );
             oracle_pks.push(oracle_pk);
         }
-        self.process_transaction(&instructions, None).await.unwrap();
+        let instructions_chunks: Vec<&[Instruction]> = instructions.chunks(2).collect();
+        for chunk in instructions_chunks {
+            self.process_transaction(&chunk, None).await.unwrap();
+        }
         return oracle_pks;
     }
 
@@ -1634,7 +1681,7 @@ impl MangoProgramTest {
         user_index: usize,
         mint_index: usize,
         amount: u64,
-    ) {
+    ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -1659,7 +1706,7 @@ impl MangoProgramTest {
             amount,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await
     }
 
     #[allow(dead_code)]
@@ -1670,7 +1717,7 @@ impl MangoProgramTest {
         mint_index: usize,
         quantity: u64,
         allow_borrow: bool,
-    ) {
+    ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -1702,7 +1749,7 @@ impl MangoProgramTest {
             allow_borrow,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await
     }
 
     #[allow(dead_code)]
@@ -1758,7 +1805,7 @@ impl MangoProgramTest {
         mint_index: usize,
         quantity: u64,
         allow_borrow: bool,
-    ) {
+    ) -> Result<(), TransportError> {
         let mango_program_id = self.mango_program_id;
         let mango_group = mango_group_cookie.mango_group;
         let mango_group_pk = mango_group_cookie.address;
@@ -1795,7 +1842,7 @@ impl MangoProgramTest {
             allow_borrow,
         )
         .unwrap()];
-        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+        self.process_transaction(&instructions, Some(&[&user])).await
     }
 
     #[allow(dead_code)]
@@ -1995,6 +2042,115 @@ impl MangoProgramTest {
 
         mango_group_cookie.mango_accounts[liqor_index].mango_account =
             self.load_account::<MangoAccount>(liqor_mango_account_pk).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_set_market_mode(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        market_index: usize,
+        market_mode: MarketMode,
+        market_type: AssetType,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let mango_group_pk = mango_group_cookie.address;
+
+        let instructions = [mango::instruction::set_market_mode(
+            &mango_program_id,
+            &mango_group_pk,
+            &self.get_payer_pk(),
+            market_index,
+            market_mode,
+            market_type,
+        )
+        .unwrap()];
+
+        self.process_transaction(&instructions, None).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_set_market_mode_as_user(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        market_index: usize,
+        market_mode: MarketMode,
+        market_type: AssetType,
+        user_index: usize,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let mango_group_pk = mango_group_cookie.address;
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let instructions = [mango::instruction::set_market_mode(
+            &mango_program_id,
+            &mango_group_pk,
+            &user.pubkey(),
+            market_index,
+            market_mode,
+            market_type,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn perform_liquidate_delisting_token(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        liqee_index: usize,
+        liqor_index: usize,
+        liab_index: usize,
+        asset_index: usize,
+    ) -> Result<(), TransportError> {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let (dust_account_pk, _bump_seed) = Pubkey::find_program_address(
+            &[&mango_group_pk.as_ref(), b"DustAccount"],
+            &self.mango_program_id,
+        );
+
+        let liqee_mango_account = mango_group_cookie.mango_accounts[liqee_index].mango_account;
+        let liqee_mango_account_pk = mango_group_cookie.mango_accounts[liqee_index].address;
+        let liqor_mango_account = mango_group_cookie.mango_accounts[liqor_index].mango_account;
+        let liqor_mango_account_pk = mango_group_cookie.mango_accounts[liqor_index].address;
+
+        let liqor = Keypair::from_base58_string(&self.users[liqor_index].to_base58_string());
+
+        let (asset_root_bank_pk, asset_root_bank) =
+            self.with_root_bank(&mango_group, asset_index).await;
+        let (asset_node_bank_pk, _asset_node_bank) = self.with_node_bank(&asset_root_bank, 0).await;
+        let (liab_root_bank_pk, liab_root_bank) =
+            self.with_root_bank(&mango_group, liab_index).await;
+        let (liab_node_bank_pk, liab_node_bank) = self.with_node_bank(&liab_root_bank, 0).await;
+
+        let liqee_liab_token_account_pk = self.with_user_token_account(liqee_index, liab_index);
+        let liqor_liab_token_account_pk = self.with_user_token_account(liqor_index, liab_index);
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let instructions = [mango::instruction::liquidate_delisting_token(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_group_cookie.mango_group.mango_cache,
+            &dust_account_pk,
+            &liqee_mango_account_pk,
+            &liqor_mango_account_pk,
+            &liqor.pubkey(),
+            &asset_root_bank_pk,
+            &asset_node_bank_pk,
+            &liab_root_bank_pk,
+            &liab_node_bank_pk,
+            &liab_node_bank.vault,
+            &liqee_liab_token_account_pk,
+            &liqor_liab_token_account_pk,
+            &liqee_mango_account.spot_open_orders,
+            &liqor_mango_account.spot_open_orders,
+            &signer_pk,
+            u64::MAX,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&liqor])).await
     }
 }
 

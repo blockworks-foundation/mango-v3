@@ -330,3 +330,13 @@ pub struct CloseSpotOpenOrdersLog {
     pub open_orders: Pubkey,
     pub spot_market: Pubkey,
 }
+
+#[event]
+pub struct ForceSettlePerpPositionLog {
+    pub mango_account_a: Pubkey,
+    pub mango_account_b: Pubkey,
+    pub market_index: u64,
+    pub base_settle: i64,
+    pub quote_settle: i128, // I80F48
+    pub cache_price: i128,  // I80F48
+}
