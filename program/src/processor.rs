@@ -810,22 +810,36 @@ impl Processor {
 
         check!(!mango_account.is_bankrupt, MangoErrorCode::Bankrupt)?;
 
-        let mango_cache = MangoCache::load_checked(mango_cache_ai, program_id, &mango_group)?;
+        let mut mango_cache =
+            MangoCache::load_mut_checked(mango_cache_ai, program_id, &mango_group)?;
 
         let token_index = mango_group
             .find_root_bank_index(root_bank_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidRootBank))?;
 
         // Find the node_bank pubkey in root_bank, if not found error
-        let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+        let mut root_bank = RootBank::load_mut_checked(root_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-        // Check validity of root bank cache
+        // Update root bank and cache to prevent interest leaching
         let now_ts = Clock::get()?.unix_timestamp as u64;
+        root_bank.update_index_without_banks(now_ts, node_bank.deposits, node_bank.borrows)?;
+        mango_cache.root_bank_cache[token_index] = RootBankCache {
+            deposit_index: root_bank.deposit_index,
+            borrow_index: root_bank.borrow_index,
+            last_update: now_ts,
+        };
+
+        mango_emit_heap!(UpdateRootBankLog {
+            mango_group: *mango_group_ai.key,
+            token_index: token_index as u64,
+            deposit_index: mango_cache.root_bank_cache[token_index].deposit_index.to_bits(),
+            borrow_index: mango_cache.root_bank_cache[token_index].borrow_index.to_bits()
+        });
+
         let root_bank_cache = &mango_cache.root_bank_cache[token_index];
-        root_bank_cache.check_valid(&mango_group, now_ts)?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
         let reduce_only = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID;
