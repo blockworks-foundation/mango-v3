@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.5.0
-Deployed: | Slot:
+Deployed: Jun 27, 2022 at 18:30:08 UTC | Slot: 139,265,834
 1. Add an ExpiryType argument to PlacePerpOrder2
 2. Add delisting instructions
 3. Add Withdraw2 which passes in compact open orders
