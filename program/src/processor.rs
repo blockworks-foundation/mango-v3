@@ -3301,18 +3301,19 @@ impl Processor {
             return Ok(());
         }
 
-        let settlement = pnl.abs().min(perp_market.fees_accrued);
-
-        // Allow internal settlement of dust fees if necessary
-        let (settlement, quantity) = if perp_market.fees_accrued < ONE_I80F48 {
-            (settlement, settlement.checked_floor().unwrap().to_num())
-        } else {
-            let settlement_floored = settlement.checked_floor().unwrap();
-            (settlement_floored, settlement_floored.to_num())
-        };
+        let settlement = pnl.abs().min(perp_market.fees_accrued).checked_floor().unwrap();
 
         perp_market.fees_accrued -= settlement;
         pa.quote_position += settlement;
+
+        if mango_group.tokens[market_index].perp_market_mode == MarketMode::ForceCloseOnly
+            && perp_market.fees_accrued < ONE_I80F48
+        {
+            // If market is in ForceCloseOnly, zero out dust fees and credit to the last guy to settle
+            // Note: this dust amount won't be logged, but that's fine
+            pa.quote_position += perp_market.fees_accrued;
+            perp_market.fees_accrued = ZERO_I80F48;
+        }
 
         // Transfer quote token from bank vault to fees vault owned by Mango DAO
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
@@ -3322,7 +3323,7 @@ impl Processor {
             fees_vault_ai,
             signer_ai,
             &[&signers_seeds],
-            quantity,
+            settlement.to_num(),
         )?;
 
         // Decrement deposits on mango account
