@@ -6754,40 +6754,27 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        // Make sure perp market has zero open interest
-        let perp_market =
-            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
-        check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
+        {
+            // Check perp market has zero open interest or fees, check mngo vault
+            let perp_market =
+                PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+            check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
+            check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
+            check!(mngo_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
 
-        // Make sure event queue has no events
-        let event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-        check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
+            // Check event queue has no events
+            let event_queue =
+                EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+            check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
 
-        // Close event queue, return lamports to admin
-        program_transfer_lamports(event_queue_ai, admin_ai, event_queue_ai.lamports())?;
-        sol_memset(&mut event_queue_ai.try_borrow_mut_data()?, 0, size_of::<EventQueue>());
+            // Check book is empty
+            let book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+            check!(book.bids.is_empty(), MangoErrorCode::InvalidAccountState)?;
+            check!(book.asks.is_empty(), MangoErrorCode::InvalidAccountState)?;
+        }
 
-        // Check book is empty, close each side anmd return lamports to admin
-        let book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        check!(book.bids.is_empty(), MangoErrorCode::InvalidAccountState)?;
-        check!(book.asks.is_empty(), MangoErrorCode::InvalidAccountState)?;
-
-        program_transfer_lamports(bids_ai, admin_ai, bids_ai.lamports())?;
-        program_transfer_lamports(asks_ai, admin_ai, asks_ai.lamports())?;
-
-        sol_memset(&mut bids_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
-        sol_memset(&mut asks_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
-
-        // Transfer MNGO in vault to DAO treasury
-        check!(mngo_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
+        // Transfer MNGO to DAO vault
         let mngo_vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
-
-        // Close perp market, return lamports to admin
-        program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
-        sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
-
-        // todo do checks to make sure dao vault is correct
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
@@ -6805,6 +6792,18 @@ impl Processor {
             &[&signers_seeds],
         )?;
 
+        // Return lamports to admin, zero data
+        program_transfer_lamports(event_queue_ai, admin_ai, event_queue_ai.lamports())?;
+        program_transfer_lamports(bids_ai, admin_ai, bids_ai.lamports())?;
+        program_transfer_lamports(asks_ai, admin_ai, asks_ai.lamports())?;
+        program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
+
+        sol_memset(&mut event_queue_ai.try_borrow_mut_data()?, 0, size_of::<EventQueue>());
+        sol_memset(&mut bids_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
+        sol_memset(&mut asks_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
+        sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
+
+        // Reset market info
         mango_group.tokens[market_index].perp_market_mode = MarketMode::Inactive;
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: Pubkey::default(),
