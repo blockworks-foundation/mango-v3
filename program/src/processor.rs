@@ -35,8 +35,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{ msrm_token, srm_token, luna_pyth_oracle
-};
+use crate::ids::{msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, ExpiryType, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -1065,12 +1064,7 @@ impl Processor {
         for oracle_ai in oracle_ais.iter() {
             let oracle_index = mango_group.find_oracle_index(oracle_ai.key).ok_or(throw!())?;
 
-            if let Ok(price) = read_oracle(
-                &mango_group,
-                oracle_index,
-                oracle_ai,
-                mango_cache.price_cache[oracle_index].price,
-            ) {
+            if let Ok(price) = read_oracle(&mango_group, oracle_index, oracle_ai) {
                 mango_cache.price_cache[oracle_index] = PriceCache { price, last_update };
 
                 oracle_indexes.push(oracle_index as u64);
@@ -8022,7 +8016,6 @@ pub fn read_oracle(
     mango_group: &MangoGroup,
     token_index: usize,
     oracle_ai: &AccountInfo,
-    last_known_price_in_cache: I80F48,
 ) -> MangoResult<I80F48> {
     let quote_decimals = mango_group.tokens[QUOTE_INDEX].decimals as i32;
     let base_decimals = mango_group.tokens[token_index].decimals as i32;
@@ -8047,11 +8040,6 @@ pub fn read_oracle(
                     value.to_num::<f64>(),
                     conf.to_num::<f64>()
                 );
-
-                // For luna, to prevent market from getting stuck, just continue using last known price in cache
-                if oracle_ai.key == &luna_pyth_oracle::ID {
-                    return Ok(last_known_price_in_cache);
-                }
 
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
             }

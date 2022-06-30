@@ -21,8 +21,3 @@ pub mod mngo_token {
     #[cfg(not(feature = "devnet"))]
     declare_id!("MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac");
 }
-
-pub mod luna_pyth_oracle {
-    use solana_program::declare_id;
-    declare_id!("5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY");
-}
