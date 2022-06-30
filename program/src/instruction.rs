@@ -1170,7 +1170,7 @@ pub enum MangoInstruction {
     /// 1. `[writable]` mango_account_a_ai
     /// 2. `[writable]` mango_account_b_ai
     /// 3. `[]` mango_cache_ai
-    /// 4. `[]` perp_market_ai
+    /// 4. `[writable]` perp_market_ai
     ForceSettlePerpPosition,
 }
 

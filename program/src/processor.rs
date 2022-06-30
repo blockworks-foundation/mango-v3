@@ -3318,7 +3318,7 @@ impl Processor {
             return Ok(());
         }
 
-        let settlement = pnl.abs().min(perp_market.fees_accrued).checked_floor().unwrap();
+        let settlement = pnl.abs().min(perp_market.fees_accrued);
 
         perp_market.fees_accrued -= settlement;
         pa.quote_position += settlement;
@@ -3331,7 +3331,7 @@ impl Processor {
             fees_vault_ai,
             signer_ai,
             &[&signers_seeds],
-            settlement.to_num(),
+            settlement.checked_floor().unwrap().to_num(),
         )?;
 
         // Decrement deposits on mango account
@@ -6561,13 +6561,15 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        let root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
-        check_eq!(MAX_NODE_BANKS, node_bank_ais.len(), MangoErrorCode::Default)?;
-        for i in 0..root_bank.num_node_banks {
-            check!(
-                node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
-                MangoErrorCode::InvalidNodeBank
-            )?;
+        {
+            let root_bank = RootBank::load_checked(&root_bank_ai, program_id)?;
+            check_eq!(MAX_NODE_BANKS, node_bank_ais.len(), MangoErrorCode::Default)?;
+            for i in 0..root_bank.num_node_banks {
+                check!(
+                    node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
+                    MangoErrorCode::InvalidNodeBank
+                )?;
+            }
         }
 
         // Check dust account
@@ -6589,16 +6591,18 @@ impl Processor {
                 continue;
             }
 
-            let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+            {
+                let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-            // borrows must be zero
-            // deposits must be same as DustAccount
-            total_deposits += node_bank.deposits;
-            check!(node_bank.borrows.is_zero(), MangoErrorCode::InvalidAccountState)?;
+                // borrows must be zero
+                // deposits must be same as DustAccount
+                total_deposits += node_bank.deposits;
+                check!(node_bank.borrows.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
-            // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
-            // check vault was passed in
-            check!(vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
+                // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
+                // check vault was passed in
+                check!(vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
+            }
             let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
 
             invoke_transfer(
@@ -7236,7 +7240,7 @@ impl Processor {
             mango_account_a_ai, // write
             mango_account_b_ai, // write
             mango_cache_ai,     // read
-            perp_market_ai,     // read
+            perp_market_ai,     // write
         ] = accounts;
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
