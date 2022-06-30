@@ -35,8 +35,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{
-    luna_perp_market, luna_pyth_oracle, luna_root_bank, luna_spot_market, msrm_token, srm_token,
+use crate::ids::{ msrm_token, srm_token, luna_pyth_oracle
 };
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, ExpiryType, OrderType, Side};
@@ -828,9 +827,8 @@ impl Processor {
         root_bank_cache.check_valid(&mango_group, now_ts)?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
-        let reduce_only = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID;
 
-        let quantity = if reduce_only {
+        let quantity = if mode.is_reduce_only() {
             let max_deposit = mango_account
                 .get_native_borrow(root_bank_cache, token_index)?
                 .checked_floor()
@@ -1217,8 +1215,7 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
-        let is_market_closing = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID; // temp until luna gets moved to close only officially
-        check!(!(is_market_closing && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
+        check!(!(mode.is_reduce_only() && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
@@ -1327,8 +1324,7 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
-        let is_market_closing = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID; // temp until luna gets moved to close only officially
-        check!(!(is_market_closing && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
+        check!(!(mode.is_reduce_only() && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
@@ -1807,9 +1803,8 @@ impl Processor {
         // If not post_allowed, then pre_locked may not increase
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_market_closing =
-            mode.is_reduce_only() || spot_market_ai.key == &luna_spot_market::ID;
-        let (post_allowed, pre_locked) = if is_market_closing {
+
+        let (post_allowed, pre_locked) = if mode.is_reduce_only() {
             let open_orders = load_open_orders(&open_orders_ais[market_index])?;
             // only one open order at a time
             check!(
@@ -2142,9 +2137,8 @@ impl Processor {
         // If not post_allowed, then pre_locked may not increase
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_market_closing =
-            mode.is_reduce_only() || spot_market_ai.key == &luna_spot_market::ID;
-        let (post_allowed, pre_locked) = if is_market_closing {
+
+        let (post_allowed, pre_locked) = if mode.is_reduce_only() {
             let open_orders = load_open_orders(market_open_orders_ai)?;
             // only one open order at a time
             check!(
@@ -2594,9 +2588,7 @@ impl Processor {
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
-        let is_market_closing = mode.is_reduce_only() || is_luna_market;
-        check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
+        check!(!mode.is_reduce_only() || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
             &mango_group,
@@ -2637,7 +2629,7 @@ impl Processor {
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
-            } else if is_market_closing {
+            } else if mode.is_reduce_only() {
                 // Take into account outstanding open orders as well
                 let on_orders = match side {
                     Side::Bid => mango_account.perp_accounts[market_index].bids_quantity,
@@ -2676,7 +2668,6 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             u8::MAX,
-            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2776,9 +2767,8 @@ impl Processor {
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
-        let is_market_closing = mode == MarketMode::CloseOnly || is_luna_market;
-        check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
+
+        check!(!mode.is_reduce_only() || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
             &mango_group,
@@ -2824,7 +2814,7 @@ impl Processor {
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
-            } else if is_market_closing {
+            } else if mode.is_reduce_only() {
                 // Take into account outstanding open orders as well
                 let on_orders = match side {
                     Side::Bid => mango_account.perp_accounts[market_index].bids_quantity,
@@ -2862,7 +2852,6 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             limit,
-            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -5605,11 +5594,10 @@ impl Processor {
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
-        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::InvalidAccountState)?;
-        let is_market_closing = mode.is_reduce_only() || is_luna_market;
-        if is_market_closing {
+
+        if mode.is_reduce_only() {
             order.reduce_only = true;
         }
 
@@ -5674,7 +5662,6 @@ impl Processor {
                     i64::MAX,
                     order.order_type,
                     now_ts,
-                    is_luna_market,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,
@@ -5733,7 +5720,6 @@ impl Processor {
                     now_ts,
                     None,
                     u8::MAX,
-                    is_luna_market,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
