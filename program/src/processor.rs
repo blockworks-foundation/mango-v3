@@ -3320,6 +3320,14 @@ impl Processor {
 
         let settlement = pnl.abs().min(perp_market.fees_accrued);
 
+        // Allow internal settlement of dust fees if necessary
+        let (settlement, quantity) = if perp_market.fees_accrued < ONE_I80F48 {
+            (settlement, settlement.checked_floor().unwrap().to_num())
+        } else {
+            let settlement_floored = settlement.checked_floor().unwrap();
+            (settlement_floored, settlement_floored.to_num())
+        };
+
         perp_market.fees_accrued -= settlement;
         pa.quote_position += settlement;
 
@@ -3331,7 +3339,7 @@ impl Processor {
             fees_vault_ai,
             signer_ai,
             &[&signers_seeds],
-            settlement.checked_floor().unwrap().to_num(),
+            quantity,
         )?;
 
         // Decrement deposits on mango account
