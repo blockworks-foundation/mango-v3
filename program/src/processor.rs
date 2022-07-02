@@ -3311,8 +3311,9 @@ impl Processor {
         {
             // If market is in ForceCloseOnly, zero out dust fees and credit to the last guy to settle
             // Note: this dust amount won't be logged, but that's fine
-            pa.quote_position += perp_market.fees_accrued;
-            perp_market.fees_accrued = ZERO_I80F48;
+            let dust_settlement = (pnl + settlement).abs().min(perp_market.fees_accrued); // note: pnl + settlement <= 0
+            pa.quote_position += dust_settlement;
+            perp_market.fees_accrued -= dust_settlement;
         }
 
         // Transfer quote token from bank vault to fees vault owned by Mango DAO
