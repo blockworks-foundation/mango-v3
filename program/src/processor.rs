@@ -6521,9 +6521,7 @@ impl Processor {
     #[inline(never)]
     fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 7;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_NODE_BANKS];
-        let (fixed_accounts, node_bank_ais, vault_ais) =
-            array_refs![accounts, NUM_FIXED, MAX_NODE_BANKS, MAX_NODE_BANKS];
+        let (fixed_accounts, bank_and_vault_ais) = array_refs![accounts, NUM_FIXED; ..;];
 
         let [
             mango_group_ai, // write
@@ -6550,12 +6548,17 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
+        let (node_bank_ais, vault_ais) = bank_and_vault_ais.split_at(bank_and_vault_ais.len() / 2);
+
         {
             let root_bank = RootBank::load_checked(&root_bank_ai, program_id)?;
-            check_eq!(MAX_NODE_BANKS, node_bank_ais.len(), MangoErrorCode::Default)?;
+
+            check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
+            check_eq!(root_bank.num_node_banks, vault_ais.len(), MangoErrorCode::Default)?;
             for i in 0..root_bank.num_node_banks {
-                check!(
-                    node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
+                check_eq!(
+                    node_bank_ais[i].key,
+                    &root_bank.node_banks[i],
                     MangoErrorCode::InvalidNodeBank
                 )?;
             }

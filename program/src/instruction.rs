@@ -1130,8 +1130,8 @@ pub enum MangoInstruction {
     /// 4. `[writable]` admin_vault_ai
     /// 5. `[]` signer_ai
     /// 6. `[]` token_prog_ai
-    /// 7..7 + MAX_NODE_BANKS `[writable]` node_bank_ais
-    /// 7 + MAX_NODE_BANKS.. `[writable]` vault_ais
+    /// 7..7 + NUM_NODE_BANKS `[writable]` node_bank_ais
+    /// 7 + NUM_NODE_BANKS.. `[writable]` vault_ais
     RemoveSpotMarket,
 
     /// Remove an oracle
