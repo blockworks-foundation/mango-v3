@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "mango"
-version = "3.4.7"
+version = "3.5.0"
 dependencies = [
  "anchor-lang",
  "arrayref",
