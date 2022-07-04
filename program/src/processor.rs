@@ -6574,10 +6574,6 @@ impl Processor {
         let mut dust_account =
             MangoAccount::load_mut_checked(dust_account_ai, program_id, mango_group_ai.key)?;
 
-        // Check vault owner is group admin
-        let admin_vault = Account::unpack(&admin_vault_ai.try_borrow_data()?)?;
-        check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner)?;
-
         let mut total_deposits = ZERO_I80F48;
         for (node_bank_ai, vault_ai) in node_bank_ais.iter().zip(vault_ais.iter()) {
             if node_bank_ai.key == &Pubkey::default() {
