@@ -2419,88 +2419,39 @@ impl Processor {
             _msrm_or_srm_vault_ai,   // read
         ] = fixed_ais;
 
-        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
-        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
-        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
-        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+        // Account validations occur in the calls to cancel/place/settle order
 
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
         let market_index = mango_group
             .find_spot_market_index(spot_market_ai.key)
             .ok_or(throw_err!(MangoErrorCode::InvalidMarket))?;
         let market_open_orders_ai = &packed_open_orders_ais[market_index];
 
         // fetch the size of the order that the user is cancelling
-        let mut remaining_cancel_size: u64 = 0;
         {
-            let open_orders = load_open_orders(market_open_orders_ai)?;
-
             let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
             let bids = load_bids_mut(&market, bids_ai)?;
             let asks = load_asks_mut(&market, asks_ai)?;
 
-            for j in 0..128 {
-                let slot_mask = 1u128 << j;
-                if open_orders.free_slot_bits & slot_mask != 0 {
-                    // means slot is free
-                    continue;
+            if cancel_order.side == serum_dex::matching::Side::Bid {
+                if let Some(bid) = bids
+                    .find_by_key(cancel_order.order_id)
+                    .and_then(|order| bids.get(order))
+                    .and_then(|node| node.as_leaf())
+                {
+                    let (new_max_coin_qty, new_max_pc_qty_including_fees) = Self::calculate_adjusted_size_and_quantity(*market, bid, &cancel_order, expected_cancel_size, &new_order)?;
+                    new_order.max_coin_qty = new_max_coin_qty;
+                    new_order.max_native_pc_qty_including_fees = new_max_pc_qty_including_fees;
                 }
-                let order_id = open_orders.orders[j];
-
-                if open_orders.is_bid_bits & slot_mask != 0 {
-                    match bids
-                        .find_by_key(order_id)
-                        .and_then(|order| bids.get(order))
-                        .and_then(|node| node.as_leaf())
-                    {
-                        None => continue,
-                        Some(bid) => {
-                            remaining_cancel_size = bid.quantity();
-                            break;
-                        }
-                    };
-                } else {
-                    match asks
-                        .find_by_key(order_id)
-                        .and_then(|order| asks.get(order))
-                        .and_then(|node| node.as_leaf())
-                    {
-                        None => continue,
-                        Some(ask) => {
-                            remaining_cancel_size = ask.quantity();
-                            break;
-                        }
-                    };
-                };
-            }
-        }
-
-        check!(expected_cancel_size > 0, MangoErrorCode::Default)?;
-        check!(remaining_cancel_size > 0, MangoErrorCode::Default)?;
-        check!(new_order.side == cancel_order.side, MangoErrorCode::Default)?;
-
-        // if cancel order has been partially filled, reduce the new order size to accommodate
-        let filled_amount = expected_cancel_size.checked_sub(remaining_cancel_size).unwrap();
-        if filled_amount > 0 {
-            let (_coin_lot_size, pc_lot_size) = {
-                let market = load_market_state(spot_market_ai, dex_prog_ai.key)?;
-                (market.coin_lot_size, market.pc_lot_size)
-            };
-
-            let new_max_qty = new_order.max_coin_qty.get().checked_sub(filled_amount).unwrap();
-            new_order.max_coin_qty = NonZeroU64::new(new_max_qty).unwrap();
-            match cancel_order.side {
-                serum_dex::matching::Side::Bid => {
-                    let new_max_pc_qty_including_fees = pc_lot_size
-                        .checked_mul(new_order.limit_price.get())
-                        .unwrap()
-                        .checked_mul(new_order.max_coin_qty.get())
-                        .unwrap();
-                    new_order.max_native_pc_qty_including_fees =
-                        NonZeroU64::new(new_max_pc_qty_including_fees).unwrap();
-                }
-                serum_dex::matching::Side::Ask => {
-                    new_order.max_native_pc_qty_including_fees =
-                        NonZeroU64::new(std::u64::MAX).unwrap();
+            } else {
+                if let Some(ask) = asks
+                    .find_by_key(cancel_order.order_id)
+                    .and_then(|order| asks.get(order))
+                    .and_then(|node| node.as_leaf())
+                {
+                    let (new_max_coin_qty, new_max_pc_qty_including_fees) = Self::calculate_adjusted_size_and_quantity(*market, ask, &cancel_order, expected_cancel_size, &new_order)?;
+                    new_order.max_coin_qty = new_max_coin_qty;
+                    new_order.max_native_pc_qty_including_fees = new_max_pc_qty_including_fees;
                 }
             };
         }
@@ -2555,6 +2506,43 @@ impl Processor {
         Ok(())
     }
 
+    fn calculate_adjusted_size_and_quantity(
+        market_state: serum_dex::state::MarketState,
+        leaf_node: &serum_dex::critbit::LeafNode,
+        cancel_order: &serum_dex::instruction::CancelOrderInstructionV2,
+        expected_cancel_size: u64,
+        new_order: &serum_dex::instruction::NewOrderInstructionV3,
+    ) -> MangoResult<(NonZeroU64, NonZeroU64)> {
+        let remaining_cancel_size = leaf_node.quantity();
+        let fee_tier = leaf_node.fee_tier();
+
+        check!(expected_cancel_size > 0, MangoErrorCode::Default)?; // TODO: break out errors
+        check!(remaining_cancel_size > 0, MangoErrorCode::Default)?;
+        check!(new_order.side == cancel_order.side, MangoErrorCode::Default)?;
+        check!(expected_cancel_size >= remaining_cancel_size, MangoErrorCode::Default)?;
+
+        // if cancel order has been partially filled, reduce the new order size to accommodate
+        let filled_amount = expected_cancel_size.checked_sub(remaining_cancel_size).unwrap();
+        if filled_amount > 0 {
+            let new_max_coin_qty = new_order.max_coin_qty.get().checked_sub(filled_amount).unwrap();
+
+            let new_max_pc_qty_before_fees = market_state
+                .pc_lot_size
+                .checked_mul(new_order.limit_price.get())
+                .unwrap()
+                .checked_mul(new_order.max_coin_qty.get())
+                .unwrap();
+
+            let new_max_pc_qty_including_fees =
+                NonZeroU64::new(fee_tier.remove_taker_fee(new_max_pc_qty_before_fees)).unwrap();
+
+            Ok((NonZeroU64::new(new_max_coin_qty).unwrap(), new_max_pc_qty_including_fees))
+        } else {
+            Ok((new_order.max_coin_qty, new_order.max_native_pc_qty_including_fees))
+        }
+
+    }
+
     #[inline(never)]
     pub fn edit_perp_order_by_client_id(
         program_id: &Pubkey,
@@ -2585,6 +2573,8 @@ impl Processor {
             _referrer_mango_account_ai,  // write
         ] = fixed_ais;
 
+        // Account validations occur in the calls to cancel/place order
+
         {
             let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
@@ -2609,7 +2599,7 @@ impl Processor {
                 .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
 
             let book_order = book.get_order(order_id, side)?;
-            check!(cancel_side == side, MangoErrorCode::Default)?;
+            check!(cancel_side == side, MangoErrorCode::Default)?; // new error
             if book_order.quantity <= 0
                 || expected_cancel_size <= 0
                 || book_order.quantity > expected_cancel_size
@@ -2619,6 +2609,7 @@ impl Processor {
 
             let filled_amount = expected_cancel_size.checked_sub(book_order.quantity).unwrap();
             if filled_amount > 0 {
+                // TODO: should be max quote??
                 let new_max_base = max_base_quantity.checked_sub(filled_amount).unwrap();
                 if new_max_base < 0 {
                     throw_err!(MangoErrorCode::Default);
@@ -2694,6 +2685,8 @@ impl Processor {
             _referrer_mango_account_ai,  // write
         ] = fixed_ais;
 
+        // Account validations occur in the calls to cancel/place order
+
         {
             let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
@@ -2718,13 +2711,14 @@ impl Processor {
 
             let book_order = book.get_order(cancel_order_id, side)?;
             check!(cancel_side == side, MangoErrorCode::Default)?;
-            if book_order.quantity <= 0
-                || expected_cancel_size <= 0
-                || book_order.quantity > expected_cancel_size
-            {
-                throw_err!(MangoErrorCode::Default);
+            if book_order.quantity <= 0 {
+                throw_err!(MangoErrorCode::InvalidOrderBookQuantity);
+            }
+            if expected_cancel_size <= 0 || book_order.quantity > expected_cancel_size {
+                throw_err!(MangoErrorCode::InvalidCancelSize);
             }
 
+            // TODO: max_base_quantity could be i64::MAX, with max_quote_quantity being used for the order limiting
             let filled_amount = expected_cancel_size.checked_sub(book_order.quantity).unwrap();
             if filled_amount > 0 {
                 let new_max_base = max_base_quantity.checked_sub(filled_amount).unwrap();
@@ -8227,11 +8221,10 @@ impl Processor {
                 order_type,
                 reduce_only,
                 limit,
-                invalid_id_ok,
                 expiry_type,
             } => {
                 msg!("Mango: EditPerpOrderByClientId client_order_id={}", client_order_id);
-                let result = Self::edit_perp_order_by_client_id(
+                Self::edit_perp_order_by_client_id(
                     program_id,
                     accounts,
                     price,
@@ -8245,17 +8238,7 @@ impl Processor {
                     reduce_only,
                     limit,
                     expiry_type,
-                );
-                if invalid_id_ok {
-                    if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
-                        if mango_error_code == MangoErrorCode::InvalidOrderId
-                            || mango_error_code == MangoErrorCode::ClientIdNotFound
-                        {
-                            return Ok(());
-                        }
-                    }
-                }
-                result
+                )
             }
             MangoInstruction::EditPerpOrder {
                 cancel_order_id,
@@ -8269,11 +8252,10 @@ impl Processor {
                 order_type,
                 reduce_only,
                 limit,
-                invalid_id_ok,
                 expiry_type,
             } => {
                 msg!("Mango: EditPerpOrder order_id={}", cancel_order_id);
-                let result = Self::edit_perp_order(
+                Self::edit_perp_order(
                     program_id,
                     accounts,
                     cancel_order_id,
@@ -8288,17 +8270,7 @@ impl Processor {
                     reduce_only,
                     limit,
                     expiry_type,
-                );
-                if invalid_id_ok {
-                    if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
-                        if mango_error_code == MangoErrorCode::InvalidOrderId
-                            || mango_error_code == MangoErrorCode::ClientIdNotFound
-                        {
-                            return Ok(());
-                        }
-                    }
-                }
-                result
+                )
             }
             MangoInstruction::Withdraw2 { quantity, allow_borrow } => {
                 msg!("Mango: Withdraw2");
