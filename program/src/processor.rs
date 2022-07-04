@@ -2439,7 +2439,14 @@ impl Processor {
                     .and_then(|order| bids.get(order))
                     .and_then(|node| node.as_leaf())
                 {
-                    let (new_max_coin_qty, new_max_pc_qty_including_fees) = Self::calculate_adjusted_size_and_quantity(*market, bid, &cancel_order, expected_cancel_size, &new_order)?;
+                    let (new_max_coin_qty, new_max_pc_qty_including_fees) =
+                        Self::calculate_adjusted_size_and_quantity(
+                            *market,
+                            bid,
+                            &cancel_order,
+                            expected_cancel_size,
+                            &new_order,
+                        )?;
                     new_order.max_coin_qty = new_max_coin_qty;
                     new_order.max_native_pc_qty_including_fees = new_max_pc_qty_including_fees;
                 }
@@ -2449,7 +2456,14 @@ impl Processor {
                     .and_then(|order| asks.get(order))
                     .and_then(|node| node.as_leaf())
                 {
-                    let (new_max_coin_qty, new_max_pc_qty_including_fees) = Self::calculate_adjusted_size_and_quantity(*market, ask, &cancel_order, expected_cancel_size, &new_order)?;
+                    let (new_max_coin_qty, new_max_pc_qty_including_fees) =
+                        Self::calculate_adjusted_size_and_quantity(
+                            *market,
+                            ask,
+                            &cancel_order,
+                            expected_cancel_size,
+                            &new_order,
+                        )?;
                     new_order.max_coin_qty = new_max_coin_qty;
                     new_order.max_native_pc_qty_including_fees = new_max_pc_qty_including_fees;
                 }
@@ -2516,10 +2530,10 @@ impl Processor {
         let remaining_cancel_size = leaf_node.quantity();
         let fee_tier = leaf_node.fee_tier();
 
-        check!(expected_cancel_size > 0, MangoErrorCode::Default)?; // TODO: break out errors
-        check!(remaining_cancel_size > 0, MangoErrorCode::Default)?;
-        check!(new_order.side == cancel_order.side, MangoErrorCode::Default)?;
-        check!(expected_cancel_size >= remaining_cancel_size, MangoErrorCode::Default)?;
+        check!(expected_cancel_size > 0, MangoErrorCode::InvalidCancelSize)?;
+        check!(remaining_cancel_size > 0, MangoErrorCode::InvalidOrderBookQuantity)?;
+        check!(new_order.side == cancel_order.side, MangoErrorCode::InvalidParam)?;
+        check!(expected_cancel_size >= remaining_cancel_size, MangoErrorCode::InvalidCancelSize)?;
 
         // if cancel order has been partially filled, reduce the new order size to accommodate
         let filled_amount = expected_cancel_size.checked_sub(remaining_cancel_size).unwrap();
@@ -2540,7 +2554,6 @@ impl Processor {
         } else {
             Ok((new_order.max_coin_qty, new_order.max_native_pc_qty_including_fees))
         }
-
     }
 
     #[inline(never)]
@@ -2599,20 +2612,19 @@ impl Processor {
                 .ok_or(throw_err!(MangoErrorCode::ClientIdNotFound))?;
 
             let book_order = book.get_order(order_id, side)?;
-            check!(cancel_side == side, MangoErrorCode::Default)?; // new error
-            if book_order.quantity <= 0
-                || expected_cancel_size <= 0
-                || book_order.quantity > expected_cancel_size
-            {
-                throw_err!(MangoErrorCode::Default);
+            check!(cancel_side == side, MangoErrorCode::InvalidParam)?;
+            if book_order.quantity <= 0 {
+                throw_err!(MangoErrorCode::InvalidOrderBookQuantity);
+            }
+            if expected_cancel_size <= 0 || book_order.quantity > expected_cancel_size {
+                throw_err!(MangoErrorCode::InvalidCancelSize);
             }
 
             let filled_amount = expected_cancel_size.checked_sub(book_order.quantity).unwrap();
             if filled_amount > 0 {
-                // TODO: should be max quote??
                 let new_max_base = max_base_quantity.checked_sub(filled_amount).unwrap();
-                if new_max_base < 0 {
-                    throw_err!(MangoErrorCode::Default);
+                if new_max_base <= 0 {
+                    throw_err!(MangoErrorCode::InvalidParam);
                 }
                 max_base_quantity = new_max_base;
             };
@@ -2710,7 +2722,7 @@ impl Processor {
                 .ok_or(throw_err!(MangoErrorCode::InvalidOrderId))?;
 
             let book_order = book.get_order(cancel_order_id, side)?;
-            check!(cancel_side == side, MangoErrorCode::Default)?;
+            check!(cancel_side == side, MangoErrorCode::InvalidParam)?;
             if book_order.quantity <= 0 {
                 throw_err!(MangoErrorCode::InvalidOrderBookQuantity);
             }
@@ -2718,12 +2730,11 @@ impl Processor {
                 throw_err!(MangoErrorCode::InvalidCancelSize);
             }
 
-            // TODO: max_base_quantity could be i64::MAX, with max_quote_quantity being used for the order limiting
             let filled_amount = expected_cancel_size.checked_sub(book_order.quantity).unwrap();
             if filled_amount > 0 {
                 let new_max_base = max_base_quantity.checked_sub(filled_amount).unwrap();
                 if new_max_base < 0 {
-                    throw_err!(MangoErrorCode::Default);
+                    throw_err!(MangoErrorCode::InvalidParam);
                 }
                 max_base_quantity = new_max_base;
             };

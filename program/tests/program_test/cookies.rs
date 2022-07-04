@@ -966,7 +966,7 @@ impl PerpMarketCookie {
         options: PlacePerpOptions,
         client_order_id: u64,
         cancel_order_size: f64,
-        invalid_id_ok: bool,
+        expiry_type: ExpiryType,
     ) {
         let cancel_size = test.base_size_number_to_lots(&self.mint, cancel_order_size) as i64;
         let order_base_size = test.base_size_number_to_lots(&self.mint, base_size) as i64;
@@ -990,7 +990,7 @@ impl PerpMarketCookie {
             options.order_type,
             options.reduce_only,
             options.limit,
-            invalid_id_ok,
+            expiry_type,
         )
         .await;
 
@@ -1011,7 +1011,7 @@ impl PerpMarketCookie {
         price: f64,
         options: PlacePerpOptions,
         cancel_order_size: f64,
-        invalid_id_ok: bool,
+        expiry_type: ExpiryType,
     ) {
         let cancel_size = test.base_size_number_to_lots(&self.mint, cancel_order_size) as i64;
         let order_base_size = test.base_size_number_to_lots(&self.mint, base_size) as i64;
@@ -1036,7 +1036,7 @@ impl PerpMarketCookie {
             options.order_type,
             options.reduce_only,
             options.limit,
-            invalid_id_ok,
+            expiry_type,
         )
         .await;
 

@@ -675,16 +675,14 @@ impl BookSide {
                     child_h = new_child_h;
                 }
                 NodeRef::Leaf(leaf) => {
-                    if leaf.key != search_key {
-                        return None;
+                    if leaf.key == search_key {
+                        return Some(*leaf);
                     }
                     break;
                 }
             }
         }
-        let leaf: LeafNode = *self.get(child_h).unwrap().as_leaf().unwrap();
-
-        Some(leaf)
+        None
     }
 
     fn remove(&mut self, key: NodeHandle) -> Option<AnyNode> {

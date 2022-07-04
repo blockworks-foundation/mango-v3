@@ -1235,8 +1235,6 @@ pub enum MangoInstruction {
         /// When the limit is reached, processing stops and the instruction succeeds.
         limit: u8,
 
-        invalid_id_ok: bool,
-
         /// Can be 0 -> Absolute or 1 -> Relative; see expiry_timestamp
         expiry_type: ExpiryType,
     },
@@ -1298,8 +1296,6 @@ pub enum MangoInstruction {
         /// Use this to limit compute used during order matching.
         /// When the limit is reached, processing stops and the instruction succeeds.
         limit: u8,
-
-        invalid_id_ok: bool,
 
         /// Can be 0 -> Absolute or 1 -> Relative; see expiry_timestamp
         expiry_type: ExpiryType,
@@ -1849,7 +1845,7 @@ impl MangoInstruction {
                 MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order }
             }
             75 => {
-                let data_arr = array_ref![data, 0, 53];
+                let data_arr = array_ref![data, 0, 52];
                 let (
                     price,
                     max_base_quantity,
@@ -1861,9 +1857,8 @@ impl MangoInstruction {
                     order_type,
                     reduce_only,
                     limit,
-                    invalid_id_ok,
-                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 8, 1, 1, 1, 1, 1];
-                let expiry_type_byte = if data.len() > 53 { data[53] } else { 0 };
+                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 8, 1, 1, 1, 1];
+                let expiry_type_byte = if data.len() > 52 { data[52] } else { 0 };
                 MangoInstruction::EditPerpOrderByClientId {
                     price: i64::from_le_bytes(*price),
                     max_base_quantity: i64::from_le_bytes(*max_base_quantity),
@@ -1875,12 +1870,11 @@ impl MangoInstruction {
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
                     limit: u8::from_le_bytes(*limit),
-                    invalid_id_ok: invalid_id_ok[0] != 0,
                     expiry_type: ExpiryType::try_from_primitive(expiry_type_byte).ok()?,
                 }
             }
             76 => {
-                let data_arr = array_ref![data, 0, 69];
+                let data_arr = array_ref![data, 0, 68];
                 let (
                     cancel_order_id,
                     price,
@@ -1893,9 +1887,8 @@ impl MangoInstruction {
                     order_type,
                     reduce_only,
                     limit,
-                    invalid_id_ok,
-                ) = array_refs![data_arr, 16, 8, 8, 8, 8, 8, 8, 1, 1, 1, 1, 1];
-                let expiry_type_byte = if data.len() > 69 { data[69] } else { 0 };
+                ) = array_refs![data_arr, 16, 8, 8, 8, 8, 8, 8, 1, 1, 1, 1];
+                let expiry_type_byte = if data.len() > 68 { data[68] } else { 0 };
                 MangoInstruction::EditPerpOrder {
                     cancel_order_id: i128::from_le_bytes(*cancel_order_id),
                     price: i64::from_le_bytes(*price),
@@ -1908,7 +1901,6 @@ impl MangoInstruction {
                     order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
                     reduce_only: reduce_only[0] != 0,
                     limit: u8::from_le_bytes(*limit),
-                    invalid_id_ok: invalid_id_ok[0] != 0,
                     expiry_type: ExpiryType::try_from_primitive(expiry_type_byte).ok()?,
                 }
             }
@@ -3541,7 +3533,6 @@ pub fn edit_perp_order_by_client_id(
     order_type: OrderType,
     reduce_only: bool,
     limit: u8,
-    invalid_id_ok: bool,
     expiry_type: ExpiryType,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
@@ -3569,7 +3560,6 @@ pub fn edit_perp_order_by_client_id(
         order_type,
         reduce_only,
         limit,
-        invalid_id_ok,
         expiry_type,
     };
     let data = instr.pack();
@@ -3600,7 +3590,6 @@ pub fn edit_perp_order(
     order_type: OrderType,
     reduce_only: bool,
     limit: u8,
-    invalid_id_ok: bool,
     expiry_type: ExpiryType,
 ) -> Result<Instruction, ProgramError> {
     let mut accounts = vec![
@@ -3629,7 +3618,6 @@ pub fn edit_perp_order(
         order_type,
         reduce_only,
         limit,
-        invalid_id_ok,
         expiry_type,
     };
     let data = instr.pack();

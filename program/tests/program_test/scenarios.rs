@@ -251,7 +251,7 @@ pub async fn edit_perp_order_by_client_id_scenario(
                 PlacePerpOptions::default(),
                 client_order_id,
                 cancel_order_size,
-                false,
+                mango::matching::ExpiryType::Absolute,
             )
             .await;
 
@@ -283,7 +283,7 @@ pub async fn edit_perp_order_scenario(
                 order_price,
                 PlacePerpOptions::default(),
                 cancel_order_size,
-                false,
+                mango::matching::ExpiryType::Absolute,
             )
             .await;
 
