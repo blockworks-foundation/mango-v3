@@ -657,22 +657,13 @@ impl BookSide {
     }
 
     fn get_by_key(&self, search_key: i128) -> Option<LeafNode> {
-        let parent_h = self.root()?;
-        let (mut child_h, _crit_bit) = match self.get(parent_h).unwrap().case().unwrap() {
-            NodeRef::Leaf(&leaf) if leaf.key == search_key => {
-                assert_eq!(self.leaf_count, 1);
-                return Some(leaf);
-            }
-            NodeRef::Leaf(_) => return None,
-            NodeRef::Inner(inner) => inner.walk_down(search_key),
-        };
-
+        let mut handle = self.root()?;
         // walk down the tree until finding the key
         loop {
-            match self.get(child_h).unwrap().case().unwrap() {
+            match self.get(handle).unwrap().case().unwrap() {
                 NodeRef::Inner(inner) => {
-                    let (new_child_h, _new_crit_bit) = inner.walk_down(search_key);
-                    child_h = new_child_h;
+                    let (new_handle, _new_crit_bit) = inner.walk_down(search_key);
+                    handle = new_handle;
                 }
                 NodeRef::Leaf(leaf) => {
                     if leaf.key == search_key {
