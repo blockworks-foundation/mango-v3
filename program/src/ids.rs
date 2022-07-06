@@ -22,23 +22,6 @@ pub mod mngo_token {
     declare_id!("MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac");
 }
 
-pub mod luna_spot_market {
-    use solana_program::declare_id;
-    declare_id!("HBTu8hNaoT3VyiSSzJYa8jwt9sDGKtJviSwFa11iXdmE");
-}
-
-pub mod luna_perp_market {
-    use solana_program::declare_id;
-    #[cfg(feature = "devnet")]
-    declare_id!("CuYEjB3vneuzpimL5iZXeiQRHuDwRefcVbJSsBPoxgwF");
-    #[cfg(not(feature = "devnet"))]
-    declare_id!("BCJrpvsB2BJtqiDgKVC4N6gyX1y24Jz96C6wMraYmXss");
-}
-
-pub mod luna_root_bank {
-    use solana_program::declare_id;
-    declare_id!("AUU8Zw5ezmZJBuWtMjfTTyP6eowkpNbH5pHh6uY5BHu7");
-}
 pub mod luna_pyth_oracle {
     use solana_program::declare_id;
     declare_id!("5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY");

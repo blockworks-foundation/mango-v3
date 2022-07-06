@@ -35,8 +35,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{
-    luna_perp_market, luna_pyth_oracle, luna_root_bank, luna_spot_market, msrm_token, srm_token,
+use crate::ids::{ msrm_token, srm_token, luna_pyth_oracle
 };
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, ExpiryType, OrderType, Side};
@@ -828,9 +827,8 @@ impl Processor {
         root_bank_cache.check_valid(&mango_group, now_ts)?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
-        let reduce_only = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID;
 
-        let quantity = if reduce_only {
+        let quantity = if mode.is_reduce_only() {
             let max_deposit = mango_account
                 .get_native_borrow(root_bank_cache, token_index)?
                 .checked_floor()
@@ -1217,8 +1215,7 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
-        let is_market_closing = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID; // temp until luna gets moved to close only officially
-        check!(!(is_market_closing && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
+        check!(!(mode.is_reduce_only() && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
@@ -1327,8 +1324,7 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidToken))?;
 
         let mode = mango_group.tokens[token_index].spot_market_mode;
-        let is_market_closing = mode.is_reduce_only() || root_bank_ai.key == &luna_root_bank::ID; // temp until luna gets moved to close only officially
-        check!(!(is_market_closing && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
+        check!(!(mode.is_reduce_only() && allow_borrow), MangoErrorCode::InvalidAllowBorrow)?;
 
         let mut node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
         check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
@@ -1807,9 +1803,8 @@ impl Processor {
         // If not post_allowed, then pre_locked may not increase
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_market_closing =
-            mode.is_reduce_only() || spot_market_ai.key == &luna_spot_market::ID;
-        let (post_allowed, pre_locked) = if is_market_closing {
+
+        let (post_allowed, pre_locked) = if mode.is_reduce_only() {
             let open_orders = load_open_orders(&open_orders_ais[market_index])?;
             // only one open order at a time
             check!(
@@ -2142,9 +2137,8 @@ impl Processor {
         // If not post_allowed, then pre_locked may not increase
         let mode = mango_group.tokens[market_index].spot_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_market_closing =
-            mode.is_reduce_only() || spot_market_ai.key == &luna_spot_market::ID;
-        let (post_allowed, pre_locked) = if is_market_closing {
+
+        let (post_allowed, pre_locked) = if mode.is_reduce_only() {
             let open_orders = load_open_orders(market_open_orders_ai)?;
             // only one open order at a time
             check!(
@@ -2594,9 +2588,7 @@ impl Processor {
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
-        let is_market_closing = mode.is_reduce_only() || is_luna_market;
-        check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
+        check!(!mode.is_reduce_only() || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
             &mango_group,
@@ -2637,7 +2629,7 @@ impl Processor {
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
-            } else if is_market_closing {
+            } else if mode.is_reduce_only() {
                 // Take into account outstanding open orders as well
                 let on_orders = match side {
                     Side::Bid => mango_account.perp_accounts[market_index].bids_quantity,
@@ -2676,7 +2668,6 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             u8::MAX,
-            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -2776,9 +2767,8 @@ impl Processor {
 
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode != MarketMode::ForceCloseOnly, MangoErrorCode::NewOrdersNotAllowed)?;
-        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
-        let is_market_closing = mode == MarketMode::CloseOnly || is_luna_market;
-        check!(!is_market_closing || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
+
+        check!(!mode.is_reduce_only() || reduce_only, MangoErrorCode::ReduceOnlyRequired)?;
 
         let active_assets = UserActiveAssets::new(
             &mango_group,
@@ -2824,7 +2814,7 @@ impl Processor {
 
             if (side == Side::Bid && base_pos > 0) || (side == Side::Ask && base_pos < 0) {
                 0
-            } else if is_market_closing {
+            } else if mode.is_reduce_only() {
                 // Take into account outstanding open orders as well
                 let on_orders = match side {
                     Side::Bid => mango_account.perp_accounts[market_index].bids_quantity,
@@ -2862,7 +2852,6 @@ impl Processor {
             now_ts,
             referrer_mango_account_ai,
             limit,
-            is_luna_market,
         )?;
 
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
@@ -3322,6 +3311,16 @@ impl Processor {
 
         perp_market.fees_accrued -= settlement;
         pa.quote_position += settlement;
+
+        if mango_group.tokens[market_index].perp_market_mode == MarketMode::ForceCloseOnly
+            && perp_market.fees_accrued < ONE_I80F48
+        {
+            // If market is in ForceCloseOnly, zero out dust fees and credit to the last guy to settle
+            // Note: this dust amount won't be logged, but that's fine
+            let dust_settlement = (pnl + settlement).abs().min(perp_market.fees_accrued); // note: pnl + settlement <= 0
+            pa.quote_position += dust_settlement;
+            perp_market.fees_accrued -= dust_settlement;
+        }
 
         // Transfer quote token from bank vault to fees vault owned by Mango DAO
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
@@ -5597,11 +5596,10 @@ impl Processor {
         let mut perp_market =
             PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
 
-        let is_luna_market = perp_market_ai.key == &luna_perp_market::ID;
         let mode = mango_group.tokens[market_index].perp_market_mode;
         check!(mode.allow_new_open_orders(), MangoErrorCode::InvalidAccountState)?;
-        let is_market_closing = mode.is_reduce_only() || is_luna_market;
-        if is_market_closing {
+
+        if mode.is_reduce_only() {
             order.reduce_only = true;
         }
 
@@ -5666,7 +5664,6 @@ impl Processor {
                     i64::MAX,
                     order.order_type,
                     now_ts,
-                    is_luna_market,
                 )?,
                 Side::Ask => book.sim_new_ask(
                     &perp_market,
@@ -5725,7 +5722,6 @@ impl Processor {
                     now_ts,
                     None,
                     u8::MAX,
-                    is_luna_market,
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
@@ -6532,9 +6528,7 @@ impl Processor {
     #[inline(never)]
     fn remove_spot_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> MangoResult {
         const NUM_FIXED: usize = 7;
-        let accounts = array_ref![accounts, 0, NUM_FIXED + 2 * MAX_NODE_BANKS];
-        let (fixed_accounts, node_bank_ais, vault_ais) =
-            array_refs![accounts, NUM_FIXED, MAX_NODE_BANKS, MAX_NODE_BANKS];
+        let (fixed_accounts, bank_and_vault_ais) = array_refs![accounts, NUM_FIXED; ..;];
 
         let [
             mango_group_ai, // write
@@ -6561,13 +6555,20 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        let root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
-        check_eq!(MAX_NODE_BANKS, node_bank_ais.len(), MangoErrorCode::Default)?;
-        for i in 0..root_bank.num_node_banks {
-            check!(
-                node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
-                MangoErrorCode::InvalidNodeBank
-            )?;
+        let (node_bank_ais, vault_ais) = bank_and_vault_ais.split_at(bank_and_vault_ais.len() / 2);
+
+        {
+            let root_bank = RootBank::load_checked(&root_bank_ai, program_id)?;
+
+            check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
+            check_eq!(root_bank.num_node_banks, vault_ais.len(), MangoErrorCode::Default)?;
+            for i in 0..root_bank.num_node_banks {
+                check_eq!(
+                    node_bank_ais[i].key,
+                    &root_bank.node_banks[i],
+                    MangoErrorCode::InvalidNodeBank
+                )?;
+            }
         }
 
         // Check dust account
@@ -6579,26 +6580,24 @@ impl Processor {
         let mut dust_account =
             MangoAccount::load_mut_checked(dust_account_ai, program_id, mango_group_ai.key)?;
 
-        // Check vault owner is group admin
-        let admin_vault = Account::unpack(&admin_vault_ai.try_borrow_data()?)?;
-        check!(admin_vault.owner == mango_group.admin, MangoErrorCode::InvalidOwner)?;
-
         let mut total_deposits = ZERO_I80F48;
         for (node_bank_ai, vault_ai) in node_bank_ais.iter().zip(vault_ais.iter()) {
             if node_bank_ai.key == &Pubkey::default() {
                 continue;
             }
 
-            let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
+            {
+                let node_bank = NodeBank::load_mut_checked(node_bank_ai, program_id)?;
 
-            // borrows must be zero
-            // deposits must be same as DustAccount
-            total_deposits += node_bank.deposits;
-            check!(node_bank.borrows.is_zero(), MangoErrorCode::InvalidAccountState)?;
+                // borrows must be zero
+                // deposits must be same as DustAccount
+                total_deposits += node_bank.deposits;
+                check!(node_bank.borrows.is_zero(), MangoErrorCode::InvalidAccountState)?;
 
-            // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
-            // check vault was passed in
-            check!(vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
+                // Transfer any remaining vault balance to admin owned vault, clean up token account lamports
+                // check vault was passed in
+                check!(vault_ai.key == &node_bank.vault, MangoErrorCode::InvalidVault)?;
+            }
             let vault = Account::unpack(&vault_ai.try_borrow_data()?)?;
 
             invoke_transfer(
@@ -6750,40 +6749,27 @@ impl Processor {
             MangoErrorCode::InvalidAccountState
         )?;
 
-        // Make sure perp market has zero open interest
-        let perp_market =
-            PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
-        check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
-        check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
+        {
+            // Check perp market has zero open interest or fees, check mngo vault
+            let perp_market =
+                PerpMarket::load_mut_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+            check!(perp_market.open_interest == 0, MangoErrorCode::InvalidAccountState)?;
+            check!(perp_market.fees_accrued.is_zero(), MangoErrorCode::InvalidAccountState)?;
+            check!(mngo_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
 
-        // Make sure event queue has no events
-        let event_queue = EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
-        check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
+            // Check event queue has no events
+            let event_queue =
+                EventQueue::load_mut_checked(event_queue_ai, program_id, &perp_market)?;
+            check!(event_queue.empty(), MangoErrorCode::InvalidAccountState)?;
 
-        // Close event queue, return lamports to admin
-        program_transfer_lamports(event_queue_ai, admin_ai, event_queue_ai.lamports())?;
-        sol_memset(&mut event_queue_ai.try_borrow_mut_data()?, 0, size_of::<EventQueue>());
+            // Check book is empty
+            let book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
+            check!(book.bids.is_empty(), MangoErrorCode::InvalidAccountState)?;
+            check!(book.asks.is_empty(), MangoErrorCode::InvalidAccountState)?;
+        }
 
-        // Check book is empty, close each side anmd return lamports to admin
-        let book = Book::load_checked(program_id, bids_ai, asks_ai, &perp_market)?;
-        check!(book.bids.is_empty(), MangoErrorCode::InvalidAccountState)?;
-        check!(book.asks.is_empty(), MangoErrorCode::InvalidAccountState)?;
-
-        program_transfer_lamports(bids_ai, admin_ai, bids_ai.lamports())?;
-        program_transfer_lamports(asks_ai, admin_ai, asks_ai.lamports())?;
-
-        sol_memset(&mut bids_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
-        sol_memset(&mut asks_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
-
-        // Transfer MNGO in vault to DAO treasury
-        check!(mngo_vault_ai.key == &perp_market.mngo_vault, MangoErrorCode::InvalidVault)?;
+        // Transfer MNGO to DAO vault
         let mngo_vault = Account::unpack(&mngo_vault_ai.try_borrow_data()?)?;
-
-        // Close perp market, return lamports to admin
-        program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
-        sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
-
-        // todo do checks to make sure dao vault is correct
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
@@ -6801,6 +6787,18 @@ impl Processor {
             &[&signers_seeds],
         )?;
 
+        // Return lamports to admin, zero data
+        program_transfer_lamports(event_queue_ai, admin_ai, event_queue_ai.lamports())?;
+        program_transfer_lamports(bids_ai, admin_ai, bids_ai.lamports())?;
+        program_transfer_lamports(asks_ai, admin_ai, asks_ai.lamports())?;
+        program_transfer_lamports(perp_market_ai, admin_ai, perp_market_ai.lamports())?;
+
+        sol_memset(&mut event_queue_ai.try_borrow_mut_data()?, 0, size_of::<EventQueue>());
+        sol_memset(&mut bids_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
+        sol_memset(&mut asks_ai.try_borrow_mut_data()?, 0, size_of::<BookSide>());
+        sol_memset(&mut perp_market_ai.try_borrow_mut_data()?, 0, size_of::<PerpMarket>());
+
+        // Reset market info
         mango_group.tokens[market_index].perp_market_mode = MarketMode::Inactive;
         mango_group.perp_markets[market_index] = PerpMarketInfo {
             perp_market: Pubkey::default(),
@@ -7236,7 +7234,7 @@ impl Processor {
             mango_account_a_ai, // write
             mango_account_b_ai, // write
             mango_cache_ai,     // read
-            perp_market_ai,     // read
+            perp_market_ai,     // write
         ] = accounts;
         let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
 
