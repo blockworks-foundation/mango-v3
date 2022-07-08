@@ -461,24 +461,16 @@ impl RootBank {
         self.node_banks.iter().position(|pk| pk == node_bank_pk)
     }
 
-    pub fn update_index(
+    /// There can only be one node_bank as of v3.5.
+    /// So this function can be used directly by just passing in the indexed deposits and borrows of that node bank
+    pub fn update_index_without_banks(
         &mut self,
-        node_bank_ais: &[AccountInfo],
-        program_id: &Pubkey,
         now_ts: u64,
-    ) -> MangoResult<()> {
-        let mut native_deposits = ZERO_I80F48;
-        let mut native_borrows = ZERO_I80F48;
-
-        for node_bank_ai in node_bank_ais.iter() {
-            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
-            native_deposits = native_deposits
-                .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
-                .unwrap();
-            native_borrows = native_borrows
-                .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
-                .unwrap();
-        }
+        deposits: I80F48,
+        borrows: I80F48,
+    ) -> MangoResult {
+        let native_deposits = deposits.checked_mul(self.deposit_index).unwrap();
+        let native_borrows = borrows.checked_mul(self.borrow_index).unwrap();
 
         // TODO - is this a good assumption?
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
@@ -512,6 +504,23 @@ impl RootBank {
             .unwrap();
 
         Ok(())
+    }
+    pub fn update_index(
+        &mut self,
+        node_bank_ais: &[AccountInfo],
+        program_id: &Pubkey,
+        now_ts: u64,
+    ) -> MangoResult<()> {
+        let mut deposits = ZERO_I80F48;
+        let mut borrows = ZERO_I80F48;
+
+        for node_bank_ai in node_bank_ais.iter() {
+            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
+            deposits = deposits.checked_add(node_bank.deposits).unwrap();
+            borrows = borrows.checked_add(node_bank.borrows).unwrap();
+        }
+
+        self.update_index_without_banks(now_ts, deposits, borrows)
     }
 
     /// Socialize the loss on lenders and return (native_loss, percentage_loss)
