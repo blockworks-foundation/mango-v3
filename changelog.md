@@ -1,5 +1,11 @@
 # Mango Program Change Log
 
+## v3.5.1
+Deployed: | Slot:
+1. Remove luna related hard codings
+2. Fix deposit leach bug
+3. Fix bugs in ForceSettlePerpPosition
+
 ## v3.5.0
 Deployed: Jun 27, 2022 at 18:30:08 UTC | Slot: 139,265,834
 1. Add an ExpiryType argument to PlacePerpOrder2
