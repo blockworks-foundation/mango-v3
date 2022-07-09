@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.5.1
-Deployed: | Slot:
+Deployed: Jul 9, 2022 at 17:07:37 UTC | Slot: 140,876,554
 1. Remove luna related hard codings
 2. Fix deposit leach bug
 3. Fix bugs in ForceSettlePerpPosition
