@@ -656,6 +656,26 @@ impl BookSide {
         Some(removed_leaf)
     }
 
+    fn get_by_key(&self, search_key: i128) -> Option<LeafNode> {
+        let mut handle = self.root()?;
+        // walk down the tree until finding the key
+        loop {
+            match self.get(handle).unwrap().case().unwrap() {
+                NodeRef::Inner(inner) => {
+                    let (new_handle, _new_crit_bit) = inner.walk_down(search_key);
+                    handle = new_handle;
+                }
+                NodeRef::Leaf(leaf) => {
+                    if leaf.key == search_key {
+                        return Some(*leaf);
+                    }
+                    break;
+                }
+            }
+        }
+        None
+    }
+
     fn remove(&mut self, key: NodeHandle) -> Option<AnyNode> {
         let val = *self.get(key)?;
 
@@ -1695,6 +1715,17 @@ impl<'a> Book<'a> {
         }
 
         Ok(())
+    }
+
+    pub fn get_order(&self, order_id: i128, side: Side) -> MangoResult<LeafNode> {
+        match side {
+            Side::Bid => {
+                self.bids.get_by_key(order_id).ok_or(throw_err!(MangoErrorCode::InvalidOrderId))
+            }
+            Side::Ask => {
+                self.asks.get_by_key(order_id).ok_or(throw_err!(MangoErrorCode::InvalidOrderId))
+            }
+        }
     }
 
     pub fn cancel_order(&mut self, order_id: i128, side: Side) -> MangoResult<LeafNode> {

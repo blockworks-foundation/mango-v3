@@ -139,7 +139,11 @@ pub enum MangoErrorCode {
     )]
     NewOrdersNotAllowed,
 
-    #[error("MangoErrorCode::Default Check the source code for more info")] // 44
+    #[error("MangoErrorCode::InvalidOrderBookQuantity")]
+    InvalidOrderBookQuantity,
+    #[error("MangoErrorCode::InvalidCancelSize")]
+    InvalidCancelSize,
+    #[error("MangoErrorCode::Default Check the source code for more info")] // 47
     Default = u32::MAX_VALUE,
 }
 

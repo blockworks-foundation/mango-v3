@@ -582,3 +582,317 @@ async fn test_perp_order_types() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_edit_perp_order_by_client_id() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig::default_two_mints();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let user_index: usize = 0;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
+    let mint = test.mints[mint_index];
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Deposit amounts
+    let user_deposits = vec![
+        (user_index, test.quote_index, base_price * base_size),
+        (user_index, mint_index, base_size),
+    ];
+
+    // Perp Orders
+    let user_perp_orders = vec![(user_index, mint_index, Side::Bid, 1.0, base_price)];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+    // Step 2: Place perp orders
+    place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+    assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
+
+    let perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+    let bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let top_order = bids.get_max().unwrap();
+    assert_eq!(top_order.price(), test.price_number_to_lots(&mint, base_price) as i64);
+    assert_eq!(top_order.quantity, test.base_size_number_to_lots(&mint, base_size) as i64);
+
+    // Step 3: Edit the order
+
+    let updated_perp_orders = vec![(user_index, mint_index, Side::Bid, 1.0, base_price * 0.5)];
+
+    edit_perp_order_by_client_id_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        &updated_perp_orders,
+        STARTING_PERP_ORDER_ID,
+        base_size,
+    )
+    .await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+    assert_open_perp_orders(&mango_group_cookie, &updated_perp_orders, STARTING_PERP_ORDER_ID);
+
+    let updated_bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let updated_top_order = updated_bids.get_max().unwrap();
+    assert_eq!(
+        updated_top_order.price(),
+        test.price_number_to_lots(&mint, base_price * 0.5) as i64
+    );
+    assert_eq!(updated_top_order.quantity, test.base_size_number_to_lots(&mint, base_size) as i64);
+}
+
+#[tokio::test]
+async fn test_edit_perp_order_by_client_id_will_adjust_order_size_if_user_passes_stale_order() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig::default_two_mints();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let bidder_user_index: usize = 0;
+    let asker_user_index: usize = 1;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
+    let mint = test.mints[mint_index];
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Deposit amounts
+    let user_deposits = vec![
+        (bidder_user_index, test.quote_index, base_price),
+        (asker_user_index, mint_index, 1.0),
+    ];
+
+    // Matched Perp Orders
+    let matched_perp_orders = vec![vec![
+        (asker_user_index, mint_index, mango::matching::Side::Ask, base_size * 0.5, base_price),
+        (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
+    ]];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+    // Step 2: Place and match spot order
+    match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;
+
+    // Step 3: Settle pnl
+    mango_group_cookie.run_keeper(&mut test).await;
+    for matched_perp_order in matched_perp_orders {
+        mango_group_cookie.settle_perp_funds(&mut test, &matched_perp_order).await;
+    }
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    // assert_matched_perp_orders(&mango_group_cookie, &user_perp_orders);
+
+    let perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+    let bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let top_order = bids.get_max().unwrap();
+    assert_eq!(top_order.price(), test.price_number_to_lots(&mint, base_price) as i64);
+    assert_eq!(top_order.quantity, test.base_size_number_to_lots(&mint, base_size * 0.5) as i64);
+
+    // Step 4: Edit the order
+    let updated_perp_orders =
+        vec![(bidder_user_index, mint_index, Side::Bid, 1.0, base_price * 0.5)];
+
+    edit_perp_order_by_client_id_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        &updated_perp_orders,
+        STARTING_PERP_ORDER_ID + 1,
+        base_size, // client expects to cancel all of the original order
+    )
+    .await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+    assert_open_perp_orders(&mango_group_cookie, &updated_perp_orders, STARTING_PERP_ORDER_ID + 1);
+
+    let updated_bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let updated_top_order = updated_bids.get_max().unwrap();
+    assert_eq!(
+        updated_top_order.price(),
+        test.price_number_to_lots(&mint, base_price * 0.5) as i64
+    );
+    assert_eq!(
+        updated_top_order.quantity,
+        test.base_size_number_to_lots(&mint, base_size * 0.5) as i64
+    );
+}
+
+#[tokio::test]
+async fn test_edit_perp_order() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig::default_two_mints();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let user_index: usize = 0;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
+    let mint = test.mints[mint_index];
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Deposit amounts
+    let user_deposits = vec![
+        (user_index, test.quote_index, base_price * base_size),
+        (user_index, mint_index, base_size),
+    ];
+
+    // Perp Orders
+    let user_perp_orders = vec![(user_index, mint_index, Side::Bid, 1.0, base_price)];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+    // Step 2: Place perp orders
+    place_perp_order_scenario(&mut test, &mut mango_group_cookie, &user_perp_orders).await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+    assert_open_perp_orders(&mango_group_cookie, &user_perp_orders, STARTING_PERP_ORDER_ID);
+
+    let perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+    let bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let top_order = bids.get_max().unwrap();
+    let cancel_order_id = top_order.key;
+    assert_eq!(top_order.price(), test.price_number_to_lots(&mint, base_price) as i64);
+    assert_eq!(top_order.quantity, test.base_size_number_to_lots(&mint, base_size) as i64);
+
+    // Step 3: Edit the order
+
+    let updated_perp_orders = vec![(user_index, mint_index, Side::Bid, 1.0, base_price * 0.5)];
+
+    edit_perp_order_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        &updated_perp_orders,
+        cancel_order_id,
+        base_size,
+    )
+    .await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+    assert_open_perp_orders(&mango_group_cookie, &updated_perp_orders, STARTING_PERP_ORDER_ID + 1);
+
+    let updated_bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let updated_top_order = updated_bids.get_max().unwrap();
+    assert_eq!(
+        updated_top_order.price(),
+        test.price_number_to_lots(&mint, base_price * 0.5) as i64
+    );
+    assert_eq!(updated_top_order.quantity, test.base_size_number_to_lots(&mint, base_size) as i64);
+}
+
+#[tokio::test]
+async fn test_edit_perp_order_will_adjust_order_size_if_user_passes_stale_order() {
+    // === Arrange ===
+    let config = MangoProgramTestConfig::default_two_mints();
+    let mut test = MangoProgramTest::start_new(&config).await;
+
+    let mut mango_group_cookie = MangoGroupCookie::default(&mut test).await;
+    mango_group_cookie.full_setup(&mut test, config.num_users, config.num_mints - 1).await;
+
+    // General parameters
+    let bidder_user_index: usize = 0;
+    let asker_user_index: usize = 1;
+    let mint_index: usize = 0;
+    let base_price: f64 = 10_000.0;
+    let base_size: f64 = 1.0;
+    let mint = test.mints[mint_index];
+
+    // Set oracles
+    mango_group_cookie.set_oracle(&mut test, mint_index, base_price).await;
+
+    // Deposit amounts
+    let user_deposits = vec![
+        (bidder_user_index, test.quote_index, base_price),
+        (asker_user_index, mint_index, 1.0),
+    ];
+
+    // Matched Perp Orders
+    let matched_perp_orders = vec![vec![
+        (asker_user_index, mint_index, mango::matching::Side::Ask, base_size * 0.5, base_price),
+        (bidder_user_index, mint_index, mango::matching::Side::Bid, base_size, base_price),
+    ]];
+
+    // === Act ===
+    // Step 1: Make deposits
+    deposit_scenario(&mut test, &mut mango_group_cookie, &user_deposits).await;
+
+    // Step 2: Place and match spot order
+    match_perp_order_scenario(&mut test, &mut mango_group_cookie, &matched_perp_orders).await;
+
+    // Step 3: Settle pnl
+    mango_group_cookie.run_keeper(&mut test).await;
+    for matched_perp_order in matched_perp_orders {
+        mango_group_cookie.settle_perp_funds(&mut test, &matched_perp_order).await;
+    }
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+
+    // assert_matched_perp_orders(&mango_group_cookie, &user_perp_orders);
+
+    let perp_market_cookie = mango_group_cookie.perp_markets[mint_index];
+    let bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let top_order = bids.get_max().unwrap();
+    let cancel_order_id = top_order.key;
+    assert_eq!(top_order.price(), test.price_number_to_lots(&mint, base_price) as i64);
+    assert_eq!(top_order.quantity, test.base_size_number_to_lots(&mint, base_size * 0.5) as i64);
+
+    // Step 4: Edit the order
+    let updated_perp_orders =
+        vec![(bidder_user_index, mint_index, Side::Bid, 1.0, base_price * 0.5)];
+
+    edit_perp_order_scenario(
+        &mut test,
+        &mut mango_group_cookie,
+        &updated_perp_orders,
+        cancel_order_id,
+        base_size, // client expects to cancel all of the original order
+    )
+    .await;
+
+    // === Assert ===
+    mango_group_cookie.run_keeper(&mut test).await;
+    assert_open_perp_orders(&mango_group_cookie, &updated_perp_orders, STARTING_PERP_ORDER_ID + 2);
+
+    let updated_bids = test.load_account::<BookSide>(perp_market_cookie.bids_pk).await;
+    let updated_top_order = updated_bids.get_max().unwrap();
+    assert_eq!(
+        updated_top_order.price(),
+        test.price_number_to_lots(&mint, base_price * 0.5) as i64
+    );
+    assert_eq!(
+        updated_top_order.quantity,
+        test.base_size_number_to_lots(&mint, base_size * 0.5) as i64
+    );
+}

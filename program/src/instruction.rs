@@ -1067,7 +1067,6 @@ pub enum MangoInstruction {
     CancelAllSpotOrders {
         limit: u8,
     },
-
     /// Withdraw funds that were deposited earlier.
     ///
     /// Accounts expected by this instruction (10):
@@ -1172,6 +1171,135 @@ pub enum MangoInstruction {
     /// 3. `[]` mango_cache_ai
     /// 4. `[writable]` perp_market_ai
     ForceSettlePerpPosition,
+
+    /// Replaces a spot order on the Serum Dex
+    /// Accounts expected by this instruction are the same as PlaceSpotOrder2
+    EditSpotOrder {
+        cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+        cancel_order_size: u64,
+        new_order: serum_dex::instruction::NewOrderInstructionV3,
+    },
+
+    /// Replaces a perp order, using the client_order_id
+    /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[signer]` owner_ai - owner of MangoAccount
+    /// 3. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 4. `[writable]` perp_market_ai
+    /// 5. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 6. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8. `[writable]` referrer_mango_account_ai - referrer's mango account;
+    ///                 pass in mango_account_ai as duplicate if you don't have a referrer
+    /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
+    EditPerpOrderByClientId {
+        /// Price in quote lots per base lots.
+        ///
+        /// Effect is based on order type, it's usually
+        /// - fill orders on the book up to this price or
+        /// - place an order on the book at this price.
+        ///
+        /// Ignored for Market orders and potentially adjusted for PostOnlySlide orders.
+        price: i64,
+
+        /// Max base lots to buy/sell.
+        max_base_quantity: i64,
+
+        /// Max quote lots to pay/receive (not taking fees into account).
+        max_quote_quantity: i64,
+
+        /// Timestamp of when order expires
+        ///
+        /// Send 0 if you want the order to never expire.
+        /// Timestamps in the past mean the instruction is skipped.
+        /// Timestamps in the future are reduced to now + 255s.
+        expiry_timestamp: u64,
+
+        /// Client order id of order to replace
+        client_order_id: u64,
+
+        /// Expected quantity remaining on the order to be replaced
+        cancel_order_size: i64,
+
+        side: Side,
+
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
+        order_type: OrderType,
+
+        reduce_only: bool,
+
+        /// Maximum number of orders from the book to fill.
+        ///
+        /// Use this to limit compute used during order matching.
+        /// When the limit is reached, processing stops and the instruction succeeds.
+        limit: u8,
+
+        /// Can be 0 -> Absolute or 1 -> Relative; see expiry_timestamp
+        expiry_type: ExpiryType,
+    },
+
+    /// Replaces a perp order, using the order_id
+    /// Accounts expected by this instruction (9 + `NUM_IN_MARGIN_BASKET`):
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - the MangoAccount of owner
+    /// 2. `[signer]` owner_ai - owner of MangoAccount
+    /// 3. `[]` mango_cache_ai - MangoCache for this MangoGroup
+    /// 4. `[writable]` perp_market_ai
+    /// 5. `[writable]` bids_ai - bids account for this PerpMarket
+    /// 6. `[writable]` asks_ai - asks account for this PerpMarket
+    /// 7. `[writable]` event_queue_ai - EventQueue for this PerpMarket
+    /// 8. `[writable]` referrer_mango_account_ai - referrer's mango account;
+    ///                 pass in mango_account_ai as duplicate if you don't have a referrer
+    /// 9..9 + NUM_IN_MARGIN_BASKET `[]` open_orders_ais - pass in open orders in margin basket
+    EditPerpOrder {
+        /// Id of the order to replace
+        cancel_order_id: i128,
+
+        /// Price in quote lots per base lots.
+        ///
+        /// Effect is based on order type, it's usually
+        /// - fill orders on the book up to this price or
+        /// - place an order on the book at this price.
+        ///
+        /// Ignored for Market orders and potentially adjusted for PostOnlySlide orders.
+        price: i64,
+
+        /// Max base lots to buy/sell.
+        max_base_quantity: i64,
+
+        /// Max quote lots to pay/receive (not taking fees into account).
+        max_quote_quantity: i64,
+
+        /// Timestamp of when order expires
+        ///
+        /// Send 0 if you want the order to never expire.
+        /// Timestamps in the past mean the instruction is skipped.
+        /// Timestamps in the future are reduced to now + 255s.
+        expiry_timestamp: u64,
+
+        /// Client order id of the updated order
+        client_order_id: u64,
+
+        /// Expected quantity remaining on the order to be replaced
+        cancel_order_size: i64,
+
+        side: Side,
+
+        /// Can be 0 -> LIMIT, 1 -> IOC, 2 -> PostOnly, 3 -> Market, 4 -> PostOnlySlide
+        order_type: OrderType,
+
+        reduce_only: bool,
+
+        /// Maximum number of orders from the book to fill.
+        ///
+        /// Use this to limit compute used during order matching.
+        /// When the limit is reached, processing stops and the instruction succeeds.
+        limit: u8,
+
+        /// Can be 0 -> Absolute or 1 -> Relative; see expiry_timestamp
+        expiry_type: ExpiryType,
+    },
 }
 
 impl MangoInstruction {
@@ -1700,6 +1828,82 @@ impl MangoInstruction {
                 }
             }
             73 => MangoInstruction::ForceSettlePerpPosition,
+            74 => {
+                let (cancel_array, cancel_order_size, new_order_array) =
+                    array_refs![data, 20, 8; ..;];
+                let fields = array_refs![cancel_array, 4, 16];
+                let side = match u32::from_le_bytes(*fields.0) {
+                    0 => serum_dex::matching::Side::Bid,
+                    1 => serum_dex::matching::Side::Ask,
+                    _ => return None,
+                };
+                let order_id = u128::from_le_bytes(*fields.1);
+                let cancel_order_size = u64::from_le_bytes(*cancel_order_size);
+                let cancel_order =
+                    serum_dex::instruction::CancelOrderInstructionV2 { side, order_id };
+                let new_order = unpack_dex_new_order_v3(new_order_array)?;
+                MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order }
+            }
+            75 => {
+                let data_arr = array_ref![data, 0, 52];
+                let (
+                    price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    expiry_timestamp,
+                    client_order_id,
+                    cancel_order_size,
+                    side,
+                    order_type,
+                    reduce_only,
+                    limit,
+                ) = array_refs![data_arr, 8, 8, 8, 8, 8, 8, 1, 1, 1, 1];
+                let expiry_type_byte = if data.len() > 52 { data[52] } else { 0 };
+                MangoInstruction::EditPerpOrderByClientId {
+                    price: i64::from_le_bytes(*price),
+                    max_base_quantity: i64::from_le_bytes(*max_base_quantity),
+                    max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    cancel_order_size: i64::from_le_bytes(*cancel_order_size),
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only: reduce_only[0] != 0,
+                    limit: u8::from_le_bytes(*limit),
+                    expiry_type: ExpiryType::try_from_primitive(expiry_type_byte).ok()?,
+                }
+            }
+            76 => {
+                let data_arr = array_ref![data, 0, 68];
+                let (
+                    cancel_order_id,
+                    price,
+                    max_base_quantity,
+                    max_quote_quantity,
+                    expiry_timestamp,
+                    client_order_id,
+                    cancel_order_size,
+                    side,
+                    order_type,
+                    reduce_only,
+                    limit,
+                ) = array_refs![data_arr, 16, 8, 8, 8, 8, 8, 8, 1, 1, 1, 1];
+                let expiry_type_byte = if data.len() > 68 { data[68] } else { 0 };
+                MangoInstruction::EditPerpOrder {
+                    cancel_order_id: i128::from_le_bytes(*cancel_order_id),
+                    price: i64::from_le_bytes(*price),
+                    max_base_quantity: i64::from_le_bytes(*max_base_quantity),
+                    max_quote_quantity: i64::from_le_bytes(*max_quote_quantity),
+                    expiry_timestamp: u64::from_le_bytes(*expiry_timestamp),
+                    client_order_id: u64::from_le_bytes(*client_order_id),
+                    cancel_order_size: i64::from_le_bytes(*cancel_order_size),
+                    side: Side::try_from_primitive(side[0]).ok()?,
+                    order_type: OrderType::try_from_primitive(order_type[0]).ok()?,
+                    reduce_only: reduce_only[0] != 0,
+                    limit: u8::from_le_bytes(*limit),
+                    expiry_type: ExpiryType::try_from_primitive(expiry_type_byte).ok()?,
+                }
+            }
             _ => {
                 return None;
             }
@@ -3237,4 +3441,186 @@ fn serialize_option_fixed_width<S: serde::Serializer, T: Sized + Default + Seria
         }
     };
     tup.end()
+}
+
+pub fn edit_spot_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    dex_prog_pk: &Pubkey,
+    spot_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    dex_request_queue_pk: &Pubkey,
+    dex_event_queue_pk: &Pubkey,
+    dex_base_pk: &Pubkey,
+    dex_quote_pk: &Pubkey,
+    base_root_bank_pk: &Pubkey,
+    base_node_bank_pk: &Pubkey,
+    base_vault_pk: &Pubkey,
+    quote_root_bank_pk: &Pubkey,
+    quote_node_bank_pk: &Pubkey,
+    quote_vault_pk: &Pubkey,
+    signer_pk: &Pubkey,
+    dex_signer_pk: &Pubkey,
+    msrm_or_srm_vault_pk: &Pubkey,
+    open_orders_pks: &[Pubkey], // caller only need to pass in open_orders_pks that are in margin basket
+    affected_market_open_orders_index: usize, // used to determine which of the open orders accounts should be passed in write
+    cancel_order: serum_dex::instruction::CancelOrderInstructionV2,
+    cancel_order_size: u64,
+    new_order: serum_dex::instruction::NewOrderInstructionV3,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new_readonly(*dex_prog_pk, false),
+        AccountMeta::new(*spot_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*dex_request_queue_pk, false),
+        AccountMeta::new(*dex_event_queue_pk, false),
+        AccountMeta::new(*dex_base_pk, false),
+        AccountMeta::new(*dex_quote_pk, false),
+        AccountMeta::new_readonly(*base_root_bank_pk, false),
+        AccountMeta::new(*base_node_bank_pk, false),
+        AccountMeta::new(*base_vault_pk, false),
+        AccountMeta::new_readonly(*quote_root_bank_pk, false),
+        AccountMeta::new(*quote_node_bank_pk, false),
+        AccountMeta::new(*quote_vault_pk, false),
+        AccountMeta::new_readonly(spl_token::ID, false),
+        AccountMeta::new_readonly(*signer_pk, false),
+        AccountMeta::new_readonly(*dex_signer_pk, false),
+        AccountMeta::new_readonly(*msrm_or_srm_vault_pk, false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().enumerate().map(|(i, pk)| {
+        if i == affected_market_open_orders_index {
+            AccountMeta::new(*pk, false)
+        } else {
+            AccountMeta::new_readonly(*pk, false)
+        }
+    }));
+
+    let instr = MangoInstruction::EditSpotOrder { cancel_order, cancel_order_size, new_order };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn edit_perp_order_by_client_id(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
+    open_orders_pks: &[Pubkey],
+    price: i64,
+    max_base_quantity: i64,
+    max_quote_quantity: i64,
+    expiry_timestamp: u64,
+    client_order_id: u64,
+    cancel_order_size: i64,
+    side: Side,
+    order_type: OrderType,
+    reduce_only: bool,
+    limit: u8,
+    expiry_type: ExpiryType,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*referrer_mango_account_pk.unwrap_or(mango_account_pk), false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::EditPerpOrderByClientId {
+        price,
+        max_base_quantity,
+        max_quote_quantity,
+        expiry_timestamp,
+        client_order_id,
+        cancel_order_size,
+        side,
+        order_type,
+        reduce_only,
+        limit,
+        expiry_type,
+    };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
+}
+
+pub fn edit_perp_order(
+    program_id: &Pubkey,
+    mango_group_pk: &Pubkey,
+    mango_account_pk: &Pubkey,
+    owner_pk: &Pubkey,
+    mango_cache_pk: &Pubkey,
+    perp_market_pk: &Pubkey,
+    bids_pk: &Pubkey,
+    asks_pk: &Pubkey,
+    event_queue_pk: &Pubkey,
+    referrer_mango_account_pk: Option<&Pubkey>,
+    open_orders_pks: &[Pubkey],
+    cancel_order_id: i128,
+    price: i64,
+    max_base_quantity: i64,
+    max_quote_quantity: i64,
+    expiry_timestamp: u64,
+    client_order_id: u64,
+    cancel_order_size: i64,
+    side: Side,
+    order_type: OrderType,
+    reduce_only: bool,
+    limit: u8,
+    expiry_type: ExpiryType,
+) -> Result<Instruction, ProgramError> {
+    let mut accounts = vec![
+        AccountMeta::new_readonly(*mango_group_pk, false),
+        AccountMeta::new(*mango_account_pk, false),
+        AccountMeta::new_readonly(*owner_pk, true),
+        AccountMeta::new_readonly(*mango_cache_pk, false),
+        AccountMeta::new(*perp_market_pk, false),
+        AccountMeta::new(*bids_pk, false),
+        AccountMeta::new(*asks_pk, false),
+        AccountMeta::new(*event_queue_pk, false),
+        AccountMeta::new(*referrer_mango_account_pk.unwrap_or(mango_account_pk), false),
+    ];
+
+    accounts.extend(open_orders_pks.iter().map(|pk| AccountMeta::new_readonly(*pk, false)));
+
+    let instr = MangoInstruction::EditPerpOrder {
+        cancel_order_id,
+        price,
+        max_base_quantity,
+        max_quote_quantity,
+        expiry_timestamp,
+        client_order_id,
+        cancel_order_size,
+        side,
+        order_type,
+        reduce_only,
+        limit,
+        expiry_type,
+    };
+    let data = instr.pack();
+
+    Ok(Instruction { program_id: *program_id, accounts, data })
 }

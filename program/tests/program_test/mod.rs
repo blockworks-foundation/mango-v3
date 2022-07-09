@@ -3,7 +3,10 @@ use std::mem::size_of;
 
 use bincode::deserialize;
 use fixed::types::I80F48;
-use serum_dex::instruction::NewOrderInstructionV3;
+use serum_dex::{
+    instruction::{CancelOrderInstructionV2, NewOrderInstructionV3},
+    state::OpenOrders,
+};
 use solana_program::entrypoint::ProgramResult;
 use solana_program::{
     account_info::AccountInfo,
@@ -455,6 +458,29 @@ impl MangoProgramTest {
         let open_orders = load_open_orders(&acc).unwrap();
         let (quote_free, quote_locked, base_free, base_locked) = split_open_orders(&open_orders);
         return (quote_free, quote_locked, base_free, base_locked);
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_oo(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        user_index: usize,
+        mint_index: usize,
+    ) -> OpenOrders {
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mut oo = self.get_account(mango_account.spot_open_orders[0]).await;
+        let clock = self.get_clock().await;
+        let acc = solana_program::account_info::AccountInfo::new(
+            &mango_account.spot_open_orders[mint_index],
+            false,
+            false,
+            &mut oo.lamports,
+            &mut oo.data,
+            &mango_group_cookie.mango_accounts[user_index].address,
+            false,
+            clock.epoch,
+        );
+        return *load_open_orders(&acc).unwrap();
     }
 
     #[allow(dead_code)]
@@ -2045,6 +2071,221 @@ impl MangoProgramTest {
     }
 
     #[allow(dead_code)]
+    pub async fn edit_spot_order(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        spot_market_cookie: &SpotMarketCookie,
+        user_index: usize,
+        cancel_order: CancelOrderInstructionV2,
+        cancel_order_size: u64,
+        new_order: NewOrderInstructionV3,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let serum_program_id = self.serum_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let mint_index = spot_market_cookie.mint.index;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+
+        let (signer_pk, _signer_nonce) =
+            create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
+
+        let (mint_root_bank_pk, mint_root_bank) =
+            self.with_root_bank(&mango_group, mint_index).await;
+        let (mint_node_bank_pk, mint_node_bank) = self.with_node_bank(&mint_root_bank, 0).await;
+        let (quote_root_bank_pk, quote_root_bank) =
+            self.with_root_bank(&mango_group, self.quote_index).await;
+        let (quote_node_bank_pk, quote_node_bank) = self.with_node_bank(&quote_root_bank, 0).await;
+
+        // Only pass in open orders if in margin basket or current market index, and
+        // the only writable account should be OpenOrders for current market index
+        let mut open_orders_pks = Vec::new();
+        for x in 0..mango_account.spot_open_orders.len() {
+            if x == mint_index && mango_account.spot_open_orders[x] == Pubkey::default() {
+                open_orders_pks.push(
+                    self.create_spot_open_orders(
+                        &mango_group_pk,
+                        &mango_group,
+                        &mango_account_pk,
+                        user_index,
+                        x,
+                        None,
+                    )
+                    .await,
+                );
+            } else {
+                open_orders_pks.push(mango_account.spot_open_orders[x]);
+            }
+        }
+
+        let (dex_signer_pk, _dex_signer_nonce) =
+            create_signer_key_and_nonce(&serum_program_id, &spot_market_cookie.market);
+
+        let instructions = [mango::instruction::edit_spot_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &serum_program_id,
+            &spot_market_cookie.market,
+            &spot_market_cookie.bids,
+            &spot_market_cookie.asks,
+            &spot_market_cookie.req_q,
+            &spot_market_cookie.event_q,
+            &spot_market_cookie.coin_vault,
+            &spot_market_cookie.pc_vault,
+            &mint_root_bank_pk,
+            &mint_node_bank_pk,
+            &mint_node_bank.vault,
+            &quote_root_bank_pk,
+            &quote_node_bank_pk,
+            &quote_node_bank.vault,
+            &signer_pk,
+            &dex_signer_pk,
+            &mango_group.msrm_vault,
+            &open_orders_pks, // oo ais
+            mint_index,
+            cancel_order,
+            cancel_order_size,
+            new_order,
+        )
+        .unwrap()];
+
+        let signers = vec![&user];
+
+        self.process_transaction(&instructions, Some(&signers)).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn edit_perp_order_by_client_id(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_index: usize,
+        order_price: i64,
+        order_base_size: i64,
+        order_quote_size: i64,
+        expiry_timestamp: u64,
+        client_order_id: u64,
+        expected_cancel_size: i64,
+        side: Side,
+        order_type: OrderType,
+        reduce_only: bool,
+        limit: u8,
+        expiry_type: ExpiryType,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let open_orders_pks: Vec<Pubkey> = mango_account
+            .spot_open_orders
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &pk)| if mango_account.in_margin_basket[i] { Some(pk) } else { None })
+            .collect();
+
+        let instructions = [mango::instruction::edit_perp_order_by_client_id(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &perp_market.event_queue,
+            None,
+            &open_orders_pks,
+            order_price,
+            order_base_size,
+            order_quote_size,
+            expiry_timestamp,
+            client_order_id,
+            expected_cancel_size,
+            side,
+            order_type,
+            reduce_only,
+            limit,
+            expiry_type,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn edit_perp_order(
+        &mut self,
+        mango_group_cookie: &MangoGroupCookie,
+        perp_market_cookie: &PerpMarketCookie,
+        user_index: usize,
+        order_id: i128,
+        order_price: i64,
+        order_base_size: i64,
+        order_quote_size: i64,
+        expiry_timestamp: u64,
+        client_order_id: u64,
+        expected_cancel_size: i64,
+        side: Side,
+        order_type: OrderType,
+        reduce_only: bool,
+        limit: u8,
+        expiry_type: ExpiryType,
+    ) {
+        let mango_program_id = self.mango_program_id;
+        let mango_group = mango_group_cookie.mango_group;
+        let mango_group_pk = mango_group_cookie.address;
+        let mango_account = mango_group_cookie.mango_accounts[user_index].mango_account;
+        let mango_account_pk = mango_group_cookie.mango_accounts[user_index].address;
+        let perp_market = perp_market_cookie.perp_market;
+        let perp_market_pk = perp_market_cookie.address;
+
+        let user = Keypair::from_base58_string(&self.users[user_index].to_base58_string());
+        let open_orders_pks: Vec<Pubkey> = mango_account
+            .spot_open_orders
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &pk)| if mango_account.in_margin_basket[i] { Some(pk) } else { None })
+            .collect();
+
+        let instructions = [mango::instruction::edit_perp_order(
+            &mango_program_id,
+            &mango_group_pk,
+            &mango_account_pk,
+            &user.pubkey(),
+            &mango_group.mango_cache,
+            &perp_market_pk,
+            &perp_market.bids,
+            &perp_market.asks,
+            &perp_market.event_queue,
+            None,
+            &open_orders_pks,
+            order_id,
+            order_price,
+            order_base_size,
+            order_quote_size,
+            expiry_timestamp,
+            client_order_id,
+            expected_cancel_size,
+            side,
+            order_type,
+            reduce_only,
+            limit,
+            expiry_type,
+        )
+        .unwrap()];
+        self.process_transaction(&instructions, Some(&[&user])).await.unwrap();
+    }
+
     pub async fn perform_set_market_mode(
         &mut self,
         mango_group_cookie: &MangoGroupCookie,
