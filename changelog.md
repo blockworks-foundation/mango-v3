@@ -1,5 +1,49 @@
 # Mango Program Change Log
 
+## v3.5.1
+Deployed: Jul 9, 2022 at 17:07:37 UTC | Slot: 140,876,554
+1. Remove luna related hard codings
+2. Fix deposit leach bug
+3. Fix bugs in ForceSettlePerpPosition
+
+## v3.5.0
+Deployed: Jun 27, 2022 at 18:30:08 UTC | Slot: 139,265,834
+1. Add an ExpiryType argument to PlacePerpOrder2
+2. Add delisting instructions
+3. Add Withdraw2 which passes in compact open orders
+
+## v3.4.7
+Deployed: May 14, 2022 at 21:27:20 UTC | Slot: 133,813,868
+1. Fix overflow in SettlePnl
+2. Fix 0 base quantity trade for perps
+
+## v3.4.6
+Deployed: May 13, 2022 at 17:09:10 UTC | Slot: 133,663,345
+1. Force reduce only for perp market advanced order
+2. Allow LUNA-PERP bids to be as high as 9c
+3. Fix LUNA spot orders to be reduce only
+4. Fix LUNA-PERP reduce only to take into account open orders
+5. Allow LUNA spot bids to be as high as 9c
+
+## v3.4.5
+Deployed: May 12, 2022 at 14:29:36 UTC | Slot: 133,529,809
+1. LUNA perp market has been moved to reduce only. Only orders with reduce_only flag set will go through
+2. LUNA deposits are only allowed if you're offsetting a borrow
+3. LUNA borrows not allowed
+4. LUNA spot orders only allowed if reducing position
+5. LUNA price cache updates ignore confidence interval
+
+## v3.4.4
+Deployed: Apr 21, 2022 at 19:16:14 UTC | Slot: 130,742,427
+1. Update serum-dex package and allow for max_ts param
+2. Allow solana libs beyond 1.10
+3. Update anchor to 0.24.2
+4. Update all packages
+5. Mark RootBank and MangoCache as writable when passed into Deposit instruction
+6. CancelAllSpotOrders
+7. Add more checked math
+8. Clean up tests and speed them up
+
 ## v3.4.3
 Deployed: Apr 3, 2022 at 19:00:13 UTC | Slot: 128,066,047
 1. SettleFees will return Ok and fail silently if not pnl negative and fees accrued positive

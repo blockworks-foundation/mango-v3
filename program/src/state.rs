@@ -13,10 +13,11 @@ use serde::{Deserialize, Serialize};
 use serum_dex::state::ToAlignedBytes;
 use solana_program::account_info::AccountInfo;
 use solana_program::program_error::ProgramError;
+use solana_program::program_option::COption;
 use solana_program::program_pack::Pack;
 use solana_program::pubkey::Pubkey;
 use solana_program::sysvar::{clock::Clock, rent::Rent, Sysvar};
-use spl_token::state::Account;
+use spl_token::state::{Account, AccountState};
 use static_assertions::const_assert_eq;
 
 use mango_common::Loadable;
@@ -134,18 +135,61 @@ impl MetaData {
     }
 }
 
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Serialize, Deserialize, Debug,
+)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum MarketMode {
+    Default = 0, // Legacy value before v3.5 -- may imply Inactive or Active
+    Active = 1,
+    CloseOnly = 2,
+    ForceCloseOnly = 3,
+    Inactive = 4,
+    SwappingSpotMarket = 5, // special mode when we're swapping out a spot market
+}
+
+impl MarketMode {
+    pub fn is_reduce_only(self) -> bool {
+        self == MarketMode::CloseOnly || self == MarketMode::ForceCloseOnly
+    }
+    pub fn allow_new_open_orders(self) -> bool {
+        !(self == MarketMode::ForceCloseOnly
+            || self == MarketMode::SwappingSpotMarket
+            || self == MarketMode::Inactive)
+    }
+}
+
 #[derive(Copy, Clone, Pod)]
 #[repr(C)]
 pub struct TokenInfo {
     pub mint: Pubkey,
     pub root_bank: Pubkey,
     pub decimals: u8,
-    pub padding: [u8; 7],
+    pub spot_market_mode: MarketMode,
+    pub perp_market_mode: MarketMode,
+    pub oracle_inactive: bool,
+    pub padding: [u8; 4],
 }
 
 impl TokenInfo {
-    pub fn is_empty(&self) -> bool {
-        self.mint == Pubkey::default()
+    pub fn new(
+        mint: Pubkey,
+        root_bank: Pubkey,
+        decimals: u8,
+        spot_market_mode: MarketMode,
+        perp_market_mode: MarketMode,
+        oracle_inactive: bool,
+    ) -> Self {
+        Self {
+            mint,
+            root_bank,
+            decimals,
+            spot_market_mode,
+            perp_market_mode,
+            oracle_inactive,
+            padding: [0u8; 4],
+        }
     }
 }
 
@@ -218,6 +262,7 @@ pub struct MangoGroup {
     pub ref_surcharge_centibps: u32, // 100
     pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
     pub ref_mngo_required: u64,
+
     pub padding: [u8; 8], // padding used for future expansions
 }
 
@@ -256,21 +301,37 @@ impl MangoGroup {
     }
 
     pub fn find_oracle_index(&self, oracle_pk: &Pubkey) -> Option<usize> {
+        if oracle_pk == &Pubkey::default() {
+            // sanity check to be extra sure about data corruption
+            return None;
+        }
         self.oracles.iter().position(|pk| pk == oracle_pk) // TODO OPT profile
     }
     pub fn find_root_bank_index(&self, root_bank_pk: &Pubkey) -> Option<usize> {
         // TODO profile and optimize
+        if root_bank_pk == &Pubkey::default() {
+            return None;
+        }
         self.tokens.iter().position(|token_info| &token_info.root_bank == root_bank_pk)
     }
     pub fn find_token_index(&self, mint_pk: &Pubkey) -> Option<usize> {
+        if mint_pk == &Pubkey::default() {
+            return None;
+        }
         self.tokens.iter().position(|token_info| &token_info.mint == mint_pk)
     }
     pub fn find_spot_market_index(&self, spot_market_pk: &Pubkey) -> Option<usize> {
+        if spot_market_pk == &Pubkey::default() {
+            return None;
+        }
         self.spot_markets
             .iter()
             .position(|spot_market_info| &spot_market_info.spot_market == spot_market_pk)
     }
     pub fn find_perp_market_index(&self, perp_market_pk: &Pubkey) -> Option<usize> {
+        if perp_market_pk == &Pubkey::default() {
+            return None;
+        }
         self.perp_markets
             .iter()
             .position(|perp_market_info| &perp_market_info.perp_market == perp_market_pk)
@@ -285,6 +346,12 @@ impl MangoGroup {
                 HealthType::Equity => ONE_I80F48,
             }
         }
+    }
+
+    pub fn is_spot_market_active(&self, market_index: usize) -> bool {
+        !self.spot_markets[market_index].is_empty()
+            && (self.tokens[market_index].spot_market_mode == MarketMode::Active
+                || self.tokens[market_index].spot_market_mode == MarketMode::Default)
     }
 }
 
@@ -394,24 +461,16 @@ impl RootBank {
         self.node_banks.iter().position(|pk| pk == node_bank_pk)
     }
 
-    pub fn update_index(
+    /// There can only be one node_bank as of v3.5.
+    /// So this function can be used directly by just passing in the indexed deposits and borrows of that node bank
+    pub fn update_index_without_banks(
         &mut self,
-        node_bank_ais: &[AccountInfo],
-        program_id: &Pubkey,
         now_ts: u64,
-    ) -> MangoResult<()> {
-        let mut native_deposits = ZERO_I80F48;
-        let mut native_borrows = ZERO_I80F48;
-
-        for node_bank_ai in node_bank_ais.iter() {
-            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
-            native_deposits = native_deposits
-                .checked_add(node_bank.deposits.checked_mul(self.deposit_index).unwrap())
-                .unwrap();
-            native_borrows = native_borrows
-                .checked_add(node_bank.borrows.checked_mul(self.borrow_index).unwrap())
-                .unwrap();
-        }
+        deposits: I80F48,
+        borrows: I80F48,
+    ) -> MangoResult {
+        let native_deposits = deposits.checked_mul(self.deposit_index).unwrap();
+        let native_borrows = borrows.checked_mul(self.borrow_index).unwrap();
 
         // TODO - is this a good assumption?
         let utilization = native_borrows.checked_div(native_deposits).unwrap_or(ZERO_I80F48);
@@ -445,6 +504,23 @@ impl RootBank {
             .unwrap();
 
         Ok(())
+    }
+    pub fn update_index(
+        &mut self,
+        node_bank_ais: &[AccountInfo],
+        program_id: &Pubkey,
+        now_ts: u64,
+    ) -> MangoResult<()> {
+        let mut deposits = ZERO_I80F48;
+        let mut borrows = ZERO_I80F48;
+
+        for node_bank_ai in node_bank_ais.iter() {
+            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
+            deposits = deposits.checked_add(node_bank.deposits).unwrap();
+            borrows = borrows.checked_add(node_bank.borrows).unwrap();
+        }
+
+        self.update_index_without_banks(now_ts, deposits, borrows)
     }
 
     /// Socialize the loss on lenders and return (native_loss, percentage_loss)
@@ -753,11 +829,11 @@ impl UserActiveAssets {
         extra.iter().for_each(|(at, i)| match at {
             AssetType::Token => {
                 if *i != QUOTE_INDEX {
-                    spot[*i] = true;
+                    spot[*i] = !mango_group.spot_markets[*i].is_empty();
                 }
             }
             AssetType::Perp => {
-                perps[*i] = true;
+                perps[*i] = !mango_group.perp_markets[*i].is_empty();
             }
         });
         Self { spot, perps }
@@ -1953,7 +2029,7 @@ impl PerpAccount {
         let bids_base_net = curr_pos.checked_add(self.bids_quantity).unwrap();
         let asks_base_net = curr_pos.checked_sub(self.asks_quantity).unwrap();
 
-        if bids_base_net.abs() > asks_base_net.abs() {
+        if bids_base_net.checked_abs().unwrap() > asks_base_net.checked_abs().unwrap() {
             let base = I80F48::from_num(bids_base_net.checked_mul(pmi.base_lot_size).unwrap())
                 .checked_mul(price)
                 .unwrap();
@@ -1990,22 +2066,31 @@ impl PerpAccount {
     ) -> MangoResult<(I80F48, I80F48)> {
         let taker_base = self.taker_base + taker_base;
         let taker_quote = self.taker_quote + taker_quote;
-        let bids_quantity = self.bids_quantity + bids_quantity;
-        let asks_quantity = self.asks_quantity + asks_quantity;
+        let bids_quantity = self.bids_quantity.checked_add(bids_quantity).unwrap();
+        let asks_quantity = self.asks_quantity.checked_add(asks_quantity).unwrap();
 
-        let bids_base_net = self.base_position + taker_base + bids_quantity;
-        let asks_base_net = self.base_position + taker_base - asks_quantity;
-        if bids_base_net.abs() > asks_base_net.abs() {
-            let base = I80F48::from_num(bids_base_net * pmi.base_lot_size) * price;
+        let curr_pos = self.base_position + taker_base;
+        let bids_base_net = curr_pos.checked_add(bids_quantity).unwrap();
+        let asks_base_net = curr_pos.checked_sub(asks_quantity).unwrap();
+        if bids_base_net.checked_abs().unwrap() > asks_base_net.checked_abs().unwrap() {
+            let base = I80F48::from_num(bids_base_net.checked_mul(pmi.base_lot_size).unwrap())
+                .checked_mul(price)
+                .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(taker_quote * pmi.quote_lot_size)
-                - I80F48::from_num(bids_quantity * pmi.base_lot_size) * price;
+                - I80F48::from_num(bids_quantity.checked_mul(pmi.base_lot_size).unwrap())
+                    .checked_mul(price)
+                    .unwrap();
             Ok((base, quote))
         } else {
-            let base = I80F48::from_num(asks_base_net * pmi.base_lot_size) * price;
+            let base = I80F48::from_num(asks_base_net.checked_mul(pmi.base_lot_size).unwrap())
+                .checked_mul(price)
+                .unwrap();
             let quote = self.get_quote_position(pmc)
                 + I80F48::from_num(taker_quote * pmi.quote_lot_size)
-                + I80F48::from_num(asks_quantity * pmi.base_lot_size) * price;
+                + I80F48::from_num(asks_quantity.checked_mul(pmi.base_lot_size).unwrap())
+                    .checked_mul(price)
+                    .unwrap();
             Ok((base, quote))
         }
     }
@@ -2604,3 +2689,50 @@ impl ReferrerIdRecord {
         Ok(())
     }
 }
+
+/// SPL Token `Account` that is zero copy loadable. Saves 700 CU over `Account::unpack`
+/// example usage:
+/// ```ignore
+/// use std::cell::Ref;
+/// use mango::state::TokenAccount;
+/// let token_account: Ref<TokenAccount> = TokenAccount::load_checked(token_account_ai)?;
+/// ```
+#[repr(C, packed)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Loadable)]
+pub struct TokenAccount {
+    /// The mint associated with this account
+    pub mint: Pubkey,
+    /// The owner of this account.
+    pub owner: Pubkey,
+    /// The amount of tokens this account holds.
+    pub amount: u64, // 72
+    /// If `delegate` is `Some` then `delegated_amount` represents
+    /// the amount authorized by the delegate
+    pub delegate: COption<Pubkey>, // 108
+    /// The account's state
+    pub state: AccountState, // 109
+
+    // /// If is_native.is_some, this is a native token, and the value logs the rent-exempt reserve. An
+    // /// Account is required to be rent-exempt, so the value is used by the Processor to ensure that
+    // /// wrapped SOL accounts do not drop below this threshold.
+    // pub is_native: COption<u64>, // 121
+    padding: [u8; 12], // COption<u64> tries to take 16 bytes instead of actual 12
+    /// The amount delegated
+    pub delegated_amount: u64, // 129
+    /// Optional authority to close the account.
+    pub close_authority: COption<Pubkey>, // 165
+}
+
+impl TokenAccount {
+    pub fn load_checked<'a>(account: &'a AccountInfo) -> MangoResult<Ref<'a, Self>> {
+        let state: Ref<'a, Self> = Self::load(account)?;
+        check!(
+            state.state == AccountState::Uninitialized
+                || state.state == AccountState::Initialized
+                || state.state == AccountState::Frozen,
+            MangoErrorCode::InvalidAccountState
+        )?;
+        Ok(state)
+    }
+}
+const_assert_eq!(size_of::<TokenAccount>(), 165);

@@ -23,7 +23,7 @@ use crate::ids::mngo_token;
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
     DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketCache,
-    PerpMarketInfo, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
+    PerpMarketInfo, TokenInfo, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
 };
 use crate::utils::emit_perp_balances;
 
@@ -333,6 +333,24 @@ pub enum OrderType {
 pub enum Side {
     Bid = 0,
     Ask = 1,
+}
+
+#[derive(
+    Eq, PartialEq, Copy, Clone, TryFromPrimitive, IntoPrimitive, Debug, Serialize, Deserialize,
+)]
+#[repr(u8)]
+#[serde(into = "u8", try_from = "u8")]
+pub enum ExpiryType {
+    /// Expire at exactly the given block time.
+    ///
+    /// Orders with an expiry in the past are ignored. Expiry more than 255s in the future
+    /// is clamped to 255 seconds.
+    Absolute,
+
+    /// Expire a number of block time seconds in the future.
+    ///
+    /// Must be between 1 and 255.
+    Relative,
 }
 
 pub const MAX_BOOK_NODES: usize = 1024; // NOTE: this cannot be larger than u32::MAX
@@ -784,6 +802,10 @@ impl BookSide {
         self.free_list_len <= 1 && self.bump_index >= self.nodes.len() - 1
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.leaf_count == 0
+    }
+
     /// When a node changes, the parents' child_earliest_expiry may need to be updated.
     ///
     /// This function walks up the `stack` of parents and applies the change where the
@@ -1000,6 +1022,7 @@ impl<'a> Book<'a> {
         &self,
         market: &PerpMarket,
         info: &PerpMarketInfo,
+        token_info: &TokenInfo,
         oracle_price: I80F48,
         price: i64,
         max_base_quantity: i64, // guaranteed to be greater than zero due to initial check
@@ -1026,9 +1049,19 @@ impl<'a> Book<'a> {
         if post_allowed {
             // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
-                msg!("Posting on book disallowed due to price limits");
-                post_allowed = false;
+
+            if native_price > info.maint_liab_weight.checked_mul(oracle_price).unwrap() {
+                // if oracle price is below 1 and market is in close only, then allow people to place at 1
+                if token_info.perp_market_mode.is_reduce_only() {
+                    let low_threshold = market.lot_to_native_price(1);
+                    if oracle_price < low_threshold && native_price > low_threshold {
+                        msg!("Posting on book disallowed due to price limits");
+                        post_allowed = false;
+                    }
+                } else {
+                    msg!("Posting on book disallowed due to price limits");
+                    post_allowed = false;
+                }
             }
         }
 
@@ -1174,9 +1207,19 @@ impl<'a> Book<'a> {
         if post_allowed {
             // price limit check computed lazily to save CU on average
             let native_price = market.lot_to_native_price(price);
-            if native_price.checked_div(oracle_price).unwrap() > info.maint_liab_weight {
-                msg!("Posting on book disallowed due to price limits");
-                post_allowed = false;
+
+            if native_price > info.maint_liab_weight.checked_mul(oracle_price).unwrap() {
+                // if oracle price is below 1 and market is in close only, then allow people to place at 1
+                if mango_group.tokens[market_index].perp_market_mode.is_reduce_only() {
+                    let low_threshold = market.lot_to_native_price(1);
+                    if oracle_price < low_threshold && native_price > low_threshold {
+                        msg!("Posting on book disallowed due to price limits");
+                        post_allowed = false;
+                    }
+                } else {
+                    msg!("Posting on book disallowed due to price limits");
+                    post_allowed = false;
+                }
             }
         }
 
@@ -1230,6 +1273,11 @@ impl<'a> Book<'a> {
             }
 
             let max_match_by_quote = rem_quote_quantity / best_ask_price;
+            if max_match_by_quote == 0 {
+                // Done matching because we reached max quote quantity
+                post_allowed = false;
+                break;
+            }
             let match_quantity = rem_base_quantity.min(best_ask.quantity).min(max_match_by_quote);
             let done = match_quantity == max_match_by_quote || match_quantity == rem_base_quantity;
 
@@ -1485,6 +1533,11 @@ impl<'a> Book<'a> {
             }
 
             let max_match_by_quote = rem_quote_quantity / best_bid_price;
+            if max_match_by_quote == 0 {
+                // Done matching because we reached max quote quantity
+                post_allowed = false;
+                break;
+            }
             let match_quantity = rem_base_quantity.min(best_bid.quantity).min(max_match_by_quote);
             let done = match_quantity == max_match_by_quote || match_quantity == rem_base_quantity;
 
