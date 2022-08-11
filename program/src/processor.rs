@@ -6859,14 +6859,16 @@ impl Processor {
         // First make sure this oracle is active
         check!(!token_info.oracle_inactive, MangoErrorCode::InvalidAccountState)?;
 
-        check!(
-            token_info.spot_market_mode == MarketMode::Inactive,
-            MangoErrorCode::InvalidAccountState
-        )?;
-        check!(
-            token_info.perp_market_mode == MarketMode::Inactive,
-            MangoErrorCode::InvalidAccountState
-        )?;
+        {
+            check!(
+                mango_group.spot_markets[oracle_index].spot_market == Pubkey::default(),
+                MangoErrorCode::InvalidAccountState
+            )?;
+            check!(
+                mango_group.perp_markets[oracle_index].perp_market == Pubkey::default(),
+                MangoErrorCode::InvalidAccountState
+            )?;
+        }
 
         token_info.oracle_inactive = true;
 
