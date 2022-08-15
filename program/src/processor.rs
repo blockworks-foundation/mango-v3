@@ -6854,8 +6854,6 @@ impl Processor {
             .ok_or(throw_err!(MangoErrorCode::InvalidAccount))?;
         mango_group.oracles[oracle_index] = Pubkey::default();
 
-        let token_info = &mut mango_group.tokens[oracle_index];
-
         {
             check!(
                 mango_group.spot_markets[oracle_index].spot_market == Pubkey::default(),
@@ -6866,6 +6864,8 @@ impl Processor {
                 MangoErrorCode::InvalidAccountState
             )?;
         }
+
+        let token_info = &mut mango_group.tokens[oracle_index];
 
         // First make sure this oracle is active
         check!(!token_info.oracle_inactive, MangoErrorCode::InvalidAccountState)?;
