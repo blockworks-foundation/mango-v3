@@ -1172,6 +1172,19 @@ pub enum MangoInstruction {
     /// 3. `[]` mango_cache_ai
     /// 4. `[writable]` perp_market_ai
     ForceSettlePerpPosition,
+
+    /// Set the `ref_surcharge_centibps`, `ref_share_centibps` for both tiers and `ref_mngo_required` on `MangoGroup`
+    ///
+    /// Accounts expected by this instruction (2):
+    /// 0. `[writable]` mango_group_ai - MangoGroup that this mango account is for
+    /// 1. `[signer]` admin_ai - mango_group.admin
+    ChangeReferralFeeParams2 {
+        ref_surcharge_centibps_tier_1: u32,
+        ref_share_centibps_tier_1: u32,
+        ref_surcharge_centibps_tier_2: u32,
+        ref_share_centibps_tier_2: u32,
+        ref_mngo_required: u64,
+    },
 }
 
 impl MangoInstruction {
@@ -1700,6 +1713,18 @@ impl MangoInstruction {
                 }
             }
             73 => MangoInstruction::ForceSettlePerpPosition,
+            74 => {
+                let data = array_ref![data, 0, 24];
+                let (ref_surcharge_centibps_tier_1, ref_share_centibps_tier_1, ref_surcharge_centibps_tier_2, ref_share_centibps_tier_2, ref_mngo_required) =
+                    array_refs![data, 4, 4, 4, 4, 8];
+                MangoInstruction::ChangeReferralFeeParams2 {
+                    ref_surcharge_centibps_tier_1: u32::from_le_bytes(*ref_surcharge_centibps_tier_1),
+                    ref_share_centibps_tier_1: u32::from_le_bytes(*ref_share_centibps_tier_1),
+                    ref_surcharge_centibps_tier_2: u32::from_le_bytes(*ref_surcharge_centibps_tier_2),
+                    ref_share_centibps_tier_2: u32::from_le_bytes(*ref_share_centibps_tier_2),
+                    ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
+                }
+            }
             _ => {
                 return None;
             }

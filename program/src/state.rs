@@ -51,6 +51,7 @@ pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
 pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
+pub const REF_TIER_2_FACTOR: I80F48 = I80F48!(10);
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -259,11 +260,11 @@ pub struct MangoGroup {
     pub max_mango_accounts: u32, // limits maximum number of MangoAccounts.v1 (closeable) accounts
     pub num_mango_accounts: u32, // number of MangoAccounts.v1
 
-    pub ref_surcharge_centibps: u32, // 100
-    pub ref_share_centibps: u32,     // 80 (must be less than surcharge)
+    pub ref_surcharge_centibps_tier_1: u32, // 100
+    pub ref_share_centibps_tier_1: u32,     // 80 (must be less than surcharge)
     pub ref_mngo_required: u64,
-
-    pub padding: [u8; 8], // padding used for future expansions
+    pub ref_surcharge_centibps_tier_2: u32,
+    pub ref_share_centibps_tier_2: u32,
 }
 
 impl MangoGroup {
@@ -1198,8 +1199,15 @@ impl HealthCache {
                 let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-                if mngo_deposits < ref_mngo_req {
-                    market_fees += (I80F48::from_num(mango_group.ref_surcharge_centibps)
+
+                if mngo_deposits < ref_mngo_req * REF_TIER_2_FACTOR {
+                    let surcharge = if mango_group.ref_surcharge_centibps_tier_2 > 0 && mngo_deposits > ref_mngo_req {
+                        mango_group.ref_surcharge_centibps_tier_2
+                    } else {
+                        mango_group.ref_surcharge_centibps_tier_1
+                    };
+
+                    market_fees += (I80F48::from_num(surcharge)
                         / CENTIBPS_PER_UNIT)
                         * taker_quote_native;
                 }
