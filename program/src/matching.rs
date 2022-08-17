@@ -2069,15 +2069,16 @@ fn determine_ref_vars<'a>(
     };
 
     let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
+    let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0 && mango_group.ref_share_centibps_tier_2 != 0;
 
     // If the user's MNGO deposit is non-zero then the rootbank cache will be checked already in `place_perp_order`.
     // If it's zero then cache may be out of date, but it doesn't matter because 0 * index = 0
     let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
     let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
 
-    if mngo_deposits >= ref_mngo_req * REF_TIER_2_FACTOR {
+    if tier_2_enabled && mngo_deposits >= ref_mngo_req * REF_TIER_2_FACTOR || !tier_2_enabled && mngo_deposits >= ref_mngo_req {
         return Ok((ZERO_I80F48, None));
-    } else if mngo_deposits >= ref_mngo_req {
+    } else if tier_2_enabled && mngo_deposits >= ref_mngo_req {
         return Ok((I80F48::from_num(mango_group.ref_surcharge_centibps_tier_1) / CENTIBPS_PER_UNIT, None));
     } else if let Some(referrer_mango_account_ai) = referrer_mango_account_ai {
         // If referrer_mango_account is invalid, just treat it as if it doesn't exist
@@ -2089,7 +2090,7 @@ fn determine_ref_vars<'a>(
             let ref_mngo_deposits =
                 referrer_mango_account.get_native_deposit(mngo_cache, mngo_index)?;
 
-            let share = if mango_group.ref_share_centibps_tier_2 != 0 && ref_mngo_deposits > ref_mngo_req {
+            let share = if tier_2_enabled && ref_mngo_deposits >= ref_mngo_req * REF_TIER_2_FACTOR {
                 mango_group.ref_share_centibps_tier_2
             } else {
                 mango_group.ref_share_centibps_tier_1
@@ -2106,7 +2107,13 @@ fn determine_ref_vars<'a>(
             }
         }
     }
-    Ok((I80F48::from_num(mango_group.ref_surcharge_centibps_tier_2) / CENTIBPS_PER_UNIT, None))
+    let surcharge = if tier_2_enabled {
+        mango_group.ref_surcharge_centibps_tier_2
+    } else {
+        mango_group.ref_surcharge_centibps_tier_1
+    };
+
+    Ok((I80F48::from_num(surcharge) / CENTIBPS_PER_UNIT, None))
 }
 
 /// Apply taker fees to the taker account and update the markets' fees_accrued for
