@@ -1199,18 +1199,18 @@ impl HealthCache {
                 let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-                let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0 && mango_group.ref_share_centibps_tier_2 != 0;
+                let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0
+                    && mango_group.ref_share_centibps_tier_2 != 0;
 
                 if mngo_deposits < ref_mngo_req * REF_TIER_2_FACTOR {
-                    let surcharge = if tier_2_enabled && mngo_deposits > ref_mngo_req {
+                    let surcharge = if tier_2_enabled && mngo_deposits < ref_mngo_req {
                         mango_group.ref_surcharge_centibps_tier_2
                     } else {
                         mango_group.ref_surcharge_centibps_tier_1
                     };
 
-                    market_fees += (I80F48::from_num(surcharge)
-                        / CENTIBPS_PER_UNIT)
-                        * taker_quote_native;
+                    market_fees +=
+                        (I80F48::from_num(surcharge) / CENTIBPS_PER_UNIT) * taker_quote_native;
                 }
             }
             market_fees

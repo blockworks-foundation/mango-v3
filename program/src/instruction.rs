@@ -1715,12 +1715,21 @@ impl MangoInstruction {
             73 => MangoInstruction::ForceSettlePerpPosition,
             74 => {
                 let data = array_ref![data, 0, 24];
-                let (ref_surcharge_centibps_tier_1, ref_share_centibps_tier_1, ref_surcharge_centibps_tier_2, ref_share_centibps_tier_2, ref_mngo_required) =
-                    array_refs![data, 4, 4, 4, 4, 8];
+                let (
+                    ref_surcharge_centibps_tier_1,
+                    ref_share_centibps_tier_1,
+                    ref_surcharge_centibps_tier_2,
+                    ref_share_centibps_tier_2,
+                    ref_mngo_required,
+                ) = array_refs![data, 4, 4, 4, 4, 8];
                 MangoInstruction::ChangeReferralFeeParams2 {
-                    ref_surcharge_centibps_tier_1: u32::from_le_bytes(*ref_surcharge_centibps_tier_1),
+                    ref_surcharge_centibps_tier_1: u32::from_le_bytes(
+                        *ref_surcharge_centibps_tier_1,
+                    ),
                     ref_share_centibps_tier_1: u32::from_le_bytes(*ref_share_centibps_tier_1),
-                    ref_surcharge_centibps_tier_2: u32::from_le_bytes(*ref_surcharge_centibps_tier_2),
+                    ref_surcharge_centibps_tier_2: u32::from_le_bytes(
+                        *ref_surcharge_centibps_tier_2,
+                    ),
                     ref_share_centibps_tier_2: u32::from_le_bytes(*ref_share_centibps_tier_2),
                     ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
                 }

@@ -6169,17 +6169,33 @@ impl Processor {
         ref_share_centibps_tier_2: u32,
         ref_mngo_required: u64,
     ) -> MangoResult {
-        
         let tier_2_enabled = ref_surcharge_centibps_tier_2 != 0 && ref_share_centibps_tier_2 != 0;
         if tier_2_enabled {
-            // tier 1 surcharge must be less than tier 2 surcharge so 10k holders get a discount
-            check!(ref_surcharge_centibps_tier_1 < ref_surcharge_centibps_tier_2, MangoErrorCode::InvalidParam)?;
-            // tier 1 share must be greater than tier 1 surcharge so 10k referees pay more then their referrer
-            check!(ref_share_centibps_tier_1 > ref_surcharge_centibps_tier_1, MangoErrorCode::InvalidParam)?;
-            // tier 2 share must be less than tier 2 surcharge so 100k referees don't pay more than base fee
-            check!(ref_share_centibps_tier_2 < ref_surcharge_centibps_tier_2, MangoErrorCode::InvalidParam)?;
+            // tier 1 surcharge must be <= tier 2 surcharge so tier 1 holders don't pay more than base fee
+            check!(
+                ref_surcharge_centibps_tier_1 <= ref_surcharge_centibps_tier_2,
+                MangoErrorCode::InvalidParam
+            )?;
+            // tier 1 share must be >= tier 1 surcharge so tier 1 referees don't pay less than their referrer
+            check!(
+                ref_share_centibps_tier_1 >= ref_surcharge_centibps_tier_1,
+                MangoErrorCode::InvalidParam
+            )?;
+            // tier 1 share must be <= tier 2 share so tier 2 referrers don't earn less fees than tier 1 referrers
+            check!(
+                ref_share_centibps_tier_1 <= ref_share_centibps_tier_2,
+                MangoErrorCode::InvalidParam
+            )?;
+            // tier 2 share must be <= tier 2 surcharge so tier 2 referees don't pay more than base fee
+            check!(
+                ref_share_centibps_tier_2 <= ref_surcharge_centibps_tier_2,
+                MangoErrorCode::InvalidParam
+            )?;
         } else {
-            check!(ref_surcharge_centibps_tier_1 >= ref_share_centibps_tier_1, MangoErrorCode::InvalidParam)?;
+            check!(
+                ref_surcharge_centibps_tier_1 >= ref_share_centibps_tier_1,
+                MangoErrorCode::InvalidParam
+            )?;
         }
 
         const NUM_FIXED: usize = 2;
