@@ -6169,8 +6169,18 @@ impl Processor {
         ref_share_centibps_tier_2: u32,
         ref_mngo_required: u64,
     ) -> MangoResult {
-        check!(ref_surcharge_centibps_tier_1 >= ref_share_centibps_tier_1, MangoErrorCode::InvalidParam)?;
-        check!(ref_surcharge_centibps_tier_2 >= ref_share_centibps_tier_2, MangoErrorCode::InvalidParam)?;
+        
+        let tier_2_enabled = ref_surcharge_centibps_tier_2 != 0 && ref_share_centibps_tier_2 != 0;
+        if tier_2_enabled {
+            // tier 1 surcharge must be less than tier 2 surcharge so 10k holders get a discount
+            check!(ref_surcharge_centibps_tier_1 < ref_surcharge_centibps_tier_2, MangoErrorCode::InvalidParam)?;
+            // tier 1 share must be greater than tier 1 surcharge so 10k referees pay more then their referrer
+            check!(ref_share_centibps_tier_1 > ref_surcharge_centibps_tier_1, MangoErrorCode::InvalidParam)?;
+            // tier 2 share must be less than tier 2 surcharge so 100k referees don't pay more than base fee
+            check!(ref_share_centibps_tier_2 < ref_surcharge_centibps_tier_2, MangoErrorCode::InvalidParam)?;
+        } else {
+            check!(ref_surcharge_centibps_tier_1 >= ref_share_centibps_tier_1, MangoErrorCode::InvalidParam)?;
+        }
 
         const NUM_FIXED: usize = 2;
         let accounts = array_ref![accounts, 0, NUM_FIXED];
@@ -6183,7 +6193,7 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        msg!("old referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {}", mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_mngo_required);
+        msg!("old referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {}", mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_surcharge_centibps_tier_2, mango_group.ref_share_centibps_tier_2, mango_group.ref_mngo_required);
 
         // TODO - when this goes out, if there are any events on the EventQueue fee logging will be messed up
 
