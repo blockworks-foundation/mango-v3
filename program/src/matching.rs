@@ -2076,7 +2076,7 @@ fn determine_ref_vars<'a>(
     // If it's zero then cache may be out of date, but it doesn't matter because 0 * index = 0
     let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
     let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-    let ref_mngo_tier_2_factor = I80F48::from_num(mango_group.ref_mngo_required_tier_2_factor);
+    let ref_mngo_tier_2_factor = I80F48::from_num(mango_group.ref_mngo_tier_2_factor);
 
     if tier_2_enabled && mngo_deposits >= ref_mngo_req * ref_mngo_tier_2_factor
         || !tier_2_enabled && mngo_deposits >= ref_mngo_req

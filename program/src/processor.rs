@@ -6211,7 +6211,7 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        msg!("old referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {} ref_mngo_tier_2_factor {}", mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_surcharge_centibps_tier_2, mango_group.ref_share_centibps_tier_2, mango_group.ref_mngo_required, mango_group.ref_mngo_required_tier_2_factor);
+        msg!("old referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {} ref_mngo_tier_2_factor {}", mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_surcharge_centibps_tier_2, mango_group.ref_share_centibps_tier_2, mango_group.ref_mngo_required, mango_group.ref_mngo_tier_2_factor);
 
         // TODO - when this goes out, if there are any events on the EventQueue fee logging will be messed up
 
@@ -6220,7 +6220,7 @@ impl Processor {
         mango_group.ref_surcharge_centibps_tier_2 = ref_surcharge_centibps_tier_2;
         mango_group.ref_share_centibps_tier_2 = ref_share_centibps_tier_2;
         mango_group.ref_mngo_required = ref_mngo_required;
-        mango_group.ref_mngo_required_tier_2_factor = ref_mngo_tier_2_factor;
+        mango_group.ref_mngo_tier_2_factor = ref_mngo_tier_2_factor;
 
         msg!("new referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {} ref_mngo_tier_2_factor {}", ref_surcharge_centibps_tier_1, ref_share_centibps_tier_1, ref_surcharge_centibps_tier_2, ref_share_centibps_tier_2, ref_mngo_required, ref_mngo_tier_2_factor);
         Ok(())

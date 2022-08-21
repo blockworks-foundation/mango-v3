@@ -264,7 +264,7 @@ pub struct MangoGroup {
     pub ref_mngo_required: u64,
     pub ref_surcharge_centibps_tier_2: u16,
     pub ref_share_centibps_tier_2: u16,
-    pub ref_mngo_required_tier_2_factor: u8,
+    pub ref_mngo_tier_2_factor: u8,
 
     pub padding: [u8; 3],
 }
@@ -1202,7 +1202,7 @@ impl HealthCache {
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
                 let ref_mngo_tier_2_factor =
-                    I80F48::from_num(mango_group.ref_mngo_required_tier_2_factor);
+                    I80F48::from_num(mango_group.ref_mngo_tier_2_factor);
                 let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0
                     && mango_group.ref_share_centibps_tier_2 != 0;
 
