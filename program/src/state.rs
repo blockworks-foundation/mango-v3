@@ -1201,8 +1201,7 @@ impl HealthCache {
                 let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
-                let ref_mngo_tier_2_factor =
-                    I80F48::from_num(mango_group.ref_mngo_tier_2_factor);
+                let ref_mngo_tier_2_factor = I80F48::from_num(mango_group.ref_mngo_tier_2_factor);
                 let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0
                     && mango_group.ref_share_centibps_tier_2 != 0;
 
