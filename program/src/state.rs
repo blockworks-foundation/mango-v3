@@ -51,7 +51,6 @@ pub const MAX_NUM_IN_MARGIN_BASKET: u8 = 9;
 pub const INDEX_START: I80F48 = I80F48!(1_000_000);
 pub const PYTH_CONF_FILTER: I80F48 = I80F48!(0.10); // filter out pyth prices with conf > 10% of price
 pub const CENTIBPS_PER_UNIT: I80F48 = I80F48!(1_000_000);
-pub const REF_TIER_2_FACTOR: I80F48 = I80F48!(10);
 
 declare_check_assert_macros!(SourceFileId::State);
 
@@ -263,8 +262,11 @@ pub struct MangoGroup {
     pub ref_surcharge_centibps_tier_1: u32, // 100
     pub ref_share_centibps_tier_1: u32,     // 80 (must be less than surcharge)
     pub ref_mngo_required: u64,
-    pub ref_surcharge_centibps_tier_2: u32,
-    pub ref_share_centibps_tier_2: u32,
+    pub ref_surcharge_centibps_tier_2: u16,
+    pub ref_share_centibps_tier_2: u16,
+    pub ref_mngo_required_tier_2_factor: u8,
+
+    pub padding: [u8; 3],
 }
 
 impl MangoGroup {
@@ -1199,12 +1201,14 @@ impl HealthCache {
                 let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
+                let ref_mngo_tier_2_factor =
+                    I80F48::from_num(mango_group.ref_mngo_required_tier_2_factor);
                 let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0
                     && mango_group.ref_share_centibps_tier_2 != 0;
 
-                if mngo_deposits < ref_mngo_req * REF_TIER_2_FACTOR {
+                if mngo_deposits < ref_mngo_req * ref_mngo_tier_2_factor {
                     let surcharge = if tier_2_enabled && mngo_deposits < ref_mngo_req {
-                        mango_group.ref_surcharge_centibps_tier_2
+                        mango_group.ref_surcharge_centibps_tier_2.into()
                     } else {
                         mango_group.ref_surcharge_centibps_tier_1
                     };

@@ -23,8 +23,7 @@ use crate::ids::mngo_token;
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
     DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketCache,
-    PerpMarketInfo, TokenInfo, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, REF_TIER_2_FACTOR,
-    ZERO_I80F48,
+    PerpMarketInfo, TokenInfo, CENTIBPS_PER_UNIT, MAX_PERP_OPEN_ORDERS, ZERO_I80F48,
 };
 use crate::utils::emit_perp_balances;
 
@@ -2077,8 +2076,9 @@ fn determine_ref_vars<'a>(
     // If it's zero then cache may be out of date, but it doesn't matter because 0 * index = 0
     let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
     let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
+    let ref_mngo_tier_2_factor = I80F48::from_num(mango_group.ref_mngo_required_tier_2_factor);
 
-    if tier_2_enabled && mngo_deposits >= ref_mngo_req * REF_TIER_2_FACTOR
+    if tier_2_enabled && mngo_deposits >= ref_mngo_req * ref_mngo_tier_2_factor
         || !tier_2_enabled && mngo_deposits >= ref_mngo_req
     {
         return Ok((ZERO_I80F48, None));
@@ -2097,11 +2097,12 @@ fn determine_ref_vars<'a>(
             let ref_mngo_deposits =
                 referrer_mango_account.get_native_deposit(mngo_cache, mngo_index)?;
 
-            let share = if tier_2_enabled && ref_mngo_deposits >= ref_mngo_req * REF_TIER_2_FACTOR {
-                mango_group.ref_share_centibps_tier_2
-            } else {
-                mango_group.ref_share_centibps_tier_1
-            };
+            let share =
+                if tier_2_enabled && ref_mngo_deposits >= ref_mngo_req * ref_mngo_tier_2_factor {
+                    mango_group.ref_share_centibps_tier_2.into()
+                } else {
+                    mango_group.ref_share_centibps_tier_1
+                };
 
             if !referrer_mango_account.is_bankrupt
                 && !referrer_mango_account.being_liquidated
@@ -2115,7 +2116,7 @@ fn determine_ref_vars<'a>(
         }
     }
     let surcharge = if tier_2_enabled {
-        mango_group.ref_surcharge_centibps_tier_2
+        mango_group.ref_surcharge_centibps_tier_2.into()
     } else {
         mango_group.ref_surcharge_centibps_tier_1
     };

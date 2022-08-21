@@ -1181,9 +1181,10 @@ pub enum MangoInstruction {
     ChangeReferralFeeParams2 {
         ref_surcharge_centibps_tier_1: u32,
         ref_share_centibps_tier_1: u32,
-        ref_surcharge_centibps_tier_2: u32,
-        ref_share_centibps_tier_2: u32,
+        ref_surcharge_centibps_tier_2: u16,
+        ref_share_centibps_tier_2: u16,
         ref_mngo_required: u64,
+        ref_mngo_tier_2_factor: u8,
     },
 }
 
@@ -1714,24 +1715,26 @@ impl MangoInstruction {
             }
             73 => MangoInstruction::ForceSettlePerpPosition,
             74 => {
-                let data = array_ref![data, 0, 24];
+                let data = array_ref![data, 0, 21];
                 let (
                     ref_surcharge_centibps_tier_1,
                     ref_share_centibps_tier_1,
                     ref_surcharge_centibps_tier_2,
                     ref_share_centibps_tier_2,
                     ref_mngo_required,
-                ) = array_refs![data, 4, 4, 4, 4, 8];
+                    ref_mngo_tier_2_factor,
+                ) = array_refs![data, 4, 4, 2, 2, 8, 1];
                 MangoInstruction::ChangeReferralFeeParams2 {
                     ref_surcharge_centibps_tier_1: u32::from_le_bytes(
                         *ref_surcharge_centibps_tier_1,
                     ),
                     ref_share_centibps_tier_1: u32::from_le_bytes(*ref_share_centibps_tier_1),
-                    ref_surcharge_centibps_tier_2: u32::from_le_bytes(
+                    ref_surcharge_centibps_tier_2: u16::from_le_bytes(
                         *ref_surcharge_centibps_tier_2,
                     ),
-                    ref_share_centibps_tier_2: u32::from_le_bytes(*ref_share_centibps_tier_2),
+                    ref_share_centibps_tier_2: u16::from_le_bytes(*ref_share_centibps_tier_2),
                     ref_mngo_required: u64::from_le_bytes(*ref_mngo_required),
+                    ref_mngo_tier_2_factor: u8::from_le_bytes(*ref_mngo_tier_2_factor),
                 }
             }
             _ => {

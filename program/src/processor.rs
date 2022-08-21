@@ -6165,15 +6165,16 @@ impl Processor {
         accounts: &[AccountInfo],
         ref_surcharge_centibps_tier_1: u32,
         ref_share_centibps_tier_1: u32,
-        ref_surcharge_centibps_tier_2: u32,
-        ref_share_centibps_tier_2: u32,
+        ref_surcharge_centibps_tier_2: u16,
+        ref_share_centibps_tier_2: u16,
         ref_mngo_required: u64,
+        ref_mngo_tier_2_factor: u8,
     ) -> MangoResult {
         let tier_2_enabled = ref_surcharge_centibps_tier_2 != 0 && ref_share_centibps_tier_2 != 0;
         if tier_2_enabled {
             // tier 1 surcharge must be <= tier 2 surcharge so tier 1 holders don't pay more than base fee
             check!(
-                ref_surcharge_centibps_tier_1 <= ref_surcharge_centibps_tier_2,
+                ref_surcharge_centibps_tier_1 <= u32::from(ref_surcharge_centibps_tier_2),
                 MangoErrorCode::InvalidParam
             )?;
             // tier 1 share must be >= tier 1 surcharge so tier 1 referees don't pay less than their referrer
@@ -6183,7 +6184,7 @@ impl Processor {
             )?;
             // tier 1 share must be <= tier 2 share so tier 2 referrers don't earn less fees than tier 1 referrers
             check!(
-                ref_share_centibps_tier_1 <= ref_share_centibps_tier_2,
+                ref_share_centibps_tier_1 <= u32::from(ref_share_centibps_tier_2),
                 MangoErrorCode::InvalidParam
             )?;
             // tier 2 share must be <= tier 2 surcharge so tier 2 referees don't pay more than base fee
@@ -6191,6 +6192,7 @@ impl Processor {
                 ref_share_centibps_tier_2 <= ref_surcharge_centibps_tier_2,
                 MangoErrorCode::InvalidParam
             )?;
+            check!(ref_mngo_tier_2_factor >= 1, MangoErrorCode::InvalidParam)?;
         } else {
             check!(
                 ref_surcharge_centibps_tier_1 >= ref_share_centibps_tier_1,
@@ -6209,7 +6211,7 @@ impl Processor {
         let mut mango_group = MangoGroup::load_mut_checked(mango_group_ai, program_id)?;
         check_eq!(admin_ai.key, &mango_group.admin, MangoErrorCode::InvalidAdminKey)?;
         check!(admin_ai.is_signer, MangoErrorCode::SignerNecessary)?;
-        msg!("old referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {}", mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_surcharge_centibps_tier_2, mango_group.ref_share_centibps_tier_2, mango_group.ref_mngo_required);
+        msg!("old referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {} ref_mngo_tier_2_factor {}", mango_group.ref_surcharge_centibps_tier_1, mango_group.ref_share_centibps_tier_1, mango_group.ref_surcharge_centibps_tier_2, mango_group.ref_share_centibps_tier_2, mango_group.ref_mngo_required, mango_group.ref_mngo_required_tier_2_factor);
 
         // TODO - when this goes out, if there are any events on the EventQueue fee logging will be messed up
 
@@ -6218,8 +6220,9 @@ impl Processor {
         mango_group.ref_surcharge_centibps_tier_2 = ref_surcharge_centibps_tier_2;
         mango_group.ref_share_centibps_tier_2 = ref_share_centibps_tier_2;
         mango_group.ref_mngo_required = ref_mngo_required;
+        mango_group.ref_mngo_required_tier_2_factor = ref_mngo_tier_2_factor;
 
-        msg!("new referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {}", ref_surcharge_centibps_tier_1, ref_share_centibps_tier_1, ref_surcharge_centibps_tier_2, ref_share_centibps_tier_2, ref_mngo_required);
+        msg!("new referral fee params: ref_surcharge_centibps_tier_1: {} ref_share_centibps_tier_1: {} ref_surcharge_centibps_tier_2: {} ref_share_centibps_tier_2: {} ref_mngo_required: {} ref_mngo_tier_2_factor {}", ref_surcharge_centibps_tier_1, ref_share_centibps_tier_1, ref_surcharge_centibps_tier_2, ref_share_centibps_tier_2, ref_mngo_required, ref_mngo_tier_2_factor);
         Ok(())
     }
 
@@ -7935,6 +7938,7 @@ impl Processor {
                 ref_surcharge_centibps_tier_2,
                 ref_share_centibps_tier_2,
                 ref_mngo_required,
+                ref_mngo_tier_2_factor,
             } => {
                 msg!("Mango: ChangeReferralFeeParams2");
                 Self::change_referral_fee_params2(
@@ -7945,6 +7949,7 @@ impl Processor {
                     ref_surcharge_centibps_tier_2,
                     ref_share_centibps_tier_2,
                     ref_mngo_required,
+                    ref_mngo_tier_2_factor,
                 )
             }
         }
