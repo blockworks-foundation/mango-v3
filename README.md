@@ -7,7 +7,7 @@ Any content produced by Blockworks, or developer resources that Blockworks provi
 Significant contributions to the source code may be compensated with a grant from the Blockworks Foundation.
 
 ## Security
-Mango is currently unaudited software. Use at your own risk.
+Mango has been audited by Neodyme, you can find the report [here](./audit.pdf).
 
 You will be compensated by the Mango DAO for privately reporting vulnerabilities to the maintainers of this repo.
 Email hello@blockworks.foundation
