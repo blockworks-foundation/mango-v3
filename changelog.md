@@ -1,5 +1,11 @@
 # Mango Program Change Log
 
+## v3.6.0
+Deployed: | Slot: 
+1. Fix remove_oracle bug
+2. Add second fee tier option with new instruction ChangeReferralFeeParams2
+3. Allow delegate to close spot open orders accounts
+
 ## v3.5.1
 Deployed: Jul 9, 2022 at 17:07:37 UTC | Slot: 140,876,554
 1. Remove luna related hard codings
