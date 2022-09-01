@@ -1593,7 +1593,7 @@ impl Processor {
         let [
             mango_group_ai,     // read
             mango_account_ai,   // write
-            owner_ai,           // write, signer can be liqor if market in ForceCloseOnly ***
+            owner_ai,           // write, can also be delegate, signer can be liqor if market in ForceCloseOnly, must sign if not
             dex_prog_ai,        // read
             open_orders_ai,     // write
             spot_market_ai,     // read
@@ -1610,7 +1610,10 @@ impl Processor {
 
         let mut mango_account =
             MangoAccount::load_mut_checked(mango_account_ai, program_id, &mango_group_ai.key)?;
-        check_eq!(&mango_account.owner, owner_ai.key, MangoErrorCode::InvalidOwner)?;
+        check!(
+            &mango_account.owner == owner_ai.key || &mango_account.delegate == owner_ai.key,
+            MangoErrorCode::InvalidOwner
+        )?;
 
         // Owner signature not necessary if market is in ForceCloseOnly or SwappingSpotMarket
         let mode = mango_group.tokens[market_index].spot_market_mode;
