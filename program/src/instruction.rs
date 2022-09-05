@@ -1022,6 +1022,14 @@ pub enum MangoInstruction {
         /// - Must be between 1 and 255.
         /// - The order will expire when the block timestamp has reached or exceeded
         ///   the current block timestamp plus that number of seconds.
+        ///
+        /// Since there is an unknown delay from sending a transaction to the transaction
+        /// being processed, Absolute expiry usually preferred.
+        ///
+        /// Note that the Solana block timestamp can diverge from the actual time. In the
+        /// past is has occasionally lagged behind by several hours. One way to solve
+        /// that potential issue is by retrieving the current cluster timestamp to build
+        /// an absolute expiry_timestamp based on it.
         expiry_timestamp: u64,
 
         side: Side,
