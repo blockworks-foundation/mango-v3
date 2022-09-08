@@ -1,5 +1,9 @@
 # Mango Program Change Log
 
+## v3.6.1
+Deployed: | Slot: 
+1. Fix perp health simulation for advanced order execution
+
 ## v3.6.0
 Deployed: Sep 3, 2022 at 23:05:59 UTC | Slot: 148,862,380
 1. Fix remove_oracle bug
