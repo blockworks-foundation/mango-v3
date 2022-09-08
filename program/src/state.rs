@@ -1205,7 +1205,7 @@ impl HealthCache {
                 let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0
                     && mango_group.ref_share_centibps_tier_2 != 0;
 
-                if mngo_deposits < ref_mngo_req * ref_mngo_tier_2_factor {
+                if tier_2_enabled && mngo_deposits < ref_mngo_req * ref_mngo_tier_2_factor {
                     let surcharge = if tier_2_enabled && mngo_deposits < ref_mngo_req {
                         mango_group.ref_surcharge_centibps_tier_2.into()
                     } else {
@@ -1214,6 +1214,10 @@ impl HealthCache {
 
                     market_fees +=
                         (I80F48::from_num(surcharge) / CENTIBPS_PER_UNIT) * taker_quote_native;
+                } else if !tier_2_enabled && mngo_deposits < ref_mngo_req {
+                    market_fees += (I80F48::from_num(mango_group.ref_surcharge_centibps_tier_1)
+                        / CENTIBPS_PER_UNIT)
+                        * taker_quote_native;
                 }
             }
             market_fees
