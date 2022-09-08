@@ -1,7 +1,7 @@
 # Mango Program Change Log
 
 ## v3.6.1
-Deployed: | Slot: 
+Deployed: Sep 8, 2022 at 21:50:42 UTC | Slot: 149,790,592
 1. Fix perp health simulation for advanced order execution
 
 ## v3.6.0
