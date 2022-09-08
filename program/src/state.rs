@@ -1216,8 +1216,8 @@ impl HealthCache {
                         (I80F48::from_num(surcharge) / CENTIBPS_PER_UNIT) * taker_quote_native;
                 } else if !tier_2_enabled && mngo_deposits < ref_mngo_req {
                     market_fees += (I80F48::from_num(mango_group.ref_surcharge_centibps_tier_1)
-                    / CENTIBPS_PER_UNIT)
-                    * taker_quote_native;
+                        / CENTIBPS_PER_UNIT)
+                        * taker_quote_native;
                 }
             }
             market_fees
