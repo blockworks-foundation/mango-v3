@@ -7413,551 +7413,552 @@ impl Processor {
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
-        let instruction =
-            MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
-        match instruction {
-            MangoInstruction::InitMangoGroup {
-                signer_nonce,
-                valid_interval,
-                quote_optimal_util,
-                quote_optimal_rate,
-                quote_max_rate,
-            } => {
-                msg!("Mango: InitMangoGroup");
-                Self::init_mango_group(
-                    program_id,
-                    accounts,
-                    signer_nonce,
-                    valid_interval,
-                    quote_optimal_util,
-                    quote_optimal_rate,
-                    quote_max_rate,
-                )
-            }
-            MangoInstruction::InitMangoAccount => {
-                msg!("Mango: InitMangoAccount DEPRECATED");
-                Self::init_mango_account(program_id, accounts)
-            }
-            MangoInstruction::CreateMangoAccount { account_num } => {
-                msg!("Mango: CreateMangoAccount");
-                Self::create_mango_account(program_id, accounts, account_num)
-            }
-            MangoInstruction::CloseMangoAccount => {
-                msg!("Mango: CloseMangoAccount");
-                Self::close_mango_account(program_id, accounts)
-            }
-            MangoInstruction::UpgradeMangoAccountV0V1 => {
-                msg!("Mango: UpgradeMangoAccountV0V1");
-                Self::upgrade_mango_account_v0_v1(program_id, accounts)
-            }
-            MangoInstruction::Deposit { quantity } => {
-                msg!("Mango: Deposit");
-                Self::deposit(program_id, accounts, quantity)
-            }
-            MangoInstruction::Withdraw { quantity, allow_borrow } => {
-                msg!("Mango: Withdraw");
-                Self::withdraw(program_id, accounts, quantity, allow_borrow)
-            }
-            MangoInstruction::AddSpotMarket {
-                maint_leverage,
-                init_leverage,
-                liquidation_fee,
-                optimal_util,
-                optimal_rate,
-                max_rate,
-            } => {
-                msg!("Mango: AddSpotMarket");
-                Self::add_spot_market(
-                    program_id,
-                    accounts,
-                    maint_leverage,
-                    init_leverage,
-                    liquidation_fee,
-                    optimal_util,
-                    optimal_rate,
-                    max_rate,
-                )
-            }
-            MangoInstruction::AddToBasket { .. } => {
-                msg!("Mango: AddToBasket Deprecated");
-                Ok(())
-            }
-            MangoInstruction::Borrow { .. } => {
-                msg!("Mango: Borrow DEPRECATED");
-                Ok(())
-            }
-            MangoInstruction::CachePrices => {
-                msg!("Mango: CachePrices");
-                Self::cache_prices(program_id, accounts)
-            }
-            MangoInstruction::CacheRootBanks => {
-                msg!("Mango: CacheRootBanks");
-                Self::cache_root_banks(program_id, accounts)
-            }
-            MangoInstruction::PlaceSpotOrder { order } => {
-                msg!("Mango: PlaceSpotOrder");
-                Self::place_spot_order(program_id, accounts, order)
-            }
-            MangoInstruction::CancelSpotOrder { order, .. } => {
-                msg!("Mango: CancelSpotOrder");
-                let data = serum_dex::instruction::MarketInstruction::CancelOrderV2(order).pack();
-                Self::cancel_spot_order(program_id, accounts, data)
-            }
-            MangoInstruction::AddOracle => {
-                msg!("Mango: AddOracle");
-                Self::add_oracle(program_id, accounts)
-            }
-            MangoInstruction::SettleFunds => {
-                msg!("Mango: SettleFunds");
-                Self::settle_funds(program_id, accounts)
-            }
-            MangoInstruction::UpdateRootBank => {
-                msg!("Mango: UpdateRootBank");
-                Self::update_root_bank(program_id, accounts)
-            }
-            MangoInstruction::AddPerpMarket { .. } => {
-                msg!("DEPRECATED Mango: AddPerpMarket");
-                Ok(())
-            }
-            MangoInstruction::PlacePerpOrder {
-                side,
-                price,
-                quantity,
-                client_order_id,
-                order_type,
-                reduce_only,
-            } => {
-                msg!("Mango: PlacePerpOrder client_order_id={}", client_order_id);
-                Self::place_perp_order(
-                    program_id,
-                    accounts,
-                    side,
-                    price,
-                    quantity,
-                    client_order_id,
-                    order_type,
-                    reduce_only,
-                )
-            }
-            MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok } => {
-                msg!("Mango: CancelPerpOrderByClientId client_order_id={}", client_order_id);
-                let result =
-                    Self::cancel_perp_order_by_client_id(program_id, accounts, client_order_id);
-                if invalid_id_ok {
-                    if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
-                        if mango_error_code == MangoErrorCode::InvalidOrderId
-                            || mango_error_code == MangoErrorCode::ClientIdNotFound
-                        {
-                            return Ok(());
-                        }
-                    }
-                }
-                result
-            }
-            MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok } => {
-                // TODO OPT this log may cost too much compute
-                msg!("Mango: CancelPerpOrder order_id={}", order_id);
-                let result = Self::cancel_perp_order(program_id, accounts, order_id);
-                if invalid_id_ok {
-                    if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
-                        if mango_error_code == MangoErrorCode::InvalidOrderId {
-                            return Ok(());
-                        }
-                    }
-                }
-                result
-            }
-            MangoInstruction::ConsumeEvents { limit } => {
-                msg!("Mango: ConsumeEvents limit={}", limit);
-                Self::consume_events(program_id, accounts, limit)
-            }
-            MangoInstruction::CachePerpMarkets => {
-                msg!("Mango: CachePerpMarkets");
-                Self::cache_perp_markets(program_id, accounts)
-            }
-            MangoInstruction::UpdateFunding => {
-                msg!("Mango: UpdateFunding");
-                Self::update_funding(program_id, accounts)
-            }
-            MangoInstruction::SetOracle { price } => {
-                // msg!("Mango: SetOracle {:?}", price);
-                msg!("Mango: SetOracle");
-                Self::set_oracle(program_id, accounts, price)
-            }
-            MangoInstruction::SettlePnl { market_index } => {
-                msg!("Mango: SettlePnl");
-                Self::settle_pnl(program_id, accounts, market_index)
-            }
-            MangoInstruction::SettleBorrow { .. } => {
-                msg!("Mango: SettleBorrow DEPRECATED");
-                Ok(())
-            }
-            MangoInstruction::ForceCancelSpotOrders { limit } => {
-                msg!("Mango: ForceCancelSpotOrders");
-                Self::force_cancel_spot_orders(program_id, accounts, limit)
-            }
-            MangoInstruction::ForceCancelPerpOrders { limit } => {
-                msg!("Mango: ForceCancelPerpOrders");
-                Self::force_cancel_perp_orders(program_id, accounts, limit)
-            }
-            MangoInstruction::LiquidateTokenAndToken { max_liab_transfer } => {
-                msg!("Mango: LiquidateTokenAndToken");
-                Self::liquidate_token_and_token(program_id, accounts, max_liab_transfer)
-            }
-            MangoInstruction::LiquidateTokenAndPerp {
-                asset_type,
-                asset_index,
-                liab_type,
-                liab_index,
-                max_liab_transfer,
-            } => {
-                msg!("Mango: LiquidateTokenAndPerp");
-                Self::liquidate_token_and_perp(
-                    program_id,
-                    accounts,
-                    asset_type,
-                    asset_index,
-                    liab_type,
-                    liab_index,
-                    max_liab_transfer,
-                )
-            }
-            MangoInstruction::LiquidatePerpMarket { base_transfer_request } => {
-                msg!("Mango: LiquidatePerpMarket");
-                Self::liquidate_perp_market(program_id, accounts, base_transfer_request)
-            }
-            MangoInstruction::SettleFees => {
-                msg!("Mango: SettleFees");
-                Self::settle_fees(program_id, accounts)
-            }
-            MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
-                msg!("Mango: ResolvePerpBankruptcy");
-                Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)
-            }
-            MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
-                msg!("Mango: ResolveTokenBankruptcy");
-                Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)
-            }
-            MangoInstruction::InitSpotOpenOrders => {
-                msg!("Mango: InitSpotOpenOrders");
-                Self::init_spot_open_orders(program_id, accounts)
-            }
-            MangoInstruction::CloseSpotOpenOrders => {
-                msg!("Mango: CloseSpotOpenOrders");
-                Self::close_spot_open_orders(program_id, accounts)
-            }
-            MangoInstruction::RedeemMngo => {
-                msg!("Mango: RedeemMngo");
-                Self::redeem_mngo(program_id, accounts)
-            }
-            MangoInstruction::AddMangoAccountInfo { info } => {
-                msg!("Mango: AddMangoAccountInfo");
-                Self::add_mango_account_info(program_id, accounts, info)
-            }
-            MangoInstruction::DepositMsrm { quantity } => {
-                msg!("Mango: DepositMsrm");
-                Self::deposit_msrm(program_id, accounts, quantity)
-            }
-            MangoInstruction::WithdrawMsrm { quantity } => {
-                msg!("Mango: WithdrawMsrm");
-                Self::withdraw_msrm(program_id, accounts, quantity)
-            }
-            MangoInstruction::ChangePerpMarketParams { .. } => {
-                msg!("Mango: ChangePerpMarketParams DEPRECATED - use ChangePerpMarketParams2 instead");
-                Ok(())
-            }
-            MangoInstruction::SetGroupAdmin => {
-                msg!("Mango: SetGroupAdmin");
-                Self::set_group_admin(program_id, accounts)
-            }
-            MangoInstruction::CancelAllPerpOrders { limit } => {
-                msg!("Mango: CancelAllPerpOrders | limit={}", limit);
-                Self::cancel_all_perp_orders(program_id, accounts, limit)
-            }
-            MangoInstruction::ForceSettleQuotePositions => {
-                msg!("DEPRECATED Mango: ForceSettleQuotePositions");
-                Ok(())
-            }
-            MangoInstruction::PlaceSpotOrder2 { order } => {
-                msg!("Mango: PlaceSpotOrder2");
-                Self::place_spot_order2(program_id, accounts, order)
-            }
-            MangoInstruction::InitAdvancedOrders => {
-                msg!("Mango: InitAdvancedOrders");
-                Self::init_advanced_orders(program_id, accounts)
-            }
-            MangoInstruction::CloseAdvancedOrders => {
-                msg!("Mango: CloseAdvancedOrders");
-                Self::close_advanced_orders(program_id, accounts)
-            }
-            MangoInstruction::AddPerpTriggerOrder {
-                order_type,
-                side,
-                trigger_condition,
-                reduce_only,
-                client_order_id,
-                price,
-                quantity,
-                trigger_price,
-            } => {
-                msg!(
-                    "Mango: AddPerpTriggerOrder client_order_id={} type={:?} side={:?} trigger_condition={:?} price={} quantity={} trigger={}",
-                    client_order_id,
-                    order_type,
-                    side,
-                    trigger_condition,
-                    price,
-                    quantity,
-                    trigger_price.to_num::<f64>()
-                );
-                Self::add_perp_trigger_order(
-                    program_id,
-                    accounts,
-                    order_type,
-                    side,
-                    trigger_condition,
-                    reduce_only,
-                    client_order_id,
-                    price,
-                    quantity,
-                    trigger_price,
-                )
-            }
-            MangoInstruction::RemoveAdvancedOrder { order_index } => {
-                msg!("Mango: RemoveAdvancedOrder {}", order_index);
-                Self::remove_advanced_order(program_id, accounts, order_index)
-            }
-            MangoInstruction::ExecutePerpTriggerOrder { order_index } => {
-                msg!("Mango: ExecutePerpTriggerOrder {}", order_index);
-                Self::execute_perp_trigger_order(program_id, accounts, order_index)
-            }
-            MangoInstruction::CreatePerpMarket {
-                maint_leverage,
-                init_leverage,
-                liquidation_fee,
-                maker_fee,
-                taker_fee,
-                base_lot_size,
-                quote_lot_size,
-                rate,
-                max_depth_bps,
-                target_period_length,
-                mngo_per_period,
-                exp,
-                version,
-                lm_size_shift,
-                base_decimals,
-            } => {
-                msg!("Mango: CreatePerpMarket");
-                Self::create_perp_market(
-                    program_id,
-                    accounts,
-                    maint_leverage,
-                    init_leverage,
-                    liquidation_fee,
-                    maker_fee,
-                    taker_fee,
-                    base_lot_size,
-                    quote_lot_size,
-                    rate,
-                    max_depth_bps,
-                    target_period_length,
-                    mngo_per_period,
-                    exp,
-                    version,
-                    lm_size_shift,
-                    base_decimals,
-                )
-            }
-            MangoInstruction::ChangePerpMarketParams2 {
-                maint_leverage,
-                init_leverage,
-                liquidation_fee,
-                maker_fee,
-                taker_fee,
-                rate,
-                max_depth_bps,
-                target_period_length,
-                mngo_per_period,
-                exp,
-                version,
-                lm_size_shift,
-            } => {
-                msg!("Mango: ChangePerpMarketParams2");
-                Self::change_perp_market_params2(
-                    program_id,
-                    accounts,
-                    maint_leverage,
-                    init_leverage,
-                    liquidation_fee,
-                    maker_fee,
-                    taker_fee,
-                    rate,
-                    max_depth_bps,
-                    target_period_length,
-                    mngo_per_period,
-                    exp,
-                    version,
-                    lm_size_shift,
-                )
-            }
-            MangoInstruction::UpdateMarginBasket => {
-                msg!("Mango: UpdateMarginBasket");
-                Self::update_margin_basket(program_id, accounts)
-            }
-            MangoInstruction::ChangeMaxMangoAccounts { max_mango_accounts } => {
-                msg!("Mango: ChangeMaxMangoAccounts");
-                Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
-            }
-            MangoInstruction::CreateDustAccount => {
-                msg!("Mango: CreateDustAccount");
-                Self::create_dust_account(program_id, accounts)
-            }
-            MangoInstruction::ResolveDust => {
-                msg!("Mango: ResolveDust");
-                Self::resolve_dust(program_id, accounts)
-            }
-            MangoInstruction::CancelPerpOrdersSide { side, limit } => {
-                msg!("Mango: CancelSidePerpOrders");
-                Self::cancel_perp_orders_side(program_id, accounts, side, limit)
-            }
-            MangoInstruction::SetDelegate => {
-                msg!("Mango: SetDelegate");
-                Self::set_delegate(program_id, accounts)
-            }
-            MangoInstruction::ChangeSpotMarketParams {
-                maint_leverage,
-                init_leverage,
-                liquidation_fee,
-                optimal_util,
-                optimal_rate,
-                max_rate,
-                version,
-            } => {
-                msg!("Mango: ChangeSpotMarketParams");
-                Self::change_spot_market_params(
-                    program_id,
-                    accounts,
-                    maint_leverage,
-                    init_leverage,
-                    liquidation_fee,
-                    optimal_util,
-                    optimal_rate,
-                    max_rate,
-                    version,
-                )
-            }
-            MangoInstruction::CreateSpotOpenOrders => {
-                msg!("Mango: CreateSpotOpenOrders");
-                Self::create_spot_open_orders(program_id, accounts)
-            }
-            MangoInstruction::ChangeReferralFeeParams {
-                ref_surcharge_centibps,
-                ref_share_centibps,
-                ref_mngo_required,
-            } => {
-                msg!("Mango: ChangeReferralFeeParams");
-                Self::change_referral_fee_params(
-                    program_id,
-                    accounts,
-                    ref_surcharge_centibps,
-                    ref_share_centibps,
-                    ref_mngo_required,
-                )
-            }
-            MangoInstruction::SetReferrerMemory => {
-                msg!("Mango: SetReferrerMemory");
-                Self::set_referrer_memory(program_id, accounts)
-            }
-            MangoInstruction::RegisterReferrerId { referrer_id } => {
-                msg!("Mango: RegisterReferrerId");
-                Self::register_referrer_id(program_id, accounts, referrer_id)
-            }
-            MangoInstruction::PlacePerpOrder2 {
-                side,
-                price,
-                max_base_quantity,
-                max_quote_quantity,
-                client_order_id,
-                expiry_timestamp,
-                order_type,
-                reduce_only,
-                limit,
-                expiry_type,
-            } => {
-                msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
-                Self::place_perp_order2(
-                    program_id,
-                    accounts,
-                    side,
-                    price,
-                    max_base_quantity,
-                    max_quote_quantity,
-                    client_order_id,
-                    order_type,
-                    reduce_only,
-                    expiry_timestamp,
-                    limit,
-                    expiry_type,
-                )
-            }
-            MangoInstruction::CancelAllSpotOrders { limit } => {
-                msg!("Mango: CancelAllSpotOrders");
-                Self::cancel_all_spot_orders(program_id, accounts, limit)
-            }
-            MangoInstruction::Withdraw2 { quantity, allow_borrow } => {
-                msg!("Mango: Withdraw2");
-                Self::withdraw2(program_id, accounts, quantity, allow_borrow)
-            }
-            MangoInstruction::SetMarketMode { market_index, market_type, mode } => {
-                msg!("Mango: SetMarketMode");
-                Self::set_market_mode(program_id, accounts, market_index, mode, market_type)
-            }
-            MangoInstruction::RemovePerpMarket => {
-                msg!("Mango: RemovePerpMarket");
-                Self::remove_perp_market(program_id, accounts)
-            }
-            MangoInstruction::SwapSpotMarket => {
-                msg!("Mango: SwapSpotMarket");
-                Self::swap_spot_market(program_id, accounts)
-            }
-            MangoInstruction::RemoveSpotMarket => {
-                msg!("Mango: RemoveSpotMarket");
-                Self::remove_spot_market(program_id, accounts)
-            }
-            MangoInstruction::RemoveOracle => {
-                msg!("Mango: RemoveOracle");
-                Self::remove_oracle(program_id, accounts)
-            }
-            MangoInstruction::LiquidateDelistingToken { max_liquidate_amount } => {
-                msg!("Mango: LiquidateDelistingToken");
-                Self::liquidate_delisting_token(program_id, accounts, max_liquidate_amount)
-            }
-            MangoInstruction::ForceSettlePerpPosition => {
-                msg!("Mango: ForceSettlePerpPosition");
-                Self::force_settle_perp_position(program_id, accounts)
-            }
-            MangoInstruction::ChangeReferralFeeParams2 {
-                ref_surcharge_centibps_tier_1,
-                ref_share_centibps_tier_1,
-                ref_surcharge_centibps_tier_2,
-                ref_share_centibps_tier_2,
-                ref_mngo_required,
-                ref_mngo_tier_2_factor,
-            } => {
-                msg!("Mango: ChangeReferralFeeParams2");
-                Self::change_referral_fee_params2(
-                    program_id,
-                    accounts,
-                    ref_surcharge_centibps_tier_1,
-                    ref_share_centibps_tier_1,
-                    ref_surcharge_centibps_tier_2,
-                    ref_share_centibps_tier_2,
-                    ref_mngo_required,
-                    ref_mngo_tier_2_factor,
-                )
-            }
-        }
+        unimplemented!()
+        // let instruction =
+        //     MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
+        // match instruction {
+        //     MangoInstruction::InitMangoGroup {
+        //         signer_nonce,
+        //         valid_interval,
+        //         quote_optimal_util,
+        //         quote_optimal_rate,
+        //         quote_max_rate,
+        //     } => {
+        //         msg!("Mango: InitMangoGroup");
+        //         Self::init_mango_group(
+        //             program_id,
+        //             accounts,
+        //             signer_nonce,
+        //             valid_interval,
+        //             quote_optimal_util,
+        //             quote_optimal_rate,
+        //             quote_max_rate,
+        //         )
+        //     }
+        //     MangoInstruction::InitMangoAccount => {
+        //         msg!("Mango: InitMangoAccount DEPRECATED");
+        //         Self::init_mango_account(program_id, accounts)
+        //     }
+        //     MangoInstruction::CreateMangoAccount { account_num } => {
+        //         msg!("Mango: CreateMangoAccount");
+        //         Self::create_mango_account(program_id, accounts, account_num)
+        //     }
+        //     MangoInstruction::CloseMangoAccount => {
+        //         msg!("Mango: CloseMangoAccount");
+        //         Self::close_mango_account(program_id, accounts)
+        //     }
+        //     MangoInstruction::UpgradeMangoAccountV0V1 => {
+        //         msg!("Mango: UpgradeMangoAccountV0V1");
+        //         Self::upgrade_mango_account_v0_v1(program_id, accounts)
+        //     }
+        //     MangoInstruction::Deposit { quantity } => {
+        //         msg!("Mango: Deposit");
+        //         Self::deposit(program_id, accounts, quantity)
+        //     }
+        //     MangoInstruction::Withdraw { quantity, allow_borrow } => {
+        //         msg!("Mango: Withdraw");
+        //         Self::withdraw(program_id, accounts, quantity, allow_borrow)
+        //     }
+        //     MangoInstruction::AddSpotMarket {
+        //         maint_leverage,
+        //         init_leverage,
+        //         liquidation_fee,
+        //         optimal_util,
+        //         optimal_rate,
+        //         max_rate,
+        //     } => {
+        //         msg!("Mango: AddSpotMarket");
+        //         Self::add_spot_market(
+        //             program_id,
+        //             accounts,
+        //             maint_leverage,
+        //             init_leverage,
+        //             liquidation_fee,
+        //             optimal_util,
+        //             optimal_rate,
+        //             max_rate,
+        //         )
+        //     }
+        //     MangoInstruction::AddToBasket { .. } => {
+        //         msg!("Mango: AddToBasket Deprecated");
+        //         Ok(())
+        //     }
+        //     MangoInstruction::Borrow { .. } => {
+        //         msg!("Mango: Borrow DEPRECATED");
+        //         Ok(())
+        //     }
+        //     MangoInstruction::CachePrices => {
+        //         msg!("Mango: CachePrices");
+        //         Self::cache_prices(program_id, accounts)
+        //     }
+        //     MangoInstruction::CacheRootBanks => {
+        //         msg!("Mango: CacheRootBanks");
+        //         Self::cache_root_banks(program_id, accounts)
+        //     }
+        //     MangoInstruction::PlaceSpotOrder { order } => {
+        //         msg!("Mango: PlaceSpotOrder");
+        //         Self::place_spot_order(program_id, accounts, order)
+        //     }
+        //     MangoInstruction::CancelSpotOrder { order, .. } => {
+        //         msg!("Mango: CancelSpotOrder");
+        //         let data = serum_dex::instruction::MarketInstruction::CancelOrderV2(order).pack();
+        //         Self::cancel_spot_order(program_id, accounts, data)
+        //     }
+        //     MangoInstruction::AddOracle => {
+        //         msg!("Mango: AddOracle");
+        //         Self::add_oracle(program_id, accounts)
+        //     }
+        //     MangoInstruction::SettleFunds => {
+        //         msg!("Mango: SettleFunds");
+        //         Self::settle_funds(program_id, accounts)
+        //     }
+        //     MangoInstruction::UpdateRootBank => {
+        //         msg!("Mango: UpdateRootBank");
+        //         Self::update_root_bank(program_id, accounts)
+        //     }
+        //     MangoInstruction::AddPerpMarket { .. } => {
+        //         msg!("DEPRECATED Mango: AddPerpMarket");
+        //         Ok(())
+        //     }
+        //     MangoInstruction::PlacePerpOrder {
+        //         side,
+        //         price,
+        //         quantity,
+        //         client_order_id,
+        //         order_type,
+        //         reduce_only,
+        //     } => {
+        //         msg!("Mango: PlacePerpOrder client_order_id={}", client_order_id);
+        //         Self::place_perp_order(
+        //             program_id,
+        //             accounts,
+        //             side,
+        //             price,
+        //             quantity,
+        //             client_order_id,
+        //             order_type,
+        //             reduce_only,
+        //         )
+        //     }
+        //     MangoInstruction::CancelPerpOrderByClientId { client_order_id, invalid_id_ok } => {
+        //         msg!("Mango: CancelPerpOrderByClientId client_order_id={}", client_order_id);
+        //         let result =
+        //             Self::cancel_perp_order_by_client_id(program_id, accounts, client_order_id);
+        //         if invalid_id_ok {
+        //             if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
+        //                 if mango_error_code == MangoErrorCode::InvalidOrderId
+        //                     || mango_error_code == MangoErrorCode::ClientIdNotFound
+        //                 {
+        //                     return Ok(());
+        //                 }
+        //             }
+        //         }
+        //         result
+        //     }
+        //     MangoInstruction::CancelPerpOrder { order_id, invalid_id_ok } => {
+        //         // TODO OPT this log may cost too much compute
+        //         msg!("Mango: CancelPerpOrder order_id={}", order_id);
+        //         let result = Self::cancel_perp_order(program_id, accounts, order_id);
+        //         if invalid_id_ok {
+        //             if let Err(MangoError::MangoErrorCode { mango_error_code, .. }) = result {
+        //                 if mango_error_code == MangoErrorCode::InvalidOrderId {
+        //                     return Ok(());
+        //                 }
+        //             }
+        //         }
+        //         result
+        //     }
+        //     MangoInstruction::ConsumeEvents { limit } => {
+        //         msg!("Mango: ConsumeEvents limit={}", limit);
+        //         Self::consume_events(program_id, accounts, limit)
+        //     }
+        //     MangoInstruction::CachePerpMarkets => {
+        //         msg!("Mango: CachePerpMarkets");
+        //         Self::cache_perp_markets(program_id, accounts)
+        //     }
+        //     MangoInstruction::UpdateFunding => {
+        //         msg!("Mango: UpdateFunding");
+        //         Self::update_funding(program_id, accounts)
+        //     }
+        //     MangoInstruction::SetOracle { price } => {
+        //         // msg!("Mango: SetOracle {:?}", price);
+        //         msg!("Mango: SetOracle");
+        //         Self::set_oracle(program_id, accounts, price)
+        //     }
+        //     MangoInstruction::SettlePnl { market_index } => {
+        //         msg!("Mango: SettlePnl");
+        //         Self::settle_pnl(program_id, accounts, market_index)
+        //     }
+        //     MangoInstruction::SettleBorrow { .. } => {
+        //         msg!("Mango: SettleBorrow DEPRECATED");
+        //         Ok(())
+        //     }
+        //     MangoInstruction::ForceCancelSpotOrders { limit } => {
+        //         msg!("Mango: ForceCancelSpotOrders");
+        //         Self::force_cancel_spot_orders(program_id, accounts, limit)
+        //     }
+        //     MangoInstruction::ForceCancelPerpOrders { limit } => {
+        //         msg!("Mango: ForceCancelPerpOrders");
+        //         Self::force_cancel_perp_orders(program_id, accounts, limit)
+        //     }
+        //     MangoInstruction::LiquidateTokenAndToken { max_liab_transfer } => {
+        //         msg!("Mango: LiquidateTokenAndToken");
+        //         Self::liquidate_token_and_token(program_id, accounts, max_liab_transfer)
+        //     }
+        //     MangoInstruction::LiquidateTokenAndPerp {
+        //         asset_type,
+        //         asset_index,
+        //         liab_type,
+        //         liab_index,
+        //         max_liab_transfer,
+        //     } => {
+        //         msg!("Mango: LiquidateTokenAndPerp");
+        //         Self::liquidate_token_and_perp(
+        //             program_id,
+        //             accounts,
+        //             asset_type,
+        //             asset_index,
+        //             liab_type,
+        //             liab_index,
+        //             max_liab_transfer,
+        //         )
+        //     }
+        //     MangoInstruction::LiquidatePerpMarket { base_transfer_request } => {
+        //         msg!("Mango: LiquidatePerpMarket");
+        //         Self::liquidate_perp_market(program_id, accounts, base_transfer_request)
+        //     }
+        //     MangoInstruction::SettleFees => {
+        //         msg!("Mango: SettleFees");
+        //         Self::settle_fees(program_id, accounts)
+        //     }
+        //     MangoInstruction::ResolvePerpBankruptcy { liab_index, max_liab_transfer } => {
+        //         msg!("Mango: ResolvePerpBankruptcy");
+        //         Self::resolve_perp_bankruptcy(program_id, accounts, liab_index, max_liab_transfer)
+        //     }
+        //     MangoInstruction::ResolveTokenBankruptcy { max_liab_transfer } => {
+        //         msg!("Mango: ResolveTokenBankruptcy");
+        //         Self::resolve_token_bankruptcy(program_id, accounts, max_liab_transfer)
+        //     }
+        //     MangoInstruction::InitSpotOpenOrders => {
+        //         msg!("Mango: InitSpotOpenOrders");
+        //         Self::init_spot_open_orders(program_id, accounts)
+        //     }
+        //     MangoInstruction::CloseSpotOpenOrders => {
+        //         msg!("Mango: CloseSpotOpenOrders");
+        //         Self::close_spot_open_orders(program_id, accounts)
+        //     }
+        //     MangoInstruction::RedeemMngo => {
+        //         msg!("Mango: RedeemMngo");
+        //         Self::redeem_mngo(program_id, accounts)
+        //     }
+        //     MangoInstruction::AddMangoAccountInfo { info } => {
+        //         msg!("Mango: AddMangoAccountInfo");
+        //         Self::add_mango_account_info(program_id, accounts, info)
+        //     }
+        //     MangoInstruction::DepositMsrm { quantity } => {
+        //         msg!("Mango: DepositMsrm");
+        //         Self::deposit_msrm(program_id, accounts, quantity)
+        //     }
+        //     MangoInstruction::WithdrawMsrm { quantity } => {
+        //         msg!("Mango: WithdrawMsrm");
+        //         Self::withdraw_msrm(program_id, accounts, quantity)
+        //     }
+        //     MangoInstruction::ChangePerpMarketParams { .. } => {
+        //         msg!("Mango: ChangePerpMarketParams DEPRECATED - use ChangePerpMarketParams2 instead");
+        //         Ok(())
+        //     }
+        //     MangoInstruction::SetGroupAdmin => {
+        //         msg!("Mango: SetGroupAdmin");
+        //         Self::set_group_admin(program_id, accounts)
+        //     }
+        //     MangoInstruction::CancelAllPerpOrders { limit } => {
+        //         msg!("Mango: CancelAllPerpOrders | limit={}", limit);
+        //         Self::cancel_all_perp_orders(program_id, accounts, limit)
+        //     }
+        //     MangoInstruction::ForceSettleQuotePositions => {
+        //         msg!("DEPRECATED Mango: ForceSettleQuotePositions");
+        //         Ok(())
+        //     }
+        //     MangoInstruction::PlaceSpotOrder2 { order } => {
+        //         msg!("Mango: PlaceSpotOrder2");
+        //         Self::place_spot_order2(program_id, accounts, order)
+        //     }
+        //     MangoInstruction::InitAdvancedOrders => {
+        //         msg!("Mango: InitAdvancedOrders");
+        //         Self::init_advanced_orders(program_id, accounts)
+        //     }
+        //     MangoInstruction::CloseAdvancedOrders => {
+        //         msg!("Mango: CloseAdvancedOrders");
+        //         Self::close_advanced_orders(program_id, accounts)
+        //     }
+        //     MangoInstruction::AddPerpTriggerOrder {
+        //         order_type,
+        //         side,
+        //         trigger_condition,
+        //         reduce_only,
+        //         client_order_id,
+        //         price,
+        //         quantity,
+        //         trigger_price,
+        //     } => {
+        //         msg!(
+        //             "Mango: AddPerpTriggerOrder client_order_id={} type={:?} side={:?} trigger_condition={:?} price={} quantity={} trigger={}",
+        //             client_order_id,
+        //             order_type,
+        //             side,
+        //             trigger_condition,
+        //             price,
+        //             quantity,
+        //             trigger_price.to_num::<f64>()
+        //         );
+        //         Self::add_perp_trigger_order(
+        //             program_id,
+        //             accounts,
+        //             order_type,
+        //             side,
+        //             trigger_condition,
+        //             reduce_only,
+        //             client_order_id,
+        //             price,
+        //             quantity,
+        //             trigger_price,
+        //         )
+        //     }
+        //     MangoInstruction::RemoveAdvancedOrder { order_index } => {
+        //         msg!("Mango: RemoveAdvancedOrder {}", order_index);
+        //         Self::remove_advanced_order(program_id, accounts, order_index)
+        //     }
+        //     MangoInstruction::ExecutePerpTriggerOrder { order_index } => {
+        //         msg!("Mango: ExecutePerpTriggerOrder {}", order_index);
+        //         Self::execute_perp_trigger_order(program_id, accounts, order_index)
+        //     }
+        //     MangoInstruction::CreatePerpMarket {
+        //         maint_leverage,
+        //         init_leverage,
+        //         liquidation_fee,
+        //         maker_fee,
+        //         taker_fee,
+        //         base_lot_size,
+        //         quote_lot_size,
+        //         rate,
+        //         max_depth_bps,
+        //         target_period_length,
+        //         mngo_per_period,
+        //         exp,
+        //         version,
+        //         lm_size_shift,
+        //         base_decimals,
+        //     } => {
+        //         msg!("Mango: CreatePerpMarket");
+        //         Self::create_perp_market(
+        //             program_id,
+        //             accounts,
+        //             maint_leverage,
+        //             init_leverage,
+        //             liquidation_fee,
+        //             maker_fee,
+        //             taker_fee,
+        //             base_lot_size,
+        //             quote_lot_size,
+        //             rate,
+        //             max_depth_bps,
+        //             target_period_length,
+        //             mngo_per_period,
+        //             exp,
+        //             version,
+        //             lm_size_shift,
+        //             base_decimals,
+        //         )
+        //     }
+        //     MangoInstruction::ChangePerpMarketParams2 {
+        //         maint_leverage,
+        //         init_leverage,
+        //         liquidation_fee,
+        //         maker_fee,
+        //         taker_fee,
+        //         rate,
+        //         max_depth_bps,
+        //         target_period_length,
+        //         mngo_per_period,
+        //         exp,
+        //         version,
+        //         lm_size_shift,
+        //     } => {
+        //         msg!("Mango: ChangePerpMarketParams2");
+        //         Self::change_perp_market_params2(
+        //             program_id,
+        //             accounts,
+        //             maint_leverage,
+        //             init_leverage,
+        //             liquidation_fee,
+        //             maker_fee,
+        //             taker_fee,
+        //             rate,
+        //             max_depth_bps,
+        //             target_period_length,
+        //             mngo_per_period,
+        //             exp,
+        //             version,
+        //             lm_size_shift,
+        //         )
+        //     }
+        //     MangoInstruction::UpdateMarginBasket => {
+        //         msg!("Mango: UpdateMarginBasket");
+        //         Self::update_margin_basket(program_id, accounts)
+        //     }
+        //     MangoInstruction::ChangeMaxMangoAccounts { max_mango_accounts } => {
+        //         msg!("Mango: ChangeMaxMangoAccounts");
+        //         Self::change_max_mango_accounts(program_id, accounts, max_mango_accounts)
+        //     }
+        //     MangoInstruction::CreateDustAccount => {
+        //         msg!("Mango: CreateDustAccount");
+        //         Self::create_dust_account(program_id, accounts)
+        //     }
+        //     MangoInstruction::ResolveDust => {
+        //         msg!("Mango: ResolveDust");
+        //         Self::resolve_dust(program_id, accounts)
+        //     }
+        //     MangoInstruction::CancelPerpOrdersSide { side, limit } => {
+        //         msg!("Mango: CancelSidePerpOrders");
+        //         Self::cancel_perp_orders_side(program_id, accounts, side, limit)
+        //     }
+        //     MangoInstruction::SetDelegate => {
+        //         msg!("Mango: SetDelegate");
+        //         Self::set_delegate(program_id, accounts)
+        //     }
+        //     MangoInstruction::ChangeSpotMarketParams {
+        //         maint_leverage,
+        //         init_leverage,
+        //         liquidation_fee,
+        //         optimal_util,
+        //         optimal_rate,
+        //         max_rate,
+        //         version,
+        //     } => {
+        //         msg!("Mango: ChangeSpotMarketParams");
+        //         Self::change_spot_market_params(
+        //             program_id,
+        //             accounts,
+        //             maint_leverage,
+        //             init_leverage,
+        //             liquidation_fee,
+        //             optimal_util,
+        //             optimal_rate,
+        //             max_rate,
+        //             version,
+        //         )
+        //     }
+        //     MangoInstruction::CreateSpotOpenOrders => {
+        //         msg!("Mango: CreateSpotOpenOrders");
+        //         Self::create_spot_open_orders(program_id, accounts)
+        //     }
+        //     MangoInstruction::ChangeReferralFeeParams {
+        //         ref_surcharge_centibps,
+        //         ref_share_centibps,
+        //         ref_mngo_required,
+        //     } => {
+        //         msg!("Mango: ChangeReferralFeeParams");
+        //         Self::change_referral_fee_params(
+        //             program_id,
+        //             accounts,
+        //             ref_surcharge_centibps,
+        //             ref_share_centibps,
+        //             ref_mngo_required,
+        //         )
+        //     }
+        //     MangoInstruction::SetReferrerMemory => {
+        //         msg!("Mango: SetReferrerMemory");
+        //         Self::set_referrer_memory(program_id, accounts)
+        //     }
+        //     MangoInstruction::RegisterReferrerId { referrer_id } => {
+        //         msg!("Mango: RegisterReferrerId");
+        //         Self::register_referrer_id(program_id, accounts, referrer_id)
+        //     }
+        //     MangoInstruction::PlacePerpOrder2 {
+        //         side,
+        //         price,
+        //         max_base_quantity,
+        //         max_quote_quantity,
+        //         client_order_id,
+        //         expiry_timestamp,
+        //         order_type,
+        //         reduce_only,
+        //         limit,
+        //         expiry_type,
+        //     } => {
+        //         msg!("Mango: PlacePerpOrder2 client_order_id={}", client_order_id);
+        //         Self::place_perp_order2(
+        //             program_id,
+        //             accounts,
+        //             side,
+        //             price,
+        //             max_base_quantity,
+        //             max_quote_quantity,
+        //             client_order_id,
+        //             order_type,
+        //             reduce_only,
+        //             expiry_timestamp,
+        //             limit,
+        //             expiry_type,
+        //         )
+        //     }
+        //     MangoInstruction::CancelAllSpotOrders { limit } => {
+        //         msg!("Mango: CancelAllSpotOrders");
+        //         Self::cancel_all_spot_orders(program_id, accounts, limit)
+        //     }
+        //     MangoInstruction::Withdraw2 { quantity, allow_borrow } => {
+        //         msg!("Mango: Withdraw2");
+        //         Self::withdraw2(program_id, accounts, quantity, allow_borrow)
+        //     }
+        //     MangoInstruction::SetMarketMode { market_index, market_type, mode } => {
+        //         msg!("Mango: SetMarketMode");
+        //         Self::set_market_mode(program_id, accounts, market_index, mode, market_type)
+        //     }
+        //     MangoInstruction::RemovePerpMarket => {
+        //         msg!("Mango: RemovePerpMarket");
+        //         Self::remove_perp_market(program_id, accounts)
+        //     }
+        //     MangoInstruction::SwapSpotMarket => {
+        //         msg!("Mango: SwapSpotMarket");
+        //         Self::swap_spot_market(program_id, accounts)
+        //     }
+        //     MangoInstruction::RemoveSpotMarket => {
+        //         msg!("Mango: RemoveSpotMarket");
+        //         Self::remove_spot_market(program_id, accounts)
+        //     }
+        //     MangoInstruction::RemoveOracle => {
+        //         msg!("Mango: RemoveOracle");
+        //         Self::remove_oracle(program_id, accounts)
+        //     }
+        //     MangoInstruction::LiquidateDelistingToken { max_liquidate_amount } => {
+        //         msg!("Mango: LiquidateDelistingToken");
+        //         Self::liquidate_delisting_token(program_id, accounts, max_liquidate_amount)
+        //     }
+        //     MangoInstruction::ForceSettlePerpPosition => {
+        //         msg!("Mango: ForceSettlePerpPosition");
+        //         Self::force_settle_perp_position(program_id, accounts)
+        //     }
+        //     MangoInstruction::ChangeReferralFeeParams2 {
+        //         ref_surcharge_centibps_tier_1,
+        //         ref_share_centibps_tier_1,
+        //         ref_surcharge_centibps_tier_2,
+        //         ref_share_centibps_tier_2,
+        //         ref_mngo_required,
+        //         ref_mngo_tier_2_factor,
+        //     } => {
+        //         msg!("Mango: ChangeReferralFeeParams2");
+        //         Self::change_referral_fee_params2(
+        //             program_id,
+        //             accounts,
+        //             ref_surcharge_centibps_tier_1,
+        //             ref_share_centibps_tier_1,
+        //             ref_surcharge_centibps_tier_2,
+        //             ref_share_centibps_tier_2,
+        //             ref_mngo_required,
+        //             ref_mngo_tier_2_factor,
+        //         )
+        //     }
+        // }
     }
 }
 
