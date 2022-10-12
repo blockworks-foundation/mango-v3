@@ -3,7 +3,8 @@ members = [
     "common",
     "mango-macro",
     "program",
-    "mango-logs"
+    "mango-logs",
+    "cli"
 ]
 
 [profile.release]
