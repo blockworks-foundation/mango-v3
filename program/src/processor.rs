@@ -7413,7 +7413,7 @@ impl Processor {
     }
 
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
-        unimplemented!()
+        Err(throw!())
         // let instruction =
         //     MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
         // match instruction {
