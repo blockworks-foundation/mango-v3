@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "3.1.8", features = ["derive", "env"] }
+clap = { version = "4.0.15", features = ["derive", "env"] }
 dotenv = "0.15.0"
 env_logger = "0.8.4"
 fixed = { version = "=1.11.0", features = ["serde", "borsh"] }

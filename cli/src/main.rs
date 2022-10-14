@@ -7,7 +7,6 @@ use serum_dex::state::OpenOrders;
 use solana_sdk::pubkey::Pubkey;
 use std::mem::size_of;
 use std::str::FromStr;
-use std::sync::Arc;
 
 #[derive(Parser, Debug, Clone)]
 #[clap()]
@@ -77,6 +76,7 @@ impl DataSource {
         anyhow::bail!("no data found for pubkey {}", address);
     }
 
+    /*
     fn program_account_list(&self, program: Pubkey) -> anyhow::Result<Vec<Pubkey>> {
         let mut stmt =
             self.conn.prepare_cached("SELECT DISTINCT pubkey FROM account WHERE owner = ?")?;
@@ -88,6 +88,7 @@ impl DataSource {
         }
         Ok(list)
     }
+    */
 
     fn mango_account_list(
         &self,
@@ -138,11 +139,8 @@ struct EquityFromSnapshot {
     cache: MangoCache,
 }
 
-#[derive(Default, Clone)]
-struct AccountEquity {
-    /// value of per-token equity in usd, ordered by mango group token index
-    tokens_usd: [i64; 16],
-}
+/// value of per-token equity in usd, ordered by mango group token index
+type AccountTokenAmounts = [i64; 16];
 
 impl EquityFromSnapshot {
     fn run(args: EquityFromSnapshotArgs) -> anyhow::Result<()> {
@@ -156,7 +154,7 @@ impl EquityFromSnapshot {
         let account_addresses =
             ctx.data.mango_account_list(ctx.args.program, DataType::MangoAccount)?;
 
-        let mut account_equities: Vec<(Pubkey, AccountEquity)> =
+        let mut account_equities: Vec<(Pubkey, AccountTokenAmounts)> =
             Vec::with_capacity(account_addresses.len());
         for account_address in account_addresses {
             let equity_opt = ctx
@@ -167,6 +165,11 @@ impl EquityFromSnapshot {
             }
             account_equities.push((account_address, equity_opt.unwrap()));
         }
+
+        let token_names: [&str; 16] = [
+            "MNGO", "BTC", "ETH", "SOL", "USDT", "SRM", "RAY", "COPE", "FTT", "ADA", "MSOL", "BNB",
+            "AVAX", "LUNA", "GMT", "USDC",
+        ];
 
         let available_tokens: [bool; 15] = [
             true, true, true, true, false, // usdt is gone
@@ -231,10 +234,9 @@ impl EquityFromSnapshot {
         for (_, equity) in reimburse_amounts.iter_mut() {
             for i in 0..15 {
                 if !available_tokens[i] {
-                    let amount = equity.tokens_usd[i];
-                    equity.tokens_usd[QUOTE_INDEX] =
-                        equity.tokens_usd[QUOTE_INDEX].checked_add(amount).unwrap();
-                    equity.tokens_usd[i] = 0;
+                    let amount = equity[i];
+                    equity[QUOTE_INDEX] += amount;
+                    equity[i] = 0;
                 }
             }
         }
@@ -242,9 +244,9 @@ impl EquityFromSnapshot {
         // basic total amount of all positive equities per token (liabs handled later)
         let mut reimburse_totals = [0u64; 16];
         for (_, equity) in account_equities.iter() {
-            for (i, value) in equity.tokens_usd.iter().enumerate() {
+            for (i, value) in equity.iter().enumerate() {
                 if *value >= 0 {
-                    reimburse_totals[i] = reimburse_totals[i].checked_add(*value as u64).unwrap();
+                    reimburse_totals[i] += *value as u64;
                 }
             }
         }
@@ -255,11 +257,9 @@ impl EquityFromSnapshot {
         // resolve user's liabilities with their assets in a way that aims to bring the
         // needed token amounts <= what's available
         let mut reimburse_amounts = account_equities.clone();
-        for (pubkey, equity) in reimburse_amounts.iter_mut() {
-            println!("new equity: {:?} {pubkey}", equity.tokens_usd);
-
+        for (_, equity) in reimburse_amounts.iter_mut() {
             for i in 0..16 {
-                let mut value = equity.tokens_usd[i];
+                let mut value = equity[i];
                 // positive amounts get reimbursed
                 if value >= 0 {
                     continue;
@@ -267,7 +267,7 @@ impl EquityFromSnapshot {
 
                 // Negative amounts must be settled against other token balances
                 // This is using a greedy strategy, reducing the most requested token first
-                let mut weighted_indexes = equity.tokens_usd[0..15]
+                let mut weighted_indexes = equity[0..15]
                     .iter()
                     .enumerate()
                     .filter_map(|(i, v)| (*v > 0).then_some(i))
@@ -279,94 +279,154 @@ impl EquityFromSnapshot {
 
                 weighted_indexes.sort_by(|a, b| a.1.cmp(&b.1));
                 for &(j, _) in weighted_indexes.iter() {
-                    let start = equity.tokens_usd[j];
+                    let start = equity[j];
                     let amount = if start + value >= 0 { -value } else { start };
-                    equity.tokens_usd[j] = equity.tokens_usd[j].checked_sub(amount).unwrap();
-                    reimburse_totals[j] = reimburse_totals[j].checked_sub(amount as u64).unwrap();
-                    //println!("{value} {start} {amount} {i} {j}");
-                    value = value + amount;
+                    equity[j] -= amount;
+                    reimburse_totals[j] -= amount as u64;
+                    value += amount;
                     if value >= 0 {
                         break;
                     }
                 }
 
                 // All tokens fine? Try reducing some random one, starting with USDC
-                for j in (0..16).rev() {
-                    if equity.tokens_usd[j] <= 0 {
+                for j in [15, 14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10] {
+                    if equity[j] <= 0 {
                         continue;
                     }
-                    let start = equity.tokens_usd[j];
+                    let start = equity[j];
                     let amount = if start + value >= 0 { -value } else { start };
-                    equity.tokens_usd[j] = equity.tokens_usd[j].checked_sub(amount).unwrap();
-                    reimburse_totals[j] = reimburse_totals[j].checked_sub(amount as u64).unwrap();
-                    value = value + amount;
+                    equity[j] -= amount;
+                    reimburse_totals[j] -= amount as u64;
+                    value += amount;
                     if value >= 0 {
                         break;
                     }
                 }
 
                 assert!(value == 0);
-                equity.tokens_usd[i] = 0;
+                equity[i] = 0;
             }
-            println!("---- final: {:?}", equity.tokens_usd);
         }
 
         // now all reimburse_amounts are >= 0
 
-        // Do a second pass where we scale up or down user reimbursement amounts to fully utilize funds
+        // Do a pass where we scale down user reimbursement token amounts and instead
+        // reimburse with USDC if there's not enough tokens
         for i in 0..15 {
             if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
                 continue;
             }
             let fraction = I80F48::from(available_amounts[i]) / I80F48::from(reimburse_totals[i]);
+            if fraction >= 1 {
+                continue;
+            }
 
             // Scale down token reimbursements and replace them with USDC reimbursements
             for (_, equity) in reimburse_amounts.iter_mut() {
-                let amount = &mut equity.tokens_usd[i];
+                let amount = &mut equity[i];
                 assert!(*amount >= 0);
                 if *amount == 0 {
                     continue;
                 }
 
                 let new_amount: i64 = (I80F48::from(*amount) * fraction).to_num();
-                if fraction < 1 {
-                    let decrease = (*amount - new_amount) as u64;
-                    *amount = new_amount;
-                    reimburse_totals[i] = reimburse_totals[i].checked_sub(decrease).unwrap();
-                    equity.tokens_usd[QUOTE_INDEX] += decrease as i64;
-                    reimburse_totals[QUOTE_INDEX] =
-                        reimburse_totals[QUOTE_INDEX].checked_add(decrease).unwrap();
+                let decrease = (*amount - new_amount) as u64;
+                *amount = new_amount;
+                reimburse_totals[i] -= decrease;
+                let target = if i == 3 {
+                    10 // SOL -> mSOL
                 } else {
-                    let increase = (new_amount - *amount) as u64;
-                    *amount = new_amount;
-                    reimburse_totals[i] = reimburse_totals[i].checked_add(increase).unwrap();
-                    equity.tokens_usd[QUOTE_INDEX] -= increase as i64;
-                    reimburse_totals[QUOTE_INDEX] =
-                        reimburse_totals[QUOTE_INDEX].checked_sub(increase).unwrap();
+                    QUOTE_INDEX
+                };
+                equity[target] += decrease as i64;
+                reimburse_totals[target] += decrease;
+            }
+        }
+
+        // Do passes where we scale up token reimbursement amounts to try to fully utilize funds
+        for _ in 0..100 {
+            for i in 0..15 {
+                if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
+                    continue;
+                }
+
+                let fraction =
+                    I80F48::from(available_amounts[i]) / I80F48::from(reimburse_totals[i]);
+                if fraction <= 1 {
+                    continue;
+                }
+
+                // Scale up token reimbursements and take away USDC reimbursements
+                for (_, equity) in reimburse_amounts.iter_mut() {
+                    let amount = equity[i];
+                    assert!(amount >= 0);
+                    if amount == 0 {
+                        continue;
+                    }
+
+                    let new_amount: i64 = (I80F48::from(amount) * fraction).to_num();
+                    let mut remaining_increase = new_amount - amount; // positive
+
+                    for j in (0..16).rev() {
+                        let other_amount = equity[j];
+                        if (j != 15 && available_amounts[j] >= reimburse_totals[j])
+                            || other_amount == 0
+                        {
+                            continue;
+                        }
+                        let increase = remaining_increase.min(other_amount);
+                        equity[j] -= increase;
+                        reimburse_totals[j] -= increase as u64;
+                        equity[i] += increase;
+                        reimburse_totals[i] += increase as u64;
+                        remaining_increase -= increase;
+                    }
                 }
             }
         }
 
-        println!("sum of positive token equities: {:?}", reimburse_totals);
+        // double check that user equity is unchanged
+        for ((_, equity), (_, reimburse)) in account_equities.iter().zip(reimburse_amounts.iter()) {
+            let eqsum = equity.iter().sum::<i64>();
+            let resum = reimburse.iter().sum::<i64>();
+            assert_eq!(eqsum, resum);
+        }
+
         for i in 0..15 {
             println!(
-                "{i} {} {} {}",
+                "{}: available {}, used {}, left over {}",
+                token_names[i],
                 available_amounts[i] / 1000000,
                 reimburse_totals[i] / 1000000,
                 (available_amounts[i] as i64 - reimburse_totals[i] as i64) / 1000000
             );
         }
-        println!("15 {}", reimburse_totals[15] / 1000000);
-
+        println!("USDC: used {}", reimburse_totals[15] / 1000000);
         println!("reimburse total {}", reimburse_totals.iter().sum::<u64>() / 1000000);
 
-        //     println!("{},{:?}", account_address, equity.tokens_usd);
-        // }
+        println!("pubkey,{}", token_names.join(","));
+        for (pubkey, amounts) in reimburse_amounts.iter() {
+            println!(
+                "{pubkey},{}",
+                amounts
+                    .iter()
+                    .enumerate()
+                    .map(|(index, v)| (I80F48::from(*v) / reimbursement_prices[index])
+                        .floor()
+                        .to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+        }
 
         Ok(())
     }
 
-    fn account_equity(&self, account_address: Pubkey) -> anyhow::Result<Option<AccountEquity>> {
+    fn account_equity(
+        &self,
+        account_address: Pubkey,
+    ) -> anyhow::Result<Option<AccountTokenAmounts>> {
         if account_address
             != Pubkey::from_str(&"3TXDBTHFwyKywjZj1vGdRVkrF5o4YZ1vZnMf3Hb9qALz").unwrap()
         {
@@ -455,9 +515,9 @@ impl EquityFromSnapshot {
         }
         // ignore open perp orders
 
-        let mut account_equity = AccountEquity::default();
+        let mut account_equity = AccountTokenAmounts::default();
         for i in 0..16 {
-            account_equity.tokens_usd[i] = equity[i].round().to_num();
+            account_equity[i] = equity[i].round().to_num();
         }
 
         Ok(Some(account_equity))
