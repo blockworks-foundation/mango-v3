@@ -154,7 +154,7 @@ impl EquityFromSnapshot {
         let account_addresses =
             ctx.data.mango_account_list(ctx.args.program, DataType::MangoAccount)?;
 
-        let mut account_equities: Vec<(Pubkey, AccountTokenAmounts)> =
+        let mut account_equities: Vec<(Pubkey, Pubkey, AccountTokenAmounts)> =
             Vec::with_capacity(account_addresses.len());
         for account_address in account_addresses {
             let equity_opt = ctx
@@ -163,7 +163,8 @@ impl EquityFromSnapshot {
             if equity_opt.is_none() {
                 continue;
             }
-            account_equities.push((account_address, equity_opt.unwrap()));
+            let (owner, equity) = equity_opt.unwrap();
+            account_equities.push((account_address, owner, equity));
         }
 
         let token_names: [&str; 16] = [
@@ -231,7 +232,7 @@ impl EquityFromSnapshot {
         let mut reimburse_amounts = account_equities.clone();
 
         // all the equity in unavailable tokens is just considered usdc
-        for (_, equity) in reimburse_amounts.iter_mut() {
+        for (_, _, equity) in reimburse_amounts.iter_mut() {
             for i in 0..15 {
                 if !available_tokens[i] {
                     let amount = equity[i];
@@ -243,7 +244,7 @@ impl EquityFromSnapshot {
 
         // basic total amount of all positive equities per token (liabs handled later)
         let mut reimburse_totals = [0u64; 16];
-        for (_, equity) in account_equities.iter() {
+        for (_, _, equity) in account_equities.iter() {
             for (i, value) in equity.iter().enumerate() {
                 if *value >= 0 {
                     reimburse_totals[i] += *value as u64;
@@ -257,7 +258,7 @@ impl EquityFromSnapshot {
         // resolve user's liabilities with their assets in a way that aims to bring the
         // needed token amounts <= what's available
         let mut reimburse_amounts = account_equities.clone();
-        for (_, equity) in reimburse_amounts.iter_mut() {
+        for (_, _, equity) in reimburse_amounts.iter_mut() {
             for i in 0..16 {
                 let mut value = equity[i];
                 // positive amounts get reimbursed
@@ -323,7 +324,7 @@ impl EquityFromSnapshot {
             }
 
             // Scale down token reimbursements and replace them with USDC reimbursements
-            for (_, equity) in reimburse_amounts.iter_mut() {
+            for (_, _, equity) in reimburse_amounts.iter_mut() {
                 let amount = &mut equity[i];
                 assert!(*amount >= 0);
                 if *amount == 0 {
@@ -358,7 +359,7 @@ impl EquityFromSnapshot {
                 }
 
                 // Scale up token reimbursements and take away USDC reimbursements
-                for (_, equity) in reimburse_amounts.iter_mut() {
+                for (_, _, equity) in reimburse_amounts.iter_mut() {
                     let amount = equity[i];
                     assert!(amount >= 0);
                     if amount == 0 {
@@ -387,10 +388,13 @@ impl EquityFromSnapshot {
         }
 
         // double check that user equity is unchanged
-        for ((_, equity), (_, reimburse)) in account_equities.iter().zip(reimburse_amounts.iter()) {
+        for ((_, ownerl, equity), (_, ownerr, reimburse)) in
+            account_equities.iter().zip(reimburse_amounts.iter())
+        {
             let eqsum = equity.iter().sum::<i64>();
             let resum = reimburse.iter().sum::<i64>();
             assert_eq!(eqsum, resum);
+            assert_eq!(ownerl, ownerr);
         }
 
         for i in 0..15 {
@@ -405,10 +409,10 @@ impl EquityFromSnapshot {
         println!("USDC: used {}", reimburse_totals[15] / 1000000);
         println!("reimburse total {}", reimburse_totals.iter().sum::<u64>() / 1000000);
 
-        println!("pubkey,{}", token_names.join(","));
-        for (pubkey, amounts) in reimburse_amounts.iter() {
+        println!("account,owner,{}", token_names.join(","));
+        for (account, owner, amounts) in reimburse_amounts.iter() {
             println!(
-                "{pubkey},{}",
+                "{account},{owner},{}",
                 amounts
                     .iter()
                     .enumerate()
@@ -426,7 +430,7 @@ impl EquityFromSnapshot {
     fn account_equity(
         &self,
         account_address: Pubkey,
-    ) -> anyhow::Result<Option<AccountTokenAmounts>> {
+    ) -> anyhow::Result<Option<(Pubkey, AccountTokenAmounts)>> {
         if account_address
             != Pubkey::from_str(&"3TXDBTHFwyKywjZj1vGdRVkrF5o4YZ1vZnMf3Hb9qALz").unwrap()
         {
@@ -520,6 +524,6 @@ impl EquityFromSnapshot {
             account_equity[i] = equity[i].round().to_num();
         }
 
-        Ok(Some(account_equity))
+        Ok(Some((mango_account.owner, account_equity)))
     }
 }
