@@ -197,7 +197,7 @@ impl EquityFromSnapshot {
         let data = DataSource::new(args.sqlite.clone())?;
 
         let group = data.load_group(args.group)?;
-        let cache = data.load_cache(group.mango_cache)?;
+        let mut cache = data.load_cache(group.mango_cache)?;
 
         let ctx = EquityFromSnapshot { args, data, group, cache };
 
@@ -327,6 +327,13 @@ impl EquityFromSnapshot {
             I80F48::ONE,
         ];
 
+        // Fix the MNGO snapshot price to be the same as the reimbursement price.
+        // This does two things:
+        // - the MNGO-based equity will be converted back to MNGO tokens at the same price,
+        //   allowing the token count to stay unchanged
+        // - if MNGO tokens must be used as assets, they're valued with the less favorable price
+        cache.price_cache[0].price = reimbursement_prices[0];
+
         // USD amounts in each token that can be used for reimbursement
         let available_amounts: [u64; 15] = available_native_amounts
             .iter()
@@ -379,6 +386,7 @@ impl EquityFromSnapshot {
                 let mut weighted_indexes = equity[0..15]
                     .iter()
                     .enumerate()
+                    .skip(1) // skip MNGO
                     .filter_map(|(i, v)| (*v > 0).then_some(i))
                     .filter_map(|i| {
                         (available_amounts[i] < reimburse_totals[i])
@@ -401,7 +409,9 @@ impl EquityFromSnapshot {
                 // All tokens fine? Try reducing some random one, starting with USDC
                 // (mSOL is last because it looks like we will have a lot of it and want
                 // to prefer giving it out to users that had it before)
-                for j in [15, 14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10] {
+                // This list has MNGO last, meaning that Mango tokens are only used as
+                // an asset to offset a liability as last resort.
+                for j in [15, 14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 0] {
                     if equity[j] <= 0 {
                         continue;
                     }
@@ -424,7 +434,8 @@ impl EquityFromSnapshot {
 
         // Do a pass where we scale down user reimbursement token amounts and instead
         // reimburse with USDC if there's not enough tokens to give out
-        for i in 0..15 {
+        // Don't do it for 0 (MNGO).
+        for i in 1..15 {
             if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
                 continue;
             }
@@ -461,7 +472,7 @@ impl EquityFromSnapshot {
         // To leave the DAO with fewer SOL at the end we prefer to give people who already
         // had some SOL more of it (and compensate by giving them less of another token).
         for _ in 0..100 {
-            for i in 0..15 {
+            for i in 1..15 {
                 if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
                     continue;
                 }
@@ -483,7 +494,7 @@ impl EquityFromSnapshot {
                     let new_amount: i64 = (I80F48::from(amount) * fraction).to_num();
                     let mut remaining_increase = new_amount - amount; // positive
 
-                    for j in (0..16).rev() {
+                    for j in (1..16).rev() {
                         let other_amount = equity[j];
                         if (j != 15 && available_amounts[j] >= reimburse_totals[j])
                             || other_amount == 0
@@ -502,14 +513,27 @@ impl EquityFromSnapshot {
         }
 
         // Double check that total user equity is unchanged
+        let mut accounts_with_mngo = 0;
+        let mut accounts_with_mngo_unchanged = 0;
         for ((_, ownerl, equity), (_, ownerr, reimburse)) in
             account_equities.iter().zip(reimburse_amounts.iter())
         {
             let eqsum = equity.iter().sum::<i64>();
             let resum = reimburse.iter().sum::<i64>();
             assert_eq!(eqsum, resum);
+            if equity[0] > 0 {
+                // MNGO amount can only go down
+                assert!(reimburse[0] <= equity[0]);
+                accounts_with_mngo += 1;
+                if reimburse[0] == equity[0] {
+                    accounts_with_mngo_unchanged += 1;
+                }
+            }
+
             assert_eq!(ownerl, ownerr);
         }
+
+        println!("account w mango: {accounts_with_mngo}, unchanged {accounts_with_mngo_unchanged}");
 
         for i in 0..15 {
             println!(
@@ -613,9 +637,21 @@ impl EquityFromSnapshot {
 
         // Sum up the perp position equity
         for oracle_index in 0..self.group.num_oracles {
-            if self.group.perp_markets[oracle_index].is_empty()
-                || !mango_account.perp_accounts[oracle_index].is_active()
-            {
+            if self.group.perp_markets[oracle_index].is_empty() {
+                continue;
+            }
+
+            let mngo_index = 0;
+            let mngo = mango_account.perp_accounts[oracle_index].mngo_accrued;
+            equity[mngo_index] = equity[mngo_index]
+                .checked_add(
+                    I80F48::from(mngo)
+                        .checked_mul(self.cache.price_cache[mngo_index].price)
+                        .unwrap(),
+                )
+                .unwrap();
+
+            if !mango_account.perp_accounts[oracle_index].is_active() {
                 continue;
             }
             let price = self.cache.price_cache[oracle_index].price;
