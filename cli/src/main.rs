@@ -5,6 +5,7 @@ use mango::state::*;
 use mango_common::*;
 use serum_dex::state::OpenOrders;
 use solana_sdk::pubkey::Pubkey;
+use std::collections::HashMap;
 use std::mem::size_of;
 use std::str::FromStr;
 
@@ -18,6 +19,7 @@ struct Cli {
 #[derive(Args, Debug, Clone)]
 struct EquityFromSnapshotArgs {
     sqlite: String,
+    late_changes: String,
     program: Pubkey,
     group: Pubkey,
 }
@@ -76,20 +78,6 @@ impl DataSource {
         anyhow::bail!("no data found for pubkey {}", address);
     }
 
-    /*
-    fn program_account_list(&self, program: Pubkey) -> anyhow::Result<Vec<Pubkey>> {
-        let mut stmt =
-            self.conn.prepare_cached("SELECT DISTINCT pubkey FROM account WHERE owner = ?")?;
-        let mut rows = stmt.query(rusqlite::params![program.as_ref()])?;
-        let mut list = Vec::new();
-        while let Some(row) = rows.next()? {
-            let v: Vec<u8> = row.get(0)?;
-            list.push(Pubkey::new(&v));
-        }
-        Ok(list)
-    }
-    */
-
     fn mango_account_list(
         &self,
         program: Pubkey,
@@ -132,6 +120,58 @@ impl DataSource {
     }
 }
 
+fn late_deposits_withdrawals(filename: &str) -> anyhow::Result<Vec<(Pubkey, Pubkey, usize, i64)>> {
+    // mango token index and decimals
+    let tokens: HashMap<&str, (usize, i32)> = HashMap::from([
+        ("MNGO", (0, 6)),
+        ("BTC", (1, 6)),
+        ("ETH", (2, 6)),
+        ("SOL", (3, 9)),
+        ("USDT", (4, 6)),
+        ("SRM", (5, 6)),
+        ("RAY", (6, 6)),
+        ("FTT", (8, 6)),
+        ("MSOL", (10, 9)),
+        ("BNB", (11, 8)),
+        ("AVAX", (12, 8)),
+        ("GMT", (14, 9)),
+        ("USDC", (15, 6)),
+    ]);
+
+    let mut list = Vec::new();
+
+    use std::io::{BufRead, BufReader};
+    let file = std::fs::File::open(filename)?;
+    for line in BufReader::new(file).lines().skip(1) {
+        if let Ok(line) = line {
+            let fields = line.split("\t").collect::<Vec<&str>>();
+            assert_eq!(fields.len(), 19);
+            let account = Pubkey::from_str(fields[5]).unwrap();
+            // skip attacker accounts
+            if fields[5] == "4ND8FVPjUGGjx9VuGFuJefDWpg3THb58c277hbVRnjNa"
+                || fields[5] == "CQvKSNnYtPTZfQRQ5jkHq8q2swJyRsdQLcFcj3EmKFfX"
+            {
+                continue;
+            }
+            let owner = Pubkey::from_str(fields[6]).unwrap();
+            let token = fields[7];
+            let side = fields[8];
+            let quantity = f64::from_str(&fields[9].replace(",", "")).unwrap();
+            let token_info = tokens.get(token).unwrap();
+            let change = (quantity
+                * 10f64.powi(token_info.1)
+                * (if side == "Withdraw" {
+                    -1f64
+                } else {
+                    assert_eq!(side, "Deposit");
+                    1f64
+                })) as i64;
+            list.push((account, owner, token_info.0, change));
+        }
+    }
+    Ok(list)
+}
+
 struct EquityFromSnapshot {
     args: EquityFromSnapshotArgs,
     data: DataSource,
@@ -139,11 +179,21 @@ struct EquityFromSnapshot {
     cache: MangoCache,
 }
 
+fn cache_price(cache: &MangoCache, index: usize) -> I80F48 {
+    if index == QUOTE_INDEX {
+        I80F48::ONE
+    } else {
+        cache.price_cache[index].price
+    }
+}
+
 /// value of per-token equity in usd, ordered by mango group token index
 type AccountTokenAmounts = [i64; 16];
 
 impl EquityFromSnapshot {
     fn run(args: EquityFromSnapshotArgs) -> anyhow::Result<()> {
+        let late_changes = late_deposits_withdrawals(&args.late_changes)?;
+
         let data = DataSource::new(args.sqlite.clone())?;
 
         let group = data.load_group(args.group)?;
@@ -156,6 +206,8 @@ impl EquityFromSnapshot {
 
         let mut account_equities: Vec<(Pubkey, Pubkey, AccountTokenAmounts)> =
             Vec::with_capacity(account_addresses.len());
+
+        // get the snapshot account equities
         for account_address in account_addresses {
             let equity_opt = ctx
                 .account_equity(account_address)
@@ -165,6 +217,59 @@ impl EquityFromSnapshot {
             }
             let (owner, equity) = equity_opt.unwrap();
             account_equities.push((account_address, owner, equity));
+        }
+
+        // apply the late deposits/withdrawals
+        for &(address, owner, token_index, change_native) in late_changes.iter() {
+            let change_usd =
+                (I80F48::from(change_native) * cache_price(&cache, token_index)).to_num();
+            // slow, but just ran a handful times
+            let account_opt = account_equities.iter_mut().find(|(a, _, _)| a == &address);
+            if let Some((_, _, equity)) = account_opt {
+                equity[token_index] += change_usd;
+            } else {
+                assert!(change_usd > 0);
+                let mut equity = AccountTokenAmounts::default();
+                equity[token_index] = change_usd;
+                account_equities.push((address, owner, equity));
+            }
+        }
+
+        // Some accounts already cached out on a MNGO PERP position that started to be valuable after the
+        // snapshot was taken, no reimbursements
+        {
+            let odd_accounts = [
+                "9A6YVfa66kBEeCLtt6wyqdmjpib7UrybA5mHr3X3kyvf",
+                "AEYWfmFVu1huajTkT3UUbvhCZx92kZXwgpWgrMtocnzv",
+                "AZVbGBJ1DU2RnZNhZ72fcpo191DX3k1uyqDiPiaWoF1q",
+                "C19JAyRLUjkTWmj9VpYu5eVVCbSXcbqqhyF5588ERSSf",
+                "C9rprN4zcP7Wx87UcbLarTEAGCmGiPZp8gaFXPhY9HYm",
+            ];
+            for odd_one in odd_accounts {
+                let address = Pubkey::from_str(odd_one).unwrap();
+                let (_, _, equity) =
+                    account_equities.iter_mut().find(|(a, _, _)| a == &address).unwrap();
+                assert!(late_changes.iter().any(|(a, _, _, c)| a == &address && *c < 0));
+                let total = equity.iter().sum::<i64>();
+                assert!(total < 0);
+                assert!(total > -10_000_000_000); // none of these was bigger than 10000 USD
+                *equity = AccountTokenAmounts::default();
+            }
+        }
+
+        // Some accounts withdrew everything after the snapshot was taken. When doing that they
+        // probably withdrew a tiny bit more than their snapshot equity due to interest.
+        // These accounts have already cached out, no need to reimburse.
+        for (address, _, equity) in account_equities.iter_mut() {
+            let total = equity.iter().sum::<i64>();
+            if total >= 0 {
+                continue;
+            }
+            assert!(late_changes.iter().any(|(a, _, _, c)| a == address && *c < 0));
+            assert!(equity.iter().sum::<i64>() < 0);
+            // only up to -10 USD is expected, otherwise investigate manually!
+            assert!(equity.iter().sum::<i64>() > -10_000_000);
+            *equity = AccountTokenAmounts::default();
         }
 
         let token_names: [&str; 16] = [
@@ -179,8 +284,6 @@ impl EquityFromSnapshot {
             true, true, true, false, // luna delisted
             true,
         ];
-
-        //println!("{:?}", ctx.cache.price_cache.iter().map(|c| c.price).collect::<Vec<_>>());
 
         // TODO: tentative numbers from "Repay bad Debt #2" proposal
         let available_native_amounts: [u64; 15] = [
@@ -201,8 +304,11 @@ impl EquityFromSnapshot {
             152843000000000,
         ];
 
+        // Token prices at time of reimbursement
+        // Note that user equity at snapshot time is computed from the prices from the
+        // mango cache in the snapshot.
         let reimbursement_prices: [I80F48; 16] = [
-            // TODO: bad prices
+            // TODO: bad prices, must be updated when time comes!
             I80F48::from_num(0.038725),
             I80F48::from_num(19036.47),
             I80F48::from_num(1280.639999999999997),
@@ -221,6 +327,7 @@ impl EquityFromSnapshot {
             I80F48::ONE,
         ];
 
+        // USD amounts in each token that can be used for reimbursement
         let available_amounts: [u64; 15] = available_native_amounts
             .iter()
             .zip(reimbursement_prices.iter())
@@ -229,6 +336,7 @@ impl EquityFromSnapshot {
             .try_into()
             .unwrap();
 
+        // Amounts each user should be reimbursed
         let mut reimburse_amounts = account_equities.clone();
 
         // all the equity in unavailable tokens is just considered usdc
@@ -291,6 +399,8 @@ impl EquityFromSnapshot {
                 }
 
                 // All tokens fine? Try reducing some random one, starting with USDC
+                // (mSOL is last because it looks like we will have a lot of it and want
+                // to prefer giving it out to users that had it before)
                 for j in [15, 14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 10] {
                     if equity[j] <= 0 {
                         continue;
@@ -313,7 +423,7 @@ impl EquityFromSnapshot {
         // now all reimburse_amounts are >= 0
 
         // Do a pass where we scale down user reimbursement token amounts and instead
-        // reimburse with USDC if there's not enough tokens
+        // reimburse with USDC if there's not enough tokens to give out
         for i in 0..15 {
             if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
                 continue;
@@ -346,6 +456,10 @@ impl EquityFromSnapshot {
         }
 
         // Do passes where we scale up token reimbursement amounts to try to fully utilize funds
+        //
+        // The idea here is that we have say 1000 SOL but only need 500 SOL to reimburse.
+        // To leave the DAO with fewer SOL at the end we prefer to give people who already
+        // had some SOL more of it (and compensate by giving them less of another token).
         for _ in 0..100 {
             for i in 0..15 {
                 if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
@@ -387,7 +501,7 @@ impl EquityFromSnapshot {
             }
         }
 
-        // double check that user equity is unchanged
+        // Double check that total user equity is unchanged
         for ((_, ownerl, equity), (_, ownerr, reimburse)) in
             account_equities.iter().zip(reimburse_amounts.iter())
         {
@@ -432,7 +546,7 @@ impl EquityFromSnapshot {
         account_address: Pubkey,
     ) -> anyhow::Result<Option<(Pubkey, AccountTokenAmounts)>> {
         if account_address
-            != Pubkey::from_str(&"3TXDBTHFwyKywjZj1vGdRVkrF5o4YZ1vZnMf3Hb9qALz").unwrap()
+            != Pubkey::from_str(&"rwxRFn2S1DHkbA8wiCDxzMRMncgjUaa4LiJTagvLBr9").unwrap()
         {
             //return Ok(None);
         }
