@@ -178,9 +178,24 @@ impl EquityFromSnapshot {
 
         //println!("{:?}", ctx.cache.price_cache.iter().map(|c| c.price).collect::<Vec<_>>());
 
-        // test values only!
-        // TODO: pass in the actual prices and amounts!
-        let available_native_amounts: [u64; 15] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        // TODO: tentative numbers from "Repay bad Debt #2" proposal
+        let available_native_amounts: [u64; 15] = [
+            32409565000000,
+            281498000,
+            226000000,
+            761577910000000,
+            0,
+            2354260000000,
+            98295000000,
+            0,
+            11774000000,
+            0,
+            799155000000000,
+            60800000000,
+            180900000000,
+            0,
+            152843000000000,
+        ];
 
         let reimbursement_prices: [I80F48; 16] = [
             // TODO: bad prices
