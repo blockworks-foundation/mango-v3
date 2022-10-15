@@ -175,34 +175,62 @@ fn late_deposits_withdrawals(filename: &str) -> anyhow::Result<Vec<(Pubkey, Pubk
 struct EquityFromSnapshot {
     args: EquityFromSnapshotArgs,
     data: DataSource,
+    late_changes: Vec<(Pubkey, Pubkey, usize, i64)>,
     group: MangoGroup,
     cache: MangoCache,
-}
-
-fn cache_price(cache: &MangoCache, index: usize) -> I80F48 {
-    if index == QUOTE_INDEX {
-        I80F48::ONE
-    } else {
-        cache.price_cache[index].price
-    }
 }
 
 /// value of per-token equity in usd, ordered by mango group token index
 type AccountTokenAmounts = [i64; 16];
 
+#[derive(Clone, Debug)]
+struct AccountData {
+    mango_account: Pubkey,
+    owner: Pubkey,
+    amounts: AccountTokenAmounts,
+}
+
+fn pay_liab(
+    amounts: &mut AccountTokenAmounts,
+    liab: usize,
+    asset: usize,
+    amount: i64,
+    totals: &mut [u64; 16],
+) {
+    assert!(liab != asset);
+    assert!(amount >= 0);
+    amounts[asset] -= amount;
+    assert!(amounts[asset] >= 0);
+    amounts[liab] += amount;
+    totals[asset] -= amount as u64;
+    // liabs weren't counted in totals!
+}
+
+fn move_amount(
+    amounts: &mut AccountTokenAmounts,
+    from: usize,
+    to: usize,
+    amount: i64,
+    totals: &mut [u64; 16],
+) {
+    assert!(from != to);
+    assert!(amount >= 0);
+    amounts[from] -= amount;
+    assert!(amounts[from] >= 0);
+    amounts[to] += amount;
+    totals[from] -= amount as u64;
+    totals[to] += amount as u64;
+}
+
 impl EquityFromSnapshot {
     fn run(args: EquityFromSnapshotArgs) -> anyhow::Result<()> {
         let late_changes = late_deposits_withdrawals(&args.late_changes)?;
-
         let data = DataSource::new(args.sqlite.clone())?;
 
         let group = data.load_group(args.group)?;
         let mut cache = data.load_cache(group.mango_cache)?;
 
-        let ctx = EquityFromSnapshot { args, data, group, cache };
-
-        let account_addresses =
-            ctx.data.mango_account_list(ctx.args.program, DataType::MangoAccount)?;
+        let ctx = EquityFromSnapshot { args, data, late_changes, group, cache };
 
         let token_names: [&str; 16] = [
             "MNGO", "BTC", "ETH", "SOL", "USDT", "SRM", "RAY", "COPE", "FTT", "ADA", "MSOL", "BNB",
@@ -211,84 +239,26 @@ impl EquityFromSnapshot {
 
         println!("table,account,owner,{}", token_names.join(","));
 
-        let mut account_equities: Vec<(Pubkey, Pubkey, AccountTokenAmounts)> =
-            Vec::with_capacity(account_addresses.len());
-
-        // get the snapshot account equities
-        for account_address in account_addresses {
-            let equity_opt = ctx
-                .account_equity(account_address)
-                .context(format!("on account {}", account_address))?;
-            if equity_opt.is_none() {
-                continue;
+        let debug_print = |table: &str, data: &[AccountData]| {
+            for account in data.iter() {
+                println!(
+                    "{table},{},{},{}",
+                    account.mango_account,
+                    account.owner,
+                    account.amounts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+                );
             }
-            let (owner, equity) = equity_opt.unwrap();
-            account_equities.push((account_address, owner, equity));
-            println!(
-                "snapshot,{account_address},{owner},{}",
-                equity.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
-            );
-        }
+        };
 
-        // apply the late deposits/withdrawals
-        for &(address, owner, token_index, change_native) in late_changes.iter() {
-            let change_usd =
-                (I80F48::from(change_native) * cache_price(&cache, token_index)).to_num();
-            // slow, but just ran a handful times
-            let account_opt = account_equities.iter_mut().find(|(a, _, _)| a == &address);
-            if let Some((_, _, equity)) = account_opt {
-                equity[token_index] += change_usd;
-            } else {
-                assert!(change_usd > 0);
-                let mut equity = AccountTokenAmounts::default();
-                equity[token_index] = change_usd;
-                account_equities.push((address, owner, equity));
-            }
-        }
+        let mut account_equities = ctx.snapshot_account_equities()?;
 
-        for &(address, owner, equity) in account_equities.iter() {
-            println!(
-                "dep/with,{address},{owner},{}",
-                equity.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
-            );
-        }
+        debug_print("snapshot", &account_equities);
 
-        // Some accounts already cached out on a MNGO PERP position that started to be valuable after the
-        // snapshot was taken, no reimbursements
-        {
-            let odd_accounts = [
-                "9A6YVfa66kBEeCLtt6wyqdmjpib7UrybA5mHr3X3kyvf",
-                "AEYWfmFVu1huajTkT3UUbvhCZx92kZXwgpWgrMtocnzv",
-                "AZVbGBJ1DU2RnZNhZ72fcpo191DX3k1uyqDiPiaWoF1q",
-                "C19JAyRLUjkTWmj9VpYu5eVVCbSXcbqqhyF5588ERSSf",
-                "C9rprN4zcP7Wx87UcbLarTEAGCmGiPZp8gaFXPhY9HYm",
-            ];
-            for odd_one in odd_accounts {
-                let address = Pubkey::from_str(odd_one).unwrap();
-                let (_, _, equity) =
-                    account_equities.iter_mut().find(|(a, _, _)| a == &address).unwrap();
-                assert!(late_changes.iter().any(|(a, _, _, c)| a == &address && *c < 0));
-                let total = equity.iter().sum::<i64>();
-                assert!(total < 0);
-                assert!(total > -10_000_000_000); // none of these was bigger than 10000 USD
-                *equity = AccountTokenAmounts::default();
-            }
-        }
+        ctx.apply_late_deposits_withdrawals(&mut account_equities)?;
 
-        // Some accounts withdrew everything after the snapshot was taken. When doing that they
-        // probably withdrew a tiny bit more than their snapshot equity due to interest.
-        // These accounts have already cached out, no need to reimburse.
-        for (address, _, equity) in account_equities.iter_mut() {
-            let total = equity.iter().sum::<i64>();
-            if total >= 0 {
-                continue;
-            }
-            assert!(late_changes.iter().any(|(a, _, _, c)| a == address && *c < 0));
-            assert!(equity.iter().sum::<i64>() < 0);
-            // only up to -10 USD is expected, otherwise investigate manually!
-            assert!(equity.iter().sum::<i64>() > -10_000_000);
-            *equity = AccountTokenAmounts::default();
-        }
+        debug_print("after dep/with", &account_equities);
+
+        ctx.skip_accounts(&mut account_equities)?;
 
         let available_tokens: [bool; 15] = [
             true, true, true, true, false, // usdt is gone
@@ -359,21 +329,22 @@ impl EquityFromSnapshot {
         // Amounts each user should be reimbursed
         let mut reimburse_amounts = account_equities.clone();
 
-        // all the equity in unavailable tokens is just considered usdc
-        for (_, _, equity) in reimburse_amounts.iter_mut() {
+        // All the equity in unavailable tokens - that means tokens that are not available for
+        // reimbursing people with - is just considered usdc
+        for account in reimburse_amounts.iter_mut() {
             for i in 0..15 {
                 if !available_tokens[i] {
-                    let amount = equity[i];
-                    equity[QUOTE_INDEX] += amount;
-                    equity[i] = 0;
+                    let amount = account.amounts[i];
+                    account.amounts[QUOTE_INDEX] += amount;
+                    account.amounts[i] = 0;
                 }
             }
         }
 
         // basic total amount of all positive equities per token (liabs handled later)
         let mut reimburse_totals = [0u64; 16];
-        for (_, _, equity) in account_equities.iter() {
-            for (i, value) in equity.iter().enumerate() {
+        for account in account_equities.iter() {
+            for (i, value) in account.amounts.iter().enumerate() {
                 if *value >= 0 {
                     reimburse_totals[i] += *value as u64;
                 }
@@ -386,9 +357,9 @@ impl EquityFromSnapshot {
         // resolve user's liabilities with their assets in a way that aims to bring the
         // needed token amounts <= what's available
         let mut reimburse_amounts = account_equities.clone();
-        for (_, _, equity) in reimburse_amounts.iter_mut() {
+        for AccountData { amounts, .. } in reimburse_amounts.iter_mut() {
             for i in 0..16 {
-                let mut value = equity[i];
+                let mut value = amounts[i];
                 // positive amounts get reimbursed
                 if value >= 0 {
                     continue;
@@ -396,7 +367,7 @@ impl EquityFromSnapshot {
 
                 // Negative amounts must be settled against other token balances
                 // This is using a greedy strategy, reducing the most requested token first
-                let mut weighted_indexes = equity[0..15]
+                let mut weighted_indexes = amounts[0..15]
                     .iter()
                     .enumerate()
                     .skip(1) // skip MNGO
@@ -409,10 +380,9 @@ impl EquityFromSnapshot {
 
                 weighted_indexes.sort_by(|a, b| a.1.cmp(&b.1));
                 for &(j, _) in weighted_indexes.iter() {
-                    let start = equity[j];
+                    let start = amounts[j];
                     let amount = if start + value >= 0 { -value } else { start };
-                    equity[j] -= amount;
-                    reimburse_totals[j] -= amount as u64;
+                    pay_liab(amounts, i, j, amount, &mut reimburse_totals);
                     value += amount;
                     if value >= 0 {
                         break;
@@ -425,13 +395,12 @@ impl EquityFromSnapshot {
                 // This list has MNGO last, meaning that Mango tokens are only used as
                 // an asset to offset a liability as last resort.
                 for j in [14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 15, 0] {
-                    if equity[j] <= 0 {
+                    if amounts[j] <= 0 {
                         continue;
                     }
-                    let start = equity[j];
+                    let start = amounts[j];
                     let amount = if start + value >= 0 { -value } else { start };
-                    equity[j] -= amount;
-                    reimburse_totals[j] -= amount as u64;
+                    pay_liab(amounts, i, j, amount, &mut reimburse_totals);
                     value += amount;
                     if value >= 0 {
                         break;
@@ -439,7 +408,7 @@ impl EquityFromSnapshot {
                 }
 
                 assert!(value == 0);
-                equity[i] = 0;
+                assert!(amounts[i] == 0);
             }
         }
 
@@ -458,24 +427,21 @@ impl EquityFromSnapshot {
             }
 
             // Scale down token reimbursements and replace them with USDC reimbursements
-            for (_, _, equity) in reimburse_amounts.iter_mut() {
-                let amount = &mut equity[i];
-                assert!(*amount >= 0);
-                if *amount == 0 {
+            for AccountData { amounts, .. } in reimburse_amounts.iter_mut() {
+                let start_amount = amounts[i];
+                assert!(start_amount >= 0);
+                if start_amount == 0 {
                     continue;
                 }
 
-                let new_amount: i64 = (I80F48::from(*amount) * fraction).to_num();
-                let decrease = (*amount - new_amount) as u64;
-                *amount = new_amount;
-                reimburse_totals[i] -= decrease;
+                let new_amount: i64 = (I80F48::from(start_amount) * fraction).to_num();
+                let amount = start_amount - new_amount;
                 let target = if i == 3 {
                     10 // SOL -> mSOL
                 } else {
                     QUOTE_INDEX
                 };
-                equity[target] += decrease as i64;
-                reimburse_totals[target] += decrease;
+                move_amount(amounts, i, target, amount, &mut reimburse_totals);
             }
         }
 
@@ -528,22 +494,23 @@ impl EquityFromSnapshot {
         // Double check that total user equity is unchanged
         let mut accounts_with_mngo = 0;
         let mut accounts_with_mngo_unchanged = 0;
-        for ((_, ownerl, equity), (_, ownerr, reimburse)) in
-            account_equities.iter().zip(reimburse_amounts.iter())
-        {
-            let eqsum = equity.iter().sum::<i64>();
-            let resum = reimburse.iter().sum::<i64>();
+        for (a_equity, a_reimburse) in account_equities.iter().zip(reimburse_amounts.iter()) {
+            let eqsum = a_equity.amounts.iter().sum::<i64>();
+            let resum = a_reimburse.amounts.iter().sum::<i64>();
             assert_eq!(eqsum, resum);
-            if equity[0] > 0 {
+
+            let mngo_equity = a_equity.amounts[0];
+            let mngo_reimburse = a_reimburse.amounts[0];
+            if mngo_equity > 0 {
                 // MNGO amount can only go down
-                assert!(reimburse[0] <= equity[0]);
+                assert!(mngo_reimburse <= mngo_equity);
                 accounts_with_mngo += 1;
-                if reimburse[0] == equity[0] {
+                if mngo_reimburse == mngo_equity {
                     accounts_with_mngo_unchanged += 1;
                 }
             }
 
-            assert_eq!(ownerl, ownerr);
+            assert_eq!(a_equity.owner, a_reimburse.owner);
         }
 
         println!("account w mango: {accounts_with_mngo}, unchanged {accounts_with_mngo_unchanged}");
@@ -560,16 +527,14 @@ impl EquityFromSnapshot {
         println!("USDC: used {}", reimburse_totals[15] / 1000000);
         println!("reimburse total {}", reimburse_totals.iter().sum::<u64>() / 1000000);
 
-        for (account, owner, amounts) in reimburse_amounts.iter() {
+        debug_print("usd final", &reimburse_amounts);
+
+        for a in reimburse_amounts.iter() {
             println!(
-                "usd final,{account},{owner},{}",
-                amounts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
-            );
-        }
-        for (account, owner, amounts) in reimburse_amounts.iter() {
-            println!(
-                "token final,{account},{owner},{}",
-                amounts
+                "token final,{},{},{}",
+                a.mango_account,
+                a.owner,
+                a.amounts
                     .iter()
                     .enumerate()
                     .map(|(index, v)| (I80F48::from(*v) / reimbursement_prices[index])
@@ -578,6 +543,102 @@ impl EquityFromSnapshot {
                     .collect::<Vec<_>>()
                     .join(",")
             );
+        }
+
+        Ok(())
+    }
+
+    fn snapshot_price(&self, index: usize) -> I80F48 {
+        if index == QUOTE_INDEX {
+            I80F48::ONE
+        } else {
+            self.cache.price_cache[index].price
+        }
+    }
+
+    fn snapshot_account_equities(&self) -> anyhow::Result<Vec<AccountData>> {
+        let account_addresses =
+            self.data.mango_account_list(self.args.program, DataType::MangoAccount)?;
+
+        let mut account_equities: Vec<AccountData> = Vec::with_capacity(account_addresses.len()); // get the snapshot account equities
+        for mango_account in account_addresses {
+            let equity_opt = self
+                .account_equity(mango_account)
+                .context(format!("on account {}", mango_account))?;
+            if equity_opt.is_none() {
+                continue;
+            }
+            let (owner, amounts) = equity_opt.unwrap();
+            account_equities.push(AccountData { mango_account, owner, amounts });
+        }
+
+        Ok(account_equities)
+    }
+
+    fn apply_late_deposits_withdrawals(
+        &self,
+        account_equities: &mut Vec<AccountData>,
+    ) -> anyhow::Result<()> {
+        // apply the late deposits/withdrawals
+        for &(mango_account, owner, token_index, change_native) in self.late_changes.iter() {
+            let change_usd =
+                (I80F48::from(change_native) * self.snapshot_price(token_index)).to_num();
+            // slow, but just ran a handful times
+            let account_opt =
+                account_equities.iter_mut().find(|a| a.mango_account == mango_account);
+            if let Some(account) = account_opt {
+                account.amounts[token_index] += change_usd;
+            } else {
+                assert!(change_usd > 0);
+                let mut amounts = AccountTokenAmounts::default();
+                amounts[token_index] = change_usd;
+                account_equities.push(AccountData { mango_account, owner, amounts });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn skip_accounts(&self, account_equities: &mut Vec<AccountData>) -> anyhow::Result<()> {
+        // Some accounts already cached out on a MNGO PERP position that started to be valuable after the
+        // snapshot was taken, no reimbursements
+        {
+            let odd_accounts = [
+                "9A6YVfa66kBEeCLtt6wyqdmjpib7UrybA5mHr3X3kyvf",
+                "AEYWfmFVu1huajTkT3UUbvhCZx92kZXwgpWgrMtocnzv",
+                "AZVbGBJ1DU2RnZNhZ72fcpo191DX3k1uyqDiPiaWoF1q",
+                "C19JAyRLUjkTWmj9VpYu5eVVCbSXcbqqhyF5588ERSSf",
+                "C9rprN4zcP7Wx87UcbLarTEAGCmGiPZp8gaFXPhY9HYm",
+            ];
+            for odd_one in odd_accounts {
+                let address = Pubkey::from_str(odd_one).unwrap();
+                let account =
+                    account_equities.iter_mut().find(|a| a.mango_account == address).unwrap();
+                assert!(self.late_changes.iter().any(|(a, _, _, c)| a == &address && *c < 0));
+                let total = account.amounts.iter().sum::<i64>();
+                assert!(total < 0);
+                assert!(total > -10_000_000_000); // none of these was bigger than 10000 USD
+                account.amounts = AccountTokenAmounts::default();
+            }
+        }
+
+        // Some accounts withdrew everything after the snapshot was taken. When doing that they
+        // probably withdrew a tiny bit more than their snapshot equity due to interest.
+        // These accounts have already cached out, no need to reimburse.
+        for account in account_equities.iter_mut() {
+            let equity = &mut account.amounts;
+            let total = equity.iter().sum::<i64>();
+            if total >= 0 {
+                continue;
+            }
+            assert!(self
+                .late_changes
+                .iter()
+                .any(|(a, _, _, c)| a == &account.mango_account && *c < 0));
+            assert!(equity.iter().sum::<i64>() < 0);
+            // only up to -10 USD is expected, otherwise investigate manually!
+            assert!(equity.iter().sum::<i64>() > -10_000_000);
+            *equity = AccountTokenAmounts::default();
         }
 
         Ok(())
@@ -614,7 +675,7 @@ impl EquityFromSnapshot {
             if self.group.spot_markets[oracle_index].is_empty() {
                 continue;
             }
-            let price = self.cache.price_cache[oracle_index].price;
+            let price = self.snapshot_price(oracle_index);
             let bank_cache = &self.cache.root_bank_cache[oracle_index];
             let net = mango_account.get_net(bank_cache, oracle_index);
             let net_usd = net.checked_mul(price).unwrap();
@@ -631,7 +692,7 @@ impl EquityFromSnapshot {
             if oo_address == Pubkey::default() {
                 continue;
             }
-            let price = self.cache.price_cache[oracle_index].price;
+            let price = self.snapshot_price(oracle_index);
             let oo_maybe = self.data.load_open_orders(oo_address);
             if oo_maybe.is_err() {
                 println!(
@@ -663,16 +724,14 @@ impl EquityFromSnapshot {
             let mngo = mango_account.perp_accounts[oracle_index].mngo_accrued;
             equity[mngo_index] = equity[mngo_index]
                 .checked_add(
-                    I80F48::from(mngo)
-                        .checked_mul(self.cache.price_cache[mngo_index].price)
-                        .unwrap(),
+                    I80F48::from(mngo).checked_mul(self.snapshot_price(mngo_index)).unwrap(),
                 )
                 .unwrap();
 
             if !mango_account.perp_accounts[oracle_index].is_active() {
                 continue;
             }
-            let price = self.cache.price_cache[oracle_index].price;
+            let price = self.snapshot_price(oracle_index);
             let pmi = &self.group.perp_markets[oracle_index];
             let pmc = &self.cache.perp_market_cache[oracle_index];
             let pa = &mango_account.perp_accounts[oracle_index];
