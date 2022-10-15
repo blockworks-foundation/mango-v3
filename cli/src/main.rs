@@ -343,7 +343,7 @@ impl EquityFromSnapshot {
 
         // basic total amount of all positive equities per token (liabs handled later)
         let mut reimburse_totals = [0u64; 16];
-        for account in account_equities.iter() {
+        for account in reimburse_amounts.iter() {
             for (i, value) in account.amounts.iter().enumerate() {
                 if *value >= 0 {
                     reimburse_totals[i] += *value as u64;
@@ -356,7 +356,6 @@ impl EquityFromSnapshot {
 
         // resolve user's liabilities with their assets in a way that aims to bring the
         // needed token amounts <= what's available
-        let mut reimburse_amounts = account_equities.clone();
         for AccountData { amounts, .. } in reimburse_amounts.iter_mut() {
             for i in 0..16 {
                 let mut value = amounts[i];
@@ -389,11 +388,14 @@ impl EquityFromSnapshot {
                     }
                 }
 
-                // All tokens fine? Try reducing some random one, starting with USDC
-                // (mSOL is last because it looks like we will have a lot of it and want
-                // to prefer giving it out to users that had it before)
-                // This list has MNGO last, meaning that Mango tokens are only used as
-                // an asset to offset a liability as last resort.
+                // Otherwise settle against some other token with positive balance.
+                //
+                // mSOL is third to last because it looks like we will have a lot of it and want
+                // to prefer giving it out to users.
+                // USDC is after tokens, because settling tokens first leads to better results
+                // (consider delta-neutral positions)
+                // MNGO is last, meaning that Mango tokens are only used as an asset to offset a
+                // liability as last resort, because we force it to a bad price.
                 for j in [14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 15, 0] {
                     if amounts[j] <= 0 {
                         continue;
