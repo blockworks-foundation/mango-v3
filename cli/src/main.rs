@@ -204,6 +204,13 @@ impl EquityFromSnapshot {
         let account_addresses =
             ctx.data.mango_account_list(ctx.args.program, DataType::MangoAccount)?;
 
+        let token_names: [&str; 16] = [
+            "MNGO", "BTC", "ETH", "SOL", "USDT", "SRM", "RAY", "COPE", "FTT", "ADA", "MSOL", "BNB",
+            "AVAX", "LUNA", "GMT", "USDC",
+        ];
+
+        println!("table,account,owner,{}", token_names.join(","));
+
         let mut account_equities: Vec<(Pubkey, Pubkey, AccountTokenAmounts)> =
             Vec::with_capacity(account_addresses.len());
 
@@ -217,6 +224,10 @@ impl EquityFromSnapshot {
             }
             let (owner, equity) = equity_opt.unwrap();
             account_equities.push((account_address, owner, equity));
+            println!(
+                "snapshot,{account_address},{owner},{}",
+                equity.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+            );
         }
 
         // apply the late deposits/withdrawals
@@ -233,6 +244,13 @@ impl EquityFromSnapshot {
                 equity[token_index] = change_usd;
                 account_equities.push((address, owner, equity));
             }
+        }
+
+        for &(address, owner, equity) in account_equities.iter() {
+            println!(
+                "dep/with,{address},{owner},{}",
+                equity.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+            );
         }
 
         // Some accounts already cached out on a MNGO PERP position that started to be valuable after the
@@ -271,11 +289,6 @@ impl EquityFromSnapshot {
             assert!(equity.iter().sum::<i64>() > -10_000_000);
             *equity = AccountTokenAmounts::default();
         }
-
-        let token_names: [&str; 16] = [
-            "MNGO", "BTC", "ETH", "SOL", "USDT", "SRM", "RAY", "COPE", "FTT", "ADA", "MSOL", "BNB",
-            "AVAX", "LUNA", "GMT", "USDC",
-        ];
 
         let available_tokens: [bool; 15] = [
             true, true, true, true, false, // usdt is gone
@@ -411,7 +424,7 @@ impl EquityFromSnapshot {
                 // to prefer giving it out to users that had it before)
                 // This list has MNGO last, meaning that Mango tokens are only used as
                 // an asset to offset a liability as last resort.
-                for j in [15, 14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 0] {
+                for j in [14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 15, 0] {
                     if equity[j] <= 0 {
                         continue;
                     }
@@ -471,7 +484,7 @@ impl EquityFromSnapshot {
         // The idea here is that we have say 1000 SOL but only need 500 SOL to reimburse.
         // To leave the DAO with fewer SOL at the end we prefer to give people who already
         // had some SOL more of it (and compensate by giving them less of another token).
-        for _ in 0..100 {
+        /*for _ in 0..100 {
             for i in 1..15 {
                 if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
                     continue;
@@ -510,7 +523,7 @@ impl EquityFromSnapshot {
                     }
                 }
             }
-        }
+        }*/
 
         // Double check that total user equity is unchanged
         let mut accounts_with_mngo = 0;
@@ -547,10 +560,15 @@ impl EquityFromSnapshot {
         println!("USDC: used {}", reimburse_totals[15] / 1000000);
         println!("reimburse total {}", reimburse_totals.iter().sum::<u64>() / 1000000);
 
-        println!("account,owner,{}", token_names.join(","));
         for (account, owner, amounts) in reimburse_amounts.iter() {
             println!(
-                "{account},{owner},{}",
+                "usd final,{account},{owner},{}",
+                amounts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+            );
+        }
+        for (account, owner, amounts) in reimburse_amounts.iter() {
+            println!(
+                "token final,{account},{owner},{}",
                 amounts
                     .iter()
                     .enumerate()
