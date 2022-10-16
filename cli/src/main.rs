@@ -120,24 +120,163 @@ impl DataSource {
     }
 }
 
-fn late_deposits_withdrawals(filename: &str) -> anyhow::Result<Vec<(Pubkey, Pubkey, usize, i64)>> {
-    // mango token index and decimals
-    let tokens: HashMap<&str, (usize, i32)> = HashMap::from([
-        ("MNGO", (0, 6)),
-        ("BTC", (1, 6)),
-        ("ETH", (2, 6)),
-        ("SOL", (3, 9)),
-        ("USDT", (4, 6)),
-        ("SRM", (5, 6)),
-        ("RAY", (6, 6)),
-        ("FTT", (8, 6)),
-        ("MSOL", (10, 9)),
-        ("BNB", (11, 8)),
-        ("AVAX", (12, 8)),
-        ("GMT", (14, 9)),
-        ("USDC", (15, 6)),
-    ]);
+struct TokenInfo {
+    name: String,
+    index: usize,
+    decimals: i32,
+    available_native: u64,
+    reimbursement_price: I80F48,
+}
 
+impl TokenInfo {
+    fn is_active(&self) -> bool {
+        self.decimals > 0
+    }
+}
+
+struct Constants {
+    token_infos: Vec<TokenInfo>,
+}
+
+impl Constants {
+    fn new() -> Self {
+        let out = Self {
+            // TODO: available_native needs to be double-checked
+            // TODO: reimbursement_price needs to be updated before execution!
+            // (Note that user equity at snapshot time is computed from the prices from the
+            //  mango cache in the snapshot, not the reimbursement_price)
+            token_infos: vec![
+                TokenInfo {
+                    name: "MNGO".into(),
+                    index: 0,
+                    decimals: 6,
+                    available_native: 32409565000000,
+                    reimbursement_price: I80F48::from_num(0.038725),
+                },
+                TokenInfo {
+                    name: "BTC".into(),
+                    index: 1,
+                    decimals: 6,
+                    available_native: 281498000,
+                    reimbursement_price: I80F48::from_num(19036.47),
+                },
+                TokenInfo {
+                    name: "ETH".into(),
+                    index: 2,
+                    decimals: 6,
+                    available_native: 226000000,
+                    reimbursement_price: I80F48::from_num(1280.639999999999997),
+                },
+                TokenInfo {
+                    name: "SOL".into(),
+                    index: 3,
+                    decimals: 9,
+                    available_native: 761577910000000,
+                    reimbursement_price: I80F48::from_num(0.031244633849997),
+                },
+                TokenInfo {
+                    name: "USDT".into(),
+                    index: 4,
+                    decimals: 6,
+                    available_native: 0,
+                    reimbursement_price: I80F48::from_num(0.999905),
+                },
+                TokenInfo {
+                    name: "SRM".into(),
+                    index: 5,
+                    decimals: 6,
+                    available_native: 2354260000000,
+                    reimbursement_price: I80F48::from_num(0.74051845),
+                },
+                TokenInfo {
+                    name: "RAY".into(),
+                    index: 6,
+                    decimals: 6,
+                    available_native: 98295000000,
+                    reimbursement_price: I80F48::from_num(0.511599999999998),
+                },
+                TokenInfo {
+                    name: "COPE".into(),
+                    index: 7,
+                    decimals: i32::MIN,
+                    available_native: 0,
+                    reimbursement_price: I80F48::MIN,
+                },
+                TokenInfo {
+                    name: "FTT".into(),
+                    index: 8,
+                    decimals: 6,
+                    available_native: 11774000000,
+                    reimbursement_price: I80F48::from_num(23.248483429999997),
+                },
+                TokenInfo {
+                    name: "ADA".into(),
+                    index: 9,
+                    decimals: i32::MIN,
+                    available_native: 0,
+                    reimbursement_price: I80F48::MIN,
+                },
+                TokenInfo {
+                    name: "MSOL".into(),
+                    index: 10,
+                    decimals: 9,
+                    available_native: 799155000000000,
+                    reimbursement_price: I80F48::from_num(0.033400008119997),
+                },
+                TokenInfo {
+                    name: "BNB".into(),
+                    index: 11,
+                    decimals: 8,
+                    available_native: 60800000000,
+                    reimbursement_price: I80F48::from_num(2.7067999025),
+                },
+                TokenInfo {
+                    name: "AVAX".into(),
+                    index: 12,
+                    decimals: 8,
+                    available_native: 180900000000,
+                    reimbursement_price: I80F48::from_num(0.159774020999997),
+                },
+                TokenInfo {
+                    name: "LUNA".into(),
+                    index: 13,
+                    decimals: i32::MIN,
+                    available_native: 0,
+                    reimbursement_price: I80F48::MIN,
+                },
+                TokenInfo {
+                    name: "GMT".into(),
+                    index: 14,
+                    decimals: 9,
+                    available_native: 152843000000000,
+                    reimbursement_price: I80F48::from_num(0.000636922499996),
+                },
+                TokenInfo {
+                    name: "USDC".into(),
+                    index: 15,
+                    decimals: 6,
+                    available_native: u64::MAX,
+                    reimbursement_price: I80F48::ONE,
+                },
+            ],
+        };
+        assert!(out.token_infos.iter().map(|ti| ti.index).eq(0..16));
+        out
+    }
+
+    fn token_info_by_name(&self, name: &str) -> Option<&TokenInfo> {
+        self.token_infos.iter().find(|ti| ti.name == name)
+    }
+
+    fn token_names(&self) -> Vec<String> {
+        self.token_infos.iter().map(|ti| ti.name.clone()).collect()
+    }
+}
+
+fn late_deposits_withdrawals(
+    filename: &str,
+    constants: &Constants,
+) -> anyhow::Result<Vec<(Pubkey, Pubkey, usize, i64)>> {
     let mut list = Vec::new();
 
     use std::io::{BufRead, BufReader};
@@ -157,16 +296,16 @@ fn late_deposits_withdrawals(filename: &str) -> anyhow::Result<Vec<(Pubkey, Pubk
             let token = fields[7];
             let side = fields[8];
             let quantity = f64::from_str(&fields[9].replace(",", "")).unwrap();
-            let token_info = tokens.get(token).unwrap();
+            let token_info = constants.token_info_by_name(&token).unwrap();
             let change = (quantity
-                * 10f64.powi(token_info.1)
+                * 10f64.powi(token_info.decimals)
                 * (if side == "Withdraw" {
                     -1f64
                 } else {
                     assert_eq!(side, "Deposit");
                     1f64
                 })) as i64;
-            list.push((account, owner, token_info.0, change));
+            list.push((account, owner, token_info.index, change));
         }
     }
     Ok(list)
@@ -224,7 +363,8 @@ fn move_amount(
 
 impl EquityFromSnapshot {
     fn run(args: EquityFromSnapshotArgs) -> anyhow::Result<()> {
-        let late_changes = late_deposits_withdrawals(&args.late_changes)?;
+        let constants = Constants::new();
+        let late_changes = late_deposits_withdrawals(&args.late_changes, &constants)?;
         let data = DataSource::new(args.sqlite.clone())?;
 
         let group = data.load_group(args.group)?;
@@ -232,10 +372,7 @@ impl EquityFromSnapshot {
 
         let ctx = EquityFromSnapshot { args, data, late_changes, group, cache };
 
-        let token_names: [&str; 16] = [
-            "MNGO", "BTC", "ETH", "SOL", "USDT", "SRM", "RAY", "COPE", "FTT", "ADA", "MSOL", "BNB",
-            "AVAX", "LUNA", "GMT", "USDC",
-        ];
+        let token_names = constants.token_names();
 
         println!("table,account,owner,{}", token_names.join(","));
 
@@ -260,68 +397,18 @@ impl EquityFromSnapshot {
 
         ctx.skip_negative_equity_accounts(&mut account_equities)?;
 
-        let available_tokens: [bool; 15] = [
-            true, true, true, true, false, // usdt is gone
-            true, true, false, // cope delisted
-            true, false, // no spot ada
-            true, true, true, false, // luna delisted
-            true,
-        ];
-
-        // TODO: tentative numbers from "Repay bad Debt #2" proposal
-        let available_native_amounts: [u64; 15] = [
-            32409565000000,
-            281498000,
-            226000000,
-            761577910000000,
-            0,
-            2354260000000,
-            98295000000,
-            0,
-            11774000000,
-            0,
-            799155000000000,
-            60800000000,
-            180900000000,
-            0,
-            152843000000000,
-        ];
-
-        // Token prices at time of reimbursement
-        // Note that user equity at snapshot time is computed from the prices from the
-        // mango cache in the snapshot.
-        let reimbursement_prices: [I80F48; 16] = [
-            // TODO: bad prices, must be updated when time comes!
-            I80F48::from_num(0.038725),
-            I80F48::from_num(19036.47),
-            I80F48::from_num(1280.639999999999997),
-            I80F48::from_num(0.031244633849997),
-            I80F48::from_num(0.999905),
-            I80F48::from_num(0.74051845),
-            I80F48::from_num(0.511599999999998),
-            I80F48::from_num(0.051956999999998),
-            I80F48::from_num(23.248483429999997),
-            I80F48::from_num(0.393549989999997),
-            I80F48::from_num(0.033400008119997),
-            I80F48::from_num(2.7067999025),
-            I80F48::from_num(0.159774020999997),
-            I80F48::from_num(0.000156989999997),
-            I80F48::from_num(0.000636922499996),
-            I80F48::ONE,
-        ];
-
         // Fix the MNGO snapshot price to be the same as the reimbursement price.
         // This does two things:
         // - the MNGO-based equity will be converted back to MNGO tokens at the same price,
         //   allowing the token count to stay unchanged
         // - if MNGO tokens must be used as assets, they're valued with the less favorable price
-        cache.price_cache[0].price = reimbursement_prices[0];
+        cache.price_cache[0].price =
+            constants.token_info_by_name("MNGO").unwrap().reimbursement_price;
 
         // USD amounts in each token that can be used for reimbursement
-        let available_amounts: [u64; 15] = available_native_amounts
+        let available_amounts: [u64; 15] = constants.token_infos[0..15]
             .iter()
-            .zip(reimbursement_prices.iter())
-            .map(|(&native, &price)| (I80F48::from(native) * price).to_num())
+            .map(|ti| (I80F48::from(ti.available_native) * ti.reimbursement_price).to_num())
             .collect::<Vec<u64>>()
             .try_into()
             .unwrap();
@@ -329,14 +416,11 @@ impl EquityFromSnapshot {
         // Amounts each user should be reimbursed
         let mut reimburse_amounts = account_equities.clone();
 
-        // All the equity in unavailable tokens - that means tokens that are not available for
-        // reimbursing people with - is just considered usdc
+        // Verify that equity for inactive tokens is zero
         for account in reimburse_amounts.iter_mut() {
-            for i in 0..15 {
-                if !available_tokens[i] {
-                    let amount = account.amounts[i];
-                    account.amounts[QUOTE_INDEX] += amount;
-                    account.amounts[i] = 0;
+            for ti in constants.token_infos.iter() {
+                if !ti.is_active() {
+                    assert_eq!(account.amounts[ti.index], 0);
                 }
             }
         }
@@ -539,7 +623,8 @@ impl EquityFromSnapshot {
                 a.amounts
                     .iter()
                     .enumerate()
-                    .map(|(index, v)| (I80F48::from(*v) / reimbursement_prices[index])
+                    .map(|(index, v)| (I80F48::from(*v)
+                        / constants.token_infos[index].reimbursement_price)
                         .floor()
                         .to_string())
                     .collect::<Vec<_>>()
