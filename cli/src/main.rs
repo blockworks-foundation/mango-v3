@@ -258,7 +258,7 @@ impl EquityFromSnapshot {
 
         debug_print("after dep/with", &account_equities);
 
-        ctx.skip_accounts(&mut account_equities)?;
+        ctx.skip_negative_equity_accounts(&mut account_equities)?;
 
         let available_tokens: [bool; 15] = [
             true, true, true, true, false, // usdt is gone
@@ -601,9 +601,12 @@ impl EquityFromSnapshot {
         Ok(())
     }
 
-    fn skip_accounts(&self, account_equities: &mut Vec<AccountData>) -> anyhow::Result<()> {
-        // Some accounts already cached out on a MNGO PERP position that started to be valuable after the
-        // snapshot was taken, no reimbursements
+    fn skip_negative_equity_accounts(
+        &self,
+        account_equities: &mut Vec<AccountData>,
+    ) -> anyhow::Result<()> {
+        // Some accounts have negative equity because they already cashed out on a MNGO PERP position
+        // that started to be valuable after the snapshot was taken, skip them
         {
             let odd_accounts = [
                 "9A6YVfa66kBEeCLtt6wyqdmjpib7UrybA5mHr3X3kyvf",
@@ -626,7 +629,7 @@ impl EquityFromSnapshot {
 
         // Some accounts withdrew everything after the snapshot was taken. When doing that they
         // probably withdrew a tiny bit more than their snapshot equity due to interest.
-        // These accounts have already cached out, no need to reimburse.
+        // These accounts have already cashed out, no need to reimburse.
         for account in account_equities.iter_mut() {
             let equity = &mut account.amounts;
             let total = equity.iter().sum::<i64>();
