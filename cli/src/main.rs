@@ -26,6 +26,7 @@ enum OutType {
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum DistributionMode {
     UsdcOnly,
+    UsdcAndMngo,
     Tokens,
 }
 
@@ -295,10 +296,18 @@ impl Constants {
         };
         assert!(out.token_infos.iter().map(|ti| ti.index).eq(0..16));
 
-        if mode == DistributionMode::UsdcOnly {
-            for ti in out.token_infos[0..15].iter_mut() {
-                ti.available_native = 0;
+        match mode {
+            DistributionMode::UsdcOnly => {
+                for ti in out.token_infos[0..15].iter_mut() {
+                    ti.available_native = 0;
+                }
             }
+            DistributionMode::UsdcAndMngo => {
+                for ti in out.token_infos[1..15].iter_mut() {
+                    ti.available_native = 0;
+                }
+            }
+            _ => {}
         }
 
         out
@@ -677,7 +686,7 @@ impl EquityFromSnapshot {
             let resum = a_reimburse.amounts.iter().sum::<i64>();
             assert_eq!(eqsum, resum);
 
-            if ctx.args.distribution_mode == DistributionMode::Tokens {
+            if ctx.args.distribution_mode != DistributionMode::UsdcOnly {
                 let mngo_equity = a_equity.amounts[0];
                 let mngo_reimburse = a_reimburse.amounts[0];
                 if mngo_equity > 0 {
