@@ -1222,15 +1222,34 @@ pub enum MangoInstruction {
     },
 
     /// Allow withdrawal of token accounts in a recovery group
-    /// Accounts expected: 18 + open orders accounts (MAX_PAIRS)
+    /// Accounts expected: 6
     /// 0. `[]` mango_group_ai - MangoGroup
-    /// 1. `[writable]` token_source_ai - Vault TokenAccount
-    /// 2. `[writable]` token_destination_account - Recovery authority ata
+    /// 1. `[writable]` vault_ai - Vault TokenAccount
+    /// 2. `[writable]` token_account_ai - Recovery authority ata
     /// 3. `[]` root_bank_ai - RootBank
     /// 4. `[]` node_bank_ai - NodeBank
     /// 5. `[]` signer_ai - Group Signer Key
     /// 6. `[]` token_prog_ai - Token program
     RecoveryWithdrawTokenVault,
+
+    /// Allow withdrawal of unused mngo rewards in a recovery group
+    /// Accounts expected: 5
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` vault_ai - Vault TokenAccount
+    /// 2. `[writable]` token_account_ai - Recovery authority MNGO ata
+    //  3. `[]` perp_market_ai - Perp market
+    /// 4. `[]` signer_ai - Group Signer Key
+    /// 5. `[]` token_prog_ai - Token program
+    RecoveryWithdrawMngoVault,
+
+    /// Allow withdrawal of the insurance vault in a recovery group
+    /// Accounts expected: 4
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` vault_ai - Vault TokenAccount
+    /// 2. `[writable]` token_account_ai - Recovery authority USDC ata
+    /// 3. `[]` signer_ai - Group Signer Key
+    /// 4. `[]` token_prog_ai - Token program
+    RecoveryWithdrawInsuranceVault,
 }
 
 impl MangoInstruction {
@@ -1788,6 +1807,8 @@ impl MangoInstruction {
                 MangoInstruction::RecoveryForceSettleSpotOrders { limit: u8::from_le_bytes(*data_arr) }
             }
             76 => MangoInstruction::RecoveryWithdrawTokenVault,
+            77 => MangoInstruction::RecoveryWithdrawMngoVault,
+            78 => MangoInstruction::RecoveryWithdrawInsuranceVault,
             _ => {
                 return None;
             }

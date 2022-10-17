@@ -7566,7 +7566,7 @@ impl Processor {
         let accounts = array_ref![accounts, 0, NUM_FIXED];
         let [
             mango_group_ai,     // read
-            token_source_ai,    // write
+            vault_ai,           // write
             token_account_ai,   // write
             root_bank_ai,       // read
             node_bank_ai,       // read
@@ -7587,9 +7587,9 @@ impl Processor {
 
             let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
             check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
-            check_eq!(&node_bank.vault, token_source_ai.key, MangoErrorCode::InvalidVault)?;
+            check_eq!(&node_bank.vault, vault_ai.key, MangoErrorCode::InvalidVault)?;
 
-            let source_account = TokenAccount::load_checked(token_source_ai)?;
+            let source_account = TokenAccount::load_checked(vault_ai)?;
             let destination_account = TokenAccount::load_checked(token_account_ai)?;
             check_eq!(destination_account.mint, source_account.mint, MangoErrorCode::InvalidAccount)?;
             check_eq!(destination_account.owner, recovery_authority::ID, MangoErrorCode::InvalidOwner)?;
@@ -7599,7 +7599,102 @@ impl Processor {
         let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
         invoke_transfer(
             token_prog_ai,
-            token_source_ai,
+            vault_ai,
+            token_account_ai,
+            signer_ai,
+            &[&signers_seeds],
+            quantity,
+        )?;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn recovery_withdraw_mngo_vault(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 6;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            vault_ai,           // write
+            token_account_ai,   // write
+            perp_market_ai,     // read
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        
+        check_eq!(mango_group_ai.key, &mainnet_1_group::ID, MangoErrorCode::InvalidAccount)?;
+        check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+        let quantity;
+
+        {
+            let perp_market = PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+
+            check_eq!(&perp_market.mngo_vault, vault_ai.key, MangoErrorCode::InvalidAccount)?;
+
+            let source_account = TokenAccount::load_checked(vault_ai)?;
+            let destination_account = TokenAccount::load_checked(token_account_ai)?;
+            check_eq!(destination_account.mint, source_account.mint, MangoErrorCode::InvalidAccount)?;
+            check_eq!(destination_account.owner, recovery_authority::ID, MangoErrorCode::InvalidOwner)?;
+            quantity = source_account.amount;
+        }
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            vault_ai,
+            token_account_ai,
+            signer_ai,
+            &[&signers_seeds],
+            quantity,
+        )?;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn recovery_withdraw_insurance_vault(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 5;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            vault_ai,           // write
+            token_account_ai,   // write
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        
+        check_eq!(mango_group_ai.key, &mainnet_1_group::ID, MangoErrorCode::InvalidAccount)?;
+        check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+        let quantity;
+
+        {
+            check_eq!(&mango_group.insurance_vault, vault_ai.key, MangoErrorCode::InvalidAccount)?;
+
+            let source_account = TokenAccount::load_checked(vault_ai)?;
+            let destination_account = TokenAccount::load_checked(token_account_ai)?;
+            check_eq!(destination_account.mint, source_account.mint, MangoErrorCode::InvalidAccount)?;
+            check_eq!(destination_account.owner, recovery_authority::ID, MangoErrorCode::InvalidOwner)?;
+            quantity = source_account.amount;
+        }
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            vault_ai,
             token_account_ai,
             signer_ai,
             &[&signers_seeds],
@@ -8158,6 +8253,14 @@ impl Processor {
             MangoInstruction::RecoveryWithdrawTokenVault => {
                 msg!("Mango: RecoveryWithdrawTokenVault");
                 Self::recovery_withdraw_token_vault(program_id, accounts)
+            }
+            MangoInstruction::RecoveryWithdrawMngoVault => {
+                msg!("Mango: RecoveryWithdrawMngoVault");
+                Self::recovery_withdraw_mngo_vault(program_id, accounts)
+            }
+            MangoInstruction::RecoveryWithdrawInsuranceVault => {
+                msg!("Mango: RecoveryWithdrawInsuranceVault");
+                Self::recovery_withdraw_insurance_vault(program_id, accounts)
             }
             MangoInstruction::RecoveryForceSettleSpotOrders { limit } => {
                 msg!("Mango: RecoveryForceSettleOrders");
