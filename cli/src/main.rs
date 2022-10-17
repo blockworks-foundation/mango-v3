@@ -401,10 +401,13 @@ impl OutWriter {
     fn write_header(&mut self, constants: &Constants) {
         match self.outtype {
             OutType::Csv => {
-                write!(&mut self.file, "account,owner,{}", constants.token_names().join(","))
+                write!(&mut self.file, "account,owner,{}\n", constants.token_names().join(","))
                     .unwrap();
             }
-            OutType::Binary => {}
+            OutType::Binary => {
+                // buffer accounts have a 37 byte header -- add 3 bytes to 8-byte align the data
+                self.file.write_all(&[0u8; 3]).unwrap();
+            }
         }
     }
 }
