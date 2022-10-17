@@ -169,54 +169,57 @@ impl Constants {
             // TODO: reimbursement_price needs to be updated before execution!
             // (Note that user equity at snapshot time is computed from the prices from the
             //  mango cache in the snapshot, not the reimbursement_price)
+
+            // The available_native amounts are the sum of tokens recovered from the attacker
+            // (left) and tokens recovered from serum3 open orders (right).
             token_infos: vec![
                 TokenInfo {
                     name: "MNGO".into(),
                     index: 0,
                     decimals: 6,
-                    available_native: 32904328899472,
+                    available_native: 32904328899472 + 17926416000000,
                     reimbursement_price: I80F48::from_num(0.02425361),
                 },
                 TokenInfo {
                     name: "BTC".into(),
                     index: 1,
                     decimals: 6,
-                    available_native: 281498500,
+                    available_native: 281498500 + 15849599,
                     reimbursement_price: I80F48::from_num(19272.92),
                 },
                 TokenInfo {
                     name: "ETH".into(),
                     index: 2,
                     decimals: 6,
-                    available_native: 226000000,
+                    available_native: 226000000 + 7431000,
                     reimbursement_price: I80F48::from_num(1306.94),
                 },
                 TokenInfo {
                     name: "SOL".into(),
                     index: 3,
                     decimals: 9,
-                    available_native: 761577000000000,
+                    available_native: 761577000000000 + 4778699999999,
                     reimbursement_price: I80F48::from_num(0.03017),
                 },
                 TokenInfo {
                     name: "USDT".into(),
                     index: 4,
                     decimals: 6,
-                    available_native: 0,
+                    available_native: 0 + 14646000000,
                     reimbursement_price: I80F48::from_num(1.000),
                 },
                 TokenInfo {
                     name: "SRM".into(),
                     index: 5,
                     decimals: 6,
-                    available_native: 2354260000000,
+                    available_native: 2354260000000 + 10258200000,
                     reimbursement_price: I80F48::from_num(0.720998),
                 },
                 TokenInfo {
                     name: "RAY".into(),
                     index: 6,
                     decimals: 6,
-                    available_native: 98295000000,
+                    available_native: 98295000000 + 10605100000,
                     reimbursement_price: I80F48::from_num(0.491728),
                 },
                 TokenInfo {
@@ -230,7 +233,7 @@ impl Constants {
                     name: "FTT".into(),
                     index: 8,
                     decimals: 6,
-                    available_native: 11774000000,
+                    available_native: 11774000000 + 214800000,
                     reimbursement_price: I80F48::from_num(23.73),
                 },
                 TokenInfo {
@@ -244,21 +247,21 @@ impl Constants {
                     name: "MSOL".into(),
                     index: 10,
                     decimals: 9,
-                    available_native: 799155000000000,
+                    available_native: 799155000000000 + 179378000000,
                     reimbursement_price: I80F48::from_num(0.03227),
                 },
                 TokenInfo {
                     name: "BNB".into(),
                     index: 11,
                     decimals: 8,
-                    available_native: 60800000000,
+                    available_native: 60800000000 + 151100000,
                     reimbursement_price: I80F48::from_num(2.7236),
                 },
                 TokenInfo {
                     name: "AVAX".into(),
                     index: 12,
                     decimals: 8,
-                    available_native: 180900000000,
+                    available_native: 180900000000 + 10225000000,
                     reimbursement_price: I80F48::from_num(0.1576),
                 },
                 TokenInfo {
@@ -272,7 +275,7 @@ impl Constants {
                     name: "GMT".into(),
                     index: 14,
                     decimals: 9,
-                    available_native: 152843000000000,
+                    available_native: 152843000000000 + 0,
                     reimbursement_price: I80F48::from_num(0.000578548),
                 },
                 TokenInfo {
