@@ -332,6 +332,8 @@ struct EquityFromSnapshot {
     late_changes: Vec<(Pubkey, Pubkey, usize, i64)>,
     group: MangoGroup,
     cache: MangoCache,
+    constants: Constants,
+    mngo_perp_price: I80F48,
 }
 
 #[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
@@ -433,8 +435,9 @@ impl EquityFromSnapshot {
 
         let group = data.load_group(args.group)?;
 
-        let cache = {
+        let (cache, mngo_perp_price) = {
             let mut cache = data.load_cache(group.mango_cache)?;
+            let mngo_cache_price = cache.price_cache[0].price;
             // Fix the MNGO snapshot price to be the same as the reimbursement price.
             // This does two things:
             // - the MNGO-based equity will be converted back to MNGO tokens at the same price,
@@ -442,12 +445,20 @@ impl EquityFromSnapshot {
             // - if MNGO tokens must be used as assets, they're valued with the less favorable price
             cache.price_cache[0].price =
                 constants.token_info_by_name("MNGO").unwrap().reimbursement_price;
-            cache
+            (cache, mngo_cache_price)
         };
 
-        let ctx = EquityFromSnapshot { args, data, late_changes, group, cache };
-
         let token_names = constants.token_names();
+
+        let ctx = EquityFromSnapshot {
+            args,
+            data,
+            late_changes,
+            group,
+            cache,
+            constants,
+            mngo_perp_price,
+        };
 
         println!("table,account,owner,{}", token_names.join(","));
 
@@ -477,7 +488,7 @@ impl EquityFromSnapshot {
         };
 
         // USD amounts in each token that can be used for reimbursement
-        let available_amounts: [u64; 15] = constants.token_infos[0..15]
+        let available_amounts: [u64; 15] = ctx.constants.token_infos[0..15]
             .iter()
             .map(|ti| (I80F48::from(ti.available_native) * ti.reimbursement_price).to_num())
             .collect::<Vec<u64>>()
@@ -489,7 +500,7 @@ impl EquityFromSnapshot {
 
         // Verify that equity for inactive tokens is zero
         for account in reimburse_amounts.iter_mut() {
-            for ti in constants.token_infos.iter() {
+            for ti in ctx.constants.token_infos.iter() {
                 if !ti.is_active() {
                     assert_eq!(account.amounts[ti.index], 0);
                 }
@@ -689,7 +700,7 @@ impl EquityFromSnapshot {
         let mut reimburse_native = reimburse_amounts.clone();
         for a in reimburse_native.iter_mut() {
             for (index, v) in a.amounts.iter_mut().enumerate() {
-                *v = (I80F48::from(*v) / constants.token_infos[index].reimbursement_price)
+                *v = (I80F48::from(*v) / ctx.constants.token_infos[index].reimbursement_price)
                     .floor()
                     .to_num();
             }
@@ -707,6 +718,14 @@ impl EquityFromSnapshot {
             I80F48::ONE
         } else {
             self.cache.price_cache[index].price
+        }
+    }
+
+    fn snapshot_price_perp(&self, index: usize) -> I80F48 {
+        if index == 0 {
+            self.mngo_perp_price
+        } else {
+            self.snapshot_price(index)
         }
     }
 
@@ -779,6 +798,25 @@ impl EquityFromSnapshot {
             }
         }
 
+        // Negative equity accounts can happen due to us using a post-snapshot MNGO price
+        for account in account_equities.iter_mut() {
+            let equity = &mut account.amounts;
+            let total = equity.iter().sum::<i64>();
+            if total >= 0 {
+                continue;
+            }
+
+            let mngo_equity = I80F48::from(equity[0]);
+            let old_mngo_equity = mngo_equity / self.constants.token_infos[0].reimbursement_price
+                * I80F48::from_num(0.0387250);
+            let old_equity = old_mngo_equity.to_num::<i64>() + equity[1..].iter().sum::<i64>();
+
+            if old_equity >= 0 {
+                // negative equity due to changed MNGO price, is ok
+                *equity = AccountTokenAmounts::default();
+            }
+        }
+
         // Some accounts withdrew everything after the snapshot was taken. When doing that they
         // probably withdrew a tiny bit more than their snapshot equity due to interest.
         // These accounts have already cashed out, no need to reimburse.
@@ -788,13 +826,12 @@ impl EquityFromSnapshot {
             if total >= 0 {
                 continue;
             }
-            assert!(self
-                .late_changes
-                .iter()
-                .any(|(a, _, _, c)| a == &account.mango_account && *c < 0));
-            assert!(equity.iter().sum::<i64>() < 0);
+            let had_withdrawal =
+                self.late_changes.iter().any(|(a, _, _, c)| a == &account.mango_account && *c < 0);
+            assert!(had_withdrawal);
+
             // only up to -10 USD is expected, otherwise investigate manually!
-            assert!(equity.iter().sum::<i64>() > -10_000_000);
+            assert!(total > -10_000_000);
             *equity = AccountTokenAmounts::default();
         }
 
@@ -888,7 +925,7 @@ impl EquityFromSnapshot {
             if !mango_account.perp_accounts[oracle_index].is_active() {
                 continue;
             }
-            let price = self.snapshot_price(oracle_index);
+            let price = self.snapshot_price_perp(oracle_index);
             let pmi = &self.group.perp_markets[oracle_index];
             let pmc = &self.cache.perp_market_cache[oracle_index];
             let pa = &mango_account.perp_accounts[oracle_index];
