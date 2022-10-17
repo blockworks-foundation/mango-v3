@@ -157,7 +157,6 @@ struct Constants {
 impl Constants {
     fn new() -> Self {
         let out = Self {
-            // TODO: available_native needs to be double-checked
             // TODO: reimbursement_price needs to be updated before execution!
             // (Note that user equity at snapshot time is computed from the prices from the
             //  mango cache in the snapshot, not the reimbursement_price)
@@ -166,14 +165,14 @@ impl Constants {
                     name: "MNGO".into(),
                     index: 0,
                     decimals: 6,
-                    available_native: 32409565000000,
+                    available_native: 32904328899472,
                     reimbursement_price: I80F48::from_num(0.038725),
                 },
                 TokenInfo {
                     name: "BTC".into(),
                     index: 1,
                     decimals: 6,
-                    available_native: 281498000,
+                    available_native: 281498500,
                     reimbursement_price: I80F48::from_num(19036.47),
                 },
                 TokenInfo {
@@ -187,7 +186,7 @@ impl Constants {
                     name: "SOL".into(),
                     index: 3,
                     decimals: 9,
-                    available_native: 761577910000000,
+                    available_native: 761577000000000,
                     reimbursement_price: I80F48::from_num(0.031244633849997),
                 },
                 TokenInfo {
