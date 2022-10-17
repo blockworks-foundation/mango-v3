@@ -621,7 +621,7 @@ impl EquityFromSnapshot {
                 // (consider delta-neutral positions)
                 // MNGO is last, meaning that Mango tokens are only used as an asset to offset a
                 // liability as last resort, because we force it to a bad price.
-                for j in [14, 13, 12, 11, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 15, 0] {
+                for j in [14, 13, 12, 9, 7, 6, 5, 4, 3, 11, 8, 2, 1, 10, 15, 0] {
                     if amounts[j] <= 0 {
                         continue;
                     }
