@@ -35,7 +35,7 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{luna_pyth_oracle, msrm_token, srm_token};
+use crate::ids::{luna_pyth_oracle, msrm_token, srm_token, mainnet_1_group, recovery_authority};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, ExpiryType, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -7412,11 +7412,207 @@ impl Processor {
         Ok(())
     }
 
+    fn recovery_force_settle_spot_orders(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        limit: u8,
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 18;
+        let accounts = array_ref![accounts, 0, NUM_FIXED + MAX_PAIRS];
+        let (fixed_ais, open_orders_ais) = array_refs![accounts, NUM_FIXED, MAX_PAIRS];
+
+        let [
+            mango_group_ai,         // read
+            mango_account_ai,       // write
+            base_root_bank_ai,      // read
+            base_node_bank_ai,      // write
+            base_vault_ai,          // write
+            quote_root_bank_ai,     // read
+            quote_node_bank_ai,     // write
+            quote_vault_ai,         // write
+
+            spot_market_ai,         // write
+            bids_ai,                // write
+            asks_ai,                // write
+            signer_ai,              // read
+            dex_event_queue_ai,     // write
+            dex_base_ai,            // write
+            dex_quote_ai,           // write
+            dex_signer_ai,          // read
+            dex_prog_ai,            // read
+            token_prog_ai,          // read
+        ] = fixed_ais;
+
+        check_eq!(mango_group_ai.key, &mainnet_1_group::ID, MangoErrorCode::InvalidAccount)?;
+        // Check token program id
+        check_eq!(token_prog_ai.key, &spl_token::ID, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        check_eq!(dex_prog_ai.key, &mango_group.dex_program_id, MangoErrorCode::InvalidProgramId)?;
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+
+        let mut mango_account =
+            MangoAccount::load_mut_checked(mango_account_ai, program_id, mango_group_ai.key)?;
+        mango_account.check_open_orders(&mango_group, open_orders_ais)?;
+
+        let market_index = mango_group.find_spot_market_index(spot_market_ai.key).unwrap();
+        check!(mango_account.in_margin_basket[market_index], MangoErrorCode::Default)?;
+
+        check_eq!(
+            &mango_group.tokens[market_index].root_bank,
+            base_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let base_root_bank = RootBank::load_checked(base_root_bank_ai, program_id)?;
+
+        check!(
+            base_root_bank.node_banks.contains(base_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let base_node_bank = NodeBank::load_mut_checked(base_node_bank_ai, program_id)?;
+        check_eq!(&base_node_bank.vault, base_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        check_eq!(
+            &mango_group.tokens[QUOTE_INDEX].root_bank,
+            quote_root_bank_ai.key,
+            MangoErrorCode::InvalidRootBank
+        )?;
+        let quote_root_bank = RootBank::load_checked(quote_root_bank_ai, program_id)?;
+
+        check!(
+            quote_root_bank.node_banks.contains(quote_node_bank_ai.key),
+            MangoErrorCode::InvalidNodeBank
+        )?;
+        let quote_node_bank = NodeBank::load_mut_checked(quote_node_bank_ai, program_id)?;
+        check_eq!(&quote_node_bank.vault, quote_vault_ai.key, MangoErrorCode::InvalidVault)?;
+
+        // Cancel orders up to the limit
+        let open_orders_ai = &open_orders_ais[market_index];
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_cancel_orders(
+            open_orders_ai,
+            dex_prog_ai,
+            spot_market_ai,
+            bids_ai,
+            asks_ai,
+            signer_ai,
+            dex_event_queue_ai,
+            &[&signers_seeds],
+            limit,
+        )?;
+
+        let (pre_base, pre_quote) = {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            (
+                open_orders.native_coin_free,
+                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+            )
+        };
+
+        if pre_base == 0 && pre_quote == 0 {
+            // margin basket may be in an invalid state; correct it before returning
+            let open_orders = load_open_orders(open_orders_ai)?;
+            mango_account.update_basket(market_index, &open_orders)?;
+            return Ok(());
+        }
+
+        // Settle funds released by canceling open orders
+        invoke_settle_funds(
+            dex_prog_ai,
+            spot_market_ai,
+            open_orders_ai,
+            signer_ai,
+            dex_base_ai,
+            dex_quote_ai,
+            base_vault_ai,
+            quote_vault_ai,
+            dex_signer_ai,
+            token_prog_ai,
+            &[&signers_seeds],
+        )?;
+
+        let (post_base, post_quote) = {
+            let open_orders = load_open_orders(open_orders_ai)?;
+            mango_account.update_basket(market_index, &open_orders)?;
+            mango_emit_stack::<_, 256>(OpenOrdersBalanceLog {
+                mango_group: *mango_group_ai.key,
+                mango_account: *mango_account_ai.key,
+                market_index: market_index as u64,
+                base_total: open_orders.native_coin_total,
+                base_free: open_orders.native_coin_free,
+                quote_total: open_orders.native_pc_total,
+                quote_free: open_orders.native_pc_free,
+                referrer_rebates_accrued: open_orders.referrer_rebates_accrued,
+            });
+
+            (
+                open_orders.native_coin_free,
+                open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
+            )
+        };
+
+        check!(post_base <= pre_base, MangoErrorCode::Default)?;
+        check!(post_quote <= pre_quote, MangoErrorCode::Default)?;
+
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn recovery_withdraw_token_vault(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> MangoResult<()> {
+        const NUM_FIXED: usize = 7;
+        let accounts = array_ref![accounts, 0, NUM_FIXED];
+        let [
+            mango_group_ai,     // read
+            token_source_ai,    // write
+            token_account_ai,   // write
+            root_bank_ai,       // read
+            node_bank_ai,       // read
+            signer_ai,          // read
+            token_prog_ai,      // read
+        ] = accounts;
+        
+        check_eq!(mango_group_ai.key, &mainnet_1_group::ID, MangoErrorCode::InvalidAccount)?;
+        check_eq!(&spl_token::ID, token_prog_ai.key, MangoErrorCode::InvalidProgramId)?;
+
+        let mango_group = MangoGroup::load_checked(mango_group_ai, program_id)?;
+        
+        check!(signer_ai.key == &mango_group.signer_key, MangoErrorCode::InvalidSignerKey)?;
+        let quantity;
+
+        {
+            let root_bank = RootBank::load_checked(root_bank_ai, program_id)?;
+
+            let node_bank = NodeBank::load_checked(node_bank_ai, program_id)?;
+            check!(root_bank.node_banks.contains(node_bank_ai.key), MangoErrorCode::InvalidNodeBank)?;
+            check_eq!(&node_bank.vault, token_source_ai.key, MangoErrorCode::InvalidVault)?;
+
+            let source_account = TokenAccount::load_checked(token_source_ai)?;
+            let destination_account = TokenAccount::load_checked(token_account_ai)?;
+            check_eq!(destination_account.mint, source_account.mint, MangoErrorCode::InvalidAccount)?;
+            check_eq!(destination_account.owner, recovery_authority::ID, MangoErrorCode::InvalidOwner)?;
+            quantity = source_account.amount;
+        }
+
+        let signers_seeds = gen_signer_seeds(&mango_group.signer_nonce, mango_group_ai.key);
+        invoke_transfer(
+            token_prog_ai,
+            token_source_ai,
+            token_account_ai,
+            signer_ai,
+            &[&signers_seeds],
+            quantity,
+        )?;
+
+        Ok(())
+    }
+
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
-        Err(throw!())
-        // let instruction =
-        //     MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
-        // match instruction {
+        let instruction =
+            MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
+        match instruction {
         //     MangoInstruction::InitMangoGroup {
         //         signer_nonce,
         //         valid_interval,
@@ -7959,6 +8155,18 @@ impl Processor {
         //         )
         //     }
         // }
+            MangoInstruction::RecoveryWithdrawTokenVault => {
+                msg!("Mango: RecoveryWithdrawTokenVault");
+                Self::recovery_withdraw_token_vault(program_id, accounts)
+            }
+            MangoInstruction::RecoveryForceSettleSpotOrders { limit } => {
+                msg!("Mango: RecoveryForceSettleOrders");
+                Self::recovery_force_settle_spot_orders(program_id, accounts, limit)
+            }
+            _ => {
+                Err(throw!())
+            }
+        }
     }
 }
 

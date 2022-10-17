@@ -1194,6 +1194,43 @@ pub enum MangoInstruction {
         ref_mngo_required: u64,
         ref_mngo_tier_2_factor: u8,
     },
+
+    /// Force cancellation and settlement of open orders for a user in a recovery group
+    ///
+    /// Accounts expected: 18 + open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` mango_account_ai - MangoAccount
+    /// 2. `[]` base_root_bank_ai - RootBank
+    /// 3. `[writable]` base_node_bank_ai - NodeBank
+    /// 4. `[writable]` base_vault_ai - MangoGroup base vault acc
+    /// 5. `[]` quote_root_bank_ai - RootBank
+    /// 6. `[writable]` quote_node_bank_ai - NodeBank
+    /// 7. `[writable]` quote_vault_ai - MangoGroup quote vault acc
+    /// 8. `[writable]` spot_market_ai - SpotMarket
+    /// 9. `[writable]` bids_ai - SpotMarket bids acc
+    /// 10. `[writable]` asks_ai - SpotMarket asks acc
+    /// 12. `[signer]` signer_ai - Signer
+    /// 12. `[writable]` dex_event_queue_ai - Market event queue acc
+    /// 13. `[writable]` dex_base_ai -
+    /// 14. `[writable]` dex_quote_ai -
+    /// 15. `[]` dex_signer_ai -
+    /// 16. `[]` dex_prog_ai - Dex Program acc
+    /// 17. `[]` token_prog_ai - Token Program acc
+    /// 18+... `[]` open_orders_ais - open orders accs
+    RecoveryForceSettleSpotOrders {
+        limit: u8,
+    },
+
+    /// Allow withdrawal of token accounts in a recovery group
+    /// Accounts expected: 18 + open orders accounts (MAX_PAIRS)
+    /// 0. `[]` mango_group_ai - MangoGroup
+    /// 1. `[writable]` token_source_ai - Vault TokenAccount
+    /// 2. `[writable]` token_destination_account - Recovery authority ata
+    /// 3. `[]` root_bank_ai - RootBank
+    /// 4. `[]` node_bank_ai - NodeBank
+    /// 5. `[]` signer_ai - Group Signer Key
+    /// 6. `[]` token_prog_ai - Token program
+    RecoveryWithdrawTokenVault,
 }
 
 impl MangoInstruction {
@@ -1745,6 +1782,12 @@ impl MangoInstruction {
                     ref_mngo_tier_2_factor: u8::from_le_bytes(*ref_mngo_tier_2_factor),
                 }
             }
+            75 => {
+                let data_arr = array_ref![data, 0, 1];
+
+                MangoInstruction::RecoveryForceSettleSpotOrders { limit: u8::from_le_bytes(*data_arr) }
+            }
+            76 => MangoInstruction::RecoveryWithdrawTokenVault,
             _ => {
                 return None;
             }

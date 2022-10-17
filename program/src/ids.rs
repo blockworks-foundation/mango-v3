@@ -26,3 +26,20 @@ pub mod luna_pyth_oracle {
     use solana_program::declare_id;
     declare_id!("5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY");
 }
+
+pub mod mainnet_1_group {
+    use solana_program::declare_id;
+    #[cfg(feature = "devnet")]
+    declare_id!("Ec2enZyoC4nGpEfu2sUNAa2nUGJHWxoUWYSEJ2hNTWTA");
+    #[cfg(not(feature = "devnet"))]
+    declare_id!("98pjRuQjK3qA6gXts96PqZT4Ze5QmnCmt3QYjhbUSPue");
+}
+
+// Owner of the reimbursement fund multisig accounts
+pub mod recovery_authority {
+    use solana_program::declare_id;
+    #[cfg(feature = "devnet")]
+    declare_id!("8pANRWCcw8vn8DszUP7hh4xFbCiBiMWX3WbwUTipArSJ");
+    #[cfg(not(feature = "devnet"))]
+    declare_id!("9mM6NfXauEFviFY1S1thbo7HXYNiSWSvwZEhguJw26wY");
+}
