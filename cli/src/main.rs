@@ -166,7 +166,7 @@ struct Constants {
 impl Constants {
     fn new(mode: DistributionMode) -> Self {
         let mut out = Self {
-            // TODO: reimbursement_price needs to be updated before execution!
+            // Reimbursement prices: Coingecko market close prices of 2022-10-16
             // (Note that user equity at snapshot time is computed from the prices from the
             //  mango cache in the snapshot, not the reimbursement_price)
 
