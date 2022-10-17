@@ -23,6 +23,12 @@ enum OutType {
     Binary,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum DistributionMode {
+    UsdcOnly,
+    Tokens,
+}
+
 #[derive(Args, Debug, Clone)]
 struct EquityFromSnapshotArgs {
     #[arg(long)]
@@ -38,6 +44,9 @@ struct EquityFromSnapshotArgs {
     outtype: OutType,
     #[arg(long)]
     outfile: String,
+
+    #[arg(long, default_value = "tokens")]
+    distribution_mode: DistributionMode,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -155,8 +164,8 @@ struct Constants {
 }
 
 impl Constants {
-    fn new() -> Self {
-        let out = Self {
+    fn new(mode: DistributionMode) -> Self {
+        let mut out = Self {
             // TODO: reimbursement_price needs to be updated before execution!
             // (Note that user equity at snapshot time is computed from the prices from the
             //  mango cache in the snapshot, not the reimbursement_price)
@@ -276,6 +285,13 @@ impl Constants {
             ],
         };
         assert!(out.token_infos.iter().map(|ti| ti.index).eq(0..16));
+
+        if mode == DistributionMode::UsdcOnly {
+            for ti in out.token_infos[0..15].iter_mut() {
+                ti.available_native = 0;
+            }
+        }
+
         out
     }
 
@@ -381,6 +397,16 @@ impl OutWriter {
             }
         }
     }
+
+    fn write_header(&mut self, constants: &Constants) {
+        match self.outtype {
+            OutType::Csv => {
+                write!(&mut self.file, "account,owner,{}", constants.token_names().join(","))
+                    .unwrap();
+            }
+            OutType::Binary => {}
+        }
+    }
 }
 
 /// value of per-token equity in usd, ordered by mango group token index
@@ -427,7 +453,7 @@ fn move_amount(
 
 impl EquityFromSnapshot {
     fn run(args: EquityFromSnapshotArgs) -> anyhow::Result<()> {
-        let constants = Constants::new();
+        let constants = Constants::new(args.distribution_mode);
         let late_changes = late_deposits_withdrawals(&args.late_changes, &constants)?;
         let data = DataSource::new(args.snapshot.clone())?;
 
@@ -584,8 +610,12 @@ impl EquityFromSnapshot {
 
         // Do a pass where we scale down user reimbursement token amounts and instead
         // reimburse with USDC if there's not enough tokens to give out
-        // Don't do it for 0 (MNGO).
-        for i in 1..15 {
+        let scale_down_iter = if ctx.args.distribution_mode == DistributionMode::UsdcOnly {
+            0..15
+        } else {
+            1..15 // keep MNGO intact, DAO can provide extra from treasury
+        };
+        for i in scale_down_iter {
             if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
                 continue;
             }
@@ -667,14 +697,16 @@ impl EquityFromSnapshot {
             let resum = a_reimburse.amounts.iter().sum::<i64>();
             assert_eq!(eqsum, resum);
 
-            let mngo_equity = a_equity.amounts[0];
-            let mngo_reimburse = a_reimburse.amounts[0];
-            if mngo_equity > 0 {
-                // MNGO amount can only go down
-                assert!(mngo_reimburse <= mngo_equity);
-                accounts_with_mngo += 1;
-                if mngo_reimburse == mngo_equity {
-                    accounts_with_mngo_unchanged += 1;
+            if ctx.args.distribution_mode == DistributionMode::Tokens {
+                let mngo_equity = a_equity.amounts[0];
+                let mngo_reimburse = a_reimburse.amounts[0];
+                if mngo_equity > 0 {
+                    // MNGO amount can only go down
+                    assert!(mngo_reimburse <= mngo_equity);
+                    accounts_with_mngo += 1;
+                    if mngo_reimburse == mngo_equity {
+                        accounts_with_mngo_unchanged += 1;
+                    }
                 }
             }
 
@@ -706,6 +738,11 @@ impl EquityFromSnapshot {
             }
         }
 
+        // drop any full-zero rows
+        reimburse_native =
+            reimburse_native.into_iter().filter(|a| a.amounts.iter().sum::<i64>() != 0).collect();
+
+        outwriter.write_header(&ctx.constants);
         for a in reimburse_native.iter() {
             outwriter.write(a)
         }
