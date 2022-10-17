@@ -7855,10 +7855,10 @@ impl Processor {
         //         msg!("Mango: DepositMsrm");
         //         Self::deposit_msrm(program_id, accounts, quantity)
         //     }
-        //     MangoInstruction::WithdrawMsrm { quantity } => {
-        //         msg!("Mango: WithdrawMsrm");
-        //         Self::withdraw_msrm(program_id, accounts, quantity)
-        //     }
+            MangoInstruction::WithdrawMsrm { quantity } => {
+                msg!("Mango: WithdrawMsrm");
+                Self::withdraw_msrm(program_id, accounts, quantity)
+            }
         //     MangoInstruction::ChangePerpMarketParams { .. } => {
         //         msg!("Mango: ChangePerpMarketParams DEPRECATED - use ChangePerpMarketParams2 instead");
         //         Ok(())
