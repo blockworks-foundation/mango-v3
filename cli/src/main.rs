@@ -47,6 +47,12 @@ struct EquityFromSnapshotArgs {
 
     #[arg(long, default_value = "tokens")]
     distribution_mode: DistributionMode,
+
+    #[arg(long, default_value = "false")]
+    enable_scale_down: bool,
+
+    #[arg(long, default_value = "false")]
+    enable_greedy: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -562,27 +568,29 @@ impl EquityFromSnapshot {
                     continue;
                 }
 
-                // Negative amounts must be settled against other token balances
-                // This is using a greedy strategy, reducing the most requested token first
-                let mut weighted_indexes = amounts[0..15]
-                    .iter()
-                    .enumerate()
-                    .skip(1) // skip MNGO
-                    .filter_map(|(i, v)| (*v > 0).then_some(i))
-                    .filter_map(|i| {
-                        (available_amounts[i] < reimburse_totals[i])
-                            .then(|| (i, reimburse_totals[i] - available_amounts[i]))
-                    })
-                    .collect::<Vec<(usize, u64)>>();
+                if ctx.args.enable_greedy {
+                    // Negative amounts must be settled against other token balances
+                    // This is using a greedy strategy, reducing the most requested token first
+                    let mut weighted_indexes = amounts[0..15]
+                        .iter()
+                        .enumerate()
+                        .skip(1) // skip MNGO
+                        .filter_map(|(i, v)| (*v > 0).then_some(i))
+                        .filter_map(|i| {
+                            (available_amounts[i] < reimburse_totals[i])
+                                .then(|| (i, reimburse_totals[i] - available_amounts[i]))
+                        })
+                        .collect::<Vec<(usize, u64)>>();
 
-                weighted_indexes.sort_by(|a, b| a.1.cmp(&b.1));
-                for &(j, _) in weighted_indexes.iter() {
-                    let start = amounts[j];
-                    let amount = if start + value >= 0 { -value } else { start };
-                    pay_liab(amounts, i, j, amount, &mut reimburse_totals);
-                    value += amount;
-                    if value >= 0 {
-                        break;
+                    weighted_indexes.sort_by(|a, b| a.1.cmp(&b.1));
+                    for &(j, _) in weighted_indexes.iter() {
+                        let start = amounts[j];
+                        let amount = if start + value >= 0 { -value } else { start };
+                        pay_liab(amounts, i, j, amount, &mut reimburse_totals);
+                        value += amount;
+                        if value >= 0 {
+                            break;
+                        }
                     }
                 }
 
@@ -616,7 +624,9 @@ impl EquityFromSnapshot {
 
         // Do a pass where we scale down user reimbursement token amounts and instead
         // reimburse with USDC if there's not enough tokens to give out
-        let scale_down_iter = if ctx.args.distribution_mode == DistributionMode::UsdcOnly {
+        let scale_down_iter = if !ctx.args.enable_scale_down {
+            0..0
+        } else if ctx.args.distribution_mode == DistributionMode::UsdcOnly {
             0..15
         } else {
             1..15 // keep MNGO intact, DAO can provide extra from treasury
@@ -649,52 +659,6 @@ impl EquityFromSnapshot {
             }
         }
 
-        // Do passes where we scale up token reimbursement amounts to try to fully utilize funds
-        //
-        // The idea here is that we have say 1000 SOL but only need 500 SOL to reimburse.
-        // To leave the DAO with fewer SOL at the end we prefer to give people who already
-        // had some SOL more of it (and compensate by giving them less of another token).
-        /*for _ in 0..100 {
-            for i in 1..15 {
-                if reimburse_totals[i] == 0 || reimburse_totals[i] == available_amounts[i] {
-                    continue;
-                }
-
-                let fraction =
-                    I80F48::from(available_amounts[i]) / I80F48::from(reimburse_totals[i]);
-                if fraction <= 1 {
-                    continue;
-                }
-
-                // Scale up token reimbursements and take away USDC reimbursements
-                for (_, _, equity) in reimburse_amounts.iter_mut() {
-                    let amount = equity[i];
-                    assert!(amount >= 0);
-                    if amount == 0 {
-                        continue;
-                    }
-
-                    let new_amount: i64 = (I80F48::from(amount) * fraction).to_num();
-                    let mut remaining_increase = new_amount - amount; // positive
-
-                    for j in (1..16).rev() {
-                        let other_amount = equity[j];
-                        if (j != 15 && available_amounts[j] >= reimburse_totals[j])
-                            || other_amount == 0
-                        {
-                            continue;
-                        }
-                        let increase = remaining_increase.min(other_amount);
-                        equity[j] -= increase;
-                        reimburse_totals[j] -= increase as u64;
-                        equity[i] += increase;
-                        reimburse_totals[i] += increase as u64;
-                        remaining_increase -= increase;
-                    }
-                }
-            }
-        }*/
-
         // Double check that total user equity is unchanged
         let mut accounts_with_mngo = 0;
         let mut accounts_with_mngo_unchanged = 0;
@@ -723,11 +687,14 @@ impl EquityFromSnapshot {
 
         for i in 0..15 {
             println!(
-                "{}: available {}, used {}, left over {}",
+                "{}: available ${}, used ${}, left over ${}, buy/sell native {}",
                 token_names[i],
                 available_amounts[i] / 1000000,
                 reimburse_totals[i] / 1000000,
-                (available_amounts[i] as i64 - reimburse_totals[i] as i64) / 1000000
+                (available_amounts[i] as i64 - reimburse_totals[i] as i64) / 1000000,
+                -(I80F48::from(available_amounts[i] as i64 - reimburse_totals[i] as i64)
+                    / ctx.constants.token_infos[i].reimbursement_price)
+                    .to_num::<i64>(),
             );
         }
         println!("USDC: used {}", reimburse_totals[15] / 1000000);
