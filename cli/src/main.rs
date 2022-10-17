@@ -707,8 +707,8 @@ impl EquityFromSnapshot {
                     .usd_to_tokens_ui(i, available_amounts[i] as i64 - reimburse_totals[i] as i64),
             );
         }
-        println!("USDC: used {}", reimburse_totals[15] / 1000000);
-        println!("reimburse total {}", reimburse_totals.iter().sum::<u64>() / 1000000);
+        println!("USDC,,{},,", reimburse_totals[15] / 1000000);
+        println!("reimburse total,,{},,", reimburse_totals.iter().sum::<u64>() / 1000000);
 
         debug_print("usd final", &reimburse_amounts);
 
