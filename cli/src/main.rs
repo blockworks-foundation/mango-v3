@@ -311,6 +311,16 @@ impl Constants {
     fn token_names(&self) -> Vec<String> {
         self.token_infos.iter().map(|ti| ti.name.clone()).collect()
     }
+
+    fn usd_to_tokens_ui(&self, index: usize, usd: i64) -> I80F48 {
+        let ti = &self.token_infos[index];
+        if !ti.is_active() {
+            assert!(usd == 0);
+            return I80F48::ZERO;
+        }
+        (I80F48::from(usd) / ti.reimbursement_price).floor()
+            / I80F48::from(10u64.pow(ti.decimals as u32))
+    }
 }
 
 fn late_deposits_withdrawals(
@@ -685,16 +695,16 @@ impl EquityFromSnapshot {
 
         println!("account w mango: {accounts_with_mngo}, unchanged {accounts_with_mngo_unchanged}");
 
+        println!("token,available in usd,used in usd,remaining in usd,buy/sell in token ui");
         for i in 0..15 {
             println!(
-                "{}: available ${}, used ${}, left over ${}, buy/sell native {}",
+                "{},{},{},{},{}",
                 token_names[i],
                 available_amounts[i] / 1000000,
                 reimburse_totals[i] / 1000000,
                 (available_amounts[i] as i64 - reimburse_totals[i] as i64) / 1000000,
-                -(I80F48::from(available_amounts[i] as i64 - reimburse_totals[i] as i64)
-                    / ctx.constants.token_infos[i].reimbursement_price)
-                    .to_num::<i64>(),
+                -ctx.constants
+                    .usd_to_tokens_ui(i, available_amounts[i] as i64 - reimburse_totals[i] as i64),
             );
         }
         println!("USDC: used {}", reimburse_totals[15] / 1000000);
