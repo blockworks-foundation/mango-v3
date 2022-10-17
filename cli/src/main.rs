@@ -1,11 +1,12 @@
 use anyhow::Context;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use fixed::types::I80F48;
 use mango::state::*;
 use mango_common::*;
 use serum_dex::state::OpenOrders;
 use solana_sdk::pubkey::Pubkey;
-use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
 use std::mem::size_of;
 use std::str::FromStr;
 
@@ -16,12 +17,27 @@ struct Cli {
     command: Command,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum OutType {
+    Csv,
+    Binary,
+}
+
 #[derive(Args, Debug, Clone)]
 struct EquityFromSnapshotArgs {
-    sqlite: String,
+    #[arg(long)]
+    snapshot: String,
+    #[arg(long)]
     late_changes: String,
+    #[arg(long)]
     program: Pubkey,
+    #[arg(long)]
     group: Pubkey,
+
+    #[arg(long)]
+    outtype: OutType,
+    #[arg(long)]
+    outfile: String,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -319,6 +335,53 @@ struct EquityFromSnapshot {
     cache: MangoCache,
 }
 
+#[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+#[repr(C)]
+struct BinaryRow {
+    owner: Pubkey,
+    amounts: [u64; 16],
+}
+
+struct OutWriter {
+    file: File,
+    outtype: OutType,
+}
+
+impl OutWriter {
+    fn new(outfile: &str, outtype: OutType) -> Self {
+        let file = File::create(outfile).unwrap();
+        Self { file, outtype }
+    }
+
+    fn write(&mut self, account: &AccountData) {
+        match self.outtype {
+            OutType::Csv => {
+                write!(
+                    &mut self.file,
+                    "{},{},{}\n",
+                    account.mango_account,
+                    account.owner,
+                    account.amounts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+                )
+                .unwrap();
+            }
+            OutType::Binary => {
+                let row = BinaryRow {
+                    owner: account.owner,
+                    amounts: account
+                        .amounts
+                        .iter()
+                        .map(|&v| v.try_into().unwrap())
+                        .collect::<Vec<u64>>()
+                        .try_into()
+                        .unwrap(),
+                };
+                self.file.write_all(bytemuck::bytes_of(&row)).unwrap();
+            }
+        }
+    }
+}
+
 /// value of per-token equity in usd, ordered by mango group token index
 type AccountTokenAmounts = [i64; 16];
 
@@ -365,10 +428,23 @@ impl EquityFromSnapshot {
     fn run(args: EquityFromSnapshotArgs) -> anyhow::Result<()> {
         let constants = Constants::new();
         let late_changes = late_deposits_withdrawals(&args.late_changes, &constants)?;
-        let data = DataSource::new(args.sqlite.clone())?;
+        let data = DataSource::new(args.snapshot.clone())?;
+
+        let mut outwriter = OutWriter::new(&args.outfile, args.outtype);
 
         let group = data.load_group(args.group)?;
-        let mut cache = data.load_cache(group.mango_cache)?;
+
+        let cache = {
+            let mut cache = data.load_cache(group.mango_cache)?;
+            // Fix the MNGO snapshot price to be the same as the reimbursement price.
+            // This does two things:
+            // - the MNGO-based equity will be converted back to MNGO tokens at the same price,
+            //   allowing the token count to stay unchanged
+            // - if MNGO tokens must be used as assets, they're valued with the less favorable price
+            cache.price_cache[0].price =
+                constants.token_info_by_name("MNGO").unwrap().reimbursement_price;
+            cache
+        };
 
         let ctx = EquityFromSnapshot { args, data, late_changes, group, cache };
 
@@ -387,23 +463,19 @@ impl EquityFromSnapshot {
             }
         };
 
-        let mut account_equities = ctx.snapshot_account_equities()?;
+        let account_equities = {
+            let mut equities = ctx.snapshot_account_equities()?;
 
-        debug_print("snapshot", &account_equities);
+            debug_print("snapshot", &equities);
 
-        ctx.apply_late_deposits_withdrawals(&mut account_equities)?;
+            ctx.apply_late_deposits_withdrawals(&mut equities)?;
 
-        debug_print("after dep/with", &account_equities);
+            debug_print("after dep/with", &equities);
 
-        ctx.skip_negative_equity_accounts(&mut account_equities)?;
+            ctx.skip_negative_equity_accounts(&mut equities)?;
 
-        // Fix the MNGO snapshot price to be the same as the reimbursement price.
-        // This does two things:
-        // - the MNGO-based equity will be converted back to MNGO tokens at the same price,
-        //   allowing the token count to stay unchanged
-        // - if MNGO tokens must be used as assets, they're valued with the less favorable price
-        cache.price_cache[0].price =
-            constants.token_info_by_name("MNGO").unwrap().reimbursement_price;
+            equities
+        };
 
         // USD amounts in each token that can be used for reimbursement
         let available_amounts: [u64; 15] = constants.token_infos[0..15]
@@ -615,21 +687,17 @@ impl EquityFromSnapshot {
 
         debug_print("usd final", &reimburse_amounts);
 
-        for a in reimburse_amounts.iter() {
-            println!(
-                "token final,{},{},{}",
-                a.mango_account,
-                a.owner,
-                a.amounts
-                    .iter()
-                    .enumerate()
-                    .map(|(index, v)| (I80F48::from(*v)
-                        / constants.token_infos[index].reimbursement_price)
-                        .floor()
-                        .to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
+        let mut reimburse_native = reimburse_amounts.clone();
+        for a in reimburse_native.iter_mut() {
+            for (index, v) in a.amounts.iter_mut().enumerate() {
+                *v = (I80F48::from(*v) / constants.token_infos[index].reimbursement_price)
+                    .floor()
+                    .to_num();
+            }
+        }
+
+        for a in reimburse_native.iter() {
+            outwriter.write(a)
         }
 
         Ok(())
