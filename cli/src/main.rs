@@ -173,7 +173,7 @@ struct Constants {
 impl Constants {
     fn new(mode: DistributionMode) -> Self {
         let mut out = Self {
-            // Reimbursement prices: Coingecko market close prices of 2022-10-16
+            // Reimbursement prices: Coingecko market close prices of 2022-10-17
             // (Note that user equity at snapshot time is computed from the prices from the
             //  mango cache in the snapshot, not the reimbursement_price)
 
@@ -185,28 +185,28 @@ impl Constants {
                     index: 0,
                     decimals: 6,
                     available_native: 32904328899472 + 17926416000000,
-                    reimbursement_price: I80F48::from_num(0.02425361),
+                    reimbursement_price: I80F48::from_num(0.02414846),
                 },
                 TokenInfo {
                     name: "BTC".into(),
                     index: 1,
                     decimals: 6,
                     available_native: 281498500 + 15849599,
-                    reimbursement_price: I80F48::from_num(19272.92),
+                    reimbursement_price: I80F48::from_num(19541.89),
                 },
                 TokenInfo {
                     name: "ETH".into(),
                     index: 2,
                     decimals: 6,
                     available_native: 226000000 + 7431000,
-                    reimbursement_price: I80F48::from_num(1306.94),
+                    reimbursement_price: I80F48::from_num(1333.69),
                 },
                 TokenInfo {
                     name: "SOL".into(),
                     index: 3,
                     decimals: 9,
                     available_native: 761577000000000 + 4778699999999,
-                    reimbursement_price: I80F48::from_num(0.03017),
+                    reimbursement_price: I80F48::from_num(0.03118),
                 },
                 TokenInfo {
                     name: "USDT".into(),
@@ -220,14 +220,14 @@ impl Constants {
                     index: 5,
                     decimals: 6,
                     available_native: 2354260000000 + 10258200000,
-                    reimbursement_price: I80F48::from_num(0.720998),
+                    reimbursement_price: I80F48::from_num(0.748324),
                 },
                 TokenInfo {
                     name: "RAY".into(),
                     index: 6,
                     decimals: 6,
                     available_native: 98295000000 + 10605100000,
-                    reimbursement_price: I80F48::from_num(0.491728),
+                    reimbursement_price: I80F48::from_num(0.498757),
                 },
                 TokenInfo {
                     name: "COPE".into(),
@@ -241,7 +241,7 @@ impl Constants {
                     index: 8,
                     decimals: 6,
                     available_native: 11774000000 + 214800000,
-                    reimbursement_price: I80F48::from_num(23.73),
+                    reimbursement_price: I80F48::from_num(24.13),
                 },
                 TokenInfo {
                     name: "ADA".into(),
@@ -255,21 +255,21 @@ impl Constants {
                     index: 10,
                     decimals: 9,
                     available_native: 799155000000000 + 179378000000,
-                    reimbursement_price: I80F48::from_num(0.03227),
+                    reimbursement_price: I80F48::from_num(0.03335),
                 },
                 TokenInfo {
                     name: "BNB".into(),
                     index: 11,
                     decimals: 8,
                     available_native: 60800000000 + 151100000,
-                    reimbursement_price: I80F48::from_num(2.7236),
+                    reimbursement_price: I80F48::from_num(2.7529),
                 },
                 TokenInfo {
                     name: "AVAX".into(),
                     index: 12,
                     decimals: 8,
                     available_native: 180900000000 + 10225000000,
-                    reimbursement_price: I80F48::from_num(0.1576),
+                    reimbursement_price: I80F48::from_num(0.1624),
                 },
                 TokenInfo {
                     name: "LUNA".into(),
@@ -283,7 +283,7 @@ impl Constants {
                     index: 14,
                     decimals: 9,
                     available_native: 152843000000000 + 0,
-                    reimbursement_price: I80F48::from_num(0.000578548),
+                    reimbursement_price: I80F48::from_num(0.000592173),
                 },
                 TokenInfo {
                     name: "USDC".into(),
