@@ -5,6 +5,7 @@ use mango::state::*;
 use mango_common::*;
 use serum_dex::state::OpenOrders;
 use solana_sdk::pubkey::Pubkey;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::mem::size_of;
@@ -380,6 +381,55 @@ struct EquityFromSnapshot {
     mngo_perp_price: I80F48,
 }
 
+struct CsvOutWriter {
+    file: File,
+}
+
+impl CsvOutWriter {
+    fn new(outfile: &str) -> Self {
+        let file = File::create(outfile).unwrap();
+        Self { file }
+    }
+}
+
+struct BinaryOutWriter {
+    file: File,
+    owner_amounts: HashMap<Pubkey, [u64; 16]>,
+    ordering: Vec<Pubkey>,
+}
+
+impl BinaryOutWriter {
+    fn new(outfile: &str) -> Self {
+        let file = File::create(outfile).unwrap();
+        Self { file, owner_amounts: HashMap::new(), ordering: Vec::new() }
+    }
+}
+
+trait OutWriter {
+    fn write(&mut self, account: &AccountData);
+    fn write_header(&mut self, constants: &Constants);
+    fn finish(&mut self);
+}
+
+impl OutWriter for CsvOutWriter {
+    fn write(&mut self, account: &AccountData) {
+        write!(
+            &mut self.file,
+            "{},{},{}\n",
+            account.mango_account,
+            account.owner,
+            account.amounts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+        )
+        .unwrap();
+    }
+
+    fn write_header(&mut self, constants: &Constants) {
+        write!(&mut self.file, "account,owner,{}\n", constants.token_names().join(",")).unwrap();
+    }
+
+    fn finish(&mut self) {}
+}
+
 #[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
 #[repr(C)]
 struct BinaryRow {
@@ -387,55 +437,30 @@ struct BinaryRow {
     amounts: [u64; 16],
 }
 
-struct OutWriter {
-    file: File,
-    outtype: OutType,
-}
-
-impl OutWriter {
-    fn new(outfile: &str, outtype: OutType) -> Self {
-        let file = File::create(outfile).unwrap();
-        Self { file, outtype }
-    }
-
+impl OutWriter for BinaryOutWriter {
     fn write(&mut self, account: &AccountData) {
-        match self.outtype {
-            OutType::Csv => {
-                write!(
-                    &mut self.file,
-                    "{},{},{}\n",
-                    account.mango_account,
-                    account.owner,
-                    account.amounts.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
-                )
-                .unwrap();
-            }
-            OutType::Binary => {
-                let row = BinaryRow {
-                    owner: account.owner,
-                    amounts: account
-                        .amounts
-                        .iter()
-                        .map(|&v| v.try_into().unwrap())
-                        .collect::<Vec<u64>>()
-                        .try_into()
-                        .unwrap(),
-                };
-                self.file.write_all(bytemuck::bytes_of(&row)).unwrap();
-            }
+        // Don't actually write, just sum up all per-owner reimbursements.
+        // Also keep the insertion ordering, to make inspecting the results easier.
+        let amounts = self.owner_amounts.entry(account.owner).or_insert_with(|| {
+            self.ordering.push(account.owner);
+            [0u64; 16]
+        });
+        for (i, &v) in account.amounts.iter().enumerate() {
+            assert!(v >= 0);
+            amounts[i] += v as u64;
         }
     }
 
-    fn write_header(&mut self, constants: &Constants) {
-        match self.outtype {
-            OutType::Csv => {
-                write!(&mut self.file, "account,owner,{}\n", constants.token_names().join(","))
-                    .unwrap();
-            }
-            OutType::Binary => {
-                // buffer accounts have a 37 byte header -- add 3 bytes to 8-byte align the data
-                self.file.write_all(&[0u8; 3]).unwrap();
-            }
+    fn write_header(&mut self, _constants: &Constants) {
+        // buffer accounts have a 37 byte header -- add 3 bytes to 8-byte align the data
+        self.file.write_all(&[0u8; 3]).unwrap();
+    }
+
+    fn finish(&mut self) {
+        for &owner in self.ordering.iter() {
+            let amounts = *self.owner_amounts.get(&owner).unwrap();
+            let row = BinaryRow { owner, amounts };
+            self.file.write_all(bytemuck::bytes_of(&row)).unwrap();
         }
     }
 }
@@ -488,7 +513,10 @@ impl EquityFromSnapshot {
         let late_changes = late_deposits_withdrawals(&args.late_changes, &constants)?;
         let data = DataSource::new(args.snapshot.clone())?;
 
-        let mut outwriter = OutWriter::new(&args.outfile, args.outtype);
+        let mut outwriter: Box<dyn OutWriter> = match args.outtype {
+            OutType::Csv => Box::new(CsvOutWriter::new(&args.outfile)),
+            OutType::Binary => Box::new(BinaryOutWriter::new(&args.outfile)),
+        };
 
         let group = data.load_group(args.group)?;
 
@@ -738,6 +766,7 @@ impl EquityFromSnapshot {
         for a in reimburse_native.iter() {
             outwriter.write(a)
         }
+        outwriter.finish();
 
         Ok(())
     }
