@@ -1804,7 +1804,9 @@ impl MangoInstruction {
             75 => {
                 let data_arr = array_ref![data, 0, 1];
 
-                MangoInstruction::RecoveryForceSettleSpotOrders { limit: u8::from_le_bytes(*data_arr) }
+                MangoInstruction::RecoveryForceSettleSpotOrders {
+                    limit: u8::from_le_bytes(*data_arr),
+                }
             }
             76 => MangoInstruction::RecoveryWithdrawTokenVault,
             77 => MangoInstruction::RecoveryWithdrawMngoVault,
