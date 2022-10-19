@@ -7513,6 +7513,7 @@ impl Processor {
             // margin basket may be in an invalid state; correct it before returning
             let open_orders = load_open_orders(open_orders_ai)?;
             mango_account.update_basket(market_index, &open_orders)?;
+            msg!("recovery-settle: {} {} {} {}", pre_base, pre_quote, 0, 0);
             return Ok(());
         }
 
@@ -7534,22 +7535,14 @@ impl Processor {
         let (post_base, post_quote) = {
             let open_orders = load_open_orders(open_orders_ai)?;
             mango_account.update_basket(market_index, &open_orders)?;
-            mango_emit_stack::<_, 256>(OpenOrdersBalanceLog {
-                mango_group: *mango_group_ai.key,
-                mango_account: *mango_account_ai.key,
-                market_index: market_index as u64,
-                base_total: open_orders.native_coin_total,
-                base_free: open_orders.native_coin_free,
-                quote_total: open_orders.native_pc_total,
-                quote_free: open_orders.native_pc_free,
-                referrer_rebates_accrued: open_orders.referrer_rebates_accrued,
-            });
 
             (
                 open_orders.native_coin_free,
                 open_orders.native_pc_free + open_orders.referrer_rebates_accrued,
             )
         };
+
+        msg!("recovery-settle: {} {} {} {}", pre_base, pre_quote, post_base, post_quote);
 
         check!(post_base <= pre_base, MangoErrorCode::Default)?;
         check!(post_quote <= pre_quote, MangoErrorCode::Default)?;
