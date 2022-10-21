@@ -1,7 +1,15 @@
 # Mango Program Change Log
 
+## v3.7.0
+Deployed: Oct 20, 2022 at 15:54:54 UTC | Slot: 156387768
+1. Add RecoveryForceSettleSpotOrders instruction
+2. Add RecoveryWithdrawTokenVault instruction
+3. Add RecoveryWithdrawMngoVault instruction
+4. Add RecoveryWithdrawInsuranceVault instruction
+5. Re-enable WithdrawMsrm
+
 ## v3.6.3
-Deployed: | Slot:
+Deployed: Oct 12, 2022 at 02:37:32 UTC | Slot: 154889307
 1. Disable all instructions
 
 ## v3.6.1
