@@ -1,0 +1,25 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.0.15", features = ["derive", "env"] }
+dotenv = "0.15.0"
+env_logger = "0.8.4"
+fixed = { version = "=1.11.0", features = ["serde", "borsh"] }
+fixed-macro = "^1.1.1"
+futures = "0.3.21"
+log = "0.4.0"
+mango = { path = "../program", features = ["no-entrypoint", "client"] }
+mango-common = { path = "../common" }
+pyth-sdk-solana = "0.1.0"
+serum_dex = { rev = "7f55a5ef5f7937b74381a3124021a261cd7d7283",  git = "https://github.com/blockworks-foundation/serum-dex.git", default-features=false, features = ["no-entrypoint", "program"] }
+solana-client = "~1.10.29"
+solana-sdk = "~1.10.29"
+tokio = { version = "1.14.1", features = ["rt-multi-thread", "time", "macros", "sync"] }
+rusqlite = "0.28.0"
+bytemuck = "^1.7.2"
