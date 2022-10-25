@@ -688,7 +688,7 @@ impl PerpMarketCookie {
             &[&mango_group_pk.as_ref(), b"PerpMarket", &oracle_pks[mint_index].as_ref()],
             &mango_program_id,
         );
-        let (signer_pk, _signer_nonce) =
+        let (_signer_pk, _signer_nonce) =
             create_signer_key_and_nonce(&mango_program_id, &mango_group_pk);
         let max_num_events = 256;
         let event_queue_pk = test

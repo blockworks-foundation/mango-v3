@@ -138,8 +138,10 @@ pub enum MangoErrorCode {
         "MangoErrorCode::NewOrdersNotAllowed This market is in mode ForceCloseOnly. New orders not allowed."
     )]
     NewOrdersNotAllowed,
+    #[error("MangoErrorCode::DeprecatedGroup")]
+    DeprecatedGroup,
 
-    #[error("MangoErrorCode::Default Check the source code for more info")] // 44
+    #[error("MangoErrorCode::Default Check the source code for more info")] // 45
     Default = u32::MAX_VALUE,
 }
 
