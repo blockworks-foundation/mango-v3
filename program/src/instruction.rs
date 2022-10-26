@@ -105,6 +105,7 @@ pub enum MangoInstruction {
         optimal_util: I80F48,
         optimal_rate: I80F48,
         max_rate: I80F48,
+        imf: I80F48,
     },
 
     /// DEPRECATED
@@ -716,6 +717,7 @@ pub enum MangoInstruction {
         lm_size_shift: u8,
         /// define base decimals in case spot market has not yet been listed
         base_decimals: u8,
+        imf: I80F48,
     },
 
     /// Change the params for perp market.
@@ -1292,7 +1294,7 @@ impl MangoInstruction {
                 MangoInstruction::Withdraw { quantity: u64::from_le_bytes(*quantity), allow_borrow }
             }
             4 => {
-                let data = array_ref![data, 0, 96];
+                let data = array_ref![data, 0, 112];
                 let (
                     maint_leverage,
                     init_leverage,
@@ -1300,7 +1302,8 @@ impl MangoInstruction {
                     optimal_util,
                     optimal_rate,
                     max_rate,
-                ) = array_refs![data, 16, 16, 16, 16, 16, 16];
+                    imf,
+                ) = array_refs![data, 16, 16, 16, 16, 16, 16, 16];
                 MangoInstruction::AddSpotMarket {
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
@@ -1308,6 +1311,7 @@ impl MangoInstruction {
                     optimal_util: I80F48::from_le_bytes(*optimal_util),
                     optimal_rate: I80F48::from_le_bytes(*optimal_rate),
                     max_rate: I80F48::from_le_bytes(*max_rate),
+                    imf: I80F48::from_le_bytes(*imf),
                 }
             }
             5 => {
@@ -1576,7 +1580,7 @@ impl MangoInstruction {
                 MangoInstruction::ExecutePerpTriggerOrder { order_index }
             }
             46 => {
-                let data_arr = array_ref![data, 0, 148];
+                let data_arr = array_ref![data, 0, 164];
                 let (
                     maint_leverage,
                     init_leverage,
@@ -1593,7 +1597,8 @@ impl MangoInstruction {
                     version,
                     lm_size_shift,
                     base_decimals,
-                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8, 1, 1, 1, 1];
+                    imf,
+                ) = array_refs![data_arr, 16, 16, 16, 16, 16, 8, 8, 16, 16, 8, 8, 1, 1, 1, 1, 16];
                 MangoInstruction::CreatePerpMarket {
                     maint_leverage: I80F48::from_le_bytes(*maint_leverage),
                     init_leverage: I80F48::from_le_bytes(*init_leverage),
@@ -1610,6 +1615,7 @@ impl MangoInstruction {
                     version: version[0],
                     lm_size_shift: lm_size_shift[0],
                     base_decimals: base_decimals[0],
+                    imf: I80F48::from_le_bytes(*imf),
                 }
             }
             47 => {
@@ -2082,6 +2088,7 @@ pub fn add_spot_market(
     optimal_util: I80F48,
     optimal_rate: I80F48,
     max_rate: I80F48,
+    imf: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -2102,6 +2109,7 @@ pub fn add_spot_market(
         optimal_util,
         optimal_rate,
         max_rate,
+        imf,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })
@@ -2135,6 +2143,7 @@ pub fn create_perp_market(
     version: u8,
     lm_size_shift: u8,
     base_decimals: u8,
+    imf: I80F48,
 ) -> Result<Instruction, ProgramError> {
     let accounts = vec![
         AccountMeta::new(*mango_group_pk, false),
@@ -2168,6 +2177,7 @@ pub fn create_perp_market(
         version,
         lm_size_shift,
         base_decimals,
+        imf,
     };
     let data = instr.pack();
     Ok(Instruction { program_id: *program_id, accounts, data })

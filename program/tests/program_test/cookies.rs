@@ -491,6 +491,7 @@ impl SpotMarketCookie {
         let optimal_util = I80F48::from_num(0.7);
         let optimal_rate = I80F48::from_num(0.06);
         let max_rate = I80F48::from_num(1.5);
+        let imf = I80F48::from_num(0.0003);
 
         let admin_pk = test.get_payer_pk();
 
@@ -511,6 +512,7 @@ impl SpotMarketCookie {
             optimal_util,
             optimal_rate,
             max_rate,
+            imf,
         )
         .unwrap()];
 
@@ -715,6 +717,7 @@ impl PerpMarketCookie {
         let max_depth_bps = I80F48::from_num(200);
         let target_period_length = 3600;
         let mngo_per_period = 11400;
+        let imf = I80F48::from_num(0.0003);
 
         let instructions = [mango::instruction::create_perp_market(
             &mango_program_id,
@@ -743,6 +746,7 @@ impl PerpMarketCookie {
             1,
             0,
             test.mints[mint_index].decimals,
+            imf,
         )
         .unwrap()];
 

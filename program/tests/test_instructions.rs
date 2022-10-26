@@ -25,6 +25,7 @@ fn test_instruction_serialization() {
             optimal_util: I80F48::from_num(6156.0),
             optimal_rate: I80F48::from_num(8791.150),
             max_rate: I80F48::from_num(46.9870),
+            imf: I80F48::from_num(0.0003),
         },
         MangoInstruction::AddToBasket { market_index: 156489 },
         MangoInstruction::Borrow { quantity: 1264 },

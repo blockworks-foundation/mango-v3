@@ -169,6 +169,7 @@ pub struct TokenInfo {
     pub spot_market_mode: MarketMode,
     pub perp_market_mode: MarketMode,
     pub oracle_inactive: bool,
+    pub imf: I80F48,
     pub padding: [u8; 4],
 }
 
@@ -180,6 +181,7 @@ impl TokenInfo {
         spot_market_mode: MarketMode,
         perp_market_mode: MarketMode,
         oracle_inactive: bool,
+        imf: I80F48,
     ) -> Self {
         Self {
             mint,
@@ -188,6 +190,7 @@ impl TokenInfo {
             spot_market_mode,
             perp_market_mode,
             oracle_inactive,
+            imf,
             padding: [0u8; 4],
         }
     }
@@ -695,6 +698,8 @@ impl PriceCache {
 pub struct RootBankCache {
     pub deposit_index: I80F48,
     pub borrow_index: I80F48,
+    pub asset_weight_fraction: I80F48,
+    pub liab_weight_fraction: I80F48,
     pub last_update: u64,
 }
 
@@ -713,6 +718,7 @@ pub struct PerpMarketCache {
     pub long_funding: I80F48,
     pub short_funding: I80F48,
     pub last_update: u64,
+    pub weight_fraction: I80F48,
 }
 
 impl PerpMarketCache {
@@ -863,6 +869,10 @@ pub struct HealthCache {
 
     /// This will be zero until update_health is called for the first time
     health: [Option<I80F48>; NUM_HEALTHS],
+
+    asset_weight_fractions: Vec<I80F48>,
+    liab_weight_fractions: Vec<I80F48>,
+    perp_weight_fractions: Vec<I80F48>,
 }
 
 impl HealthCache {
@@ -873,6 +883,9 @@ impl HealthCache {
             perp: vec![(ZERO_I80F48, ZERO_I80F48); MAX_PAIRS],
             quote: ZERO_I80F48,
             health: [None; NUM_HEALTHS],
+            asset_weight_fractions: vec![ZERO_I80F48; MAX_PAIRS],
+            liab_weight_fractions: vec![ZERO_I80F48; MAX_PAIRS],
+            perp_weight_fractions: vec![ZERO_I80F48; MAX_PAIRS],
         }
     }
 
@@ -886,6 +899,9 @@ impl HealthCache {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
             if self.active_assets.spot[i] {
+                self.asset_weight_fractions[i] =
+                    mango_cache.root_bank_cache[i].asset_weight_fraction;
+                self.liab_weight_fractions[i] = mango_cache.root_bank_cache[i].liab_weight_fraction;
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
@@ -899,6 +915,7 @@ impl HealthCache {
             }
 
             if self.active_assets.perps[i] {
+                self.perp_weight_fractions[i] = mango_cache.perp_market_cache[i].weight_fraction;
                 self.perp[i] = mango_account.perp_accounts[i].get_val(
                     &mango_group.perp_markets[i],
                     &mango_cache.perp_market_cache[i],
@@ -920,6 +937,9 @@ impl HealthCache {
         self.quote = mango_account.get_net(&mango_cache.root_bank_cache[QUOTE_INDEX], QUOTE_INDEX);
         for i in 0..mango_group.num_oracles {
             if self.active_assets.spot[i] {
+                self.asset_weight_fractions[i] =
+                    mango_cache.root_bank_cache[i].asset_weight_fraction;
+                self.liab_weight_fractions[i] = mango_cache.root_bank_cache[i].liab_weight_fraction;
                 self.spot[i] = mango_account.get_spot_val(
                     &mango_cache.root_bank_cache[i],
                     mango_cache.price_cache[i].price,
@@ -929,6 +949,7 @@ impl HealthCache {
             }
 
             if self.active_assets.perps[i] {
+                self.perp_weight_fractions[i] = mango_cache.perp_market_cache[i].weight_fraction;
                 self.perp[i] = mango_account.perp_accounts[i].get_val(
                     &mango_group.perp_markets[i],
                     &mango_cache.perp_market_cache[i],
@@ -958,10 +979,18 @@ impl HealthCache {
                                 perp_market_info.maint_liab_weight,
                             ),
                             HealthType::Init => (
-                                spot_market_info.init_asset_weight,
-                                spot_market_info.init_liab_weight,
-                                perp_market_info.init_asset_weight,
-                                perp_market_info.init_liab_weight,
+                                spot_market_info
+                                    .init_asset_weight
+                                    .min(self.asset_weight_fractions[i]),
+                                spot_market_info
+                                    .init_liab_weight
+                                    .max(self.liab_weight_fractions[i]),
+                                perp_market_info
+                                    .init_asset_weight
+                                    .min(self.perp_weight_fractions[i]),
+                                perp_market_info
+                                    .init_liab_weight
+                                    .max(self.perp_weight_fractions[i]),
                             ),
                             HealthType::Equity => (ONE_I80F48, ONE_I80F48, ONE_I80F48, ONE_I80F48),
                         };
@@ -1054,6 +1083,59 @@ impl HealthCache {
         }
 
         (assets, liabilities)
+    }
+
+    pub fn update_perp_weight_fraction(
+        &mut self,
+        mango_group: &MangoGroup,
+        perp_market: &PerpMarket,
+        market_index: usize,
+        open_interest_delta: i64,
+    ) {
+        let open_interest = perp_market.open_interest.checked_add(open_interest_delta).unwrap();
+        self.perp_weight_fractions[market_index] = I80F48::from_num((open_interest as f64).sqrt())
+            .checked_mul(mango_group.tokens[market_index].imf)
+            .unwrap()
+            .checked_add(ONE_I80F48)
+            .unwrap();
+    }
+
+    pub fn update_token_weight_fraction(
+        &mut self,
+        mango_group: &MangoGroup,
+        mango_cache: &MangoCache,
+        node_bank: &NodeBank,
+        token_index: usize,
+    ) {
+        let token_info = mango_group.tokens[token_index];
+        self.liab_weight_fractions[token_index] = ONE_I80F48
+            .checked_div(
+                I80F48::from_num(
+                    I80F48::from(node_bank.borrows)
+                        .checked_mul(mango_cache.get_price(token_index))
+                        .unwrap()
+                        .to_num::<f64>()
+                        .sqrt(),
+                )
+                .checked_mul(token_info.imf)
+                .unwrap()
+                .checked_add(ONE_I80F48).unwrap(),
+            ).unwrap();
+
+        self.asset_weight_fractions[token_index] = ONE_I80F48
+        .checked_div(
+            I80F48::from_num(
+                I80F48::from(node_bank.deposits)
+                    .checked_mul(mango_cache.get_price(token_index))
+                    .unwrap()
+                    .to_num::<f64>()
+                    .sqrt(),
+            )
+            .checked_mul(token_info.imf)
+            .unwrap()
+            .checked_add(ONE_I80F48).unwrap(),
+        )
+        .unwrap();
     }
 
     pub fn update_quote(&mut self, mango_cache: &MangoCache, mango_account: &MangoAccount) {
@@ -1173,7 +1255,10 @@ impl HealthCache {
 
         let (asset_weight, liab_weight) = match health_type {
             HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
-            HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+            HealthType::Init => (
+                pmi.init_asset_weight.min(self.asset_weight_fractions[market_index]),
+                pmi.init_liab_weight.max(self.asset_weight_fractions[market_index]),
+            ),
             HealthType::Equity => (ONE_I80F48, ONE_I80F48),
         };
 
@@ -1250,7 +1335,10 @@ impl HealthCache {
 
                 let (asset_weight, liab_weight) = match health_type {
                     HealthType::Maint => (pmi.maint_asset_weight, pmi.maint_liab_weight),
-                    HealthType::Init => (pmi.init_asset_weight, pmi.init_liab_weight),
+                    HealthType::Init => (
+                        pmi.init_asset_weight.min(self.asset_weight_fractions[market_index]),
+                        pmi.init_liab_weight.max(self.asset_weight_fractions[market_index]),
+                    ),
                     HealthType::Equity => (ONE_I80F48, ONE_I80F48),
                 };
 

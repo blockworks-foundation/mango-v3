@@ -154,6 +154,7 @@ impl Processor {
             MarketMode::Default,
             MarketMode::Default,
             false,
+            ZERO_I80F48,
         );
 
         check!(admin_ai.is_signer, MangoErrorCode::Default)?;
@@ -421,6 +422,7 @@ impl Processor {
         optimal_util: I80F48,
         optimal_rate: I80F48,
         max_rate: I80F48,
+        imf: I80F48,
     ) -> MangoResult {
         check!(
             init_leverage >= ONE_I80F48 && maint_leverage > init_leverage,
@@ -487,6 +489,7 @@ impl Processor {
         mango_group.tokens[market_index].root_bank = *root_bank_ai.key;
         mango_group.tokens[market_index].decimals = mint.decimals;
         mango_group.tokens[market_index].spot_market_mode = MarketMode::Active;
+        mango_group.tokens[market_index].imf = imf;
 
         let (maint_asset_weight, maint_liab_weight) = get_leverage_weights(maint_leverage);
         let (init_asset_weight, init_liab_weight) = get_leverage_weights(init_leverage);
@@ -623,6 +626,7 @@ impl Processor {
         version: u8,
         lm_size_shift: u8,
         base_decimals: u8,
+        imf: I80F48,
     ) -> MangoResult {
         // params check
         check!(init_leverage >= ONE_I80F48, MangoErrorCode::InvalidParam)?;
@@ -783,6 +787,8 @@ impl Processor {
             quote_lot_size,
         };
         mango_group.tokens[market_index].perp_market_mode = MarketMode::Active;
+        //TODO-PAN: ok to overwrite?
+        mango_group.tokens[market_index].imf = imf;
 
         Ok(())
     }
@@ -833,9 +839,43 @@ impl Processor {
         // Update root bank and cache to prevent interest leaching
         let now_ts = Clock::get()?.unix_timestamp as u64;
         root_bank.update_index_without_banks(now_ts, node_bank.deposits, node_bank.borrows)?;
+        
+        let token_info = mango_group.tokens[token_index];
+        // TODO-PAN: decimals?
+        let asset_weight_fraction = ONE_I80F48
+            .checked_div(
+                I80F48::from_num(
+                    I80F48::from_num(node_bank.get_total_native_deposit(&mango_cache.root_bank_cache[token_index]))
+                        .checked_mul(mango_cache.get_price(token_index))
+                        .unwrap()
+                        .to_num::<f64>()
+                        .sqrt(),
+                )
+                .checked_mul(token_info.imf)
+                .unwrap()
+                .checked_add(ONE_I80F48).unwrap(),
+            )
+            .unwrap();
+        let liab_weight_fraction = ONE_I80F48
+            .checked_div(
+                I80F48::from_num(
+                    I80F48::from_num(node_bank.get_total_native_borrow(&mango_cache.root_bank_cache[token_index]))
+                        .checked_mul(mango_cache.get_price(token_index))
+                        .unwrap()
+                        .to_num::<f64>()
+                        .sqrt(),
+                )
+                .checked_mul(token_info.imf)
+                .unwrap()
+                .checked_add(ONE_I80F48).unwrap(),
+            )
+            .unwrap();
+
         mango_cache.root_bank_cache[token_index] = RootBankCache {
             deposit_index: root_bank.deposit_index,
             borrow_index: root_bank.borrow_index,
+            asset_weight_fraction: asset_weight_fraction,
+            liab_weight_fraction: liab_weight_fraction,
             last_update: now_ts,
         };
 
@@ -1141,6 +1181,8 @@ impl Processor {
             mango_cache.root_bank_cache[index] = RootBankCache {
                 deposit_index: root_bank.deposit_index,
                 borrow_index: root_bank.borrow_index,
+                asset_weight_fraction: mango_cache.root_bank_cache[index].asset_weight_fraction,
+                liab_weight_fraction: mango_cache.root_bank_cache[index].liab_weight_fraction,
                 last_update: now_ts,
             };
 
@@ -1182,10 +1224,17 @@ impl Processor {
             let index = mango_group.find_perp_market_index(perp_market_ai.key).unwrap();
             let perp_market =
                 PerpMarket::load_checked(perp_market_ai, program_id, mango_group_ai.key)?;
+            let token_info = mango_group.tokens[index];
+            let weight_fraction = I80F48::from_num((perp_market.open_interest as f64).sqrt())
+                .checked_mul(token_info.imf)
+                .unwrap()
+                .checked_add(ONE_I80F48)
+                .unwrap();
             mango_cache.perp_market_cache[index] = PerpMarketCache {
                 long_funding: perp_market.long_funding,
                 short_funding: perp_market.short_funding,
                 last_update: now_ts,
+                weight_fraction: weight_fraction,
             };
 
             market_indexes.push(index as u64);
@@ -1297,6 +1346,9 @@ impl Processor {
 
         let mut health_cache = HealthCache::new(active_assets);
         health_cache.init_vals(&mango_group, &mango_cache, &mango_account, open_orders_ais)?;
+        if token_index != QUOTE_INDEX {
+            health_cache.update_token_weight_fraction(&mango_group, &mango_cache, &node_bank, token_index);
+        }
         let health = health_cache.get_health(&mango_group, HealthType::Init);
 
         check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -1417,6 +1469,9 @@ impl Processor {
             &mango_account,
             &open_orders_accounts,
         )?;
+        if token_index != QUOTE_INDEX {
+            health_cache.update_token_weight_fraction(&mango_group, &mango_cache, &node_bank, token_index);
+        }
         let health = health_cache.get_health(&mango_group, HealthType::Init);
 
         check!(health >= ZERO_I80F48, MangoErrorCode::InsufficientFunds)?;
@@ -1976,6 +2031,7 @@ impl Processor {
 
         // Update health for tokens that may have changed
         health_cache.update_quote(&mango_cache, &mango_account);
+        health_cache.update_token_weight_fraction(&mango_group, &mango_cache, &base_node_bank, market_index);
         health_cache.update_spot_val(
             &mango_group,
             &mango_cache,
@@ -2314,6 +2370,7 @@ impl Processor {
 
         // Update health for tokens that may have changed
         health_cache.update_quote(&mango_cache, &mango_account);
+        health_cache.update_token_weight_fraction(&mango_group, &mango_cache, &base_node_bank, market_index);
         health_cache.update_spot_val(
             &mango_group,
             &mango_cache,
@@ -2713,6 +2770,12 @@ impl Processor {
             u8::MAX,
         )?;
 
+        health_cache.update_perp_weight_fraction(
+            &mango_group,
+            &perp_market,
+            market_index,
+            quantity,
+        );
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
         check!(
@@ -2899,6 +2962,12 @@ impl Processor {
             limit,
         )?;
 
+        health_cache.update_perp_weight_fraction(
+            &mango_group,
+            &perp_market,
+            market_index,
+            max_base_quantity,
+        );
         health_cache.update_perp_val(&mango_group, &mango_cache, &mango_account, market_index)?;
         let post_health = health_cache.get_health(&mango_group, HealthType::Init);
         check!(
@@ -4850,19 +4919,57 @@ impl Processor {
         // TODO check root bank belongs to group in load functions
         let mut root_bank = RootBank::load_mut_checked(&root_bank_ai, program_id)?;
         check_eq!(root_bank.num_node_banks, node_bank_ais.len(), MangoErrorCode::Default)?;
+        let mut total_deposits = 0;
+        let mut total_borrows = 0;
         for i in 0..root_bank.num_node_banks {
             check!(
                 node_bank_ais.iter().any(|ai| ai.key == &root_bank.node_banks[i]),
                 MangoErrorCode::InvalidNodeBank
             )?;
+            let node_bank = NodeBank::load_checked(&node_bank_ais[i], program_id)?;
+            total_deposits +=
+                node_bank.get_total_native_deposit(&mango_cache.root_bank_cache[index]);
+            total_borrows += node_bank.get_total_native_borrow(&mango_cache.root_bank_cache[index]);
         }
         let clock = Clock::get()?;
         let now_ts = clock.unix_timestamp as u64;
         root_bank.update_index(node_bank_ais, program_id, now_ts)?;
 
+        let token_info = mango_group.tokens[index];
+        let asset_weight_fraction = ONE_I80F48
+            .checked_div(
+                I80F48::from_num(
+                    I80F48::from(total_deposits)
+                        .checked_mul(mango_cache.get_price(index))
+                        .unwrap()
+                        .to_num::<f64>()
+                        .sqrt(),
+                )
+                .checked_mul(token_info.imf)
+                .unwrap()
+                .checked_add(ONE_I80F48).unwrap(),
+            )
+            .unwrap();
+        let liab_weight_fraction = ONE_I80F48
+            .checked_div(
+                I80F48::from_num(
+                    I80F48::from(total_borrows)
+                        .checked_mul(mango_cache.get_price(index))
+                        .unwrap()
+                        .to_num::<f64>()
+                        .sqrt(),
+                )
+                .checked_mul(token_info.imf)
+                .unwrap()
+                .checked_add(ONE_I80F48).unwrap(),
+            )
+            .unwrap();
+
         mango_cache.root_bank_cache[index] = RootBankCache {
             deposit_index: root_bank.deposit_index,
             borrow_index: root_bank.borrow_index,
+            asset_weight_fraction: asset_weight_fraction,
+            liab_weight_fraction: liab_weight_fraction,
             last_update: now_ts,
         };
 
@@ -5074,6 +5181,7 @@ impl Processor {
             long_funding: perp_market.long_funding,
             short_funding: perp_market.short_funding,
             last_update: now_ts,
+            weight_fraction: mango_cache.perp_market_cache[market_index].weight_fraction,
         };
 
         // only need to use UpdateFundingLog; don't worry about CachePerpMarket log
@@ -5806,6 +5914,12 @@ impl Processor {
                 )?;
 
                 // TODO OPT - unnecessary, remove after testing
+                health_cache.update_perp_weight_fraction(
+                    &mango_group,
+                    &perp_market,
+                    market_index,
+                    quantity,
+                );
                 health_cache.update_perp_val(
                     &mango_group,
                     &mango_cache,
@@ -7821,6 +7935,7 @@ impl Processor {
         Ok(())
     }
 
+    // TODO-PAN: new instruction to set imf for a token
     pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> MangoResult {
         let instruction =
             MangoInstruction::unpack(data).ok_or(ProgramError::InvalidInstructionData)?;
@@ -7874,6 +7989,7 @@ impl Processor {
                 optimal_util,
                 optimal_rate,
                 max_rate,
+                imf,
             } => {
                 msg!("Mango: AddSpotMarket");
                 Self::add_spot_market(
@@ -7885,6 +8001,7 @@ impl Processor {
                     optimal_util,
                     optimal_rate,
                     max_rate,
+                    imf,
                 )
             }
             MangoInstruction::AddToBasket { .. } => {
@@ -8156,6 +8273,7 @@ impl Processor {
                 version,
                 lm_size_shift,
                 base_decimals,
+                imf,
             } => {
                 msg!("Mango: CreatePerpMarket");
                 Self::create_perp_market(
@@ -8176,6 +8294,7 @@ impl Processor {
                     version,
                     lm_size_shift,
                     base_decimals,
+                    imf,
                 )
             }
             MangoInstruction::ChangePerpMarketParams2 {
