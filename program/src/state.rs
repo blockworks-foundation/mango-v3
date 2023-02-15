@@ -24,7 +24,6 @@ use mango_common::Loadable;
 use mango_macro::{Loadable, Pod, TriviallyTransmutable};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::mngo_token;
 use crate::matching::{Book, LeafNode, OrderType, Side};
 use crate::queue::{EventQueue, EventType, FillEvent};
 use crate::utils::{
@@ -1197,7 +1196,7 @@ impl HealthCache {
             let taker_quote_native =
                 I80F48::from_num(info.quote_lot_size.checked_mul(taker_quote.abs()).unwrap());
             let mut market_fees = info.taker_fee * taker_quote_native;
-            if let Some(mngo_index) = mango_group.find_token_index(&mngo_token::id()) {
+            if let Some(mngo_index) = Some(0) {
                 let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
                 let mngo_deposits = mango_account.get_native_deposit(mngo_cache, mngo_index)?;
                 let ref_mngo_req = I80F48::from_num(mango_group.ref_mngo_required);
@@ -2235,7 +2234,6 @@ impl PerpMarket {
         check!(vault.owner == mango_group.signer_key, MangoErrorCode::InvalidOwner)?;
         check!(vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
         check!(vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
-        check!(vault.mint == mngo_token::ID, MangoErrorCode::InvalidVault)?;
         check!(mngo_vault_ai.owner == &spl_token::ID, MangoErrorCode::InvalidOwner)?;
         state.mngo_vault = *mngo_vault_ai.key;
 

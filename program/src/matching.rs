@@ -19,7 +19,6 @@ use mango_logs::{mango_emit_stack, ReferralFeeAccrualLog};
 use mango_macro::{Loadable, Pod};
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::mngo_token;
 use crate::queue::{EventQueue, FillEvent, OutEvent};
 use crate::state::{
     DataType, MangoAccount, MangoCache, MangoGroup, MetaData, PerpMarket, PerpMarketCache,
@@ -2063,10 +2062,7 @@ fn determine_ref_vars<'a>(
     referrer_mango_account_ai: Option<&'a AccountInfo>,
     now_ts: u64,
 ) -> MangoResult<(I80F48, Option<RefMut<'a, MangoAccount>>)> {
-    let mngo_index = match mango_group.find_token_index(&mngo_token::id()) {
-        None => return Ok((ZERO_I80F48, None)),
-        Some(i) => i,
-    };
+    let mngo_index = 0;
 
     let mngo_cache = &mango_cache.root_bank_cache[mngo_index];
     let tier_2_enabled = mango_group.ref_surcharge_centibps_tier_2 != 0

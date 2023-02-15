@@ -35,7 +35,6 @@ use mango_logs::{
 };
 
 use crate::error::{check_assert, MangoError, MangoErrorCode, MangoResult, SourceFileId};
-use crate::ids::{luna_pyth_oracle, msrm_token, srm_token};
 use crate::instruction::MangoInstruction;
 use crate::matching::{Book, BookSide, ExpiryType, OrderType, Side};
 use crate::oracle::{determine_oracle_type, OracleType, StubOracle, STUB_MAGIC};
@@ -129,7 +128,6 @@ impl Processor {
             check!(msrm_vault.delegate.is_none(), MangoErrorCode::InvalidVault)?;
             check!(msrm_vault.close_authority.is_none(), MangoErrorCode::InvalidVault)?;
             check_eq!(msrm_vault.owner, mango_group.signer_key, MangoErrorCode::InvalidVault)?;
-            check_eq!(&msrm_vault.mint, &msrm_token::ID, MangoErrorCode::InvalidVault)?;
             check_eq!(msrm_vault_ai.owner, &spl_token::ID, MangoErrorCode::InvalidVault)?;
             mango_group.msrm_vault = *msrm_vault_ai.key;
         }
@@ -508,14 +506,6 @@ impl Processor {
             mango_group.tokens[QUOTE_INDEX].mint.to_aligned_bytes(),
             MangoErrorCode::Default
         )?;
-
-        // TODO - what if quote currency is mngo, srm or msrm
-        // if mint is SRM set srm_vault
-
-        if mint_ai.key == &srm_token::ID {
-            check!(mango_group.srm_vault == Pubkey::default(), MangoErrorCode::Default)?;
-            mango_group.srm_vault = *vault_ai.key;
-        }
         Ok(())
     }
 
@@ -8154,12 +8144,6 @@ pub fn read_oracle(
                     value.to_num::<f64>(),
                     conf.to_num::<f64>()
                 );
-
-                // For luna, to prevent market from getting stuck, just continue using last known price in cache
-                if oracle_ai.key == &luna_pyth_oracle::ID {
-                    return Ok(last_known_price_in_cache);
-                }
-
                 return Err(throw_err!(MangoErrorCode::InvalidOraclePrice));
             }
 
